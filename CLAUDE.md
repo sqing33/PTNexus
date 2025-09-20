@@ -186,6 +186,18 @@ The application uses a multi-stage Docker build process:
    pnpm type-check
    ```
 
+6. **Linting**:
+   ```bash
+   cd vue3
+   pnpm lint
+   ```
+
+7. **Formatting**:
+   ```bash
+   cd vue3
+   pnpm format
+   ```
+
 ### Testing
 
 The project currently does not include dedicated test files or a testing framework. Testing is performed manually through the web interface. If you want to add tests, you would need to:
@@ -193,20 +205,6 @@ The project currently does not include dedicated test files or a testing framewo
 1. Choose a testing framework (pytest for Python backend, Vitest for Vue frontend)
 2. Create test directories (`tests/` for backend, `vue3/tests/` for frontend)
 3. Write unit and integration tests for critical functionality
-
-### Linting and Formatting
-
-Frontend linting can be performed with:
-```bash
-cd vue3
-pnpm lint
-```
-
-To format code:
-```bash
-cd vue3
-pnpm format
-```
 
 ### Environment Variables
 
