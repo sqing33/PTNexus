@@ -9,22 +9,22 @@ PT Nexus is a PT (Private Tracker) seed aggregation and analysis platform that c
 ## Technology Stack
 
 - **Frontend**: Vue 3 with TypeScript, Element Plus UI library, Vite build system
-- **Backend**: Python Flask API with SQLite/MySQL/PostgreSQL database support
+- **Backend**: Python server API with SQLite/MySQL/PostgreSQL database support
 - **Deployment**: Docker container with multi-stage build (Node.js for frontend build, Python for backend)
 
 ## Architecture
 
 The application follows a client-server architecture with a clear separation between frontend and backend:
 
-1. **Frontend (vue3/)**: Vue 3 single-page application that communicates with the backend via REST API
-2. **Backend (flask/)**: Flask API server that handles data processing, storage, and business logic
+1. **Frontend (webui/)**: Vue 3 single-page application that communicates with the backend via REST API
+2. **Backend (server/)**: server API server that handles data processing, storage, and business logic
 3. **Database**: Supports SQLite (default), MySQL, and PostgreSQL backends
 4. **Data Collection**: Direct integration with qBittorrent and Transmission client APIs
 
 ## Key Components
 
 ### Backend Structure
-- `app.py`: Main Flask application entry point with app factory pattern
+- `app.py`: Main server application entry point with app factory pattern
 - `config.py`: Configuration management with default values and file persistence
 - `database.py`: Database abstraction layer supporting SQLite, MySQL, and PostgreSQL with schema migration capabilities
 - `api/`: REST API endpoints organized by functionality:
@@ -60,20 +60,20 @@ The application follows a client-server architecture with a clear separation bet
 
 2. **Frontend Development**:
    ```bash
-   cd vue3
+   cd webui
    pnpm install
    pnpm dev
    ```
 
 3. **Frontend Build**:
    ```bash
-   cd vue3
+   cd webui
    pnpm build
    ```
 
 4. **Backend Development**:
    ```bash
-   cd flask
+   cd server
    pip install -r requirements.txt
    python app.py
    ```
@@ -92,7 +92,7 @@ The application uses a multi-stage Docker build process:
    - Uses Python 3.12-slim as the base image
    - Copies the built frontend assets from the previous stage
    - Installs Python dependencies from requirements.txt
-   - Copies the Flask backend application
+   - Copies the server backend application
    - Installs system dependencies (ffmpeg, mediainfo)
    - Exposes port 5272 for the web interface
    - Mounts `/app/data` as a volume for persistent storage
@@ -138,19 +138,19 @@ The application uses a multi-stage Docker build process:
 
 1. **Install Python dependencies**:
    ```bash
-   cd flask
+   cd server
    pip install -r requirements.txt
    ```
 
 2. **Run the application**:
    ```bash
-   cd flask
+   cd server
    python app.py
    ```
 
 3. **Install in development mode** (if applicable):
    ```bash
-   cd flask
+   cd server
    pip install -e .
    ```
 
@@ -158,43 +158,43 @@ The application uses a multi-stage Docker build process:
 
 1. **Install dependencies**:
    ```bash
-   cd vue3
+   cd webui
    pnpm install
    ```
 
 2. **Start development server**:
    ```bash
-   cd vue3
+   cd webui
    pnpm dev
    ```
 
 3. **Build for production**:
    ```bash
-   cd vue3
+   cd webui
    pnpm build
    ```
 
 4. **Preview production build**:
    ```bash
-   cd vue3
+   cd webui
    pnpm preview
    ```
 
 5. **Type checking**:
    ```bash
-   cd vue3
+   cd webui
    pnpm type-check
    ```
 
 6. **Linting**:
    ```bash
-   cd vue3
+   cd webui
    pnpm lint
    ```
 
 7. **Formatting**:
    ```bash
-   cd vue3
+   cd webui
    pnpm format
    ```
 
@@ -203,7 +203,7 @@ The application uses a multi-stage Docker build process:
 The project currently does not include dedicated test files or a testing framework. Testing is performed manually through the web interface. If you want to add tests, you would need to:
 
 1. Choose a testing framework (pytest for Python backend, Vitest for Vue frontend)
-2. Create test directories (`tests/` for backend, `vue3/tests/` for frontend)
+2. Create test directories (`tests/` for backend, `webui/tests/` for frontend)
 3. Write unit and integration tests for critical functionality
 
 ### Environment Variables
