@@ -20,6 +20,7 @@ The application follows a client-server architecture with a clear separation bet
 2. **Backend (server/)**: server API server that handles data processing, storage, and business logic
 3. **Database**: Supports SQLite (default), MySQL, and PostgreSQL backends
 4. **Data Collection**: Direct integration with qBittorrent and Transmission client APIs
+5. **Go Proxy**: Enhanced qBittorrent API proxy for remote file processing and improved network performance
 
 ## Key Components
 
@@ -37,7 +38,6 @@ The application follows a client-server architecture with a clear separation bet
 - `core/`: Core services for data tracking and processing
 - `core/services.py`: Main data tracking service that polls downloaders for torrent and traffic data
 - `core/uploaders/`: Site-specific upload functionality for cross-seeding
-- `sites/`: Site-specific parsing and data extraction logic
 - `utils/`: Utility functions and helpers
 
 ### Frontend Structure
@@ -47,6 +47,17 @@ The application follows a client-server architecture with a clear separation bet
 - `src/views/`: Page-level components (TorrentsView, SitesView, etc.)
 - `src/components/`: Reusable UI components
 - `src/components/settings/`: Settings page components
+
+### Go Proxy Structure (New)
+- `proxy/proxy.go`: Main Go proxy application that provides enhanced qBittorrent API access
+- `proxy/start.sh`: Script to start the Go proxy service with dependency installation
+- `proxy/stop.sh`: Script to stop the Go proxy service
+- `proxy/pt-nexus-box-proxy`: Compiled Go binary for the proxy service
+- Key features:
+  - Concurrent processing of multiple downloader requests
+  - Remote media processing (screenshot and mediainfo) with Pixhost upload support
+  - Gzip-compressed responses for efficient data transfer
+  - Health check endpoint for service monitoring
 
 ## Common Development Tasks
 
@@ -96,6 +107,7 @@ The application uses a multi-stage Docker build process:
    - Installs system dependencies (ffmpeg, mediainfo)
    - Exposes port 5272 for the web interface
    - Mounts `/app/data` as a volume for persistent storage
+   - Includes the Go proxy service for enhanced qBittorrent functionality
 
 3. **Data Persistence**:
    - SQLite database is stored in the `/app/data` directory
@@ -152,6 +164,27 @@ The application uses a multi-stage Docker build process:
    ```bash
    cd server
    pip install -e .
+   ```
+
+### Go Proxy Development Commands
+
+1. **Start the Go proxy service**:
+   ```bash
+   cd proxy
+   chmod +x start.sh
+   ./start.sh
+   ```
+
+2. **Stop the Go proxy service**:
+   ```bash
+   cd proxy
+   ./stop.sh
+   ```
+
+3. **View proxy logs**:
+   ```bash
+   cd proxy
+   tail -f proxy.log
    ```
 
 ### Frontend Development Commands
@@ -288,7 +321,14 @@ Main API routes (all prefixed with /api):
   - `DELETE /api/sites/delete/<id>`: Delete a site
   - `POST /api/sites/sync_from_json`: Sync sites from sites_data.json file
 
-All API endpoints (except auth) require JWT authentication via Bearer token in Authorization header.
+Go Proxy API routes (all prefixed with /api, running on port 9090):
+- `/api/torrents/all`: Concurrently fetch torrent lists from multiple qBittorrent clients
+- `/api/stats/server`: Get real-time speed and traffic statistics from downloaders
+- `/api/media/screenshot`: Remote screenshot generation with Pixhost upload and BBCode return
+- `/api/media/mediainfo`: Remote MediaInfo analysis of video files
+- `/api/health`: Health check endpoint for proxy service monitoring
+
+All main API endpoints (except auth) require JWT authentication via Bearer token in Authorization header. Go Proxy API endpoints do not require authentication as they are intended to be accessed only by the backend service.
 
 ## Core Functionality
 
@@ -312,3 +352,12 @@ The migrate functionality allows users to:
 - Check if torrents exist on target sites
 - Upload torrents to target sites for cross-seeding
 - Manage site-specific upload configurations
+
+### Go Proxy Functionality
+The Go proxy service (proxy/proxy.go) provides enhanced qBittorrent API access:
+- **Concurrent Seed Data Aggregation** (`/api/torrents/all`): Fetches torrent lists from multiple downloaders simultaneously with optional comment and tracker details
+- **Remote Media Processing**:
+  - **Remote Screenshot** (`/api/media/screenshot`): Takes screenshots of remote video files using mpv and uploads them to Pixhost, returning BBCode
+  - **Remote MediaInfo** (`/api/media/mediainfo`): Analyzes remote video files using mediainfo and returns detailed media information
+- **Server Statistics** (`/api/stats/server`): Retrieves real-time speed and cumulative traffic data from downloaders
+- **Health Check** (`/api/health`): Provides a lightweight endpoint to monitor proxy service status
