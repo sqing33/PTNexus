@@ -2,7 +2,7 @@
 node_modules
 dist
 data
-corss_seed
+batch-enhancer
 .vscode
 .claude
 tmp
