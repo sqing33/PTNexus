@@ -4,360 +4,107 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PT Nexus is a PT (Private Tracker) seed aggregation and analysis platform that collects and analyzes torrent data from qBittorrent and Transmission clients. The application provides traffic statistics, seed management, site/group analytics, and cross-seeding functionality through a web interface.
-
-## Technology Stack
-
-- **Frontend**: Vue 3 with TypeScript, Element Plus UI library, Vite build system
-- **Backend**: Python server API with SQLite/MySQL/PostgreSQL database support
-- **Deployment**: Docker container with multi-stage build (Node.js for frontend build, Python for backend)
+PT Nexus is a PT (Private Tracker) seed aggregation viewing platform that analyzes seed data and traffic information from qBittorrent and Transmission downloaders. It provides cross-client seed aggregation, traffic statistics, and site/group analytics.
 
 ## Architecture
 
-The application follows a client-server architecture with a clear separation between frontend and backend:
-
-1. **Frontend (webui/)**: Vue 3 single-page application that communicates with the backend via REST API
-2. **Backend (server/)**: server API server that handles data processing, storage, and business logic
-3. **Database**: Supports SQLite (default), MySQL, and PostgreSQL backends
-4. **Data Collection**: Direct integration with qBittorrent and Transmission client APIs
-5. **Go Proxy**: Enhanced qBittorrent API proxy for remote file processing and improved network performance
+1. **Frontend**: Vue 3 + TypeScript + Vite application (in `webui/` directory)
+2. **Backend**: Python Flask application (in `server/` directory)
+3. **Database**: SQLite (default), MySQL, or PostgreSQL support
+4. **Go Proxy**: High-performance API proxy for qBittorrent with remote media processing capabilities
+5. **Batch Enhancer**: Go application for batch processing tasks
 
 ## Key Components
 
 ### Backend Structure
-- `app.py`: Main server application entry point with app factory pattern
-- `config.py`: Configuration management with default values and file persistence
-- `database.py`: Database abstraction layer supporting SQLite, MySQL, and PostgreSQL with schema migration capabilities
-- `api/`: REST API endpoints organized by functionality:
-  - `routes_auth.py`: Authentication endpoints (JWT-based)
-  - `routes_management.py`: System management and configuration
-  - `routes_stats.py`: Traffic statistics and analytics
-  - `routes_torrents.py`: Torrent data management
-  - `routes_migrate.py`: Cross-seed functionality
-  - `routes_sites.py`: Site management functionality
-- `core/`: Core services for data tracking and processing
-- `core/services.py`: Main data tracking service that polls downloaders for torrent and traffic data
-- `core/uploaders/`: Site-specific upload functionality for cross-seeding
-- `utils/`: Utility functions and helpers
+- `app.py`: Main Flask application entry point
+- `database.py`: Database management with support for SQLite/MySQL/PostgreSQL
+- `config.py`: Configuration management with environment variable support
+- `core/services.py`: Background data tracking and synchronization services
+- `api/`: API route handlers
+- `core/`: Core business logic including uploaders and extractors
+- `utils/`: Utility functions for data processing
 
 ### Frontend Structure
-- `src/main.ts`: Application entry point
-- `src/App.vue`: Main application component
-- `src/router/`: Vue Router configuration
-- `src/views/`: Page-level components (TorrentsView, SitesView, etc.)
-- `src/components/`: Reusable UI components
-- `src/components/settings/`: Settings page components
+- Vue 3 with TypeScript
+- Element Plus component library
+- Pinia for state management
+- Vue Router for navigation
 
-### Go Proxy Structure (New)
-- `proxy/proxy.go`: Main Go proxy application that provides enhanced qBittorrent API access
-- `proxy/start.sh`: Script to start the Go proxy service with dependency installation
-- `proxy/stop.sh`: Script to stop the Go proxy service
-- `proxy/pt-nexus-box-proxy`: Compiled Go binary for the proxy service
-- Key features:
-  - Concurrent processing of multiple downloader requests
-  - Remote media processing (screenshot and mediainfo) with Pixhost upload support
-  - Gzip-compressed responses for efficient data transfer
-  - Health check endpoint for service monitoring
+## Common Development Commands
 
-## Common Development Tasks
+### Backend Development
+```bash
+# Install Python dependencies
+pip install -r server/requirements.txt
 
-### Building and Running
+# Run the Flask application
+python server/app.py
 
-1. **Docker Deployment** (recommended):
-   ```bash
-   # Create docker-compose.yml first (see Deployment Details)
-   docker-compose up -d
-   ```
+# Environment variables for configuration:
+# DB_TYPE=sqlite|mysql|postgresql
+# MYSQL_* or POSTGRES_* variables for database configuration
+```
 
-2. **Frontend Development**:
-   ```bash
-   cd webui
-   pnpm install
-   pnpm dev
-   ```
+### Frontend Development
+```bash
+# Install dependencies
+cd webui && pnpm install
 
-3. **Frontend Build**:
-   ```bash
-   cd webui
-   pnpm build
-   ```
+# Development server
+pnpm dev
 
-4. **Backend Development**:
-   ```bash
-   cd server
-   pip install -r requirements.txt
-   python app.py
-   ```
+# Build for production
+pnpm build
 
-### Deployment Details
+# Type checking
+pnpm type-check
 
-The application uses a multi-stage Docker build process:
+# Linting
+pnpm lint
 
-1. **Frontend Build Stage**:
-   - Uses Node.js 20-alpine as the base image
-   - Installs pnpm package manager
-   - Installs frontend dependencies
-   - Builds the Vue 3 application for production
+# Formatting
+pnpm format
+```
 
-2. **Backend Runtime Stage**:
-   - Uses Python 3.12-slim as the base image
-   - Copies the built frontend assets from the previous stage
-   - Installs Python dependencies from requirements.txt
-   - Copies the server backend application
-   - Installs system dependencies (ffmpeg, mediainfo)
-   - Exposes port 5272 for the web interface
-   - Mounts `/app/data` as a volume for persistent storage
-   - Includes the Go proxy service for enhanced qBittorrent functionality
+### Docker Build Process
+The Dockerfile uses a multi-stage build:
+1. Build Vue frontend with Node.js
+2. Build Go batch enhancer
+3. Create final runtime image with Python dependencies
 
-3. **Data Persistence**:
-   - SQLite database is stored in the `/app/data` directory
-   - Configuration files are stored in the `/app/data` directory
-   - Temporary files are stored in `/app/data/tmp`
+### Database Migrations
+The application automatically handles schema migrations at startup. Database tables are created/updated in the `init_db()` function in `database.py`.
 
-4. **Volume Mounting**:
-   - Mount the data directory to persist configuration and database
-   - Example: `-v ./data:/app/data`
+## Site Configuration
+Site-specific configurations are stored in YAML files in `server/configs/` directory. These define:
+- Form field mappings
+- Source parameter parsers
+- Standard key mappings
+- Parameter mappings for site-specific values
 
-5. **Port Mapping**:
-   - The container exposes port 5272
-   - Map to a host port using `-p <host_port>:5272`
+## API Structure
+- `/api/torrents/*`: Torrent data and management
+- `/api/stats/*`: Traffic statistics
+- `/api/sites/*`: Site configuration
+- `/api/auth/*`: Authentication
+- `/api/migrate/*`: Migration utilities
+- `/api/management/*`: System management
 
-6. **Docker Compose Deployment**:
-   Create a `docker-compose.yml` file with the following content:
-   ```yaml
-   services:
-     pt-nexus:
-       image: ghcr.io/sqing33/pt-nexus
-       container_name: pt-nexus
-       ports:
-         - 5272:5272
-       volumes:
-         - ./data:/app/data
-       environment:
-         - TZ=Asia/Shanghai
-         - DB_TYPE=sqlite
-         - JWT_SECRET=please-change-me
-         - AUTH_USERNAME=admin
-         - AUTH_PASSWORD=your_password
-   ```
+## Proxy Services
+The Go proxy service provides:
+- `/api/torrents/all`: Concurrent seed list retrieval
+- `/api/stats/server`: Server statistics
+- `/api/media/screenshot`: Remote screenshot processing
+- `/api/media/mediainfo`: Remote MediaInfo processing
+- `/api/health`: Health checks
 
-   Then run:
-   ```bash
-   docker-compose up -d
-   ```
+## Testing
+Tests can be run with standard Python testing frameworks. For frontend, use:
+```bash
+# Run a single test
+pnpm test:unit --testNamePattern="specific test name"
 
-### Backend Development Commands
-
-1. **Install Python dependencies**:
-   ```bash
-   cd server
-   pip install -r requirements.txt
-   ```
-
-2. **Run the application**:
-   ```bash
-   cd server
-   python app.py
-   ```
-
-3. **Install in development mode** (if applicable):
-   ```bash
-   cd server
-   pip install -e .
-   ```
-
-### Go Proxy Development Commands
-
-1. **Start the Go proxy service**:
-   ```bash
-   cd proxy
-   chmod +x start.sh
-   ./start.sh
-   ```
-
-2. **Stop the Go proxy service**:
-   ```bash
-   cd proxy
-   ./stop.sh
-   ```
-
-3. **View proxy logs**:
-   ```bash
-   cd proxy
-   tail -f proxy.log
-   ```
-
-### Frontend Development Commands
-
-1. **Install dependencies**:
-   ```bash
-   cd webui
-   pnpm install
-   ```
-
-2. **Start development server**:
-   ```bash
-   cd webui
-   pnpm dev
-   ```
-
-3. **Build for production**:
-   ```bash
-   cd webui
-   pnpm build
-   ```
-
-4. **Preview production build**:
-   ```bash
-   cd webui
-   pnpm preview
-   ```
-
-5. **Type checking**:
-   ```bash
-   cd webui
-   pnpm type-check
-   ```
-
-6. **Linting**:
-   ```bash
-   cd webui
-   pnpm lint
-   ```
-
-7. **Formatting**:
-   ```bash
-   cd webui
-   pnpm format
-   ```
-
-### Testing
-
-The project currently does not include dedicated test files or a testing framework. Testing is performed manually through the web interface. If you want to add tests, you would need to:
-
-1. Choose a testing framework (pytest for Python backend, Vitest for Vue frontend)
-2. Create test directories (`tests/` for backend, `webui/tests/` for frontend)
-3. Write unit and integration tests for critical functionality
-
-### Environment Variables
-
-Key environment variables for configuration:
-
-**Authentication Settings:**
-- `JWT_SECRET`: JWT signing secret (required for production, strongly recommended to set in production)
-- `AUTH_USERNAME`: Admin username (default: admin)
-- `AUTH_PASSWORD`: Admin password (plaintext, for testing only)
-- `AUTH_PASSWORD_HASH`: Admin password bcrypt hash (preferred over plaintext password)
-
-**Database Settings:**
-- `DB_TYPE`: Database type (sqlite, mysql, or postgresql, default: sqlite)
-- `MYSQL_HOST`: MySQL database host (when DB_TYPE=mysql)
-- `MYSQL_PORT`: MySQL database port (when DB_TYPE=mysql, default: 3306)
-- `MYSQL_DATABASE`: MySQL database name (when DB_TYPE=mysql)
-- `MYSQL_USER`: MySQL database username (when DB_TYPE=mysql)
-- `MYSQL_PASSWORD`: MySQL database password (when DB_TYPE=mysql)
-- `POSTGRES_HOST`: PostgreSQL database host (when DB_TYPE=postgresql)
-- `POSTGRES_PORT`: PostgreSQL database port (when DB_TYPE=postgresql, default: 5432)
-- `POSTGRES_DATABASE`: PostgreSQL database name (when DB_TYPE=postgresql)
-- `POSTGRES_USER`: PostgreSQL database username (when DB_TYPE=postgresql)
-- `POSTGRES_PASSWORD`: PostgreSQL database password (when DB_TYPE=postgresql)
-
-**System Settings:**
-- `TZ`: Timezone setting for the container (e.g., Asia/Shanghai)
-
-The application will first check for configuration in environment variables, then fall back to the config.json file for persistent settings. Environment variables take precedence over file-based configuration.
-
-### Database Schema Management
-
-The application uses automatic schema migration. New database columns are added automatically when missing, with backward compatibility maintained.
-
-Database migrations are handled in the `_run_schema_migrations` method in `database.py`. The system checks for missing columns on startup and adds them as needed. Supported migrations include:
-- Adding new columns to existing tables
-- Removing deprecated columns (MySQL only, SQLite requires manual handling)
-- Automatic table creation on first run
-
-The system supports SQLite (default), MySQL, and PostgreSQL backends. SQLite is recommended for single-user deployments, while MySQL/PostgreSQL are better for multi-user or high-traffic scenarios.
-
-## API Endpoints
-
-Main API routes (all prefixed with /api):
-- `/api/auth/*`: Authentication endpoints
-  - `POST /api/auth/login`: User login, returns JWT token
-  - `GET /api/auth/status`: Get authentication status and user info
-  - `POST /api/auth/change_password`: Change user password
-- `/api/management/*`: System management and configuration
-  - `GET /api/sites`: Get all configured sites
-  - `POST /api/sites`: Add a new site
-  - `PUT /api/sites/<id>`: Update an existing site
-  - `DELETE /api/sites/<id>`: Delete a site
-  - `GET /api/downloaders`: Get all configured downloaders
-  - `POST /api/downloaders`: Add a new downloader
-  - `PUT /api/downloaders/<id>`: Update an existing downloader
-  - `DELETE /api/downloaders/<id>`: Delete a downloader
-  - `POST /api/sync_now`: Force synchronization with downloaders
-- `/api/stats/*`: Traffic statistics and analytics
-  - `GET /api/stats/torrents`: Get torrent statistics
-  - `GET /api/stats/sites`: Get site statistics
-  - `GET /api/stats/groups`: Get group statistics
-  - `GET /api/stats/speed`: Get speed statistics
-  - `GET /api/stats/charts`: Get chart data for visualization
-  - `GET /api/stats/chart_data`: Get historical traffic chart data
-  - `GET /api/stats/speed_data`: Get current real-time speeds
-  - `GET /api/stats/recent_speed_data`: Get recent speed data for real-time curves
-  - `GET /api/stats/speed_chart_data`: Get historical speed chart data
-- `/api/torrents/*`: Torrent data management
-  - `GET /api/torrents/data`: Get list of torrents with filtering options
-  - `GET /api/torrents/downloaders_list`: Get list of enabled downloaders
-  - `GET /api/torrents/all_downloaders`: Get list of all downloaders (enabled and disabled)
-  - `POST /api/torrents/refresh_data`: Trigger immediate refresh of torrent data
-- `/api/migrate/*`: Cross-seed functionality
-  - `GET /api/migrate/sites_list`: Get source and target sites for migration
-  - `POST /api/migrate/check`: Check if a torrent exists on target site
-  - `POST /api/migrate/upload`: Upload torrent to target site
-- `/api/sites/*`: Site management
-  - `GET /api/sites/list`: Get list of all sites
-  - `POST /api/sites/add`: Add a new site
-  - `PUT /api/sites/update/<id>`: Update an existing site
-  - `DELETE /api/sites/delete/<id>`: Delete a site
-  - `POST /api/sites/sync_from_json`: Sync sites from sites_data.json file
-
-Go Proxy API routes (all prefixed with /api, running on port 9090):
-- `/api/torrents/all`: Concurrently fetch torrent lists from multiple qBittorrent clients
-- `/api/stats/server`: Get real-time speed and traffic statistics from downloaders
-- `/api/media/screenshot`: Remote screenshot generation with Pixhost upload and BBCode return
-- `/api/media/mediainfo`: Remote MediaInfo analysis of video files
-- `/api/health`: Health check endpoint for proxy service monitoring
-
-All main API endpoints (except auth) require JWT authentication via Bearer token in Authorization header. Go Proxy API endpoints do not require authentication as they are intended to be accessed only by the backend service.
-
-## Core Functionality
-
-### Data Collection and Tracking
-The core service in `core/services.py` periodically polls configured downloaders (qBittorrent and Transmission) to collect:
-- Torrent information (hash, name, size, progress, state, save path)
-- Traffic statistics (uploaded/downloaded bytes, upload/download speeds)
-- Site information from torrent comments/trackers
-
-### Database Schema
-The application uses several key tables:
-- `traffic_stats`: Stores raw traffic data with timestamps
-- `traffic_stats_hourly`: Stores aggregated hourly traffic data
-- `downloader_clients`: Stores downloader configuration and baseline data
-- `torrents`: Stores torrent information with site associations
-- `torrent_upload_stats`: Stores upload statistics per torrent
-- `sites`: Stores site configuration including cookies, passkeys, and migration settings
-
-### Cross-Seeding Functionality
-The migrate functionality allows users to:
-- Check if torrents exist on target sites
-- Upload torrents to target sites for cross-seeding
-- Manage site-specific upload configurations
-
-### Go Proxy Functionality
-The Go proxy service (proxy/proxy.go) provides enhanced qBittorrent API access:
-- **Concurrent Seed Data Aggregation** (`/api/torrents/all`): Fetches torrent lists from multiple downloaders simultaneously with optional comment and tracker details
-- **Remote Media Processing**:
-  - **Remote Screenshot** (`/api/media/screenshot`): Takes screenshots of remote video files using mpv and uploads them to Pixhost, returning BBCode
-  - **Remote MediaInfo** (`/api/media/mediainfo`): Analyzes remote video files using mediainfo and returns detailed media information
-- **Server Statistics** (`/api/stats/server`): Retrieves real-time speed and cumulative traffic data from downloaders
-- **Health Check** (`/api/health`): Provides a lightweight endpoint to monitor proxy service status
+# Run all tests
+pnpm test:unit
+```
