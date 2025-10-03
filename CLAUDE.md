@@ -60,12 +60,14 @@ pnpm build
 # Type checking
 pnpm type-check
 
-# Linting
+# Linting (runs both oxlint and eslint)
 pnpm lint
 
 # Formatting
 pnpm format
 ```
+
+**Node Version Requirements**: Node.js ^20.19.0 or >=22.12.0
 
 ### Docker Build Process
 The Dockerfile uses a multi-stage build:
@@ -92,12 +94,22 @@ Site-specific configurations are stored in YAML files in `server/configs/` direc
 - `/api/management/*`: System management
 
 ## Proxy Services
-The Go proxy service provides:
-- `/api/torrents/all`: Concurrent seed list retrieval
-- `/api/stats/server`: Server statistics
-- `/api/media/screenshot`: Remote screenshot processing
+The Go proxy service (port 9090 in container) provides:
+- `/api/torrents/all`: Concurrent seed list retrieval with optional gzip compression
+- `/api/stats/server`: Server statistics (upload/download speeds and totals)
+- `/api/media/screenshot`: Remote screenshot processing with image host upload
 - `/api/media/mediainfo`: Remote MediaInfo processing
 - `/api/health`: Health checks
+
+## Batch Enhancer
+A Go application for batch processing tasks, integrated into the Docker image. Accessible via the `/api/management/*` endpoints.
+
+## Deployment
+Default deployment via Docker Compose:
+- Main application runs on port 15272 (mapped to 5272 externally)
+- Go proxy service runs on port 9090 (internal)
+- Configuration entirely via environment variables (see README.md for details)
+- SQLite is the default database (zero configuration required)
 
 ## Testing
 Tests can be run with standard Python testing frameworks. For frontend, use:
