@@ -13,3 +13,5 @@ pt-nexus-box-proxy
 
 routes_cross_seed_data.py
 CrossSeedDataView.vue
+
+main.go
