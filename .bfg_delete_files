@@ -15,3 +15,4 @@ routes_cross_seed_data.py
 CrossSeedDataView.vue
 
 main.go
+public.yml
