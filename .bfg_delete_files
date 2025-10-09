@@ -9,10 +9,7 @@ __pycache__
 qb.py
 test.py
 CLAUDE.md
-pt-nexus-box-proxy
 
 routes_cross_seed_data.py
-CrossSeedDataView.vue
 
 main.go
-public.yml
