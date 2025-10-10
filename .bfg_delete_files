@@ -13,3 +13,5 @@ CLAUDE.md
 routes_cross_seed_data.py
 
 main.go
+
+public.yml
