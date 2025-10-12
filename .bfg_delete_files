@@ -1,4 +1,6 @@
 # 按文件名删除，无论它们在哪个目录下
+public.yml
+
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -13,5 +15,3 @@ CLAUDE.md
 routes_cross_seed_data.py
 
 main.go
-
-public.yml
