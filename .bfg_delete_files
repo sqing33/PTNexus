@@ -12,6 +12,5 @@ qb.py
 test.py
 CLAUDE.md
 
-routes_cross_seed_data.py
-
+# 批量转种
 main.go
