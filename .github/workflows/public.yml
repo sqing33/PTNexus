@@ -1,10 +1,6 @@
 name: 推送开源内容到公开库
 
 on:
-  push:
-    branches:
-      - main
-      - master
   workflow_dispatch:
 
 jobs:
