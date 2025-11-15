@@ -12,5 +12,5 @@ qb.py
 test.py
 CLAUDE.md
 
-# 批量转种
-main.go
+batch.go
+build-beta.yml

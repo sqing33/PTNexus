@@ -1,6 +1,5 @@
 # 按文件夹删除，无论它们在哪个目录下
 node_modules
-dist
 data
 .vscode
 .claude
