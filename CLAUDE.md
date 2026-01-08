@@ -9,6 +9,7 @@ PT Nexus is a sophisticated PT (Private Tracker) torrent management platform wit
 ## Architecture
 
 ### Multi-Service Architecture
+
 - **Frontend**: Vue 3 + TypeScript + Element Plus (port 5274 via proxy)
 - **Backend API**: Python Flask (port 5275)
 - **Batch Service**: Go service for batch operations (port 5276)
@@ -16,6 +17,7 @@ PT Nexus is a sophisticated PT (Private Tracker) torrent management platform wit
 - **Box Proxy**: Standalone Go proxy service for remote box access
 
 ### Directory Structure
+
 ```
 /home/sqing/Codes/Docker.pt-nexus-dev/
 ├── webui/           # Vue.js frontend application
@@ -31,6 +33,7 @@ PT Nexus is a sophisticated PT (Private Tracker) torrent management platform wit
 ## Development Commands
 
 ### Frontend Development (Vue.js)
+
 ```bash
 cd /home/sqing/Codes/Docker.pt-nexus-dev/webui
 pnpm install          # Install dependencies
@@ -42,12 +45,14 @@ pnpm format           # Format code with prettier
 ```
 
 ### Backend Development (Python Flask)
+
 ```bash
 cd /home/sqing/Codes/Docker.pt-nexus-dev/server
 python app.py         # Start Flask server (port 5275)
 ```
 
 ### Go Services Development
+
 ```bash
 # Batch service
 cd /home/sqing/Codes/Docker.pt-nexus-dev/batch
@@ -66,6 +71,7 @@ go build -o pt-nexus-box-proxy proxy.go  # Build binary
 ```
 
 ### Full Application Startup
+
 ```bash
 cd /home/sqing/Codes/Docker.pt-nexus-dev
 ./start-services.sh   # Start all services in production mode
@@ -74,6 +80,7 @@ cd /home/sqing/Codes/Docker.pt-nexus-dev
 ## Configuration
 
 ### Environment Variables
+
 Development configuration is in `/home/sqing/Codes/Docker.pt-nexus-dev/server/.env`:
 
 ```bash
@@ -93,6 +100,7 @@ TZ=Asia/Shanghai                # Timezone
 ```
 
 ### Key Configuration Files
+
 - `/home/sqing/Codes/Docker.pt-nexus-dev/server/config.py` - Main configuration manager
 - `/home/sqing/Codes/Docker.pt-nexus-dev/server/sites_data.json` - PT sites configuration
 - `/home/sqing/Codes/Docker.pt-nexus-dev/server/configs/global_mappings.yaml` - Global torrent mappings
@@ -101,6 +109,7 @@ TZ=Asia/Shanghai                # Timezone
 ## Database Setup
 
 The application supports three database types:
+
 - **SQLite**: Default for simple deployments (file-based)
 - **MySQL**: For production environments
 - **PostgreSQL**: Alternative for production environments
@@ -110,6 +119,7 @@ Database configuration is handled automatically based on `DB_TYPE` environment v
 ## API Structure
 
 The Flask backend provides RESTful APIs organized by functionality:
+
 - `routes_auth.py` - Authentication and user management
 - `routes_config.py` - Configuration management
 - `routes_cross_seed_data.py` - Cross-seeding data operations
@@ -124,6 +134,7 @@ The Flask backend provides RESTful APIs organized by functionality:
 ## Frontend Architecture
 
 The Vue.js frontend uses:
+
 - **Vue Router** for navigation
 - **Pinia** for state management
 - **Element Plus** for UI components
@@ -132,6 +143,7 @@ The Vue.js frontend uses:
 - **TypeScript** for type safety
 
 Key directories:
+
 - `src/views/` - Page components
 - `src/components/` - Reusable components
 - `src/stores/` - Pinia state stores
@@ -141,14 +153,18 @@ Key directories:
 ## Docker Deployment
 
 ### Build Process
+
 The multi-stage Dockerfile builds:
+
 1. Frontend assets (Node.js + pnpm)
 2. Go batch service
 3. Go updater service
 4. Final Python runtime with all components
 
 ### Environment Configuration
+
 Key Docker environment variables:
+
 - `PORT=5274` - Main application port
 - `DB_TYPE` - Database type selection
 - Database connection variables (MySQL/PostgreSQL)
@@ -156,6 +172,7 @@ Key Docker environment variables:
 - Proxy settings (`http_proxy`, `https_proxy`)
 
 ### Volume Mounts
+
 - `/app/data` - Application data directory
 - `/pt` - Video files storage
 - `/data/tr_torrents/tr*` - Transmission torrent directories
@@ -163,14 +180,17 @@ Key Docker environment variables:
 ## Development Workflow
 
 ### Hot Updates
+
 The application supports hot updates through the updater service. Updates are pulled from GitHub and applied automatically without container restart.
 
 ### Testing
+
 - Frontend: Use `pnpm type-check` and `pnpm lint`
 - Backend: Python logging is configured for development
 - Integration: Test with Docker Compose setup
 
 ### Logging
+
 - Python: Configured with detailed logging including process IDs
 - Development: Check console output and log files
 - Production: Container logs provide service status
@@ -178,18 +198,21 @@ The application supports hot updates through the updater service. Updates are pu
 ## Special Features
 
 ### Torrent Transfer System
+
 - Source site → Standard parameters → Target site architecture
 - Database caching to avoid repeated parameter extraction
 - Support for multiple PT sites with custom mappings
 - Batch transfer capabilities with size restrictions (1GB limit for batch operations)
 
 ### Box Proxy Service
+
 - Standalone Go service for remote box access
 - Handles MediaInfo extraction, screenshots, and file operations
 - Resolves network latency and remote access issues
 - Multi-platform support (Linux AMD64/ARM64)
 
 ### Traffic Statistics
+
 - Real-time and historical traffic monitoring
 - Multi-downloader support (qBittorrent, Transmission)
 - Interactive charts with ECharts
@@ -198,6 +221,7 @@ The application supports hot updates through the updater service. Updates are pu
 ## Key Dependencies
 
 ### Python Backend
+
 - Flask + Flask-CORS for web framework
 - qbittorrent-api, transmission-rpc for downloader integration
 - mysql-connector-python, psycopg2-binary for database support
@@ -205,12 +229,14 @@ The application supports hot updates through the updater service. Updates are pu
 - PyYAML for configuration management
 
 ### Frontend
+
 - Vue 3 ecosystem with TypeScript
 - Element Plus for UI components
 - ECharts for data visualization
 - Axios for HTTP requests
 
 ### Go Services
+
 - Standard library only for batch and updater services
 - Additional dependencies for proxy service (check proxy/go.mod)
 
