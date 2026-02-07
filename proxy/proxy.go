@@ -46,6 +46,8 @@ type NormalizedTorrent struct {
 	Comment      string
 	Trackers     []map[string]string
 	Uploaded     int64
+	Downloaded   int64
+	Ratio        float64
 	DownloaderID string
 }
 type NormalizedInfo struct {
@@ -58,6 +60,8 @@ type NormalizedInfo struct {
 	Comment      string              `json:"comment,omitempty"`
 	Trackers     []map[string]string `json:"trackers"`
 	Uploaded     int64               `json:"uploaded"`
+	Downloaded   int64               `json:"downloaded"`
+	Ratio        float64             `json:"ratio"`
 	DownloaderID string              `json:"downloader_id"`
 }
 type TorrentsRequest struct {
@@ -138,6 +142,36 @@ type EpisodeCountResponse struct {
 	Message      string `json:"message"`
 	EpisodeCount int    `json:"episode_count,omitempty"`
 	SeasonNumber int    `json:"season_number,omitempty"`
+}
+
+type UploadLimitGroup struct {
+	LimitMBps  int      `json:"limit_mbps"`
+	TorrentIDs []string `json:"torrent_ids"`
+}
+
+type UploadLimitDownloader struct {
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Host     string             `json:"host"`
+	Username string             `json:"username"`
+	Password string             `json:"password"`
+	Actions  []UploadLimitGroup `json:"actions"`
+}
+
+type UploadLimitBatchRequest struct {
+	Downloaders []UploadLimitDownloader `json:"downloaders"`
+}
+
+type UploadLimitResult struct {
+	DownloaderID   string   `json:"downloader_id"`
+		AppliedGroups   int      `json:"applied_groups"`
+		AppliedTorrents int      `json:"applied_torrents"`
+	Errors         []string `json:"errors"`
+}
+
+type UploadLimitBatchResponse struct {
+	Success bool                `json:"success"`
+	Results []UploadLimitResult `json:"results"`
 }
 
 type SubtitleEvent struct {
@@ -223,7 +257,7 @@ func toNormalizedInfo(t NormalizedTorrent) NormalizedInfo {
 	return NormalizedInfo{
 		Hash: t.Hash, Name: t.Name, Size: t.Size, Progress: t.Progress, State: t.State,
 		SavePath: t.SavePath, Comment: t.Comment, Trackers: formatAndFilterTrackers(t.Trackers),
-		Uploaded: t.Uploaded, DownloaderID: t.DownloaderID,
+		Uploaded: t.Uploaded, Downloaded: t.Downloaded, Ratio: t.Ratio, DownloaderID: t.DownloaderID,
 	}
 }
 func formatTrackersForRaw(trackers []FlexibleTracker) []map[string]string {
@@ -294,11 +328,22 @@ func fetchTorrentsForDownloader(wg *sync.WaitGroup, config DownloaderConfig, inc
 	var totalUploaded int64 = 0
 	var totalDownloaded int64 = 0
 	for _, t := range torrents {
+		downloaded := t.Size * int64(t.Progress)
 		totalUploaded += t.Uploaded
-		totalDownloaded += t.Size * int64(t.Progress)
+		totalDownloaded += downloaded
+
+		// 计算分享率，避免除零错误
+		var ratio float64
+		if downloaded > 0 {
+			ratio = float64(t.Uploaded) / float64(downloaded)
+		} else {
+			ratio = 0
+		}
+
 		normalizedList = append(normalizedList, NormalizedTorrent{
 			Hash: t.Hash, Name: t.Name, Size: t.Size, Progress: t.Progress, State: t.State,
-			SavePath: t.SavePath, Uploaded: t.Uploaded, DownloaderID: config.ID,
+			SavePath: t.SavePath, Uploaded: t.Uploaded, Downloaded: downloaded, Ratio: ratio,
+			DownloaderID: config.ID,
 		})
 	}
 	if includeComment || includeTrackers {
@@ -1298,6 +1343,183 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, r, http.StatusOK, allStats)
 }
 
+func uploadLimitBatchHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONResponse(w, r, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "message": "仅支持 POST 方法"})
+		return
+	}
+
+	var req UploadLimitBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONResponse(w, r, http.StatusBadRequest, map[string]interface{}{"success": false, "message": "无效的 JSON 请求体: " + err.Error()})
+		return
+	}
+
+	results := make([]UploadLimitResult, 0, len(req.Downloaders))
+	for _, dl := range req.Downloaders {
+		result := UploadLimitResult{
+			DownloaderID: dl.ID,
+			Errors:       []string{},
+		}
+
+		switch dl.Type {
+		case "qbittorrent":
+			httpClient, err := newQBHTTPClient(dl.Host)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("qB HTTP客户端创建失败: %v", err))
+				results = append(results, result)
+				continue
+			}
+			if err := httpClient.Login(dl.Username, dl.Password); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("qB 登录失败: %v", err))
+				results = append(results, result)
+				continue
+			}
+
+			for _, action := range dl.Actions {
+				if len(action.TorrentIDs) == 0 {
+					continue
+				}
+
+				limitBytes := action.LimitMBps * 1024 * 1024
+				if action.LimitMBps > 999 {
+					limitBytes = -1
+				}
+
+				hashes := strings.Join(action.TorrentIDs, "|")
+				setURL := fmt.Sprintf("%s/api/v2/torrents/setUploadLimit", dl.Host)
+				data := url.Values{}
+				data.Set("hashes", hashes)
+				data.Set("limit", strconv.Itoa(limitBytes))
+
+				httpReq, err := http.NewRequest("POST", setURL, strings.NewReader(data.Encode()))
+				if err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("qB 构建限速请求失败: %v", err))
+					continue
+				}
+				httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				httpReq.Header.Set("Referer", dl.Host)
+
+				httpResp, err := httpClient.Client.Do(httpReq)
+				if err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("qB 设置限速失败: %v", err))
+					continue
+				}
+				_ = httpResp.Body.Close()
+				if httpResp.StatusCode != http.StatusOK {
+					result.Errors = append(result.Errors, fmt.Sprintf("qB 设置限速返回状态码: %d", httpResp.StatusCode))
+					continue
+				}
+
+				result.AppliedGroups++
+				result.AppliedTorrents += len(action.TorrentIDs)
+			}
+
+		case "transmission":
+			hostValue := dl.Host
+			if !strings.HasPrefix(hostValue, "http://") && !strings.HasPrefix(hostValue, "https://") {
+				hostValue = "http://" + hostValue
+			}
+			parsed, err := url.Parse(hostValue)
+			if err != nil || parsed.Hostname() == "" {
+				result.Errors = append(result.Errors, fmt.Sprintf("TR host 解析失败: %v", err))
+				results = append(results, result)
+				continue
+			}
+
+			rpcURL := fmt.Sprintf("http://%s/transmission/rpc", parsed.Host)
+			client := &http.Client{Timeout: 30 * time.Second}
+
+			for _, action := range dl.Actions {
+				if len(action.TorrentIDs) == 0 {
+					continue
+				}
+
+				args := map[string]interface{}{
+					"ids": action.TorrentIDs,
+				}
+				if action.LimitMBps > 999 {
+					args["uploadLimited"] = false
+				} else {
+					args["uploadLimit"] = action.LimitMBps * 1024
+					args["uploadLimited"] = true
+				}
+
+				payload := map[string]interface{}{
+					"method":    "torrent-set",
+					"arguments": args,
+				}
+
+				body, _ := json.Marshal(payload)
+				httpReq, err := http.NewRequest("POST", rpcURL, bytes.NewReader(body))
+				if err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("TR 构建请求失败: %v", err))
+					continue
+				}
+				httpReq.Header.Set("Content-Type", "application/json")
+				httpReq.SetBasicAuth(dl.Username, dl.Password)
+
+				httpResp, err := client.Do(httpReq)
+				if err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("TR 设置限速失败: %v", err))
+					continue
+				}
+
+				if httpResp.StatusCode == http.StatusConflict {
+					sessionID := httpResp.Header.Get("X-Transmission-Session-Id")
+					_ = httpResp.Body.Close()
+
+					httpReq2, err := http.NewRequest("POST", rpcURL, bytes.NewReader(body))
+					if err != nil {
+						result.Errors = append(result.Errors, fmt.Sprintf("TR 二次构建请求失败: %v", err))
+						continue
+					}
+					httpReq2.Header.Set("Content-Type", "application/json")
+					httpReq2.Header.Set("X-Transmission-Session-Id", sessionID)
+					httpReq2.SetBasicAuth(dl.Username, dl.Password)
+
+					httpResp, err = client.Do(httpReq2)
+					if err != nil {
+						result.Errors = append(result.Errors, fmt.Sprintf("TR 带会话ID重试失败: %v", err))
+						continue
+					}
+				}
+
+				if httpResp.StatusCode != http.StatusOK {
+					result.Errors = append(result.Errors, fmt.Sprintf("TR 设置限速返回状态码: %d", httpResp.StatusCode))
+					_ = httpResp.Body.Close()
+					continue
+				}
+
+				respBody, _ := io.ReadAll(httpResp.Body)
+				_ = httpResp.Body.Close()
+				var rpcResp map[string]interface{}
+				if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("TR 响应解析失败: %v", err))
+					continue
+				}
+				if res, ok := rpcResp["result"].(string); !ok || res != "success" {
+					result.Errors = append(result.Errors, fmt.Sprintf("TR RPC返回失败: %v", rpcResp["result"]))
+					continue
+				}
+
+				result.AppliedGroups++
+				result.AppliedTorrents += len(action.TorrentIDs)
+			}
+
+		default:
+			result.Errors = append(result.Errors, fmt.Sprintf("不支持的下载器类型: %s", dl.Type))
+		}
+
+		results = append(results, result)
+	}
+
+	writeJSONResponse(w, r, http.StatusOK, UploadLimitBatchResponse{
+		Success: true,
+		Results: results,
+	})
+}
+
 // [核心修改] 改进错误处理，失败时跳过而不是中断
 func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1716,6 +1938,7 @@ func main() {
 	}
 	http.HandleFunc("/api/torrents/all", allTorrentsHandler)
 	http.HandleFunc("/api/stats/server", statsHandler)
+	http.HandleFunc("/api/torrents/upload-limit/batch", uploadLimitBatchHandler)
 	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, r, http.StatusOK, map[string]string{"status": "ok", "message": "qBittorrent代理服务运行正常"})
 	})
@@ -1729,6 +1952,7 @@ func main() {
 	log.Println("API端点:")
 	log.Println("  POST /api/torrents/all - 获取种子信息")
 	log.Println("  POST /api/stats/server - 获取服务器统计")
+	log.Println("  POST /api/torrents/upload-limit/batch - 批量设置种子上传限速")
 	log.Println("  GET  /api/health      - 健康检查")
 	log.Println("  POST /api/media/screenshot - 远程截图并上传图床")
 	log.Println("  POST /api/media/mediainfo  - 远程获取MediaInfo")
