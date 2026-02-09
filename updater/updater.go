@@ -19,17 +19,26 @@ import (
 )
 
 const (
-	PORT                = "5274"
-	SERVER_PORT         = "5275"
-	BATCH_ENHANCER_PORT = "5276"
-	GITEE_REPO_URL      = "https://gitee.com/sqing33/PTNexus.git"
-	GITHUB_REPO_URL     = "https://github.com/sqing33/PTNexus.git"
-	UPDATE_DIR          = "/app/data/updates"
-	REPO_DIR            = "/app/data/updates/repo"
-	REPO_TIMEOUT        = 60 * time.Second // 仓库克隆/拉取超时时间
+	DEFAULT_UPDATER_PORT = "5274"
+	DEFAULT_SERVER_PORT  = "5275"
+	DEFAULT_BATCH_PORT   = "5276"
+	GITEE_REPO_URL       = "https://gitee.com/sqing33/PTNexus.git"
+	GITHUB_REPO_URL      = "https://github.com/sqing33/PTNexus.git"
+	DEFAULT_UPDATE_DIR   = "/app/data/updates"
+	DEFAULT_REPO_DIR     = "/app/data/updates/repo"
+	REPO_TIMEOUT         = 60 * time.Second // 仓库克隆/拉取超时时间
 )
 
 var (
+	updaterPort       = getEnv("UPDATER_PORT", getEnv("PORT", DEFAULT_UPDATER_PORT))
+	serverPort        = getEnv("SERVER_PORT", DEFAULT_SERVER_PORT)
+	batchEnhancerPort = getEnv(
+		"BATCH_PORT",
+		getEnv("BATCH_ENHANCER_PORT", DEFAULT_BATCH_PORT),
+	)
+	updateDir = getEnv("UPDATE_DIR", DEFAULT_UPDATE_DIR)
+	repoDir   = getEnv("REPO_DIR", DEFAULT_REPO_DIR)
+
 	localConfigFile string
 	shanghaiLoc     *time.Location
 	// 新增：互斥锁防止重复触发更新
@@ -38,6 +47,8 @@ var (
 )
 
 func init() {
+	repoDir = getEnv("REPO_DIR", filepath.Join(updateDir, "repo"))
+
 	if os.Getenv("DEV_ENV") == "true" {
 		// 开发环境
 		localConfigFile = getEnv("LOCAL_CONFIG_FILE", "/home/sqing/Codes/Docker.pt-nexus-dev/CHANGELOG.json")
@@ -291,13 +302,13 @@ func runAutoUpdate() {
 	// 5. 删除updates目录强制重新拉取
 	// 这符合你的要求：如果有更新，先清理旧目录确保干净
 	log.Println("清理 updates 目录以强制重新拉取...")
-	if err := os.RemoveAll(UPDATE_DIR); err != nil {
+	if err := os.RemoveAll(updateDir); err != nil {
 		log.Printf("删除updates目录失败: %v", err)
 		// 如果删除失败，可能影响后续流程，但尝试继续
 	}
 
 	// 确保更新目录存在
-	if err := os.MkdirAll(UPDATE_DIR, 0755); err != nil {
+	if err := os.MkdirAll(updateDir, 0755); err != nil {
 		log.Printf("创建更新目录失败: %v", err)
 		return
 	}
@@ -314,7 +325,7 @@ func runAutoUpdate() {
 	stopServices()
 
 	// 8. 备份当前版本
-	backupDir := filepath.Join(UPDATE_DIR, "backup")
+	backupDir := filepath.Join(updateDir, "backup")
 	os.RemoveAll(backupDir)
 	os.MkdirAll(backupDir, 0755)
 
@@ -323,7 +334,7 @@ func runAutoUpdate() {
 	// 虽然克隆了文件，但内存里的 config 是一样的
 	log.Println("同步文件...")
 	for _, mapping := range remoteConfig.Mappings {
-		source := filepath.Join(REPO_DIR, mapping.Source)
+		source := filepath.Join(repoDir, mapping.Source)
 		target := mapping.Target
 
 		if err := syncPath(source, target, mapping.Exclude, backupDir); err != nil {
@@ -341,7 +352,7 @@ func runAutoUpdate() {
 	}
 
 	// 10. 更新本地配置文件
-	srcConfig := filepath.Join(REPO_DIR, "CHANGELOG.json")
+	srcConfig := filepath.Join(repoDir, "CHANGELOG.json")
 	copyFile(srcConfig, localConfigFile)
 
 	log.Println("重启服务...")
@@ -560,9 +571,9 @@ func pullUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 确保更新目录存在
-	os.MkdirAll(UPDATE_DIR, 0755)
+	os.MkdirAll(updateDir, 0755)
 
-	if _, err := os.Stat(REPO_DIR); os.IsNotExist(err) {
+	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
 		// 首次克隆 - 先尝试 Gitee，超时则切换到 GitHub
 		log.Println("首次克隆仓库...")
 		if err := cloneRepoWithFallback(); err != nil {
@@ -626,17 +637,17 @@ func cloneRepoWithFallback() error {
 	}
 
 	log.Printf("尝试从 %s 克隆仓库 (超时时间: %v)...", primarySource, REPO_TIMEOUT)
-	err := execGitWithTimeout(REPO_TIMEOUT, "clone", "--depth=1", primaryURL, REPO_DIR)
+	err := execGitWithTimeout(REPO_TIMEOUT, "clone", "--depth=1", primaryURL, repoDir)
 
 	if err != nil {
 		log.Printf("%s 克隆失败: %v", primarySource, err)
 		log.Printf("切换到 %s 仓库...", fallbackSource)
 
 		// 清理可能创建的不完整目录
-		os.RemoveAll(REPO_DIR)
+		os.RemoveAll(repoDir)
 
 		// 尝试从备用仓库克隆
-		err = execGitWithTimeout(REPO_TIMEOUT, "clone", "--depth=1", fallbackURL, REPO_DIR)
+		err = execGitWithTimeout(REPO_TIMEOUT, "clone", "--depth=1", fallbackURL, repoDir)
 		if err != nil {
 			return fmt.Errorf("%s 克隆也失败: %v", fallbackSource, err)
 		}
@@ -652,12 +663,12 @@ func cloneRepoWithFallback() error {
 // 拉取更新，带超时和自动切换
 func pullRepoWithFallback() error {
 	// 获取当前远程 URL 以显示来源
-	cmd := exec.Command("git", "-C", REPO_DIR, "remote", "get-url", "origin")
+	cmd := exec.Command("git", "-C", repoDir, "remote", "get-url", "origin")
 	output, err := cmd.Output()
 	if err != nil {
 		log.Printf("获取远程URL失败，尝试重新设置: %v", err)
 		// 如果获取失败，直接重新克隆
-		os.RemoveAll(REPO_DIR)
+		os.RemoveAll(repoDir)
 		return cloneRepoWithFallback()
 	}
 
@@ -679,14 +690,14 @@ func pullRepoWithFallback() error {
 
 	for _, branch := range branches {
 		log.Printf("尝试 fetch %s 分支...", branch)
-		err = execGitWithTimeout(REPO_TIMEOUT, "-C", REPO_DIR, "fetch", "origin", branch)
+		err = execGitWithTimeout(REPO_TIMEOUT, "-C", repoDir, "fetch", "origin", branch)
 		if err != nil {
 			log.Printf("%s 仓库 %s 分支 fetch 失败: %v", repoSource, branch, err)
 			continue
 		}
 
 		// Reset
-		err = execGitWithTimeout(REPO_TIMEOUT, "-C", REPO_DIR, "reset", "--hard", "origin/"+branch)
+		err = execGitWithTimeout(REPO_TIMEOUT, "-C", repoDir, "reset", "--hard", "origin/"+branch)
 		if err != nil {
 			log.Printf("%s 仓库 %s 分支 reset 失败: %v", repoSource, branch, err)
 			continue
@@ -709,7 +720,7 @@ func pullRepoWithFallback() error {
 // 切换远程仓库地址
 func switchRemoteRepo() error {
 	// 获取当前远程 URL
-	cmd := exec.Command("git", "-C", REPO_DIR, "remote", "get-url", "origin")
+	cmd := exec.Command("git", "-C", repoDir, "remote", "get-url", "origin")
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("获取远程 URL 失败: %v", err)
@@ -754,7 +765,7 @@ func switchRemoteRepo() error {
 	}
 
 	// 设置新的远程 URL
-	cmd = exec.Command("git", "-C", REPO_DIR, "remote", "set-url", "origin", newURL)
+	cmd = exec.Command("git", "-C", repoDir, "remote", "set-url", "origin", newURL)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("设置远程 URL 失败: %v", err)
 	}
@@ -776,7 +787,7 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 读取更新配置
-	configFile := filepath.Join(REPO_DIR, "CHANGELOG.json")
+	configFile := filepath.Join(repoDir, "CHANGELOG.json")
 	data, err := os.ReadFile(configFile)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -813,7 +824,7 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		// 根据映射"同步"文件到临时目录（模拟真实下载过程）
 		log.Println("【开发环境】同步文件到临时目录...")
 		for _, mapping := range config.Mappings {
-			source := filepath.Join(REPO_DIR, mapping.Source)
+			source := filepath.Join(repoDir, mapping.Source)
 			// 将目标路径改为临时目录
 			tempTarget := filepath.Join(tempBackupDir, mapping.Target)
 
@@ -876,14 +887,14 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	stopServices()
 
 	// 备份当前版本
-	backupDir := filepath.Join(UPDATE_DIR, "backup")
+	backupDir := filepath.Join(updateDir, "backup")
 	os.RemoveAll(backupDir)
 	os.MkdirAll(backupDir, 0755)
 
 	// 根据映射同步文件
 	log.Println("同步文件...")
 	for _, mapping := range config.Mappings {
-		source := filepath.Join(REPO_DIR, mapping.Source)
+		source := filepath.Join(repoDir, mapping.Source)
 		target := mapping.Target
 
 		if err := syncPath(source, target, mapping.Exclude, backupDir); err != nil {
@@ -905,7 +916,7 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 更新本地配置文件
-	srcConfig := filepath.Join(REPO_DIR, "CHANGELOG.json")
+	srcConfig := filepath.Join(repoDir, "CHANGELOG.json")
 	copyFile(srcConfig, localConfigFile)
 
 	log.Println("重启服务...")
@@ -1340,7 +1351,7 @@ func getChangelogHandler(w http.ResponseWriter, r *http.Request) {
 
 // 代理到服务器
 func proxyToServer(w http.ResponseWriter, r *http.Request) {
-	targetURL, _ := url.Parse("http://localhost:" + SERVER_PORT)
+	targetURL, _ := url.Parse("http://localhost:" + serverPort)
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
 	originalDirector := proxy.Director
@@ -1366,7 +1377,7 @@ func proxyToServer(w http.ResponseWriter, r *http.Request) {
 
 // 代理到 batch
 func proxyToBatchEnhancer(w http.ResponseWriter, r *http.Request) {
-	targetURL, _ := url.Parse("http://localhost:" + BATCH_ENHANCER_PORT)
+	targetURL, _ := url.Parse("http://localhost:" + batchEnhancerPort)
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
 	// 设置Director来修改请求
@@ -1393,7 +1404,7 @@ func proxyToBatchEnhancer(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	log.Println("PT Nexus 更新器启动...")
-	log.Println("监听端口:", PORT)
+	log.Println("监听端口:", updaterPort)
 	log.Printf("配置的更新源: %s", getUpdateSource())
 
 	// 检查定时配置
@@ -1421,5 +1432,5 @@ func main() {
 	http.Handle("/", http.HandlerFunc(proxyToServer))
 
 	// 启动 HTTP 服务器
-	log.Fatal(http.ListenAndServe(":"+PORT, nil))
+	log.Fatal(http.ListenAndServe(":"+updaterPort, nil))
 }
