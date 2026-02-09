@@ -6,16 +6,11 @@ import tempfile
 import requests
 import yaml
 from pymediainfo import MediaInfo
-from config import GLOBAL_MAPPINGS
+from config import GLOBAL_MAPPINGS, BDINFO_DIR
 from .media_helper import _find_target_video_file, _get_downloader_proxy_config, translate_path
 
 # 根据环境变量设置BDInfo相关路径
-if os.getenv("DEV_ENV") == "true":
-    # 开发环境
-    BDINFO_DIR = "/home/sqing/Codes/Docker.pt-nexus-dev/server/core/bdinfo"
-else:
-    # 生产环境（Docker容器内）
-    BDINFO_DIR = "/app/bdinfo"
+BDINFO_DIR = os.getenv("PTNEXUS_BDINFO_DIR", BDINFO_DIR)
 
 # BDInfo相关路径
 BDINFO_PATH = os.path.join(BDINFO_DIR, "BDInfo")
@@ -270,13 +265,7 @@ def _extract_bdinfo(bluray_path: str) -> str:
             return "bdinfo提取失败：指定的路径不存在。"
 
         # 检查BDInfo工具是否存在
-        # 根据环境变量区分开发环境和生产环境
-        if os.getenv("DEV_ENV") == "true":
-            # 开发环境路径
-            bdinfo_path = BDINFO_PATH
-        else:
-            # 生产环境路径（Docker容器内）
-            bdinfo_path = "/app/bdinfo/BDInfo"
+        bdinfo_path = os.getenv("PTNEXUS_BDINFO_PATH", BDINFO_PATH)
 
         if not os.path.exists(bdinfo_path):
             print(f"错误：BDInfo工具不存在: {bdinfo_path}")

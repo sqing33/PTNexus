@@ -178,7 +178,7 @@
     "site": "chdbits",
     "nickname": "彩虹岛",
     "base_url": "ptchdbits.co",
-    "special_tracker_domain": null,
+    "special_tracker_domain": "rainbowisland,ptchdbits,chdbits",
     "group": "-CHDBits,-CHDWEB,-CHD",
     "description": "CHDBits",
     "migration": 1,
@@ -437,7 +437,7 @@
   {
     "site": "hhanclub",
     "nickname": "憨憨",
-    "base_url": "hhanclub.top",
+    "base_url": "hhanclub.net",
     "special_tracker_domain": null,
     "group": "HHWEB",
     "description": "HHClub",

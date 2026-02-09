@@ -23,8 +23,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/superturkey650/go-qbittorrent/qbt"
 )
 
 // ======================= 结构体定义 (无变动) =======================
@@ -181,6 +179,18 @@ type SubtitleEvent struct {
 
 // ======================= 辅助函数 (无变动) =======================
 
+// normalizePath 规范化路径，将反斜杠转换为正斜杠
+// 解决 Windows 客户端发送的路径在 Linux 服务器上无法识别的问题
+func normalizePath(path string) string {
+	// 将所有反斜杠替换为正斜杠
+	normalized := strings.ReplaceAll(path, "\\", "/")
+	// 清理路径中的多余斜杠（如 // -> /）
+	for strings.Contains(normalized, "//") {
+		normalized = strings.ReplaceAll(normalized, "//", "/")
+	}
+	return normalized
+}
+
 func newQBHTTPClient(baseURL string) (*qbHTTPClient, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -307,6 +317,19 @@ func formatBytes(bytes int64) string {
 
 // ======================= 核心业务逻辑 (无变动) =======================
 
+// 自定义的种子信息结构，使用正确的类型
+type QBTorrentInfo struct {
+	Hash       string  `json:"hash"`
+	Name       string  `json:"name"`
+	Size       int64   `json:"size"`
+	Progress   float64 `json:"progress"`
+	State      string  `json:"state"`
+	SavePath   string  `json:"save_path"`
+	Uploaded   int64   `json:"uploaded"`
+	Downloaded int64   `json:"downloaded"`
+	Ratio      float64 `json:"ratio"`
+}
+
 func fetchTorrentsForDownloader(wg *sync.WaitGroup, config DownloaderConfig, includeComment, includeTrackers bool, resultsChan chan<- []NormalizedTorrent, errChan chan<- error) {
 	defer wg.Done()
 	if config.Type != "qbittorrent" {
@@ -314,21 +337,53 @@ func fetchTorrentsForDownloader(wg *sync.WaitGroup, config DownloaderConfig, inc
 		return
 	}
 	log.Printf("正在为下载器 '%s' 获取种子数据...", config.Host)
-	qb := qbt.NewClient(config.Host)
-	if err := qb.Login(config.Username, config.Password); err != nil {
+
+	// 使用自定义 HTTP 客户端替代第三方库，避免类型解析问题
+	httpClient, err := newQBHTTPClient(config.Host)
+	if err != nil {
+		errChan <- fmt.Errorf("[%s] 创建HTTP客户端失败: %v", config.Host, err)
+		return
+	}
+	if err := httpClient.Login(config.Username, config.Password); err != nil {
 		errChan <- fmt.Errorf("[%s] 登录失败: %v", config.Host, err)
 		return
 	}
-	torrents, err := qb.Torrents(qbt.TorrentsOptions{})
+
+	// 直接调用 API 获取种子列表
+	body, err := httpClient.Get("torrents/info", nil)
 	if err != nil {
 		errChan <- fmt.Errorf("[%s] 获取种子列表失败: %v", config.Host, err)
 		return
 	}
+
+	// 调试：打印原始 JSON 响应的前 500 个字符
+	if len(body) > 500 {
+		log.Printf("[DEBUG] [%s] 原始响应前500字符: %s", config.Host, string(body[:500]))
+	} else {
+		log.Printf("[DEBUG] [%s] 原始响应: %s", config.Host, string(body))
+	}
+
+	var torrents []QBTorrentInfo
+	if err := json.Unmarshal(body, &torrents); err != nil {
+		errChan <- fmt.Errorf("[%s] 解析种子列表JSON失败: %v", config.Host, err)
+		return
+	}
+
+	// 调试：打印前 3 个种子的详细信息
+	for i, t := range torrents {
+		if i >= 3 {
+			break
+		}
+		log.Printf("[DEBUG] [%s] 种子[%d]: Name=%s, Size=%d, Progress=%.4f, Uploaded=%d, Downloaded=%d",
+			config.Host, i, t.Name, t.Size, t.Progress, t.Uploaded, t.Downloaded)
+	}
+
 	normalizedList := make([]NormalizedTorrent, 0, len(torrents))
 	var totalUploaded int64 = 0
 	var totalDownloaded int64 = 0
 	for _, t := range torrents {
-		downloaded := t.Size * int64(t.Progress)
+		// 计算已下载量：Size * Progress
+		downloaded := int64(float64(t.Size) * t.Progress)
 		totalUploaded += t.Uploaded
 		totalDownloaded += downloaded
 
@@ -1531,7 +1586,7 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, r, http.StatusBadRequest, ScreenshotResponse{Success: false, Message: "无效的 JSON 请求体: " + err.Error()})
 		return
 	}
-	initialPath := reqData.RemotePath
+	initialPath := normalizePath(reqData.RemotePath)
 	if initialPath == "" {
 		writeJSONResponse(w, r, http.StatusBadRequest, ScreenshotResponse{Success: false, Message: "remote_path 不能为空"})
 		return
@@ -1697,7 +1752,7 @@ func mediainfoHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, r, http.StatusBadRequest, MediaInfoResponse{Success: false, Message: "无效的 JSON 请求体: " + err.Error()})
 		return
 	}
-	initialPath := reqData.RemotePath
+	initialPath := normalizePath(reqData.RemotePath)
 	if initialPath == "" {
 		writeJSONResponse(w, r, http.StatusBadRequest, MediaInfoResponse{Success: false, Message: "remote_path 不能为空"})
 		return
@@ -1740,7 +1795,7 @@ func fileCheckHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, r, http.StatusBadRequest, FileCheckResponse{Success: false, Message: "无效的 JSON 请求体: " + err.Error()})
 		return
 	}
-	remotePath := reqData.RemotePath
+	remotePath := normalizePath(reqData.RemotePath)
 	if remotePath == "" {
 		writeJSONResponse(w, r, http.StatusBadRequest, FileCheckResponse{Success: false, Message: "remote_path 不能为空"})
 		return
@@ -1791,7 +1846,8 @@ func batchFileCheckHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("批量文件检查请求: 正在检查 %d 个路径", len(reqData.RemotePaths))
 	results := make([]FileCheckResult, 0, len(reqData.RemotePaths))
-	for _, remotePath := range reqData.RemotePaths {
+	for _, rawPath := range reqData.RemotePaths {
+		remotePath := normalizePath(rawPath)
 		result := FileCheckResult{
 			Path:   remotePath,
 			Exists: false,
@@ -1842,7 +1898,7 @@ func episodeCountHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, r, http.StatusBadRequest, EpisodeCountResponse{Success: false, Message: "无效的 JSON 请求体: " + err.Error()})
 		return
 	}
-	remotePath := reqData.RemotePath
+	remotePath := normalizePath(reqData.RemotePath)
 	if remotePath == "" {
 		writeJSONResponse(w, r, http.StatusBadRequest, EpisodeCountResponse{Success: false, Message: "remote_path 不能为空"})
 		return

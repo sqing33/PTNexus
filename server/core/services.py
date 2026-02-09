@@ -62,9 +62,12 @@ def load_site_maps_from_db(db_manager):
                     core_domain_map[_extract_core_domain(base_hostname)] = nickname
 
                 if special_tracker:
-                    special_hostname = _parse_hostname_from_url(f"http://{special_tracker}")
-                    if special_hostname:
-                        core_domain_map[_extract_core_domain(special_hostname)] = nickname
+                    for tracker_domain in special_tracker.split(","):
+                        tracker_domain = tracker_domain.strip()
+                        if tracker_domain:
+                            special_hostname = _parse_hostname_from_url(f"http://{tracker_domain}")
+                            if special_hostname:
+                                core_domain_map[_extract_core_domain(special_hostname)] = nickname
     except Exception as e:
         logging.error(f"无法从数据库加载站点信息: {e}", exc_info=True)
     finally:
@@ -2002,8 +2005,10 @@ class DataTracker(Thread):
                 # 如果是部分下载，t.progress可能显示1.0（100%），但实际上只下载了部分文件
                 # 我们希望显示的是占整个种子大小的比例
                 try:
-                    total_size = t.get("total_size", 0) if isinstance(t, dict) else getattr(t, "total_size", 0)
-                    size_selected = t.get("size", 0) if isinstance(t, dict) else getattr(t, "size", 0)
+                    # 注意：proxy 返回的字段名是 "size"，而不是 "total_size"
+                    # 从 proxy 获取时，size 就是种子总大小
+                    total_size = t.get("size", 0) if isinstance(t, dict) else getattr(t, "size", 0)
+                    size_selected = total_size  # proxy 模式下，size 就是总大小，没有单独的 selected size
                     progress_raw = t.get("progress", 0) if isinstance(t, dict) else getattr(t, "progress", 0)
 
                     # 只有当勾选大小小于总大小时，才需要重新计算进度
@@ -2024,7 +2029,7 @@ class DataTracker(Thread):
                     "name": t.get("name", "") if isinstance(t, dict) else getattr(t, "name", ""),
                     "hash": t.get("hash", "") if isinstance(t, dict) else getattr(t, "hash", ""),
                     "save_path": t.get("save_path", "") if isinstance(t, dict) else getattr(t, "save_path", ""),
-                    "size": t.get("total_size", 0) if isinstance(t, dict) else getattr(t, "total_size", 0), # 使用 total_size 作为种子总大小
+                    "size": t.get("size", 0) if isinstance(t, dict) else getattr(t, "size", 0), # proxy 返回的就是 size 字段
                     "progress": progress,
                     "state": t.get("state", "") if isinstance(t, dict) else getattr(t, "state", ""),
                     "comment": t.get("comment", "") if isinstance(t, dict) else t.get("comment", ""), # 对于对象，get("comment", "") 可能不适用，稍后处理

@@ -9,17 +9,42 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 根据 DEV_ENV 环境变量设置配置文件路径
-if os.getenv("DEV_ENV") == "true":
-    # 开发环境
-    DATA_DIR = "/home/sqing/Codes/Docker.pt-nexus-dev/server/data"
-    SITES_DATA_FILE = "/home/sqing/Codes/Docker.pt-nexus-dev/server/sites_data.json"
-    GLOBAL_MAPPINGS = "/home/sqing/Codes/Docker.pt-nexus-dev/server/configs/global_mappings.yaml"
-else:
-    # 生产环境
-    DATA_DIR = "/app/data"
-    SITES_DATA_FILE = "/app/sites_data.json"
-    GLOBAL_MAPPINGS = "/app/configs/global_mappings.yaml"
+def _resolve_runtime_paths():
+    is_dev_env = os.getenv("DEV_ENV") == "true"
+
+    if is_dev_env:
+        default_base_dir = "/home/sqing/Codes/Docker.pt-nexus-dev/server"
+        default_data_dir = "/home/sqing/Codes/Docker.pt-nexus-dev/server/data"
+    else:
+        default_base_dir = "/app"
+        default_data_dir = "/app/data"
+
+    base_dir = os.getenv("PTNEXUS_BASE_DIR", default_base_dir)
+    data_dir = os.getenv("PTNEXUS_DATA_DIR", default_data_dir)
+
+    return {
+        "base_dir": base_dir,
+        "data_dir": data_dir,
+        "sites_data_file": os.getenv(
+            "PTNEXUS_SITES_DATA_FILE", os.path.join(base_dir, "sites_data.json")
+        ),
+        "global_mappings": os.getenv(
+            "PTNEXUS_GLOBAL_MAPPINGS",
+            os.path.join(base_dir, "configs", "global_mappings.yaml"),
+        ),
+        "bdinfo_dir": os.getenv("PTNEXUS_BDINFO_DIR", os.path.join(base_dir, "bdinfo")),
+        "static_dir": os.getenv("PTNEXUS_STATIC_DIR", os.path.join(base_dir, "dist")),
+    }
+
+
+runtime_paths = _resolve_runtime_paths()
+
+BASE_DIR = runtime_paths["base_dir"]
+DATA_DIR = runtime_paths["data_dir"]
+SITES_DATA_FILE = runtime_paths["sites_data_file"]
+GLOBAL_MAPPINGS = runtime_paths["global_mappings"]
+BDINFO_DIR = runtime_paths["bdinfo_dir"]
+STATIC_DIR = runtime_paths["static_dir"]
 
 os.makedirs(DATA_DIR, exist_ok=True)
 

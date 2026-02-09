@@ -1,6 +1,7 @@
 # run.py
 
 import os
+import sys
 import logging
 import jwt  # type: ignore
 import atexit
@@ -11,8 +12,12 @@ from typing import cast
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+
 # 从项目根目录导入核心模块
-from config import get_db_config, config_manager
+from config import get_db_config, config_manager, STATIC_DIR, BDINFO_DIR
 from database import DatabaseManager, reconcile_historical_data
 from core.services import start_data_tracker, stop_data_tracker
 from core.ratio_speed_limiter import start_ratio_speed_limiter, stop_ratio_speed_limiter
@@ -23,6 +28,14 @@ logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s - [PID:%(process)d] - %(levelname)s - %(message)s"
 )
 logging.info("=== Flask 应用日志系统已初始化 ===")
+
+
+def is_main_runtime_process() -> bool:
+    """判断当前是否为实际业务进程（避免 debug reloader 的父进程重复执行初始化）。"""
+    debug_enabled = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+    if not debug_enabled:
+        return True
+    return os.environ.get("WERKZEUG_RUN_MAIN") == "true"
 
 
 def cleanup_old_tmp_structure():
@@ -113,12 +126,7 @@ def cleanup_old_tmp_structure():
     print("开始清理 BDInfo 目录下的 .log 文件...")
 
     # 根据环境变量设置BDInfo相关路径
-    if is_dev_env:
-        # 开发环境
-        bdinfo_dir = "/home/sqing/Codes/Docker.pt-nexus-dev/server/core/bdinfo"
-    else:
-        # 生产环境（Docker容器内）
-        bdinfo_dir = "/app/bdinfo"
+    bdinfo_dir = os.getenv("PTNEXUS_BDINFO_DIR", BDINFO_DIR)
 
     log_removed = 0
     try:
@@ -152,12 +160,15 @@ def create_app():
     应用工厂函数：创建并配置 Flask 应用实例。
     """
     logging.info("Flask 应用正在创建中...")
-    app = Flask(__name__, static_folder="/app/dist")
+    app = Flask(__name__, static_folder=os.getenv("PTNEXUS_STATIC_DIR", STATIC_DIR))
+    is_main_process = is_main_runtime_process()
 
     # --- 配置 CORS 跨域支持 ---
     # 修复cookie泄露问题：限制允许的来源，并设置cookie相关的安全选项
     allowed_origins = [
         "http://localhost:35275",  # 开发环境
+        "http://127.0.0.1:5274",  # Tauri 桌面版
+        "http://localhost:5274",  # Tauri 桌面版
         "http://localhost:5275",  # 生产环境
         # 如果有其他域名，请在这里添加
     ]
@@ -183,7 +194,7 @@ def create_app():
 
     # --- 步骤 0: 清理旧的 tmp 目录结构 ---
     # 只在主进程中执行，避免 reloader 重复执行
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+    if is_main_process:
         cleanup_old_tmp_structure()
 
     # --- 步骤 1: 初始化核心依赖 (数据库和配置) ---
@@ -446,7 +457,7 @@ def create_app():
     # --- 步骤 6: 启动后台数据追踪服务 ---
     logging.info("正在启动后台数据追踪服务...")
     # 检查是否在调试模式下运行
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+    if is_main_process:
         logging.info("正在启动数据追踪线程...")
         start_data_tracker(db_manager, config_manager)
         start_ratio_speed_limiter(db_manager, config_manager)
@@ -459,7 +470,7 @@ def create_app():
 
         # --- 启动时执行一次种子数据刷新 ---
         # 只在主进程中执行，避免重复执行
-        if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        if is_main_process:
             logging.info("应用启动完成，执行一次种子数据刷新...")
             try:
                 from core.manual_tasks import update_torrents_data
@@ -564,5 +575,9 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"BDInfo 管理器初始化失败: {e}", exc_info=True)
 
-    logging.info(f"以开发模式启动 Flask 服务器，监听端口 http://0.0.0.0:5275 ...")
-    flask_app.run(host="0.0.0.0", port=5275, debug=True)
+    server_host = os.getenv("SERVER_HOST", "0.0.0.0")
+    server_port = int(os.getenv("SERVER_PORT", "5275"))
+    debug_mode = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+
+    logging.info(f"启动 Flask 服务器，监听地址 http://{server_host}:{server_port} ...")
+    flask_app.run(host=server_host, port=server_port, debug=debug_mode)

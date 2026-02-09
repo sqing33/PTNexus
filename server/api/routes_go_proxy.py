@@ -1,11 +1,12 @@
 from flask import Blueprint, request, jsonify
 import requests
 import logging
+import os
 
 go_proxy_bp = Blueprint('go_proxy', __name__)
 
 # Go服务配置
-GO_SERVICE_URL = "http://localhost:5276"
+GO_SERVICE_URL = os.getenv("GO_SERVICE_URL", "http://localhost:5276")
 
 
 @go_proxy_bp.route('/batch-enhance', methods=['POST'])
