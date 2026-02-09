@@ -157,15 +157,20 @@ services:
 
 # 更新日志
 
-### v3.6.0（2026.02.10）
+### v3.6.1（2026.02.10）
 
-> **注：盒子端修改获取截图和 MediaInfo 和 BDInfo 的超时时间需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+> **注：Win 版本正在测试ing...
+盒子端需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 新增：转种目标站点-爱萝莉
 - 新增：出种限速功能
 - 新增：当种子存在于目标站点的时候，可以选择是否添加到下载器
 - 优化：一种多站页面获取种子数据的速度
-- 优化：从盒子获取种子的体积大小，部分站点多 Tracker 的判定
+- 优化：从盒子获取种子的体积大小
+- 优化：部分站点多 Tracker 的判定（例如岛）
+- 优化：720p、480p、SD 判定
+- 优化：杜比高帧率、高码率标签
+- 修复：从盒子转移种子到其他下载器时无法获取做种人数
 
 ### v3.6.0（2026.01.29）
 
