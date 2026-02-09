@@ -1,0 +1,22 @@
+[package]
+name = "pt-nexus-desktop"
+version = "0.1.0"
+description = "PT Nexus Desktop Shell"
+authors = ["PT Nexus"]
+edition = "2021"
+
+[lib]
+name = "pt_nexus_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+# 强制指定 indexmap 版本和特性
+indexmap = { version = "1", features = ["std", "serde"] }
+# 显式添加 schemars 并开启 preserve_order，这通常能修复 indexmap 的参数问题
+schemars = { version = "0.8", features = ["preserve_order"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

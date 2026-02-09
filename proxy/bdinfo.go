@@ -386,7 +386,7 @@ func bdinfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	remotePath := reqData.RemotePath
+	remotePath := normalizePath(reqData.RemotePath)
 	taskID := reqData.TaskID
 	callbackURL := reqData.CallbackURL
 
