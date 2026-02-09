@@ -841,7 +841,8 @@ global_standard_keys:
     "HLG": "tag.HLG"
 
     # 视频质量标签
-    "高码": "tag.高码"
+    "高码率": "tag.高码率"
+    "高帧率": "tag.高帧率"
     "零魔": "tag.零魔"
     "DV": "tag.DV"
     "Blu-ray": "tag.Blu-ray"

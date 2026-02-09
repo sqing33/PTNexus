@@ -490,6 +490,10 @@ def extract_tags_from_mediainfo(mediainfo_text: str) -> list:
     if current_video_section_lines:
         _process_video_section_languages(current_video_section_lines, found_tags)
 
+    # 提取高帧率和高码率标签
+    _extract_high_framerate_tag(mediainfo_text, found_tags)
+    _extract_high_bitrate_tag(mediainfo_text, found_tags)
+
     # 为所有标签添加 tag. 前缀
     prefixed_tags = set()
     for tag in found_tags:
@@ -599,6 +603,86 @@ def _check_language_in_section(section_lines) -> str | None:
                             return lang
 
     return None
+
+
+def _extract_high_framerate_tag(mediainfo_text: str, found_tags: set) -> None:
+    """
+    从 MediaInfo 文本中提取高帧率标签。
+    如果帧率 > 50 FPS，则添加 "高帧率" 标签。
+
+    MediaInfo 中的帧率格式示例：
+    - Frame rate                               : 60.000 FPS
+    - Frame rate                               : 59.940 (60000/1001) FPS
+    - Frame rate                               : 23.976 FPS
+
+    :param mediainfo_text: 完整的 MediaInfo 报告字符串
+    :param found_tags: 标签集合，用于添加新标签
+    """
+    if not mediainfo_text:
+        return
+
+    # 匹配帧率，支持多种格式
+    # 匹配 "Frame rate : 60.000 FPS" 或 "Frame rate : 59.940 (60000/1001) FPS"
+    framerate_pattern = re.compile(
+        r"Frame\s*rate\s*:\s*([\d.]+)\s*(?:\([\d/]+\))?\s*FPS",
+        re.IGNORECASE
+    )
+
+    match = framerate_pattern.search(mediainfo_text)
+    if match:
+        try:
+            framerate = float(match.group(1))
+            if framerate > 50:
+                found_tags.add("高帧率")
+                print(f"   -> 检测到高帧率: {framerate} FPS，添加 '高帧率' 标签")
+        except ValueError:
+            pass
+
+
+def _extract_high_bitrate_tag(mediainfo_text: str, found_tags: set) -> None:
+    """
+    从 MediaInfo 文本中提取高码率标签。
+    如果码率 > 10 Mb/s，则添加 "高码率" 标签。
+
+    MediaInfo 中的码率格式示例：
+    - Overall bit rate                         : 26.8 Mb/s
+    - Overall bit rate                         : 9 500 kb/s
+    - Overall bit rate                         : 1 234 Mb/s
+
+    注意：码率低于 10 Mb/s 时通常使用 kb/s 作为单位
+
+    :param mediainfo_text: 完整的 MediaInfo 报告字符串
+    :param found_tags: 标签集合，用于添加新标签
+    """
+    if not mediainfo_text:
+        return
+
+    # 匹配 Overall bit rate，支持 Mb/s 和 kb/s 格式
+    # 支持带空格的数字格式，如 "9 500 kb/s" 或 "26.8 Mb/s"
+    bitrate_pattern = re.compile(
+        r"Overall\s*bit\s*rate\s*:\s*([\d\s.]+)\s*(Mb/s|kb/s|Kbps|Mbps)",
+        re.IGNORECASE
+    )
+
+    match = bitrate_pattern.search(mediainfo_text)
+    if match:
+        try:
+            # 移除数字中的空格
+            bitrate_str = match.group(1).replace(" ", "")
+            bitrate_value = float(bitrate_str)
+            unit = match.group(2).lower()
+
+            # 转换为 Mb/s
+            if unit in ["kb/s", "kbps"]:
+                bitrate_mbps = bitrate_value / 1000
+            else:  # Mb/s 或 Mbps
+                bitrate_mbps = bitrate_value
+
+            if bitrate_mbps > 10:
+                found_tags.add("高码率")
+                print(f"   -> 检测到高码率: {bitrate_mbps:.2f} Mb/s，添加 '高码率' 标签")
+        except ValueError:
+            pass
 
 
 def extract_resolution_from_mediainfo(mediainfo_text: str) -> str:
