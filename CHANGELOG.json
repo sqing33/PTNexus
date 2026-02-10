@@ -497,7 +497,10 @@
         "*.pyc",
         "__pycache__",
         "*.backup",
-        ".env"
+        ".env",
+        "windows",
+        "windows/**",
+        "**/windows/**"
       ]
     },
     {
