@@ -18,6 +18,11 @@ import (
 	"time"
 )
 
+var defaultSparseCheckoutPaths = []string{
+	"/*",
+	"!server/core/bdinfo/windows/**",
+}
+
 const (
 	DEFAULT_UPDATER_PORT = "5274"
 	DEFAULT_SERVER_PORT  = "5275"
@@ -621,6 +626,22 @@ func execGitWithTimeout(timeout time.Duration, args ...string) error {
 	return nil
 }
 
+func applySparseCheckout(repoPath string) {
+	if err := execGitWithTimeout(REPO_TIMEOUT, "-C", repoPath, "sparse-checkout", "init", "--no-cone"); err != nil {
+		log.Printf("警告: 初始化 sparse-checkout 失败，将继续全量模式: %v", err)
+		return
+	}
+
+	setArgs := []string{"-C", repoPath, "sparse-checkout", "set"}
+	setArgs = append(setArgs, defaultSparseCheckoutPaths...)
+	if err := execGitWithTimeout(REPO_TIMEOUT, setArgs...); err != nil {
+		log.Printf("警告: 设置 sparse-checkout 路径失败，将继续全量模式: %v", err)
+		return
+	}
+
+	log.Printf("已启用 sparse-checkout 过滤规则: %v", defaultSparseCheckoutPaths)
+}
+
 // 克隆仓库，带超时和自动切换
 func cloneRepoWithFallback() error {
 	primarySource := getUpdateSource()
@@ -637,7 +658,15 @@ func cloneRepoWithFallback() error {
 	}
 
 	log.Printf("尝试从 %s 克隆仓库 (超时时间: %v)...", primarySource, REPO_TIMEOUT)
-	err := execGitWithTimeout(REPO_TIMEOUT, "clone", "--depth=1", primaryURL, repoDir)
+	err := execGitWithTimeout(
+		REPO_TIMEOUT,
+		"clone",
+		"--depth=1",
+		"--filter=blob:none",
+		"--sparse",
+		primaryURL,
+		repoDir,
+	)
 
 	if err != nil {
 		log.Printf("%s 克隆失败: %v", primarySource, err)
@@ -647,14 +676,26 @@ func cloneRepoWithFallback() error {
 		os.RemoveAll(repoDir)
 
 		// 尝试从备用仓库克隆
-		err = execGitWithTimeout(REPO_TIMEOUT, "clone", "--depth=1", fallbackURL, repoDir)
+		err = execGitWithTimeout(
+			REPO_TIMEOUT,
+			"clone",
+			"--depth=1",
+			"--filter=blob:none",
+			"--sparse",
+			fallbackURL,
+			repoDir,
+		)
 		if err != nil {
 			return fmt.Errorf("%s 克隆也失败: %v", fallbackSource, err)
 		}
 
+		applySparseCheckout(repoDir)
+
 		log.Printf("已成功从 %s 克隆仓库", fallbackSource)
 		return nil
 	}
+
+	applySparseCheckout(repoDir)
 
 	log.Printf("已成功从 %s 克隆仓库", primarySource)
 	return nil
@@ -684,6 +725,7 @@ func pullRepoWithFallback() error {
 
 	// 先尝试当前远程仓库
 	log.Printf("正在从 %s 仓库拉取更新 (超时时间: %v)...", repoSource, REPO_TIMEOUT)
+	applySparseCheckout(repoDir)
 
 	// 尝试多个分支
 	branches := []string{"main", "master"}
@@ -964,15 +1006,21 @@ func syncDirectoryToDev(source, target string, exclude []string) error {
 
 		// 计算相对路径
 		relPath, _ := filepath.Rel(source, path)
+		if relPath == "." {
+			relPath = ""
+		}
 		targetPath := filepath.Join(target, relPath)
+
+		// 检查是否排除（目录命中时直接剪枝）
+		if shouldExclude(info.Name(), relPath, exclude) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 
 		if info.IsDir() {
 			return os.MkdirAll(targetPath, 0755)
-		}
-
-		// 检查是否排除
-		if shouldExclude(info.Name(), exclude) {
-			return nil
 		}
 
 		// 直接复制到临时目录
@@ -1009,15 +1057,21 @@ func syncDirectory(source, target string, exclude []string, backupDir string) er
 
 		// 计算相对路径
 		relPath, _ := filepath.Rel(source, path)
+		if relPath == "." {
+			relPath = ""
+		}
 		targetPath := filepath.Join(target, relPath)
+
+		// 检查是否排除（目录命中时直接剪枝）
+		if shouldExclude(info.Name(), relPath, exclude) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 
 		if info.IsDir() {
 			return os.MkdirAll(targetPath, 0755)
-		}
-
-		// 检查是否排除
-		if shouldExclude(info.Name(), exclude) {
-			return nil
 		}
 
 		// 备份原文件
@@ -1079,12 +1133,59 @@ func copyFile(src, dst string) error {
 }
 
 // 检查是否应该排除
-func shouldExclude(name string, patterns []string) bool {
+func shouldExclude(name, relPath string, patterns []string) bool {
+	normalizedRelPath := filepath.ToSlash(strings.TrimSpace(relPath))
+	normalizedRelPath = strings.TrimPrefix(normalizedRelPath, "./")
+	normalizedRelPath = strings.TrimPrefix(normalizedRelPath, "/")
+
 	for _, pattern := range patterns {
+		pattern = filepath.ToSlash(strings.TrimSpace(pattern))
+		if pattern == "" {
+			continue
+		}
+
+		// 兼容旧逻辑：匹配文件/目录名
 		if matched, _ := filepath.Match(pattern, name); matched {
 			return true
 		}
+
+		if normalizedRelPath == "" {
+			continue
+		}
+
+		// 直接匹配相对路径
+		if matched, _ := filepath.Match(pattern, normalizedRelPath); matched {
+			return true
+		}
+
+		if pattern == normalizedRelPath {
+			return true
+		}
+
+		// 支持 xxx/** 前缀目录匹配
+		if strings.HasSuffix(pattern, "/**") {
+			prefix := strings.TrimSuffix(pattern, "/**")
+			if normalizedRelPath == prefix || strings.HasPrefix(normalizedRelPath, prefix+"/") {
+				return true
+			}
+		}
+
+		// 支持 **/xxx/** 目录匹配
+		if strings.HasPrefix(pattern, "**/") && strings.HasSuffix(pattern, "/**") {
+			segment := strings.TrimSuffix(strings.TrimPrefix(pattern, "**/"), "/**")
+			if strings.Contains("/"+normalizedRelPath+"/", "/"+segment+"/") {
+				return true
+			}
+		}
+
+		// 无通配符时按路径段匹配（例如 windows、__pycache__）
+		if !strings.ContainsAny(pattern, "*?[") {
+			if strings.Contains("/"+normalizedRelPath+"/", "/"+pattern+"/") {
+				return true
+			}
+		}
 	}
+
 	return false
 }
 
