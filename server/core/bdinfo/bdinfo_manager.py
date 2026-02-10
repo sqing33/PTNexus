@@ -991,6 +991,14 @@ class BDInfoManager:
                 print(f"[DEBUG] 准备调用 _extract_bdinfo，路径: {actual_save_path}")
                 # 调用 BDInfo 提取函数
                 from utils import _extract_bdinfo_with_progress
+                from utils.mediainfo import get_bdinfo_tool_paths
+
+                bdinfo_path, substractor_path = get_bdinfo_tool_paths()
+                logging.info(
+                    "本地BDInfo工具路径解析: BDInfo=%s, BDInfoDataSubstractor=%s",
+                    bdinfo_path,
+                    substractor_path,
+                )
 
                 bdinfo_content = _extract_bdinfo_with_progress(actual_save_path, task.id, self)
                 print(

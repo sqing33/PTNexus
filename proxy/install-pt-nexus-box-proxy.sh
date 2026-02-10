@@ -11,6 +11,7 @@ set -e
 # 配置变量
 REPO_OWNER="sqing33"
 REPO_NAME="pt-nexus"
+REPO_REF="${REPO_REF:-main}"
 INSTALL_DIR="/opt/pt-nexus-proxy"
 SERVICE_NAME="pt-nexus-proxy"
 
@@ -84,23 +85,39 @@ create_install_dir() {
 download_proxy() {
     log "正在下载 PT Nexus Proxy ($OS/$ARCH)..."
 
-    # 构建下载URL
-    PROXY_URL="https://github.com/$REPO_OWNER/$REPO_NAME/releases/latest/download/pt-nexus-box-proxy-$OS-$ARCH"
+    local proxy_candidates=(
+        "proxy/pt-nexus-box-proxy-$ARCH"
+        "proxy/pt-nexus-box-proxy-$OS-$ARCH"
+        "proxy/pt-nexus-box-proxy"
+    )
 
-    # 尝试使用curl下载
-    if command -v curl >/dev/null 2>&1; then
-        if ! curl -L -f -o "pt-nexus-box-proxy" "$PROXY_URL"; then
-            error "curl下载失败"
+    local downloaded=false
+
+    # 依次尝试仓库中的常见命名（优先使用按架构区分的二进制）
+    for proxy_path in "${proxy_candidates[@]}"; do
+        local PROXY_URL="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/refs/heads/$REPO_REF/$proxy_path"
+        log "尝试下载: $proxy_path"
+
+        # 尝试使用curl下载
+        if command -v curl >/dev/null 2>&1; then
+            if curl -L -f -o "pt-nexus-box-proxy" "$PROXY_URL"; then
+                downloaded=true
+                break
+            fi
+        # 如果curl不可用，尝试使用wget
+        elif command -v wget >/dev/null 2>&1; then
+            if wget -O "pt-nexus-box-proxy" "$PROXY_URL"; then
+                downloaded=true
+                break
+            fi
+        else
+            error "未找到curl或wget，请先安装其中一个"
             return 1
         fi
-    # 如果curl不可用，尝试使用wget
-    elif command -v wget >/dev/null 2>&1; then
-        if ! wget -O "pt-nexus-box-proxy" "$PROXY_URL"; then
-            error "wget下载失败"
-            return 1
-        fi
-    else
-        error "未找到curl或wget，请先安装其中一个"
+    done
+
+    if [ "$downloaded" != "true" ]; then
+        error "下载代理程序失败，未找到可用的仓库二进制文件"
         return 1
     fi
 

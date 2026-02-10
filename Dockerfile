@@ -86,6 +86,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制 Python 服务器代码
 COPY ./server ./
+# 避免把 server/core/bdinfo 下的平台二进制重复打包进镜像
+RUN rm -rf /app/core/bdinfo/linux /app/core/bdinfo/windows
 
 # 从 builder 阶段复制已构建的前端文件
 COPY --from=builder /app/webui/dist ./dist
@@ -101,8 +103,8 @@ RUN chmod +x ./updater
 # 复制版本文件
 COPY ./CHANGELOG.json ./CHANGELOG.json
 
-# 复制 BDInfo 工具
-COPY ./server/core/bdinfo /app/bdinfo
+# 仅复制 Linux BDInfo 工具
+COPY ./server/core/bdinfo/linux/ /app/bdinfo/
 RUN chmod +x /app/bdinfo/BDInfo /app/bdinfo/BDInfoDataSubstractor
 
 # 复制 supervisor 配置与启动脚本

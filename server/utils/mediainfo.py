@@ -2,19 +2,93 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import requests
 import yaml
 from pymediainfo import MediaInfo
-from config import GLOBAL_MAPPINGS, BDINFO_DIR
+from config import GLOBAL_MAPPINGS, BDINFO_DIR as DEFAULT_BDINFO_DIR
 from .media_helper import _find_target_video_file, _get_downloader_proxy_config, translate_path
 
-# 根据环境变量设置BDInfo相关路径
-BDINFO_DIR = os.getenv("PTNEXUS_BDINFO_DIR", BDINFO_DIR)
 
-# BDInfo相关路径
-BDINFO_PATH = os.path.join(BDINFO_DIR, "BDInfo")
-BDINFO_SUBSTRACTOR_PATH = os.path.join(BDINFO_DIR, "BDInfoDataSubstractor")
+def _is_windows_platform() -> bool:
+    return os.name == "nt" or sys.platform.startswith("win")
+
+
+def _resolve_bdinfo_tool_paths() -> tuple[str | None, str | None]:
+    """
+    解析 BDInfo 与 BDInfoDataSubstractor 的可执行路径，支持：
+    1) 显式环境变量覆盖
+    2) 按平台子目录（linux/windows）
+    3) 向后兼容旧版同级目录布局
+    """
+    bdinfo_dir = os.getenv("PTNEXUS_BDINFO_DIR", DEFAULT_BDINFO_DIR)
+    configured_bdinfo = os.getenv("PTNEXUS_BDINFO_PATH", "").strip()
+    configured_substractor = os.getenv("PTNEXUS_BDINFO_SUBSTRACTOR_PATH", "").strip()
+
+    is_windows = _is_windows_platform()
+    bdinfo_name = "BDInfo.exe" if is_windows else "BDInfo"
+    substractor_name = (
+        "BDInfoDataSubstractor.exe" if is_windows else "BDInfoDataSubstractor"
+    )
+
+    candidates: list[tuple[str, str]] = []
+
+    if configured_bdinfo:
+        derived_substractor = os.path.join(os.path.dirname(configured_bdinfo), substractor_name)
+        candidates.append((configured_bdinfo, configured_substractor or derived_substractor))
+
+    if configured_substractor:
+        derived_bdinfo = os.path.join(os.path.dirname(configured_substractor), bdinfo_name)
+        candidates.append((configured_bdinfo or derived_bdinfo, configured_substractor))
+
+    if is_windows:
+        candidates.extend(
+            [
+                (
+                    os.path.join(bdinfo_dir, "windows", "BDInfo.exe"),
+                    os.path.join(bdinfo_dir, "windows", "BDInfoDataSubstractor.exe"),
+                ),
+                (
+                    os.path.join(bdinfo_dir, "BDInfo.exe"),
+                    os.path.join(bdinfo_dir, "BDInfoDataSubstractor.exe"),
+                ),
+                (
+                    os.path.join(bdinfo_dir, "BDInfo"),
+                    os.path.join(bdinfo_dir, "BDInfoDataSubstractor"),
+                ),
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                (
+                    os.path.join(bdinfo_dir, "linux", "BDInfo"),
+                    os.path.join(bdinfo_dir, "linux", "BDInfoDataSubstractor"),
+                ),
+                (
+                    os.path.join(bdinfo_dir, "BDInfo"),
+                    os.path.join(bdinfo_dir, "BDInfoDataSubstractor"),
+                ),
+                (
+                    os.path.join(bdinfo_dir, "BDInfo.exe"),
+                    os.path.join(bdinfo_dir, "BDInfoDataSubstractor.exe"),
+                ),
+            ]
+        )
+
+    for bdinfo_path, substractor_path in candidates:
+        if bdinfo_path and substractor_path:
+            if os.path.exists(bdinfo_path) and os.path.exists(substractor_path):
+                return bdinfo_path, substractor_path
+
+    # 保底：如果候选都不存在，尽量返回显式配置值用于错误提示
+    return (configured_bdinfo or None), (configured_substractor or None)
+
+
+def get_bdinfo_tool_paths() -> tuple[str | None, str | None]:
+    """暴露给 BDInfo 管理器用于记录当前解析到的工具路径。"""
+    return _resolve_bdinfo_tool_paths()
 
 
 def upload_data_mediaInfo(
@@ -265,9 +339,9 @@ def _extract_bdinfo(bluray_path: str) -> str:
             return "bdinfo提取失败：指定的路径不存在。"
 
         # 检查BDInfo工具是否存在
-        bdinfo_path = os.getenv("PTNEXUS_BDINFO_PATH", BDINFO_PATH)
+        bdinfo_path, _ = _resolve_bdinfo_tool_paths()
 
-        if not os.path.exists(bdinfo_path):
+        if not bdinfo_path or not os.path.exists(bdinfo_path):
             print(f"错误：BDInfo工具不存在: {bdinfo_path}")
             return "bdinfo提取失败：BDInfo工具未找到。"
 
@@ -976,8 +1050,8 @@ def _extract_bdinfo_with_progress(bluray_path: str, task_id: str, bdinfo_manager
             return "bdinfo提取失败：指定的路径不存在。"
 
         # 检查BDInfo工具是否存在
-        bdinfo_path = BDINFO_PATH
-        if not os.path.exists(bdinfo_path):
+        bdinfo_path, substractor_path = _resolve_bdinfo_tool_paths()
+        if not bdinfo_path or not os.path.exists(bdinfo_path):
             print(f"错误：BDInfo工具不存在: {bdinfo_path}")
             return "bdinfo提取失败：BDInfo工具未找到。"
 
@@ -1098,8 +1172,7 @@ def _extract_bdinfo_with_progress(bluray_path: str, task_id: str, bdinfo_manager
                 return "bdinfo提取失败：BDInfo未创建输出文件。"
 
             # 检查 BDInfoDataSubstractor 工具是否存在
-            substractor_path = BDINFO_SUBSTRACTOR_PATH
-            if not os.path.exists(substractor_path):
+            if not substractor_path or not os.path.exists(substractor_path):
                 print(f"错误：BDInfoDataSubstractor工具不存在: {substractor_path}")
                 return "bdinfo提取失败：BDInfoDataSubstractor工具未找到。"
 

@@ -13,14 +13,40 @@ from config import TEMP_DIR, config_manager
 from .media_helper import _find_target_video_file, _convert_pixhost_url_to_direct
 
 
-def _get_best_chinese_subtitle_sid(video_path):
+_MEDIA_EXECUTABLE_ENV_MAP = {
+    "mpv": "PTNEXUS_MPV_PATH",
+    "ffmpeg": "PTNEXUS_FFMPEG_PATH",
+    "ffprobe": "PTNEXUS_FFPROBE_PATH",
+}
+
+
+def _resolve_media_executable(executable_name: str) -> str | None:
+    """
+    优先使用显式环境变量指定的可执行文件路径；未指定时回退系统 PATH。
+    """
+    env_key = _MEDIA_EXECUTABLE_ENV_MAP.get(executable_name)
+    configured_path = os.environ.get(env_key, "").strip() if env_key else ""
+    if configured_path:
+        if os.path.exists(configured_path):
+            return configured_path
+        print(f"警告：环境变量 {env_key} 指向的文件不存在: {configured_path}")
+
+    return shutil.which(executable_name)
+
+
+def _get_best_chinese_subtitle_sid(video_path, ffprobe_cmd: str | None = None):
     """
     分析视频文件，返回最合适的中文字幕 MPV sid (相对序号)。
     如果没有找到中文，返回 None。
     """
     try:
+        ffprobe_cmd = ffprobe_cmd or _resolve_media_executable("ffprobe")
+        if not ffprobe_cmd:
+            print("   ⚠️ 未找到 ffprobe，无法分析字幕流。")
+            return None
+
         cmd = [
-            "ffprobe",
+            ffprobe_cmd,
             "-v", "quiet",
             "-print_format", "json",
             "-show_streams",
@@ -220,7 +246,9 @@ def _upload_to_agsv(image_path: str, token: str):
         return None
 
 
-def _get_smart_screenshot_points(video_path: str, num_screenshots: int = 5) -> list[float]:
+def _get_smart_screenshot_points(
+    video_path: str, num_screenshots: int = 5, ffprobe_cmd: str | None = None
+) -> list[float]:
     """
     [优化版] 使用 ffprobe 智能分析视频字幕，选择最佳的截图时间点。
     - 通过 `-read_intervals` 参数实现分段读取，避免全文件扫描，大幅提升大文件处理速度。
@@ -229,13 +257,14 @@ def _get_smart_screenshot_points(video_path: str, num_screenshots: int = 5) -> l
     - 在所有智能分析失败时，优雅地回退到按百分比选择。
     """
     print("\n--- 开始智能截图时间点分析 (快速扫描模式) ---")
-    if not shutil.which("ffprobe"):
+    ffprobe_cmd = ffprobe_cmd or _resolve_media_executable("ffprobe")
+    if not ffprobe_cmd:
         print("警告: 未找到 ffprobe，无法进行智能分析。")
         return []
 
     try:
         cmd_duration = [
-            "ffprobe",
+            ffprobe_cmd,
             "-v",
             "error",
             "-show_entries",
@@ -256,7 +285,7 @@ def _get_smart_screenshot_points(video_path: str, num_screenshots: int = 5) -> l
     # 探测字幕流的部分保持不变，因为它本身速度很快
     try:
         cmd_probe_subs = [
-            "ffprobe",
+            ffprobe_cmd,
             "-v",
             "quiet",
             "-print_format",
@@ -326,7 +355,7 @@ def _get_smart_screenshot_points(video_path: str, num_screenshots: int = 5) -> l
 
         # 4. 将 -read_intervals 参数添加到 ffprobe 命令中
         cmd_extract = [
-            "ffprobe",
+            ffprobe_cmd,
             "-v",
             "quiet",
             "-read_intervals",
@@ -584,22 +613,32 @@ def upload_data_screenshot(source_info, save_path, torrent_name=None, downloader
     if is_bluray_disc:
         print("检测到原盘文件结构，但仍将进行截图处理")
 
-    if not shutil.which("mpv"):
-        print("错误：找不到 mpv。")
+    mpv_cmd = _resolve_media_executable("mpv")
+    if not mpv_cmd:
+        print("错误：找不到 mpv。请安装 mpv 或设置 PTNEXUS_MPV_PATH。")
         return ""
-    if not shutil.which("ffmpeg"):
-        print("错误：找不到 ffmpeg。")
+
+    ffmpeg_cmd = _resolve_media_executable("ffmpeg")
+    if not ffmpeg_cmd:
+        print("错误：找不到 ffmpeg。请安装 ffmpeg 或设置 PTNEXUS_FFMPEG_PATH。")
+        return ""
+
+    ffprobe_cmd = _resolve_media_executable("ffprobe")
+    if not ffprobe_cmd:
+        print("错误：找不到 ffprobe。请安装 ffprobe 或设置 PTNEXUS_FFPROBE_PATH。")
         return ""
 
     # 获取截图时间点
-    screenshot_points = _get_smart_screenshot_points(target_video_file, num_screenshots)
+    screenshot_points = _get_smart_screenshot_points(
+        target_video_file, num_screenshots, ffprobe_cmd=ffprobe_cmd
+    )
 
     # 兜底逻辑：如果智能获取失败，按百分比获取
     if len(screenshot_points) < num_screenshots:
         print("警告: 智能分析失败，回退到按百分比截图。")
         try:
             cmd_duration = [
-                "ffprobe",
+                ffprobe_cmd,
                 "-v",
                 "error",
                 "-show_entries",
@@ -619,7 +658,7 @@ def upload_data_screenshot(source_info, save_path, torrent_name=None, downloader
 
     # 自动检测中文字幕轨道
     print("正在分析字幕流...")
-    subtitle_sid = _get_best_chinese_subtitle_sid(target_video_file)
+    subtitle_sid = _get_best_chinese_subtitle_sid(target_video_file, ffprobe_cmd=ffprobe_cmd)
     if not subtitle_sid:
         print("   ℹ️ 未检测到明确的中文字幕，将截取无字幕画面。")
 
@@ -651,7 +690,7 @@ def upload_data_screenshot(source_info, save_path, torrent_name=None, downloader
 
         # --- 2. MPV 截图 (Raw output, 无色调映射) ---
         cmd_screenshot = [
-            "mpv",
+            mpv_cmd,
             "--no-audio",
             f"--start={point:.2f}",
             "--frames=1",
@@ -683,7 +722,7 @@ def upload_data_screenshot(source_info, save_path, torrent_name=None, downloader
             # 3.1 检测 HDR
             is_hdr = False
             try:
-                check_cmd = ["ffprobe", "-v", "error", "-show_streams", intermediate_png_path]
+                check_cmd = [ffprobe_cmd, "-v", "error", "-show_streams", intermediate_png_path]
                 check_res = subprocess.run(check_cmd, capture_output=True, text=True)
                 if "smpte2084" in check_res.stdout or "bt2020" in check_res.stdout:
                     is_hdr = True
@@ -700,7 +739,7 @@ def upload_data_screenshot(source_info, save_path, torrent_name=None, downloader
 
             # 3.3 执行压缩 (Level 4 + Mixed)
             cmd_compress = [
-                "ffmpeg",
+                ffmpeg_cmd,
                 "-y",
                 "-v",
                 "error",
