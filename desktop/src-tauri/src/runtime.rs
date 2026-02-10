@@ -611,7 +611,14 @@ fn build_runtime_env(
     let static_dir = server_dir.join("dist");
     let global_mappings = server_dir.join("configs").join("global_mappings.yaml");
     let sites_data = server_dir.join("sites_data.json");
-    let bdinfo_dir = server_dir.join("bdinfo");
+    let bdinfo_dir = server_dir.join("core").join("bdinfo");
+    let bdinfo_windows_dir = bdinfo_dir.join("windows");
+    let media_tools_dir = server_dir.join("tools");
+    let mpv_dir = media_tools_dir.join("mpv");
+    let ffmpeg_dir = media_tools_dir.join("ffmpeg").join("bin");
+    let mpv_path = mpv_dir.join(exe_name("mpv"));
+    let ffmpeg_path = ffmpeg_dir.join(exe_name("ffmpeg"));
+    let ffprobe_path = ffmpeg_dir.join(exe_name("ffprobe"));
 
     envs.insert("DEV_ENV".to_string(), "false".to_string());
     envs.insert("FLASK_DEBUG".to_string(), "false".to_string());
@@ -663,7 +670,29 @@ fn build_runtime_env(
     );
     envs.insert(
         "PTNEXUS_BDINFO_PATH".to_string(),
-        bdinfo_dir.join(exe_name("BDInfo")).to_string_lossy().to_string(),
+        bdinfo_windows_dir
+            .join(exe_name("BDInfo"))
+            .to_string_lossy()
+            .to_string(),
+    );
+    envs.insert(
+        "PTNEXUS_BDINFO_SUBSTRACTOR_PATH".to_string(),
+        bdinfo_windows_dir
+            .join(exe_name("BDInfoDataSubstractor"))
+            .to_string_lossy()
+            .to_string(),
+    );
+    envs.insert(
+        "PTNEXUS_MPV_PATH".to_string(),
+        mpv_path.to_string_lossy().to_string(),
+    );
+    envs.insert(
+        "PTNEXUS_FFMPEG_PATH".to_string(),
+        ffmpeg_path.to_string_lossy().to_string(),
+    );
+    envs.insert(
+        "PTNEXUS_FFPROBE_PATH".to_string(),
+        ffprobe_path.to_string_lossy().to_string(),
     );
 
     envs.insert(
@@ -691,6 +720,18 @@ fn build_runtime_env(
         "LOCAL_CONFIG_FILE".to_string(),
         changelog_path.to_string_lossy().to_string(),
     );
+
+    let path_separator = if cfg!(target_os = "windows") { ";" } else { ":" };
+    let mut path_entries = vec![
+        mpv_dir.to_string_lossy().to_string(),
+        ffmpeg_dir.to_string_lossy().to_string(),
+    ];
+    if let Ok(existing_path) = std::env::var("PATH") {
+        if !existing_path.trim().is_empty() {
+            path_entries.push(existing_path);
+        }
+    }
+    envs.insert("PATH".to_string(), path_entries.join(path_separator));
 
     envs
 }

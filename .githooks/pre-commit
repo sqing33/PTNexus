@@ -106,9 +106,19 @@ fi
 if echo "$STAGED_FILES" | grep -q "^proxy/"; then
     BUILDS_TRIGGERED=true
     echo -e "${YELLOW}📦 检测到 'proxy' 目录有变更，开始构建...${NC}"
-    (cd proxy && go build -o pt-nexus-box-proxy proxy.go bdinfo.go) || handle_error "Go proxy 构建失败"
+    (
+        cd proxy || exit 1
+        echo -e "${CYAN}   - 构建 linux/amd64 -> pt-nexus-box-proxy-amd64${NC}"
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o pt-nexus-box-proxy-amd64 proxy.go bdinfo.go || exit 1
+
+        echo -e "${CYAN}   - 构建 linux/arm64 -> pt-nexus-box-proxy-arm64${NC}"
+        CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o pt-nexus-box-proxy-arm64 proxy.go bdinfo.go || exit 1
+
+        # 兼容历史路径：保留 proxy/pt-nexus-box-proxy（默认使用 amd64 版本）
+        cp -f pt-nexus-box-proxy-amd64 pt-nexus-box-proxy || exit 1
+    ) || handle_error "Go proxy (amd64/arm64) 构建失败"
     echo -e "${GREEN}✓ Go proxy 构建成功。正在暂存产物...${NC}"
-    git add proxy/pt-nexus-box-proxy
+    git add proxy/pt-nexus-box-proxy proxy/pt-nexus-box-proxy-amd64 proxy/pt-nexus-box-proxy-arm64
 else
     echo -e "${CYAN}⏭️  'proxy' 目录无变更，跳过构建。${NC}"
 fi

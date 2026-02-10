@@ -35,6 +35,8 @@ bun run win
 - 同步 `server` 源码到 `desktop/runtime/server`
 - 下载 Windows Python Embed
 - 下载并解压 Windows wheels 到 `runtime/server/python/Lib/site-packages`
+- 下载并注入 Windows `mpv/ffmpeg/ffprobe` 到 `runtime/server/tools`
+- 自动裁剪 `runtime/server/core/bdinfo/linux`（仅保留 Windows BDInfo 工具）
 - 自动准备 NSIS（无 sudo）
 - 生成 Windows 单文件安装包
 

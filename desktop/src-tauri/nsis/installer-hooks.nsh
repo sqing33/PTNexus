@@ -16,6 +16,13 @@
   IfFileExists "$INSTDIR\_up_\CHANGELOG.json" 0 +3
   Delete "$INSTDIR\CHANGELOG.json"
   Rename "$INSTDIR\_up_\CHANGELOG.json" "$INSTDIR\CHANGELOG.json"
+
+  ; 若包含 python.zip，则安装后解压为 server\python，避免构建阶段复制海量小文件导致内存不足
+  IfFileExists "$INSTDIR\server\python.zip" 0 +4
+  nsExec::ExecToLog '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path ''$INSTDIR\\server\\python.zip'' -DestinationPath ''$INSTDIR\\server\\python'' -Force"'
+  IfErrors 0 +2
+  MessageBox MB_ICONSTOP "展开 python.zip 失败，请重新安装或手动解压。"
+  Delete "$INSTDIR\server\python.zip"
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
@@ -24,4 +31,5 @@
   RMDir /r "$INSTDIR\batch"
   RMDir /r "$INSTDIR\updater"
   Delete "$INSTDIR\CHANGELOG.json"
+  Delete "$INSTDIR\server\python.zip"
 !macroend
