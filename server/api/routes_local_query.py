@@ -10,6 +10,15 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_path(path):
+    """与 proxy.go normalizePath 保持一致的路径归一化
+    将反斜杠替换为正斜杠，移除连续的双斜杠"""
+    normalized = path.replace("\\", "/")
+    while "//" in normalized:
+        normalized = normalized.replace("//", "/")
+    return normalized
+
 local_query_bp = Blueprint("local_query_api",
                            __name__,
                            url_prefix="/api/local_query")
@@ -94,12 +103,15 @@ def batch_check_remote_files(proxy_config, remote_paths):
 
     :param proxy_config: 代理配置字典，包含 proxy_base_url
     :param remote_paths: 远程路径列表
-    :return: 字典 {path: (exists, is_file, size)}
+    :return: 字典 {normalized_path: (exists, is_file, size)}
+             键为归一化后的路径，与 proxy 返回的路径一致
     """
     if not remote_paths:
         return {}
 
     try:
+        logger.info(f"发送给代理的路径列表 ({len(remote_paths)} 个): {remote_paths}")
+
         response = requests.post(
             f"{proxy_config['proxy_base_url']}/api/file/batch-check",
             json={"remote_paths": remote_paths},
@@ -115,7 +127,17 @@ def batch_check_remote_files(proxy_config, remote_paths):
                 exists = item.get("exists", False)
                 is_file = item.get("is_file", False)
                 size = item.get("size", 0)
-                results_dict[path] = (exists, is_file, size)
+                # 代理返回的 path 已经被 normalizePath 处理过
+                # 用归一化路径作为 key，确保查找时能匹配
+                normalized = _normalize_path(path)
+                results_dict[normalized] = (exists, is_file, size)
+                if not exists:
+                    logger.info(f"代理返回文件不存在: {path}")
+            logger.info(
+                f"代理批量检查结果: {len(results_dict)} 个路径, "
+                f"存在 {sum(1 for v in results_dict.values() if v[0])} 个, "
+                f"不存在 {sum(1 for v in results_dict.values() if not v[0])} 个"
+            )
             return results_dict
         else:
             logger.error(f"代理批量文件检查失败: {result.get('message', '未知错误')}")
@@ -665,15 +687,28 @@ def scan_local_files():
                 paths_to_check.append(full_remote_path)
 
             # 批量检查所有文件
-            logger.info(f"批量检查远程路径 {remote_path} 下的 {len(paths_to_check)} 个文件")
+            logger.info(
+                f"批量检查远程路径 {remote_path} 下的 {len(paths_to_check)} 个文件, "
+                f"路径列表: {paths_to_check}"
+            )
             check_results = batch_check_remote_files(proxy_config,
                                                      paths_to_check)
 
             # 处理检查结果
             for name, torrent_group in torrents_by_name_in_path.items():
                 full_remote_path = os.path.join(remote_path, name)
+                # 使用归一化路径查找，与 batch_check_remote_files 返回的 key 一致
+                normalized_path = _normalize_path(full_remote_path)
                 exists, is_file, size = check_results.get(
-                    full_remote_path, (False, False, 0))
+                    normalized_path, (False, False, 0))
+
+                # 调试日志：如果找不到 key，记录详细信息
+                if normalized_path not in check_results:
+                    logger.warning(
+                        f"路径键值不匹配: 原始路径={full_remote_path}, "
+                        f"归一化路径={normalized_path}, "
+                        f"可用键={list(check_results.keys())[:5]}"
+                    )
 
                 if not exists:
                     # 文件不存在，添加到缺失列表
@@ -802,3 +837,5 @@ def analyze_duplicates():
     except Exception as e:
         logger.error(f"分析重复种子失败: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+

@@ -13,10 +13,12 @@
           <el-button type="primary" :loading="loading" @click="onSubmit">登录</el-button>
         </el-form-item>
       </el-form>
-      <p class="tip">如未开启认证，可直接访问页面。</p>
+      <p class="tip">
+        Docker 端初始随机密码请查看容器日志；<br>Windows 端初始密码请查看
+        %APPDATA%\com.ptnexus.desktop\logs\server.stderr.log 对应日志文件。
+      </p>
     </el-card>
   </div>
-  
 </template>
 
 <script setup lang="ts">
@@ -38,40 +40,40 @@ const onSubmit = async () => {
     const res = await axios.post('/api/auth/login', form.value)
     if (res.data?.success && res.data?.token) {
       localStorage.setItem('token', res.data.token)
-      
+
       // 检查是否使用临时密码
       const isTempPassword = res.data.is_temp_password || res.data.must_change_password
-      
+
       if (isTempPassword) {
         // 使用临时密码登录，显示警告并引导修改密码
         ElMessage.warning({
           message: '您正在使用临时密码，为了账户安全，请立即修改密码！',
           duration: 5000,
-          showClose: true
+          showClose: true,
         })
-        
+
         // 延迟跳转到设置页面
         await nextTick()
         await router.replace('/settings')
-        
+
         // 再次提示用户修改密码
         setTimeout(() => {
           ElMessage.warning({
             message: '请在"账户"标签页中修改您的用户名和密码',
             duration: 8000,
-            showClose: true
+            showClose: true,
           })
         }, 500)
       } else {
         // 正常登录，跳转到原目标页面
         ElMessage.success('登录成功')
-        
+
         const redirect = (route.query.redirect as string) || '/'
         console.log('登录成功，准备跳转到:', redirect)
-        
+
         await nextTick()
         await router.replace(redirect)
-        
+
         // 额外确保跳转成功
         setTimeout(() => {
           if (router.currentRoute.value.path === '/login') {
@@ -99,7 +101,17 @@ const onSubmit = async () => {
   justify-content: center;
   height: 100vh;
 }
-.login-card { width: 420px; }
-.title { margin: 0 0 16px; text-align: center; }
-.tip { color: #999; font-size: 12px; margin-top: 12px; text-align: center; }
+.login-card {
+  width: 420px;
+}
+.title {
+  margin: 0 0 16px;
+  text-align: center;
+}
+.tip {
+  color: #999;
+  font-size: 12px;
+  margin-top: 12px;
+  text-align: center;
+}
 </style>

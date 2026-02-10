@@ -76,6 +76,7 @@ RUN apt-get update && \
     fonts-noto-cjk \
     git \
     libicu-dev \
+    supervisor \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -104,7 +105,8 @@ COPY ./CHANGELOG.json ./CHANGELOG.json
 COPY ./server/core/bdinfo /app/bdinfo
 RUN chmod +x /app/bdinfo/BDInfo /app/bdinfo/BDInfoDataSubstractor
 
-# 复制启动脚本
+# 复制 supervisor 配置与启动脚本
+COPY ./supervisord.conf ./supervisord.conf
 COPY ./start-services.sh ./start-services.sh
 RUN chmod +x ./start-services.sh
 

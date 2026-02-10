@@ -441,7 +441,8 @@ def start_ratio_speed_limiter(db_manager, config_manager):
     global ratio_speed_limiter_thread
     import os
 
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+    debug_enabled = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    if debug_enabled and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         logging.info("检测到调试监控进程，跳过RatioSpeedLimiter线程启动。")
         return ratio_speed_limiter_thread
 

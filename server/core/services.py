@@ -2305,7 +2305,8 @@ def start_data_tracker(db_manager, config_manager):
     # 检查是否在调试模式下运行，避免重复启动
     import os
 
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+    debug_enabled = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    if debug_enabled and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         # 在调试模式下，这是监控进程，不需要启动线程
         logging.info("检测到调试监控进程，跳过DataTracker线程启动。")
         return data_tracker_thread
@@ -2330,4 +2331,3 @@ def stop_data_tracker():
             print("DataTracker 线程已优雅停止。")
         logging.info("DataTracker 线程已停止。")
     data_tracker_thread = None
-

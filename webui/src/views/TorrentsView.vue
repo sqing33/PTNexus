@@ -1018,15 +1018,28 @@ const progressColors = [
   { color: '#67c23a', percentage: 100 },
 ]
 
+const buildCurrentUiSettings = () => ({
+  page_size: pageSize.value,
+  sort_prop: currentSort.value.prop,
+  sort_order: currentSort.value.order,
+  name_search: nameSearch.value,
+  active_filters: {
+    paths: [...activeFilters.paths],
+    states: [...activeFilters.states],
+    existSiteNames: [...activeFilters.existSiteNames],
+    notExistSiteNames: [...activeFilters.notExistSiteNames],
+    downloaderIds: [...activeFilters.downloaderIds],
+  },
+})
+
+const syncUiSettingsCache = () => {
+  torrentsViewState.updateCachedUiSettings(buildCurrentUiSettings())
+}
+
 const saveUiSettings = async () => {
   try {
-    const settingsToSave = {
-      page_size: pageSize.value,
-      sort_prop: currentSort.value.prop,
-      sort_order: currentSort.value.order,
-      name_search: nameSearch.value,
-      active_filters: activeFilters,
-    }
+    const settingsToSave = buildCurrentUiSettings()
+    syncUiSettingsCache()
     await axios.post('/api/ui_settings', settingsToSave)
   } catch (e: any) {
     console.error('无法保存UI设置:', e.message)
@@ -1066,6 +1079,7 @@ const loadUiSettings = async (forceRefresh = false) => {
         delete filters.siteNames
       }
     }
+    syncUiSettingsCache()
   } catch (e) {
     console.error('加载UI设置时出错:', e)
   } finally {
@@ -1590,16 +1604,19 @@ onUnmounted(() => {
 const handleSizeChange = (val: number) => {
   pageSize.value = val
   currentPage.value = 1
+  syncUiSettingsCache()
   fetchDataWithSpinner()
   saveUiSettings()
 }
 const handleCurrentChange = (val: number) => {
   currentPage.value = val
+  syncUiSettingsCache()
   fetchDataWithSpinner()
 }
 const handleSortChange = (sort: Sort) => {
   currentSort.value = sort
   currentPage.value = 1
+  syncUiSettingsCache()
   fetchDataWithSpinner()
   saveUiSettings()
 }
@@ -1624,6 +1641,7 @@ const applyFilters = async () => {
   Object.assign(activeFilters, tempFilters)
   filterDialogVisible.value = false
   currentPage.value = 1
+  syncUiSettingsCache()
   await fetchDataWithSpinner()
   saveUiSettings()
 }
@@ -1713,6 +1731,7 @@ const clearAllFilters = async () => {
 
   // 重置到第一页并获取数据
   currentPage.value = 1
+  syncUiSettingsCache()
   await fetchDataWithSpinner()
   saveUiSettings()
 }
@@ -1910,6 +1929,7 @@ watch(nameSearch, () => {
   // 在初始化期间跳过，避免 loadUiSettings 修改 nameSearch 时触发
   if (isInitializing.value) return
   currentPage.value = 1
+  syncUiSettingsCache()
   fetchDataWithSpinner()
   saveUiSettings()
 })

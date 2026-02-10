@@ -21,7 +21,6 @@ from config import get_db_config, config_manager, STATIC_DIR, BDINFO_DIR
 from database import DatabaseManager, reconcile_historical_data
 from core.services import start_data_tracker, stop_data_tracker
 from core.ratio_speed_limiter import start_ratio_speed_limiter, stop_ratio_speed_limiter
-from core.iyuu import start_iyuu_thread, stop_iyuu_thread
 
 # --- 日志基础配置 ---
 logging.basicConfig(
@@ -29,13 +28,6 @@ logging.basicConfig(
 )
 logging.info("=== Flask 应用日志系统已初始化 ===")
 
-
-def is_main_runtime_process() -> bool:
-    """判断当前是否为实际业务进程（避免 debug reloader 的父进程重复执行初始化）。"""
-    debug_enabled = os.getenv("FLASK_DEBUG", "true").lower() == "true"
-    if not debug_enabled:
-        return True
-    return os.environ.get("WERKZEUG_RUN_MAIN") == "true"
 
 
 def cleanup_old_tmp_structure():
@@ -155,14 +147,138 @@ def cleanup_old_tmp_structure():
         traceback.print_exc()
 
 
+
+def initialize_db_manager() -> DatabaseManager:
+    """初始化数据库管理器并确保基础表结构存在。"""
+    logging.info("正在初始化数据库和配置...")
+    db_config = get_db_config()
+    db_manager = DatabaseManager(db_config)
+    db_manager.init_db()
+    return db_manager
+
+
+def run_downloader_id_migration(db_manager: DatabaseManager):
+    """执行下载器ID迁移检查与迁移。"""
+    logging.info("检查是否需要执行下载器ID迁移...")
+    try:
+        from utils.downloader_id_helper import generate_migration_mapping
+        from core.migrations.migrate_downloader_ids import execute_migration
+
+        migration_mapping = generate_migration_mapping(config_manager.get())
+        if migration_mapping:
+            logging.info(f"检测到 {len(migration_mapping)} 个下载器需要迁移ID，开始自动迁移...")
+            for mapping in migration_mapping:
+                logging.info(f"  - {mapping['name']}: {mapping['old_id']} -> {mapping['new_id']}")
+
+            result = execute_migration(db_manager, config_manager, backup=True)
+            if result["success"]:
+                logging.info(f"下载器ID迁移完成！成功迁移 {result['migrated_count']} 个下载器")
+            else:
+                logging.error(f"下载器ID迁移失败: {result.get('message', '未知错误')}")
+        else:
+            logging.info("所有下载器ID已是基于IP:端口的格式，无需迁移")
+    except Exception as e:
+        logging.error(f"检查或执行下载器ID迁移时出错: {e}", exc_info=True)
+        logging.warning("将继续启动应用...")
+
+
+def run_startup_maintenance(db_manager: DatabaseManager):
+    """执行一次性启动维护任务（清理、迁移、统计基线）。"""
+    cleanup_old_tmp_structure()
+    run_downloader_id_migration(db_manager)
+    reconcile_historical_data(db_manager, config_manager.get())
+
+    logging.info("正在执行初始数据聚合...")
+    try:
+        db_manager.aggregate_hourly_traffic()
+        logging.info("初始数据聚合完成。")
+    except Exception as e:
+        logging.error(f"初始数据聚合失败: {e}")
+
+
+def run_startup_refresh_task(db_manager: DatabaseManager):
+    """启动后执行一次种子数据刷新。"""
+    logging.info("应用启动完成，执行一次种子数据刷新...")
+    try:
+        from core.manual_tasks import update_torrents_data
+
+        result = update_torrents_data(db_manager, config_manager)
+        if result["success"]:
+            logging.info("启动时种子数据刷新完成")
+        else:
+            logging.warning(f"启动时种子数据刷新失败: {result['message']}")
+    except Exception as e:
+        logging.error(f"启动时种子数据刷新出错: {e}", exc_info=True)
+
+
+def start_background_services(db_manager: DatabaseManager):
+    """启动后台线程服务。"""
+    logging.info("正在启动后台数据追踪服务...")
+    start_data_tracker(db_manager, config_manager)
+    start_ratio_speed_limiter(db_manager, config_manager)
+    logging.info("IYUU线程已改为手动触发模式，跳过自动启动。")
+
+
+def stop_background_services():
+    """停止后台线程服务。"""
+    logging.info("正在清理后台线程...")
+    try:
+        stop_data_tracker()
+        stop_ratio_speed_limiter()
+    except Exception as e:
+        logging.error(f"停止数据追踪线程失败: {e}", exc_info=True)
+    logging.info("后台线程清理完成。")
+
+
+def run_database_migrations():
+    """运行数据库迁移。"""
+    try:
+        migration_db_manager = initialize_db_manager()
+        conn = migration_db_manager._get_connection()
+        cursor = migration_db_manager._get_cursor(conn)
+
+        success = migration_db_manager.migration_manager.run_all_migrations(conn, cursor)
+        cursor.close()
+        conn.close()
+
+        if success:
+            logging.info("数据库迁移完成")
+        else:
+            logging.error("数据库迁移失败")
+    except Exception as e:
+        logging.error(f"数据库迁移失败: {e}", exc_info=True)
+
+
+def init_bdinfo_manager():
+    """初始化并启动 BDInfo 管理器。"""
+    try:
+        from core.bdinfo.bdinfo_manager import get_bdinfo_manager
+
+        bdinfo_manager = get_bdinfo_manager()
+        bdinfo_manager.start()
+        logging.info("BDInfo 管理器初始化成功")
+    except Exception as e:
+        logging.error(f"BDInfo 管理器初始化失败: {e}", exc_info=True)
+
+
+def cleanup_bdinfo_manager():
+    """停止 BDInfo 管理器。"""
+    try:
+        from core.bdinfo.bdinfo_manager import get_bdinfo_manager
+
+        bdinfo_manager = get_bdinfo_manager()
+        bdinfo_manager.stop()
+        logging.info("BDInfo 管理器已停止")
+    except Exception as e:
+        logging.error(f"BDInfo 管理器停止失败: {e}")
+
+
 def create_app():
     """
     应用工厂函数：创建并配置 Flask 应用实例。
     """
     logging.info("Flask 应用正在创建中...")
     app = Flask(__name__, static_folder=os.getenv("PTNEXUS_STATIC_DIR", STATIC_DIR))
-    is_main_process = is_main_runtime_process()
-
     # --- 配置 CORS 跨域支持 ---
     # 修复cookie泄露问题：限制允许的来源，并设置cookie相关的安全选项
     allowed_origins = [
@@ -192,47 +308,10 @@ def create_app():
         },
     )
 
-    # --- 步骤 0: 清理旧的 tmp 目录结构 ---
-    # 只在主进程中执行，避免 reloader 重复执行
-    if is_main_process:
-        cleanup_old_tmp_structure()
+    # 初始化数据库管理器（每个 Web 进程独立实例）。
+    db_manager = initialize_db_manager()
 
-    # --- 步骤 1: 初始化核心依赖 (数据库和配置) ---
-    logging.info("正在初始化数据库和配置...")
-    db_config = get_db_config()
-    db_manager = DatabaseManager(db_config)
-    db_manager.init_db()  # 确保数据库和表结构存在
-
-    # --- 步骤 2: 自动执行下载器ID迁移（如果需要）---
-    logging.info("检查是否需要执行下载器ID迁移...")
-    try:
-        from utils.downloader_id_helper import generate_migration_mapping
-        from core.migrations.migrate_downloader_ids import execute_migration
-
-        # 检查是否需要迁移
-        migration_mapping = generate_migration_mapping(config_manager.get())
-
-        if migration_mapping:
-            logging.info(f"检测到 {len(migration_mapping)} 个下载器需要迁移ID，开始自动迁移...")
-            for mapping in migration_mapping:
-                logging.info(f"  - {mapping['name']}: {mapping['old_id']} -> {mapping['new_id']}")
-
-            # 执行迁移
-            result = execute_migration(db_manager, config_manager, backup=True)
-
-            if result["success"]:
-                logging.info(f"下载器ID迁移完成！成功迁移 {result['migrated_count']} 个下载器")
-            else:
-                logging.error(f"下载器ID迁移失败: {result.get('message', '未知错误')}")
-        else:
-            logging.info("所有下载器ID已是基于IP:端口的格式，无需迁移")
-    except Exception as e:
-        logging.error(f"检查或执行下载器ID迁移时出错: {e}", exc_info=True)
-        logging.warning("将继续启动应用...")
-
-    # --- 步骤 3: 与下载器同步，建立统计基线 ---
-    # 这个函数现在从 database.py 导入
-    reconcile_historical_data(db_manager, config_manager.get())
+    # 启动期的一次性维护任务（清理/迁移/统计）已移到 background_runner 中执行。
 
     # 动态内部认证token验证函数
     def validate_internal_token(token):
@@ -445,45 +524,7 @@ def create_app():
             ),
             200,
         )
-
-    # --- 步骤 5: 执行初始数据聚合 ---
-    logging.info("正在执行初始数据聚合...")
-    try:
-        db_manager.aggregate_hourly_traffic()
-        logging.info("初始数据聚合完成。")
-    except Exception as e:
-        logging.error(f"初始数据聚合失败: {e}")
-
-    # --- 步骤 6: 启动后台数据追踪服务 ---
-    logging.info("正在启动后台数据追踪服务...")
-    # 检查是否在调试模式下运行
-    if is_main_process:
-        logging.info("正在启动数据追踪线程...")
-        start_data_tracker(db_manager, config_manager)
-        start_ratio_speed_limiter(db_manager, config_manager)
-
-        # # --- 启动IYUU后台线程 ---
-        # 注释掉IYUU线程的自动启动，改为手动触发
-        logging.info("IYUU线程已改为手动触发模式，跳过自动启动。")
-        # if os.getenv("DEV_ENV") != "true":
-        # start_iyuu_thread(db_manager, config_manager)
-
-        # --- 启动时执行一次种子数据刷新 ---
-        # 只在主进程中执行，避免重复执行
-        if is_main_process:
-            logging.info("应用启动完成，执行一次种子数据刷新...")
-            try:
-                from core.manual_tasks import update_torrents_data
-
-                result = update_torrents_data(db_manager, config_manager)
-                if result["success"]:
-                    logging.info("启动时种子数据刷新完成")
-                else:
-                    logging.warning(f"启动时种子数据刷新失败: {result['message']}")
-            except Exception as e:
-                logging.error(f"启动时种子数据刷新出错: {e}", exc_info=True)
-    else:
-        logging.info("检测到调试监控进程，跳过后台线程启动。")
+    # 后台线程服务与启动时刷新任务已移到 background_runner 中执行。
 
     # --- 步骤 7: 配置前端静态文件服务 ---
     # 这个路由处理所有非 API 请求，将其指向前端应用
@@ -502,78 +543,29 @@ def create_app():
     return app
 
 
+
 # --- 程序主入口 ---
 if __name__ == "__main__":
-    # 注册关闭函数
-    def cleanup_bdinfo_manager():
-        """清理 BDInfo 管理器"""
-        try:
-            from core.bdinfo.bdinfo_manager import get_bdinfo_manager
+    embed_bg_in_app = os.getenv("PTNEXUS_EMBED_BG_IN_APP", "true").lower() == "true"
 
-            bdinfo_manager = get_bdinfo_manager()
-            bdinfo_manager.stop()
-            logging.info("BDInfo 管理器已停止")
-        except Exception as e:
-            logging.error(f"BDInfo 管理器停止失败: {e}")
+    if embed_bg_in_app:
+        atexit.register(cleanup_bdinfo_manager)
+        atexit.register(stop_background_services)
 
-    def cleanup():
-        """清理后台线程"""
-        logging.info("正在清理后台线程...")
-        try:
-            from core.services import stop_data_tracker
+        run_database_migrations()
+        runtime_db_manager = initialize_db_manager()
+        run_startup_maintenance(runtime_db_manager)
+        start_background_services(runtime_db_manager)
 
-            stop_data_tracker()
-            stop_ratio_speed_limiter()
-        except Exception as e:
-            logging.error(f"停止数据追踪线程失败: {e}", exc_info=True)
-        logging.info("后台线程清理完成。")
+        run_startup_refresh_task(runtime_db_manager)
+        init_bdinfo_manager()
+    else:
+        logging.info(
+            "PTNEXUS_EMBED_BG_IN_APP=false，跳过 app.py 内嵌后台任务启动，"
+            "请确保 background_runner 独立进程已启动。"
+        )
 
-    import atexit
-
-    atexit.register(cleanup_bdinfo_manager)
-    atexit.register(cleanup)
-
-    # 创建 Flask 应用
     flask_app = create_app()
-
-    # 运行数据库迁移
-    try:
-        db_config = get_db_config()
-        db_manager = DatabaseManager(db_config)
-
-        # 执行数据库迁移
-        conn = db_manager._get_connection()
-        cursor = db_manager._get_cursor(conn)
-
-        success = db_manager.migration_manager.run_all_migrations(conn, cursor)
-        cursor.close()
-        conn.close()
-
-        if success:
-            logging.info("数据库迁移完成")
-        else:
-            logging.error("数据库迁移失败")
-    except Exception as e:
-        logging.error(f"数据库迁移失败: {e}", exc_info=True)
-
-    # 初始化 BDInfo 管理器（在数据库迁移之后）
-    try:
-        from core.bdinfo.bdinfo_manager import get_bdinfo_manager
-
-        bdinfo_manager = get_bdinfo_manager()
-        bdinfo_manager.start()
-
-        # 等待一秒确保管理器完全启动
-        import time
-
-        time.sleep(1)
-
-        # 启动时恢复遗留任务
-        bdinfo_manager.recover_orphaned_tasks()
-
-        logging.info("BDInfo 管理器初始化成功")
-    except Exception as e:
-        logging.error(f"BDInfo 管理器初始化失败: {e}", exc_info=True)
 
     server_host = os.getenv("SERVER_HOST", "0.0.0.0")
     server_port = int(os.getenv("SERVER_PORT", "5275"))

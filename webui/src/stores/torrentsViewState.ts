@@ -31,6 +31,20 @@ interface UiSettings {
   }
 }
 
+const cloneUiSettings = (settings: UiSettings): UiSettings => ({
+  page_size: settings.page_size,
+  sort_prop: settings.sort_prop,
+  sort_order: settings.sort_order,
+  name_search: settings.name_search,
+  active_filters: {
+    paths: [...(settings.active_filters?.paths || [])],
+    states: [...(settings.active_filters?.states || [])],
+    existSiteNames: [...(settings.active_filters?.existSiteNames || [])],
+    notExistSiteNames: [...(settings.active_filters?.notExistSiteNames || [])],
+    downloaderIds: [...(settings.active_filters?.downloaderIds || [])],
+  },
+})
+
 // 用于保存 TorrentsView 页面的初始化状态和缓存数据
 // 这个状态在浏览器刷新前会保持，页面切换时不会重置
 export const useTorrentsViewState = defineStore('torrentsViewState', () => {
@@ -50,6 +64,12 @@ export const useTorrentsViewState = defineStore('torrentsViewState', () => {
 
   const setInitialized = () => {
     hasInitializedOnce.value = true
+  }
+
+  // 更新 UI 设置缓存（用于页面内状态变化后的即时同步）
+  const updateCachedUiSettings = (settings: UiSettings) => {
+    cachedUiSettings.value = cloneUiSettings(settings)
+    isUiSettingsLoaded.value = true
   }
 
   // 获取 UI 设置（带缓存）
@@ -142,6 +162,7 @@ export const useTorrentsViewState = defineStore('torrentsViewState', () => {
     isSitesStatusLoaded,
     // 方法
     setInitialized,
+    updateCachedUiSettings,
     fetchUiSettings,
     fetchDownloadersList,
     fetchSitesStatus,

@@ -90,7 +90,7 @@
             <el-icon class="header-icon">
               <Picture />
             </el-icon>
-            <h3>背景设置</h3>
+            <h3>其他设置</h3>
           </div>
           <el-button
             type="primary"
@@ -494,7 +494,12 @@
             <el-form-item class="form-item">
               <div style="display: flex; align-items: center; gap: 12px; width: 100%">
                 <span
-                  style="font-weight: 500; color: var(--el-text-color-regular); font-size: 13px; white-space: nowrap"
+                  style="
+                    font-weight: 500;
+                    color: var(--el-text-color-regular);
+                    font-size: 13px;
+                    white-space: nowrap;
+                  "
                 >
                   默认下载器
                 </span>
@@ -535,7 +540,12 @@
                 "
               >
                 <span
-                  style="font-weight: 500; color: var(--el-text-color-regular); font-size: 13px; margin-right: 10px"
+                  style="
+                    font-weight: 500;
+                    color: var(--el-text-color-regular);
+                    font-size: 13px;
+                    margin-right: 10px;
+                  "
                 >
                   目标站点已存在时是否添加到下载器
                 </span>
@@ -1612,7 +1622,7 @@ onMounted(() => {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
   gap: 20px;
 }
 
