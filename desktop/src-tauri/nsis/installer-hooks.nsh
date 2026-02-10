@@ -1,6 +1,5 @@
 !macro NSIS_HOOK_POSTINSTALL
   ; 让安装目录更直观：把 _up_\runtime\{server,batch,updater} 平铺到安装根目录
-
   IfFileExists "$INSTDIR\_up_\runtime\server\*.*" 0 +3
   RMDir /r "$INSTDIR\server"
   Rename "$INSTDIR\_up_\runtime\server" "$INSTDIR\server"

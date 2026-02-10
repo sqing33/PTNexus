@@ -59,6 +59,172 @@ const EXTERNAL_LINK_INTERCEPT_JS: &str = r#"
 })();
 "#;
 
+/// 注入“打开数据库配置目录”按钮到设置页的“背景设置/其他设置”卡片。
+/// 仅桌面端运行时注入，不修改 webui 源码。
+const INJECT_DB_CONFIG_BUTTON_JS: &str = r#"
+(function() {
+  if (window.__PTNEXUS_DB_BUTTON_WATCHER__) return;
+  window.__PTNEXUS_DB_BUTTON_WATCHER__ = true;
+
+  function ensureButton() {
+    var headers = Array.from(document.querySelectorAll('.card-header .header-content h3'));
+    var target = headers.find(function(h) {
+      var t = (h.textContent || '').trim();
+      return t === '其他设置';
+    });
+    if (!target) return false;
+
+    var card = target.closest('.settings-card');
+    if (!card) return false;
+
+    if (card.querySelector('.ptnexus-open-db-config-btn')) return true;
+
+    var form = card.querySelector('.settings-form');
+    if (!form) return false;
+
+    var formItem = document.createElement('div');
+    formItem.className = 'el-form-item form-item ptnexus-db-config-item';
+
+    var label = document.createElement('label');
+    label.className = 'el-form-item__label';
+    label.textContent = '数据库配置文件';
+
+    var content = document.createElement('div');
+    content.className = 'el-form-item__content';
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'el-button el-button--success is-plain ptnexus-open-db-config-btn';
+    btn.innerHTML = '<span>打开数据库配置目录</span>';
+    btn.addEventListener('click', function() {
+      try {
+        window.__TAURI_INTERNALS__.invoke('open_app_data_dir');
+      } catch (e) {
+        alert('打开目录失败，请手动前往应用数据目录修改 runtime.env。');
+      }
+    });
+
+    var hint = document.createElement('div');
+    hint.className = 'password-hint';
+    hint.innerHTML = '<span class="el-text el-text--small is-info">默认 sqlite；如需 MySQL/PostgreSQL，请编辑 runtime.env 后重启应用。</span>';
+
+    content.appendChild(btn);
+    content.appendChild(hint);
+    formItem.appendChild(label);
+    formItem.appendChild(content);
+
+    var spacer = form.querySelector('.form-spacer');
+    if (spacer && spacer.parentNode) {
+      spacer.parentNode.insertBefore(formItem, spacer);
+    } else {
+      form.appendChild(formItem);
+    }
+
+    return true;
+  }
+
+  function startObserver() {
+    var observer = new MutationObserver(function() {
+      ensureButton();
+    });
+    observer.observe(document.documentElement || document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    window.addEventListener('hashchange', ensureButton, true);
+    window.addEventListener('popstate', ensureButton, true);
+
+    var originalPushState = history.pushState;
+    var originalReplaceState = history.replaceState;
+    history.pushState = function() {
+      var ret = originalPushState.apply(this, arguments);
+      setTimeout(ensureButton, 0);
+      return ret;
+    };
+    history.replaceState = function() {
+      var ret = originalReplaceState.apply(this, arguments);
+      setTimeout(ensureButton, 0);
+      return ret;
+    };
+
+    setInterval(ensureButton, 1500);
+  }
+
+  var warmupTries = 0;
+  var warmupTimer = setInterval(function() {
+    warmupTries += 1;
+    var ok = ensureButton();
+    if (ok || warmupTries > 80) {
+      clearInterval(warmupTimer);
+      startObserver();
+      ensureButton();
+    }
+  }, 250);
+})();
+"#;
+
+/// 注入启动遮罩，尽可能覆盖 WebUI 初始化阶段，减少白屏观感。
+const STARTUP_OVERLAY_JS: &str = r#"
+(function() {
+  if (window.__PTNEXUS_STARTUP_OVERLAY__) return;
+  window.__PTNEXUS_STARTUP_OVERLAY__ = true;
+
+  function removeOverlay() {
+    var overlay = document.getElementById('ptnexus-startup-overlay');
+    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    var style = document.getElementById('ptnexus-startup-style');
+    if (style && style.parentNode) style.parentNode.removeChild(style);
+  }
+
+  function appReady() {
+    var app = document.getElementById('app');
+    if (!app) return false;
+    // 登录页已渲染
+    if (app.querySelector('.login-page, .login-card')) return true;
+    // 主应用页已渲染
+    if (app.querySelector('.app-container, .layout-container, .main-container, .home-container, .main-nav')) return true;
+    return false;
+  }
+
+  function createOverlay() {
+    if (document.getElementById('ptnexus-startup-overlay')) return;
+    // 如果 Vue 应用已经渲染了有效内容，不再创建遮罩
+    if (appReady()) return;
+
+    var style = document.createElement('style');
+    style.id = 'ptnexus-startup-style';
+    style.textContent = [
+      '#ptnexus-startup-overlay{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:#f5f7fa;color:#303133;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}',
+      '#ptnexus-startup-overlay .box{text-align:center;padding:28px 32px;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.08);background:#fff;min-width:320px;}',
+      '#ptnexus-startup-overlay .title{font-size:22px;font-weight:600;margin-bottom:10px;}',
+      '#ptnexus-startup-overlay .desc{font-size:14px;color:#606266;}',
+      '#ptnexus-startup-overlay .dot::after{content:"";display:inline-block;animation:ptnexus-dot 1.2s steps(3,end) infinite;}',
+      '@keyframes ptnexus-dot{0%{content:""}33%{content:"."}66%{content:".."}100%{content:"..."}}'
+    ].join('');
+    document.head && document.head.appendChild(style);
+
+    var overlay = document.createElement('div');
+    overlay.id = 'ptnexus-startup-overlay';
+    overlay.innerHTML = '<div class="box"><div class="title">PT Nexus 启动中<span class="dot"></span></div><div class="desc">正在初始化页面，请稍候。</div></div>';
+    (document.body || document.documentElement).appendChild(overlay);
+  }
+
+  function tick() {
+    if (appReady()) {
+      removeOverlay();
+      clearInterval(timer);
+    } else {
+      createOverlay();
+    }
+  }
+
+  var timer = setInterval(tick, 250);
+  tick();
+  setTimeout(function(){ clearInterval(timer); removeOverlay(); }, 20000);
+})();
+"#;
+
 pub struct RuntimeManager {
     processes: Arc<Mutex<Vec<Child>>>,
 }
@@ -89,8 +255,15 @@ impl RuntimeManager {
                 .join("runtime.env.example")
         };
         let local_env_example = data_dir.join("runtime.env.example");
+        let local_runtime_env = data_dir.join("runtime.env");
+
         if bundled_env_example.exists() && !local_env_example.exists() {
             let _ = fs::copy(&bundled_env_example, &local_env_example);
+        }
+
+        // 用户目录若不存在 runtime.env，则直接从模板创建一份可编辑配置。
+        if bundled_env_example.exists() && !local_runtime_env.exists() {
+            let _ = fs::copy(&bundled_env_example, &local_runtime_env);
         }
 
         let updater_dir = runtime_root.join("updater");
@@ -104,6 +277,8 @@ impl RuntimeManager {
         ensure_exists(&batch_exe)?;
         ensure_exists(&server_dir.join("dist").join("index.html"))?;
 
+        let (background_runner_program, background_runner_args, background_runner_workdir) =
+            resolve_background_runner_launcher(&server_dir)?;
         let (server_program, server_args, server_workdir) = resolve_server_launcher(&server_dir)?;
 
         let mut processes = Vec::new();
@@ -129,9 +304,27 @@ impl RuntimeManager {
                 "UPDATER_PORT",
                 "GO_SERVICE_URL",
                 "CORE_API_URL",
+                "PTNEXUS_EMBED_BG_IN_APP",
             ],
         );
         merge_env_file(&mut common_env, &data_dir.join("runtime.env"))?;
+
+        let background_runner = spawn_process(
+            &background_runner_program,
+            &background_runner_workdir,
+            &common_env,
+            &background_runner_args,
+            "background_runner",
+            &logs_dir,
+        )?;
+        let mut background_runner = background_runner;
+        wait_for_process_running(
+            "background_runner",
+            &mut background_runner,
+            Duration::from_secs(10),
+            &logs_dir,
+        )?;
+        processes.push(background_runner);
 
         let server = spawn_process(
             &server_program,
@@ -195,7 +388,9 @@ impl RuntimeManager {
             let _ = app.emit("runtime-ready", true);
 
             // 页面导航后注入外部链接拦截脚本
-            inject_external_link_interceptor(window);
+            inject_external_link_interceptor(&window);
+            inject_startup_overlay(&window);
+            inject_db_config_button(&window);
         }
 
         Ok(Self {
@@ -349,6 +544,33 @@ fn is_runtime_root(root: &Path) -> bool {
         && root.join("server").join("dist").join("index.html").exists()
 }
 
+fn resolve_background_runner_launcher(
+    server_dir: &Path,
+) -> Result<(PathBuf, Vec<String>, PathBuf), String> {
+    let runner_exe = server_dir.join(exe_name("background_runner"));
+    if runner_exe.exists() {
+        return Ok((runner_exe, vec![], server_dir.to_path_buf()));
+    }
+
+    let python_exe = server_dir.join("python").join(exe_name("python"));
+    let entry = server_dir.join("background_runner.py");
+
+    if python_exe.exists() && entry.exists() {
+        return Ok((
+            python_exe,
+            vec!["-u".to_string(), entry.to_string_lossy().to_string()],
+            server_dir.to_path_buf(),
+        ));
+    }
+
+    Err(format!(
+        "未找到 background_runner 启动入口：{} 或 {} + {}",
+        runner_exe.display(),
+        python_exe.display(),
+        entry.display()
+    ))
+}
+
 fn resolve_server_launcher(server_dir: &Path) -> Result<(PathBuf, Vec<String>, PathBuf), String> {
     let server_exe = server_dir.join(exe_name("server"));
     if server_exe.exists() {
@@ -393,6 +615,7 @@ fn build_runtime_env(
 
     envs.insert("DEV_ENV".to_string(), "false".to_string());
     envs.insert("FLASK_DEBUG".to_string(), "false".to_string());
+    envs.insert("PTNEXUS_EMBED_BG_IN_APP".to_string(), "false".to_string());
     envs.insert("PYTHONUTF8".to_string(), "1".to_string());
     envs.insert(
         "PYTHONPATH".to_string(),
@@ -632,6 +855,55 @@ fn wait_for_http_with_process_state(
     }
 }
 
+fn wait_for_process_running(
+    process_name: &str,
+    child: &mut Child,
+    timeout: Duration,
+    logs_dir: &Path,
+) -> Result<(), String> {
+    let begin = Instant::now();
+    let stdout_log = logs_dir.join(format!("{process_name}.stdout.log"));
+    let stderr_log = logs_dir.join(format!("{process_name}.stderr.log"));
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stderr_tail = read_log_tail(&stderr_log, 40);
+                if stderr_tail.is_empty() {
+                    return Err(format!(
+                        "进程 {process_name} 已退出（状态: {status}），未能保持运行。
+请查看日志：{}",
+                        stderr_log.display()
+                    ));
+                }
+                return Err(format!(
+                    "进程 {process_name} 已退出（状态: {status}），未能保持运行。
+日志：{}
+
+最近 stderr 输出：
+{stderr_tail}",
+                    stderr_log.display()
+                ));
+            }
+            Ok(None) => {
+                if begin.elapsed() >= timeout {
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                return Err(format!(
+                    "检查进程 {process_name} 运行状态失败: {e}。
+请查看日志：{}, {}",
+                    stdout_log.display(),
+                    stderr_log.display()
+                ));
+            }
+        }
+
+        thread::sleep(Duration::from_millis(250));
+    }
+}
+
 fn read_log_tail(path: &Path, max_lines: usize) -> String {
     let Ok(content) = fs::read_to_string(path) else {
         return String::new();
@@ -644,11 +916,29 @@ fn read_log_tail(path: &Path, max_lines: usize) -> String {
 
 /// 在新页面加载完成后注入外部链接拦截 JS。
 /// 因为 window.location.replace 会销毁当前页面上下文，所以需要等待新页面加载完成后再注入。
-fn inject_external_link_interceptor(window: WebviewWindow) {
+fn inject_external_link_interceptor(window: &WebviewWindow) {
+    let window = window.clone();
     thread::spawn(move || {
         // 等待新页面加载完成（SPA 首次渲染通常需要几秒）
         thread::sleep(Duration::from_secs(3));
         let _ = window.eval(EXTERNAL_LINK_INTERCEPT_JS);
+    });
+}
+
+fn inject_db_config_button(window: &WebviewWindow) {
+    let window = window.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(4));
+        let _ = window.eval(INJECT_DB_CONFIG_BUTTON_JS);
+    });
+}
+
+fn inject_startup_overlay(window: &WebviewWindow) {
+    let window = window.clone();
+    thread::spawn(move || {
+        // 导航到业务页后立即尝试注入；若尚未就绪，脚本内部会自行重试。
+        thread::sleep(Duration::from_millis(600));
+        let _ = window.eval(STARTUP_OVERLAY_JS);
     });
 }
 

@@ -2,7 +2,7 @@
 
 这个目录是 PT Nexus 的桌面壳工程，负责：
 
-1. 拉起 `server` / `batch` / `updater` 三个 sidecar。
+1. 拉起 `background_runner` / `server` / `batch` / `updater` 四个 sidecar。
 2. 启动后自动打开 `http://127.0.0.1:5274`。
 3. 退出时回收后端子进程。
 
@@ -17,7 +17,15 @@ bash ./desktop/scripts/build-windows-installer-linux.sh
 或在 `desktop/` 下执行：
 
 ```bash
+bun run build
+```
+
+也可以使用：
+
+```bash
 bun run build:win:x64:installer:linux
+# 或
+bun run win
 ```
 
 该流程会自动完成：
@@ -30,10 +38,13 @@ bun run build:win:x64:installer:linux
 - 自动准备 NSIS（无 sudo）
 - 生成 Windows 单文件安装包
 
-输出安装包：
+安装包输出目录：
 
-`desktop/src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/PT Nexus_0.1.0_x64-setup.exe`
+- `desktop/src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/`
 
+构建完成后会自动复制一份到：
+
+- `desktop/release/PT Nexus_<CHANGELOG最后版本号>_x64-setup.exe`
 
 构建成功后，安装包通常在 **60MB+**（包含 Python 运行时与依赖）。
 如果体积只有几 MB，基本可判定为缺少 runtime 资源。
@@ -48,15 +59,16 @@ bun run build:win:x64:installer:linux
 
 内部仍兼容 `_up_/runtime` 旧布局（若存在会自动回退）。
 
-## 运行时环境变量配置（数据库等）
+## 数据库配置
 
-桌面版默认使用 SQLite（无需手动配置）。
+桌面版默认使用 SQLite（安装流程不做数据库配置）。
 
 如需切换 MySQL / PostgreSQL：
 
-1. 先启动一次应用（会自动创建用户数据目录）
-2. 在用户数据目录创建 `runtime.env`，可参考同目录的 `runtime.env.example`
-3. 重启应用
+1. 在应用内进入“其他设置”卡片，点击“打开数据库配置目录”
+2. 打开目录中的 `runtime.env`（首次启动会自动生成，包含注释示例）
+3. 修改数据库参数并保存
+4. 重启应用
 
 `runtime.env` 中可用变量示例：
 
@@ -80,5 +92,4 @@ cd desktop
 bun run build:win:x64:installer
 ```
 
-
-调试提示：若启动白屏后退出，请查看用户数据目录下 `logs/server.stderr.log`、`logs/batch.stderr.log`、`logs/updater.stderr.log`。
+调试提示：若启动白屏后退出，请查看用户数据目录下 `logs/background_runner.stderr.log`、`logs/server.stderr.log`、`logs/batch.stderr.log`、`logs/updater.stderr.log`。

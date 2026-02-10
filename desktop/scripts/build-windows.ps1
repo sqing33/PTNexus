@@ -34,6 +34,16 @@ Ensure-Dir $RuntimeUpdater
 Ensure-Dir $RuntimeData
 Ensure-Dir (Join-Path $RuntimeData "tmp")
 
+$RuntimeEnvTemplate = Join-Path $Desktop "templates/runtime.env.example"
+if (Test-Path $RuntimeEnvTemplate) {
+  Copy-Item -Force $RuntimeEnvTemplate (Join-Path $RuntimeData "runtime.env.example")
+}
+
+$DbConfigWizard = Join-Path $Desktop "src-tauri/nsis/db-config.ps1"
+if (Test-Path $DbConfigWizard) {
+  Copy-Item -Force $DbConfigWizard (Join-Path $RuntimeData "db-config.ps1")
+}
+
 if (-not $SkipWeb) {
   Write-Host "[2/7] 构建 webui..."
   Push-Location (Join-Path $Root "webui")
@@ -90,7 +100,18 @@ if (-not $SkipPython) {
     --specpath (Join-Path $Desktop ".pyi-spec") `
     app.py
 
+  .\.venv\Scripts\pyinstaller.exe `
+    --noconfirm `
+    --clean `
+    --onedir `
+    --name background_runner `
+    --distpath (Join-Path $RuntimeServer "_dist") `
+    --workpath (Join-Path $Desktop ".pyi-work") `
+    --specpath (Join-Path $Desktop ".pyi-spec") `
+    background_runner.py
+
   Copy-Item -Recurse -Force (Join-Path $RuntimeServer "_dist/server/*") $RuntimeServer
+  Copy-Item -Recurse -Force (Join-Path $RuntimeServer "_dist/background_runner/*") $RuntimeServer
   Remove-Item -Recurse -Force (Join-Path $RuntimeServer "_dist")
 
   Pop-Location

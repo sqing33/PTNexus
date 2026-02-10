@@ -18,6 +18,19 @@ fn open_external(url: String) {
     let _ = open_url_in_browser(&url);
 }
 
+#[tauri::command]
+fn open_app_data_dir(app_handle: AppHandle) -> Result<(), String> {
+    let data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("解析应用数据目录失败: {e}"))?;
+
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("创建应用数据目录失败: {e}"))?;
+
+    open_path_in_file_manager(&data_dir)
+        .map_err(|e| format!("打开应用数据目录失败: {e}"))
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -81,7 +94,7 @@ pub fn run() {
             app.manage(runtime);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![ping, open_external])
+        .invoke_handler(tauri::generate_handler![ping, open_external, open_app_data_dir])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| match event {
@@ -108,8 +121,12 @@ pub fn run() {
 fn open_url_in_browser(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
         std::process::Command::new("cmd")
             .args(["/C", "start", "", url])
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()?;
     }
     #[cfg(target_os = "macos")]
@@ -119,6 +136,24 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open").arg(url).spawn()?;
+    }
+    Ok(())
+}
+
+fn open_path_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(path).spawn()?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(path).spawn()?;
     }
     Ok(())
 }
@@ -167,6 +202,6 @@ fn build_bootstrap_user_message(app_handle: &AppHandle, error: &str) -> String {
         .unwrap_or_else(|_| "<无法解析应用数据目录>".to_string());
 
     format!(
-        "启动失败，请按以下路径自检：\n\n1) 主错误日志：{data_dir}\\bootstrap-error.log\n2) 服务日志目录：{data_dir}\\logs\\\n   - server.stderr.log\n   - batch.stderr.log\n   - updater.stderr.log\n\n错误详情：\n{error}"
+        "启动失败，请按以下路径自检：\n\n1) 主错误日志：{data_dir}\\bootstrap-error.log\n2) 服务日志目录：{data_dir}\\logs\\\n   - background_runner.stderr.log\n   - server.stderr.log\n   - batch.stderr.log\n   - updater.stderr.log\n\n错误详情：\n{error}"
     )
 }

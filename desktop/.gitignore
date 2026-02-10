@@ -10,6 +10,9 @@ src-tauri/target/
 src-tauri/gen/
 .pyi-work/
 .pyi-spec/
+release/*.exe
+release/*.msi
+!release/.gitkeep
 
 # Logs
 logs/

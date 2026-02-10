@@ -6,7 +6,10 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build",
+    "build": "bash ./scripts/build-windows-installer-linux.sh",
+    "build:tauri": "tauri build",
+    "win": "bash ./scripts/build-windows-installer-linux.sh",
+    "win:installer": "bash ./scripts/build-windows-installer-linux.sh",
     "build:win:x64": "tauri build --target x86_64-pc-windows-gnu --no-bundle",
     "build:win:x64:installer": "tauri build --target x86_64-pc-windows-msvc",
     "build:win:x64:installer:linux": "bash ./scripts/build-windows-installer-linux.sh"

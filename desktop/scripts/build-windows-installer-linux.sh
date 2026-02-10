@@ -15,6 +15,40 @@ log() {
   echo "[build-win-linux] $*"
 }
 
+get_latest_changelog_version() {
+  local changelog_file="$DESKTOP_DIR/CHANGELOG.json"
+
+  if [[ ! -f "$changelog_file" ]]; then
+    echo "unknown"
+    return 0
+  fi
+
+  python3 - <<PY
+import json
+import re
+from pathlib import Path
+
+path = Path(r"$changelog_file")
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    print("unknown")
+    raise SystemExit(0)
+
+version = "unknown"
+if isinstance(data, dict):
+    history = data.get("history")
+    if isinstance(history, list) and history:
+        latest = history[0]
+        if isinstance(latest, dict):
+            version = str(latest.get("version") or "unknown")
+
+version = version.strip() or "unknown"
+version = re.sub(r"[^0-9A-Za-z._-]+", "_", version)
+print(version)
+PY
+}
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "缺少命令: $1"
@@ -225,6 +259,11 @@ build_runtime() {
   log "同步 server 源码"
   sync_server_source
 
+  if [[ ! -f "$RUNTIME_DIR/server/background_runner.py" ]]; then
+    echo "缺少 background_runner.py: $RUNTIME_DIR/server/background_runner.py"
+    exit 1
+  fi
+
   log "注入 webui dist 到 runtime/server/dist"
   rm -rf "$RUNTIME_DIR/server/dist"
   cp -a "$ROOT_DIR/webui/dist" "$RUNTIME_DIR/server/dist"
@@ -258,9 +297,11 @@ build_installer() {
     fi
   fi
 
-  local installer_path="$DESKTOP_DIR/src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/PT Nexus_0.1.0_x64-setup.exe"
-  if [[ ! -f "$installer_path" ]]; then
-    echo "安装包未生成: $installer_path"
+  local installer_dir="$DESKTOP_DIR/src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis"
+  local installer_path
+  installer_path="$(ls -1t "$installer_dir"/PT\ Nexus_*_x64-setup.exe 2>/dev/null | head -n1 || true)"
+  if [[ -z "$installer_path" || ! -f "$installer_path" ]]; then
+    echo "安装包未生成: $installer_dir/PT Nexus_*_x64-setup.exe"
     exit 1
   fi
 
@@ -273,7 +314,17 @@ build_installer() {
     exit 1
   fi
 
+  local changelog_version
+  changelog_version="$(get_latest_changelog_version)"
+
+  local release_dir="$DESKTOP_DIR/release"
+  mkdir -p "$release_dir"
+
+  local desktop_copy_path="$release_dir/PT Nexus_${changelog_version}_x64-setup.exe"
+  cp -f "$installer_path" "$desktop_copy_path"
+
   echo "installer_ready:$installer_path"
+  echo "installer_copied:$desktop_copy_path"
 }
 
 main() {
@@ -294,7 +345,8 @@ main() {
   build_installer
 
   log "完成"
-  log "安装包位置: $DESKTOP_DIR/src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/PT Nexus_0.1.0_x64-setup.exe"
+  log "安装包目录: $DESKTOP_DIR/src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis"
+  log "发布目录副本（版本号）: $DESKTOP_DIR/release/PT Nexus_<changelog_version>_x64-setup.exe"
 }
 
 main "$@"
