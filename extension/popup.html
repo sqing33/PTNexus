@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PT Nexus Cookie 同步</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <div class="header">
+        <img class="logo" src="icon48.png" alt="PT Nexus" />
+        <h1>PT Nexus Cookie 同步</h1>
+      </div>
+      <p class="hint">点击“同步”将先测试登录，再执行同步，并打开结果页。</p>
+
+      <label class="field">
+        <span>API 地址</span>
+        <input id="apiBaseUrl" type="url" placeholder="https://ptnexus.example.com" />
+      </label>
+
+      <label class="field">
+        <span>用户名</span>
+        <input id="username" type="text" placeholder="admin" />
+      </label>
+
+      <label class="field">
+        <span>密码</span>
+        <input id="password" type="password" autocomplete="current-password" placeholder="******" />
+      </label>
+
+      <label class="checkbox-row">
+        <input id="rememberPassword" type="checkbox" />
+        <span>在本地记住密码</span>
+      </label>
+
+      <div class="actions">
+        <button id="syncBtn" type="button" class="primary">同步</button>
+      </div>
+
+      <div id="status" class="status"></div>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

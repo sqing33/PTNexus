@@ -1,0 +1,226 @@
+site_name: "HDFans"
+
+# HDFans 上传页关键字段（upload.php）
+form_fields:
+  category: "type"
+  medium: "medium_sel[4]"
+  video_codec: "codec_sel[4]"
+  audio_codec: "audiocodec_sel[4]"
+  resolution: "standard_sel[4]"
+  source: "processing_sel[4]"
+  team: "team_sel[4]"
+
+source_parsers:
+  # 仅在 standardized_params 缺失时回退使用；正常迁移发布优先使用 migrator/ParameterMapper 的 standardized_params
+  source_params:
+    type:
+      source_key: "类型"
+    medium:
+      source_key: "媒介"
+    video_codec:
+      source_key: "视频编码"
+    audio_codec:
+      source_key: "音频编码"
+    resolution:
+      source_key: "分辨率"
+    team:
+      source_key: "制作组"
+    source:
+      source_key: "产地"
+
+  standard_keys:
+    # 类型（仅回退流程使用）
+    type:
+      "Movies/电影": "category.movie"
+      "TV Series/电视剧": "category.tv_series"
+      "Documentaries/纪录片": "category.documentaries"
+      "Music/音乐": "category.music"
+      "TV Shows/综艺": "category.tv_shows"
+      "Animations/动漫、动画": "category.animation"
+      "Music Videos/音乐视频": "category.mv"
+      "Concert/演唱会": "category.stage"
+      "Education/教育": "category.study"
+      "Audio Books/有声读物": "category.audiobook"
+      "Drama/戏剧": "category.drama"
+      "Sports/体育": "category.sports"
+      "Software/软件": "category.software"
+      "Games/游戏": "category.game"
+      "E-Books/电子书": "category.ebook"
+      "Others/其他": "category.other"
+
+    # 媒介（仅回退流程使用；发布时仅对原盘按 DIY 做 17/18、21/22 的区分，其余媒介沿用 mappings.medium 默认映射）
+    medium:
+      "UHD原盘": "medium.uhd_bluray"
+      "UHD DIY": "medium.uhd_bluray"
+      "UHD Remux": "medium.remux"
+      "UHD压制": "medium.encode_2160p"
+      "BD原盘": "medium.bluray"
+      "BD DIY": "medium.bluray"
+      "BD Remux": "medium.remux"
+      "1080P/i压制": "medium.encode_1080p"
+      "720P压制": "medium.encode_720p"
+      "MiniSD": "medium.minisd"
+      "WEB-DL": "medium.webdl"
+      "HDTV": "medium.hdtv"
+      "DVD": "medium.dvd"
+      "CD": "medium.cd"
+      "SACD": "medium.sacd"
+      "CD+VCD": "medium.cd_vcd"
+      "CD+DVD": "medium.cd_dvd"
+      "黑胶": "medium.vinyl"
+      "Other": "medium.other"
+
+mappings:
+  type:
+    "category.movie": "401"
+    "category.tv_series": "402"
+    "category.documentaries": "403"
+    "category.music": "406"
+    "category.tv_shows": "416"
+    "category.animation": "417"
+    "category.mv": "407"
+    "category.stage": "408"
+    "category.study": "404"
+    "category.audiobook": "405"
+    "category.drama": "409"
+    "category.sports": "418"
+    "category.software": "419"
+    "category.game": "421"
+    "category.ebook": "423"
+    "category.other": "410"
+    "default": "401"
+
+  # 媒介默认映射（仅对原盘按 DIY 做 17/18、21/22 区分，其余媒介默认映射保持不变）
+  medium:
+    "medium.uhd_bluray": "17" # UHD原盘
+    "medium.uhd_diy": "18" # UHD DIY
+    "medium.bluray": "21" # BD原盘
+    "medium.bluray_diy": "22" # BD DIY
+    "medium.remux": "23" # BD Remux
+    "medium.encode_2160p": "20" # UHD压制
+    "medium.encode_1080p": "24" # 1080P/i压制
+    "medium.encode_720p": "25" # 720P压制
+    "medium.encode": "24" # encode 兜底（按分辨率在发布器中细分）
+    "medium.webdl": "5"
+    "medium.hdtv": "6"
+    "medium.dvd": "7"
+    "medium.cd": "9"
+    "medium.sacd": "16"
+    "medium.cd_vcd": "30"
+    "medium.cd_dvd": "27"
+    "medium.vinyl": "28"
+    "medium.minisd": "26"
+    "medium.other": "10"
+    "default": "10"
+
+  video_codec:
+    "video.h264": "1"
+    "video.x264": "2"
+    "video.h265": "3"
+    "video.x265": "4"
+    "video.vc1": "5"
+    "video.mpeg2": "10"
+    "video.mpeg4": "11"
+    "video.xvid": "12"
+    "video.av1": "14"
+    "video.other": "13"
+    "default": "13"
+
+  audio_codec:
+    "audio.truehd_atmos": "1"
+    "audio.dtsx": "3"
+    "audio.truehd": "6"
+    "audio.dts_hd_ma": "4"
+    "audio.dts_hd_hr": "5"
+    "audio.dts": "2"
+    "audio.lpcm": "7"
+    "audio.wav": "14"
+    "audio.ape": "13"
+    "audio.flac": "12"
+    "audio.dsd": "20"
+    "audio.ddp_atmos": "23"
+    "audio.ddp": "21"
+    "audio.ac3": "10"
+    "audio.mpeg": "22"
+    "audio.ogg": "15"
+    "audio.aac": "11"
+    "audio.tta": "16"
+    "audio.mp3": "17"
+    "audio.alac": "25"
+    "audio.m4a": "24"
+    "audio.other": "18"
+    "default": "18"
+
+  resolution:
+    "resolution.r4320p": "1"
+    "resolution.r2160p": "2"
+    "resolution.r1080p": "3"
+    "resolution.r1080i": "4"
+    "resolution.r720p": "5"
+    "resolution.sd": "6"
+    "resolution.other": "7"
+    "default": "7"
+
+  source:
+    "source.china": "1"
+    "source.western": "2"
+    "source.uk": "3"
+    "source.hongkong": "4"
+    "source.taiwan": "5"
+    "source.japan": "6"
+    "source.korea": "7"
+    "source.europe": "8"
+    "source.other": "9"
+    "source.india": "10"
+    "source.singapore": "11"
+    "source.malaysia": "12"
+    "default": "9"
+
+  team:
+    "team.hdfans": "9"
+    "team.chdbits": "1"
+    "team.hdc": "2"
+    "team.ttg": "19"
+    "team.wiki": "3"
+    "team.beast": "4"
+    "team.cmct": "5"
+    "team.frds": "6"
+    "team.hds": "7"
+    "team.ourbits": "17"
+    "team.pter": "20"
+    "team.audies": "29"
+    "team.ubits": "41"
+    "team.hhclub": "34"
+    "team.hdhome": "18"
+    "team.pthome": "16"
+    "team.qhstudio": "40"
+    "team.hares": "28"
+    "team.tlf": "8"
+    "team.ptp": "37"
+    "team.btn": "32"
+    "team.epsilon": "30"
+    "team.framestor": "31"
+    "team.opencd": "33"
+    "team.dic": "35"
+    "team.red": "36"
+    "team.ggn": "39"
+    "team.lemonhd": "26"
+    "team.other": "27"
+    "default": "27"
+
+  tag:
+    "tag.源站转发": 29
+    "tag.DIY": 4
+    "tag.原生": 21
+    "tag.国语": 5
+    "tag.粤语": 10
+    "tag.中字": 6
+    "tag.中英双语": 17
+    "tag.特效": 18
+    "tag.HDR": 7
+    "tag.杜比": 9
+    "tag.Atmos": 12
+    "tag.完结": 23
+    "tag.4K": 19
+    "tag.8K": 20
+    "default": null

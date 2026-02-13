@@ -1,0 +1,78 @@
+name: 构建 Go Docker 镜像
+
+on:
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: pt-nexus
+  DEFAULT_TAG: go
+
+jobs:
+  build-go:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
+
+      - name: 1.5. 下载 批量转种 程序（可选）
+        env:
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          PRIVATE_REPO_URL: ${{ secrets.PRIVATE_REPO_URL }}
+        run: |
+          if [ -n "$PRIVATE_REPO_TOKEN" ] && [ -n "$PRIVATE_REPO_URL" ]; then
+            echo "📥 下载 批量转种 程序"
+
+            mkdir -p batch
+
+            curl -H "Authorization: token $PRIVATE_REPO_TOKEN" \
+                 -H "Accept: application/vnd.github.v3.raw" \
+                 -L "$PRIVATE_REPO_URL/refs/heads/main/batch/batch.go" \
+                 -o batch/batch.go
+
+            if [ -f batch/batch.go ]; then
+              echo "✅ 成功下载 batch/batch.go"
+              echo "文件大小: $(wc -l < batch/batch.go) 行"
+            else
+              echo "❌ 下载 batch/batch.go 失败"
+              exit 1
+            fi
+          else
+            echo "⚠️  未配置私有仓库访问信息，跳过文件下载（将使用仓库内已有 batch/batch.go）"
+            echo "   如需覆盖请设置 PRIVATE_REPO_TOKEN 和 PRIVATE_REPO_URL secrets"
+          fi
+
+      - name: 2. 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 3. 登录到 GitHub Container Registry (ghcr.io)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 4. 准备 Docker 标签（默认使用 go）
+        id: prepare-tags
+        run: |
+          GHCR_REPO="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+          GIT_SHA=$(git rev-parse --short HEAD)
+          FULL_TAGS="${GHCR_REPO}:${{ env.DEFAULT_TAG }},${GHCR_REPO}:${{ env.DEFAULT_TAG }}-sha-${GIT_SHA}"
+
+          echo "✅ 准备的镜像标签：$FULL_TAGS"
+          echo "tags=$FULL_TAGS" >> $GITHUB_OUTPUT
+
+      - name: 5. 构建并推送 AMD64 架构镜像（Go 版）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.go
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.prepare-tags.outputs.tags }}
+          cache-from: type=gha,scope=go-amd64
+          cache-to: type=gha,mode=max,scope=go-amd64
+

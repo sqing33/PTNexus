@@ -6,3 +6,9 @@ data
 tmp
 .gitea
 .serena
+
+# Go 版本
+server-go
+webui-go
+desktop
+extension

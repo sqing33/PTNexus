@@ -1,0 +1,605 @@
+<!-- src/App.vue -->
+<template>
+  <div v-if="!isLoginPage" class="app-nav-wrapper">
+    <el-menu
+      v-if="!isMobile"
+      :default-active="activeRoute"
+      class="main-nav glass-nav"
+      mode="horizontal"
+      router
+    >
+      <div class="brand-block">
+        <img src="/favicon.ico" alt="Logo" height="32" class="brand-logo" />
+        PT Nexus
+      </div>
+      <el-menu-item index="/">首页</el-menu-item>
+      <el-menu-item index="/info">流量统计</el-menu-item>
+      <el-menu-item index="/torrents">一种多站</el-menu-item>
+      <el-menu-item index="/data">一站多种</el-menu-item>
+      <el-menu-item index="/sites">做种检索</el-menu-item>
+      <el-menu-item index="/settings">设置</el-menu-item>
+      <div class="right-buttons-container">
+        <el-link
+          href="https://ptn-wiki.sqing33.dpdns.org"
+          target="_blank"
+          :underline="false"
+          style="margin-right: 8px"
+        >
+          <el-icon><Link /></el-icon>
+          Wiki
+        </el-link>
+        <el-link
+          href="https://github.com/sqing33/PTNexus"
+          target="_blank"
+          :underline="false"
+          style="margin-right: 8px"
+        >
+          <el-icon><Link /></el-icon>
+          GitHub
+        </el-link>
+        <el-tag size="small" style="cursor: pointer; margin-right: 15px" @click="showVersionDialog">
+          {{ currentVersion }}
+        </el-tag>
+        <el-button
+          type="primary"
+          plain
+          :icon="Download"
+          :loading="exportingLogs"
+          @click="handleExportLogs"
+        >
+          导出后端日志
+        </el-button>
+        <el-link
+          href="https://github.com/sqing33/PTNexus/issues"
+          target="_blank"
+          :underline="false"
+          style="margin-right: 8px"
+        >
+          <el-button type="primary" plain>反馈</el-button>
+        </el-link>
+        <el-button
+          type="success"
+          @click="handleGlobalRefresh"
+          :loading="isRefreshing"
+          :disabled="isRefreshing"
+          plain
+        >
+          刷新
+        </el-button>
+      </div>
+    </el-menu>
+
+    <div v-else class="mobile-nav glass-nav">
+      <div class="mobile-brand">
+        <img src="/favicon.ico" alt="Logo" height="26" class="brand-logo" />
+        <div class="mobile-brand-text">
+          <span class="mobile-brand-title">PT Nexus</span>
+          <span class="mobile-brand-subtitle">{{ currentRouteTitle }}</span>
+        </div>
+      </div>
+      <div class="mobile-top-actions">
+        <el-button
+          type="success"
+          plain
+          @click="handleGlobalRefresh"
+          :loading="isRefreshing"
+          :disabled="isRefreshing"
+          size="small"
+        >
+          刷新
+        </el-button>
+        <el-button type="primary" plain :icon="Menu" @click="mobileMenuVisible = true" size="small">
+          菜单
+        </el-button>
+      </div>
+    </div>
+
+    <el-drawer
+      v-model="mobileMenuVisible"
+      direction="ltr"
+      size="82%"
+      :with-header="false"
+      class="mobile-nav-drawer"
+    >
+      <div class="drawer-header">
+        <div class="drawer-title">PT Nexus 导航</div>
+        <el-tag size="small" style="cursor: pointer" @click="showVersionDialog">{{ currentVersion }}</el-tag>
+      </div>
+
+      <el-menu
+        :default-active="activeRoute"
+        class="mobile-nav-menu"
+        router
+        @select="mobileMenuVisible = false"
+      >
+        <el-menu-item index="/">首页</el-menu-item>
+        <el-menu-item index="/info">流量统计</el-menu-item>
+        <el-menu-item index="/torrents">一种多站</el-menu-item>
+        <el-menu-item index="/data">一站多种</el-menu-item>
+        <el-menu-item index="/sites">做种检索</el-menu-item>
+        <el-menu-item index="/settings">设置</el-menu-item>
+        <el-menu-item index="/settings/general" class="mobile-settings-sub-item">
+          基础设置
+        </el-menu-item>
+        <el-menu-item index="/settings/downloader" class="mobile-settings-sub-item">
+          下载器设置
+        </el-menu-item>
+        <el-menu-item index="/settings/cookie" class="mobile-settings-sub-item">
+          站点管理
+        </el-menu-item>
+      </el-menu>
+
+      <div class="drawer-actions">
+        <el-button type="primary" plain :icon="Download" :loading="exportingLogs" @click="handleExportLogs">
+          导出后端日志
+        </el-button>
+        <el-button
+          type="success"
+          plain
+          @click="handleGlobalRefresh"
+          :loading="isRefreshing"
+          :disabled="isRefreshing"
+        >
+          刷新缓存
+        </el-button>
+        <el-link href="https://ptn-wiki.sqing33.dpdns.org" target="_blank" :underline="false">
+          <el-icon><Link /></el-icon>
+          Wiki
+        </el-link>
+        <el-link href="https://github.com/sqing33/PTNexus" target="_blank" :underline="false">
+          <el-icon><Link /></el-icon>
+          GitHub
+        </el-link>
+        <el-link href="https://github.com/sqing33/PTNexus/issues" target="_blank" :underline="false">
+          <el-button type="primary" plain>反馈</el-button>
+        </el-link>
+      </div>
+    </el-drawer>
+  </div>
+
+  <main :class="['main-content', isLoginPage ? 'no-nav' : '', isMobile && !isLoginPage ? 'mobile-nav-content' : '']">
+    <router-view v-slot="{ Component }">
+      <component :is="Component" @ready="handleComponentReady" />
+    </router-view>
+  </main>
+
+  <!-- Version Update Component (outside navigation bar) -->
+  <VersionUpdate @version-loaded="(version) => (currentVersion = version)" ref="versionUpdateRef" />
+</template>
+
+<script setup lang="ts">
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { Download, Link, Menu } from '@element-plus/icons-vue'
+import axios from 'axios'
+import VersionUpdate from '@/components/VersionUpdate.vue'
+
+const route = useRoute()
+
+// 背景图片
+const backgroundUrl = ref('https://pic.pting.club/i/2025/10/07/68e4fbfe9be93.jpg')
+
+// 版本信息
+const currentVersion = ref('加载中...')
+
+const mobileMenuVisible = ref(false)
+const isMobile = ref(false)
+const MOBILE_BREAKPOINT = 768
+
+const routeTitleMap: Record<string, string> = {
+  '/': '首页',
+  '/info': '流量统计',
+  '/torrents': '一种多站',
+  '/data': '一站多种',
+  '/sites': '做种检索',
+  '/settings': '设置',
+}
+
+const isLoginPage = computed(() => route.path === '/login')
+
+const activeRoute = computed(() => {
+  if (route.matched.length > 0) {
+    return route.matched[0].path
+  }
+  return route.path
+})
+
+const currentRouteTitle = computed(() => routeTitleMap[activeRoute.value] || '导航')
+
+const isRefreshing = ref(false)
+const exportingLogs = ref(false)
+
+const isRefreshSupportedRoute = (path: string) => {
+  return (
+    path.startsWith('/torrents') ||
+    path.startsWith('/sites') ||
+    path.startsWith('/data') ||
+    path.startsWith('/batch-fetch')
+  )
+}
+
+// VersionUpdate组件引用
+const versionUpdateRef = ref()
+
+const activeComponentRefresher = ref<(() => Promise<void>) | null>(null)
+
+const handleComponentReady = (refreshMethod: () => Promise<void>) => {
+  activeComponentRefresher.value = refreshMethod
+}
+
+const shouldDelegateRefreshToComponent = (path: string) => {
+  return path.startsWith('/torrents')
+}
+
+const handleGlobalRefresh = async () => {
+  if (isRefreshing.value) return
+
+  if (!isRefreshSupportedRoute(route.path)) {
+    ElMessage.warning('当前页面不支持刷新操作。')
+    return
+  }
+
+  isRefreshing.value = true
+  ElMessage.info('后台正在刷新缓存...')
+
+  try {
+    if (shouldDelegateRefreshToComponent(route.path) && activeComponentRefresher.value) {
+      await activeComponentRefresher.value()
+    } else {
+      await axios.post('/api/refresh_data')
+      if (activeComponentRefresher.value) {
+        await activeComponentRefresher.value()
+      }
+    }
+
+    ElMessage.success('数据已刷新！')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '数据更新失败')
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
+// handleExportLogs 调用后端导出接口并触发浏览器下载日志文件。
+const handleExportLogs = async () => {
+  if (exportingLogs.value) {
+    return
+  }
+  exportingLogs.value = true
+  try {
+    const response = await axios.get('/api/logs/export', {
+      responseType: 'blob',
+      timeout: 120000,
+    })
+
+    const contentType = response.headers['content-type'] || 'text/plain; charset=utf-8'
+    const blob = new Blob([response.data], { type: contentType })
+    const fileName = parseFileName(response.headers['content-disposition'])
+
+    const fileUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = fileUrl
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(fileUrl)
+
+    ElMessage.success('最近24小时日志导出成功，请将文件发送给维护者')
+  } catch (error) {
+    const message = await resolveExportErrorMessage(error)
+    ElMessage.error(`日志导出失败：${message}`)
+  } finally {
+    exportingLogs.value = false
+  }
+}
+
+// parseFileName 从响应头中提取导出文件名，失败时回退默认名称。
+const parseFileName = (contentDisposition?: string) => {
+  const fallback = 'ptnexus-go-日志-24h.txt'
+  if (!contentDisposition || typeof contentDisposition !== 'string') {
+    return fallback
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+
+  const normalMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i)
+  if (normalMatch?.[1]) {
+    return normalMatch[1]
+  }
+  return fallback
+}
+
+// resolveExportErrorMessage 兼容 blob/json 文本，提取后端返回的中文错误原因。
+const resolveExportErrorMessage = async (error: any) => {
+  if (error?.response?.data instanceof Blob) {
+    try {
+      const text = await error.response.data.text()
+      if (!text) {
+        return '未知错误'
+      }
+      try {
+        const payload = JSON.parse(text)
+        if (payload?.message) {
+          return payload.message
+        }
+      } catch {
+        return text
+      }
+      return text
+    } catch {
+      return '无法读取错误详情'
+    }
+  }
+
+  if (error?.response?.data?.message) {
+    return error.response.data.message
+  }
+  if (error?.message) {
+    return error.message
+  }
+  return '未知错误'
+}
+
+const handleRefreshLoadingChange = (event: Event) => {
+  const customEvent = event as CustomEvent<{ refreshing?: boolean }>
+  isRefreshing.value = !!customEvent.detail?.refreshing
+}
+
+// 加载背景设置
+const loadBackgroundSettings = async () => {
+  try {
+    const response = await axios.get('/api/settings')
+    if (response.data?.ui_settings?.background_url) {
+      backgroundUrl.value = response.data.ui_settings.background_url
+      updateBackground(backgroundUrl.value)
+    }
+  } catch (error) {
+    console.error('加载背景设置失败:', error)
+  }
+}
+
+// 更新背景图片
+const updateBackground = (url: string) => {
+  const appElement = document.getElementById('app')
+  if (appElement) {
+    if (url) {
+      appElement.style.backgroundImage = `url('${url}')`
+    } else {
+      appElement.style.backgroundImage = `url('${backgroundUrl.value}')`
+    }
+  }
+}
+
+// 监听背景更新事件
+const handleBackgroundUpdate = (event: any) => {
+  const { backgroundUrl: newUrl } = event.detail
+  backgroundUrl.value = newUrl
+  updateBackground(newUrl)
+}
+
+// 显示版本更新对话框
+const showVersionDialog = () => {
+  if (versionUpdateRef.value) {
+    versionUpdateRef.value.show()
+  }
+}
+
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth <= MOBILE_BREAKPOINT
+}
+
+watch(
+  () => route.path,
+  () => {
+    mobileMenuVisible.value = false
+  },
+)
+
+onMounted(() => {
+  updateIsMobile()
+  loadBackgroundSettings()
+  window.addEventListener('background-updated', handleBackgroundUpdate)
+  window.addEventListener('app-global-refresh-loading', handleRefreshLoadingChange as EventListener)
+  window.addEventListener('resize', updateIsMobile)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('background-updated', handleBackgroundUpdate)
+  window.removeEventListener('resize', updateIsMobile)
+  window.removeEventListener(
+    'app-global-refresh-loading',
+    handleRefreshLoadingChange as EventListener,
+  )
+})
+</script>
+
+<style>
+#app {
+  height: 100vh;
+  min-height: 100vh;
+  position: relative;
+  background-image: url('https://pic.pting.club/i/2025/10/07/68e4fbfe9be93.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+#app::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* 禁止 Element Plus 对话框滚动 */
+.el-overlay-dialog {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.el-overlay-dialog .el-dialog {
+  margin: 0;
+}
+</style>
+
+<style scoped>
+.main-nav {
+  border-bottom: solid 1px var(--el-menu-border-color);
+  flex-shrink: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.brand-block {
+  padding: 5px 15px;
+  line-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.brand-logo {
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.mobile-nav {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--el-menu-border-color);
+}
+
+.mobile-brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.mobile-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  min-width: 0;
+}
+
+.mobile-brand-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.mobile-brand-subtitle {
+  font-size: 12px;
+  color: #606266;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-nav-content {
+  height: calc(100% - 52px);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.drawer-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.mobile-nav-menu {
+  border-right: none;
+  margin-bottom: 16px;
+}
+
+.mobile-nav-menu :deep(.mobile-settings-sub-item) {
+  padding-left: 38px !important;
+  color: #606266;
+  font-size: 13px;
+}
+
+.drawer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.drawer-actions :deep(.el-button + .el-button) {
+  margin-left: 0 !important;
+}
+
+.drawer-actions .el-link {
+  width: fit-content;
+}
+
+.main-content {
+  flex-grow: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 40px);
+  position: relative;
+  z-index: 1;
+}
+
+.main-content.no-nav {
+  height: 100%;
+}
+
+.right-buttons-container {
+  position: absolute;
+  right: 20px;
+  top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 768px) {
+  #app {
+    background-attachment: scroll;
+  }
+
+  .main-content {
+    overflow: auto;
+  }
+}
+</style>

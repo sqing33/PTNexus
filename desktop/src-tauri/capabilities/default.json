@@ -1,6 +1,0 @@
-{
-  "identifier": "default",
-  "description": "Default capability for PT Nexus desktop",
-  "windows": ["main"],
-  "permissions": ["core:default"]
-}

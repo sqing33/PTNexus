@@ -1,0 +1,957 @@
+<template>
+  <div class="cookie-view-container">
+    <!-- 1. 顶部固定区域 -->
+    <div class="top-actions cookie-actions glass-pagination">
+      <!-- CookieCloud 表单 -->
+      <el-form :model="cookieCloudForm" inline class="cookie-cloud-form">
+        <el-form-item label="CookieCloud">
+          <el-input
+            v-model="cookieCloudForm.url"
+            placeholder="http://127.0.0.1:8088"
+            clearable
+            style="width: 200px"
+          ></el-input>
+        </el-form-item>
+        <el-form-item label="KEY">
+          <el-input
+            v-model="cookieCloudForm.key"
+            placeholder="KEY (UUID)"
+            clearable
+            style="width: 100px"
+          ></el-input>
+        </el-form-item>
+        <el-form-item label="端对端密码">
+          <el-input
+            v-model="cookieCloudForm.e2e_password"
+            type="password"
+            show-password
+            placeholder="端对端加密密码"
+            clearable
+            style="width: 125px"
+          ></el-input>
+        </el-form-item>
+        <el-form-item>
+          <!-- [修改] 合并后的按钮 -->
+          <el-button
+            type="primary"
+            size="large"
+            @click="handleSaveAndSync"
+            :loading="isCookieActionLoading"
+          >
+            <el-icon>
+              <Refresh />
+            </el-icon>
+            <span>同步Cookie</span>
+          </el-button>
+        </el-form-item>
+      </el-form>
+
+      <div class="right-action-group">
+        <el-input
+          v-model="searchQuery"
+          placeholder="搜索站点昵称/标识/官组"
+          clearable
+          :prefix-icon="Search"
+          class="search-input"
+        />
+      </div>
+    </div>
+
+    <!-- 2. 中间可滚动内容区域 -->
+    <div class="settings-view" v-loading="isSitesLoading">
+      <el-table
+        :data="paginatedSites"
+        class="settings-table glass-table"
+        height="100%"
+        :row-class-name="getRowClassName"
+        @sort-change="handleSortChange"
+        :default-sort="defaultSort"
+      >
+        <el-table-column
+          prop="nickname"
+          label="站点昵称"
+          width="100"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        />
+        <el-table-column
+          prop="support_role"
+          label="支持"
+          width="100"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #default="scope">
+            <span v-if="getSiteRole(scope.row) === 'both'" class="role-tag role-both">
+              源站/目标站
+            </span>
+            <span v-else-if="getSiteRole(scope.row) === 'source'" class="role-tag role-source">
+              源站
+            </span>
+            <span v-else-if="getSiteRole(scope.row) === 'target'" class="role-tag role-target">
+              目标站
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="site"
+          label="站点标识"
+          width="100"
+          show-overflow-tooltip
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        />
+        <el-table-column
+          prop="base_url"
+          label="基础URL"
+          width="150"
+          show-overflow-tooltip
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        />
+        <el-table-column
+          prop="group"
+          label="官组"
+          show-overflow-tooltip
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        />
+        <el-table-column
+          prop="speed_limit"
+          label="限速"
+          width="100"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #default="scope">
+            <div
+              style="
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                width: 100%;
+                height: 100%;
+              "
+            >
+              <el-tag v-if="scope.row.speed_limit == 0" type="error" size="small">
+                当前不限速，重启恢复默认限速
+              </el-tag>
+              <el-tag v-else-if="scope.row.speed_limit > 999" type="success" size="small">
+                不限速
+              </el-tag>
+              <el-tag v-else type="primary" size="small"> {{ scope.row.speed_limit }} MB/s </el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="ratio_threshold"
+          label="分享率阈值"
+          width="120"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #default="scope">
+            <el-tag v-if="scope.row.ratio_threshold" size="small" type="warning">
+              ≥ {{ scope.row.ratio_threshold }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="seed_speed_limit"
+          label="出种限速"
+          width="110"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #default="scope">
+            <el-tag
+              v-if="scope.row.ratio_threshold && scope.row.seed_speed_limit !== null"
+              size="small"
+              type="info"
+            >
+              {{ scope.row.seed_speed_limit }} MB/s
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="has_cookie"
+          label="Cookie"
+          width="100"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #default="scope">
+            <el-tag v-if="scope.row.site === 'rousi'" type="info"> 无需配置 </el-tag>
+            <el-tag v-else :type="scope.row.has_cookie ? 'success' : 'danger'">
+              {{ scope.row.has_cookie ? '已配置' : '未配置' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="has_passkey"
+          label="Passkey"
+          width="100"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #default="scope">
+            <el-tag
+              v-if="['hddolby', 'm-team', 'hdtime', 'rousi'].includes(scope.row.site)"
+              :type="scope.row.has_passkey ? 'success' : 'danger'"
+            >
+              {{ scope.row.has_passkey ? '已配置' : '未配置' }}
+            </el-tag>
+            <el-tag v-else type="success"> 自动获取 </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180" align="center" fixed="right">
+          <template #default="scope">
+            <el-button type="primary" :icon="Edit" link @click="handleOpenDialog(scope.row)">
+              编辑
+            </el-button>
+            <el-button type="danger" :icon="Delete" link @click="handleDelete(scope.row)">
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- 3. 底部固定区域 -->
+    <div class="settings-footer glass-pagination">
+      <el-radio-group v-model="siteFilter" @change="handleFilterChange">
+        <el-radio-button label="existing_supported">已有支持站点</el-radio-button>
+        <el-radio-button label="supported">所有支持站点</el-radio-button>
+        <el-radio-button label="all">所有站点</el-radio-button>
+      </el-radio-group>
+      <div class="pagination-container">
+        <div class="page-size-text">{{ pagination.pageSize }} 条/页</div>
+        <el-pagination
+          v-model:current-page="pagination.currentPage"
+          v-model:page-size="pagination.pageSize"
+          :total="pagination.total"
+          layout="total, prev, pager, next, jumper"
+          background
+        />
+      </div>
+    </div>
+
+    <!-- 编辑站点对话框 -->
+    <el-dialog
+      v-model="dialogVisible"
+      title="编辑站点"
+      width="700px"
+      :close-on-click-modal="false"
+      class="site-edit-dialog"
+    >
+      <el-form :model="siteForm" ref="siteFormRef" label-width="140px" label-position="left">
+        <el-form-item label="站点标识" prop="site" required>
+          <el-input v-model="siteForm.site" placeholder="例如：pt" disabled></el-input>
+          <div class="form-tip">站点标识不可修改。</div>
+        </el-form-item>
+        <el-form-item label="站点昵称" prop="nickname" required>
+          <el-input v-model="siteForm.nickname" placeholder="例如：PT站"></el-input>
+        </el-form-item>
+        <el-form-item label="基础URL" prop="base_url">
+          <el-input v-model="siteForm.base_url" placeholder="例如：pt.com"></el-input>
+          <div class="form-tip">用于拼接种子详情页链接。</div>
+        </el-form-item>
+        <el-form-item label="Tracker域名" prop="special_tracker_domain">
+          <el-input
+            v-model="siteForm.special_tracker_domain"
+            placeholder="例如：pt-tracker.com"
+          ></el-input>
+          <div class="form-tip">
+            如果站点的Tracker域名与主域名的二级域名（则域名去掉前缀后缀部分）不同，请在此填写。
+          </div>
+        </el-form-item>
+        <el-form-item label="关联官组" prop="group">
+          <el-input v-model="siteForm.group" placeholder="例如：PT, PTWEB"></el-input>
+          <div class="form-tip">用于识别种子所属发布组，多个组用英文逗号(,)分隔。</div>
+        </el-form-item>
+        <el-form-item label="Cookie" prop="cookie">
+          <el-input
+            v-model="siteForm.cookie"
+            type="textarea"
+            :rows="3"
+            :placeholder="siteForm.site === 'rousi' ? '无需设置' : '从浏览器获取的Cookie字符串'"
+            :disabled="siteForm.site === 'rousi'"
+          ></el-input>
+        </el-form-item>
+        <el-form-item label="Passkey" prop="passkey">
+          <el-input v-model="siteForm.passkey" placeholder="站点的Passkey"></el-input>
+          <div
+            v-if="siteForm.site === 'hddolby'"
+            class="form-tip"
+            style="color: #409eff; font-weight: bold"
+          >
+            杜比的passkey为种子详情页复制种子链接时downhash=后的部分
+          </div>
+          <div
+            v-else-if="siteForm.site === 'rousi'"
+            class="form-tip"
+            style="color: #409eff; font-weight: bold"
+          >
+            肉丝的passkey在个人用户-设置-passkey
+          </div>
+        </el-form-item>
+        <el-form-item label="上传限速 (MB/s)" prop="speed_limit">
+          <el-input-number
+            v-model="siteForm.speed_limit"
+            :min="0"
+            :max="1000"
+            style="width: 100%"
+          />
+          <div class="form-tip" style="color: red; font-size: 12px">
+            填写 0 重启恢复默认；超过 999 显示不限速
+          </div>
+        </el-form-item>
+        <el-form-item label="分享率阈值" prop="ratio_threshold">
+          <el-input-number
+            v-model="siteForm.ratio_threshold"
+            :min="1.2"
+            :max="100"
+            :step="0.1"
+            :precision="1"
+            style="width: 100%"
+          />
+          <div class="form-tip" style="font-size: 12px">默认 3.0，达到后触发出种限速</div>
+        </el-form-item>
+        <el-form-item label="出种限速 (MB/s)" prop="seed_speed_limit">
+          <el-input-number
+            v-model="siteForm.seed_speed_limit"
+            :min="0"
+            :max="1000"
+            style="width: 100%"
+          />
+          <div class="form-tip" style="color: #409eff; font-size: 12px">默认 5 MB/s</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSave" :loading="isSaving"> 保存 </el-button>
+        </span>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, computed, watch } from 'vue'
+import axios from 'axios'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Edit, Refresh, Search } from '@element-plus/icons-vue'
+
+// --- 状态管理 ---
+const isSaving = ref(false) // 用于站点编辑对话框的保存按钮
+
+// --- 站点管理状态 ---
+const sitesList = ref([]) // 存储从后端获取的原始列表
+const existingSitesSet = ref(new Set()) // 存储“有此站点”的标识集合（复用后端 active 规则）
+const sitesStatusList = ref([]) // 存储源/目标站点状态信息
+const isSitesLoading = ref(false)
+const isCookieActionLoading = ref(false) // [新增] 用于新的"同步Cookie"按钮的加载状态
+const cookieCloudForm = ref({ url: '', key: '', e2e_password: '' })
+const searchQuery = ref('')
+const siteFilter = ref('existing_supported')
+
+// --- 排序状态 ---
+const sortState = ref({
+  prop: 'support_role',
+  order: 'ascending',
+})
+
+const defaultSort = computed(() => ({
+  prop: sortState.value.prop,
+  order: sortState.value.order,
+}))
+
+// --- 分页状态 ---
+const pagination = ref({
+  currentPage: 1,
+  pageSize: 30,
+  total: 0,
+})
+
+// --- 对话框状态 ---
+const dialogVisible = ref(false)
+const siteFormRef = ref(null)
+const siteForm = ref({
+  id: null,
+  site: '',
+  nickname: '',
+  base_url: '',
+  special_tracker_domain: '',
+  group: '',
+  cookie: '',
+  passkey: '',
+  speed_limit: 0, // 前端显示和输入使用 MB/s 单位
+  ratio_threshold: 3.0,
+  seed_speed_limit: 5,
+})
+
+const API_BASE_URL = '/api'
+
+// --- 计算属性 ---
+
+const sitesStatusMap = computed(() => {
+  const map = new Map()
+  for (const status of sitesStatusList.value || []) {
+    if (status && status.site) {
+      map.set(String(status.site), status)
+    }
+  }
+  return map
+})
+
+const getSiteStatus = (site) => {
+  if (!site?.site) return null
+  return sitesStatusMap.value.get(String(site.site)) || null
+}
+
+const getSiteRole = (site) => {
+  const status = getSiteStatus(site)
+  if (!status) return 'none'
+  if (status.is_source && status.is_target) return 'both'
+  if (status.is_source) return 'source'
+  if (status.is_target) return 'target'
+  return 'none'
+}
+
+const isSiteConfigComplete = (site) => {
+  const hasCookie = Boolean(site?.has_cookie)
+  const hasPasskey = Boolean(site?.has_passkey)
+  // 与 Passkey 列展示规则保持一致：大多数站点自动获取，仅少数站点需要手动配置
+  const needsPasskey = ['hddolby', 'm-team', 'hdtime', 'rousi'].includes(site?.site)
+  // 肉丝站点不需要cookie，其他站点需要cookie
+  const needsCookie = site?.site !== 'rousi'
+  return (!needsCookie || hasCookie) && (!needsPasskey || hasPasskey)
+}
+
+const shouldHighlightIncompleteConfig = computed(() =>
+  ['existing_supported', 'supported'].includes(siteFilter.value),
+)
+
+const normalizeString = (value) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+
+const compareStrings = (a, b) => {
+  const aText = normalizeString(a)
+  const bText = normalizeString(b)
+  if (!aText && !bText) return 0
+  if (!aText) return 1
+  if (!bText) return -1
+  return aText.localeCompare(bText, 'zh-CN', { numeric: true, sensitivity: 'base' })
+}
+
+const compareNullableNumbers = (a, b) => {
+  const aNull = a === null || a === undefined
+  const bNull = b === null || b === undefined
+  const aNumber = aNull ? NaN : Number(a)
+  const bNumber = bNull ? NaN : Number(b)
+  const aInvalid = aNull || Number.isNaN(aNumber)
+  const bInvalid = bNull || Number.isNaN(bNumber)
+  if (aInvalid && bInvalid) return 0
+  if (aInvalid) return 1
+  if (bInvalid) return -1
+  return aNumber - bNumber
+}
+
+const getSupportRank = (site) => {
+  const role = getSiteRole(site)
+  if (role === 'both') return 0
+  if (role === 'source') return 1
+  if (role === 'target') return 2
+  return 3
+}
+
+const getCookieSortKey = (site) => {
+  if (site?.site === 'rousi') return 2 // 无需配置，放在已配置之后
+  return site?.has_cookie ? 1 : 0
+}
+
+const getPasskeySortKey = (site) => {
+  const needsPasskey = ['hddolby', 'm-team', 'hdtime', 'rousi'].includes(site?.site)
+  if (!needsPasskey) return 2 // 自动获取，放在已配置之后
+  return site?.has_passkey ? 1 : 0
+}
+
+const compareByProp = (a, b, prop) => {
+  switch (prop) {
+    case 'nickname':
+      return compareStrings(a?.nickname, b?.nickname)
+    case 'support_role':
+      return getSupportRank(a) - getSupportRank(b)
+    case 'site':
+      return compareStrings(a?.site, b?.site)
+    case 'base_url':
+      return compareStrings(a?.base_url, b?.base_url)
+    case 'group':
+      return compareStrings(a?.group, b?.group)
+    case 'speed_limit':
+      return compareNullableNumbers(a?.speed_limit, b?.speed_limit)
+    case 'ratio_threshold':
+      return compareNullableNumbers(a?.ratio_threshold, b?.ratio_threshold)
+    case 'seed_speed_limit':
+      return compareNullableNumbers(a?.seed_speed_limit, b?.seed_speed_limit)
+    case 'has_cookie':
+      return getCookieSortKey(a) - getCookieSortKey(b)
+    case 'has_passkey':
+      return getPasskeySortKey(a) - getPasskeySortKey(b)
+    default:
+      return 0
+  }
+}
+
+const applySortOrder = (compareResult, order) => {
+  if (!order) return 0
+  return order === 'descending' ? -compareResult : compareResult
+}
+
+// 1. 先根据前端搜索框进行过滤
+const filteredSites = computed(() => {
+  let sites = sitesList.value || []
+
+  if (siteFilter.value === 'existing_supported') {
+    sites = sites.filter((site) => {
+      const status = getSiteStatus(site)
+      const isSupported = Boolean(status?.is_source || status?.is_target)
+      return isSupported && existingSitesSet.value.has(site.site)
+    })
+  } else if (siteFilter.value === 'supported') {
+    sites = sites.filter((site) => {
+      const status = getSiteStatus(site)
+      return Boolean(status?.is_source || status?.is_target)
+    })
+  }
+
+  const term = searchQuery.value.trim().toLowerCase()
+  if (term) {
+    sites = sites.filter((site) => {
+      const nickname = (site.nickname || '').toLowerCase()
+      const siteIdentifier = (site.site || '').toLowerCase()
+      const group = (site.group || '').toLowerCase()
+      return nickname.includes(term) || siteIdentifier.includes(term) || group.includes(term)
+    })
+  }
+
+  return sites
+})
+
+// 2. 再根据排序规则对过滤后的结果进行排序
+const sortedSites = computed(() => {
+  const sites = (filteredSites.value || []).slice()
+
+  return sites.sort((a, b) => {
+    if (shouldHighlightIncompleteConfig.value) {
+      const aIncomplete = isSiteConfigComplete(a) ? 0 : 1
+      const bIncomplete = isSiteConfigComplete(b) ? 0 : 1
+      if (aIncomplete !== bIncomplete) return bIncomplete - aIncomplete
+    }
+
+    const { prop, order } = sortState.value || {}
+    const hasUserSort = Boolean(prop && order)
+
+    if (hasUserSort) {
+      const result = compareByProp(a, b, prop)
+      const ordered = applySortOrder(result, order)
+      if (ordered !== 0) return ordered
+    } else {
+      const result = compareByProp(a, b, 'support_role')
+      if (result !== 0) return result
+    }
+
+    const nicknameTie = compareByProp(a, b, 'nickname')
+    if (nicknameTie !== 0) return nicknameTie
+
+    return compareByProp(a, b, 'site')
+  })
+})
+
+// 3. 再根据分页信息对排序后的结果进行切片
+const paginatedSites = computed(() => {
+  pagination.value.total = sortedSites.value.length
+
+  const start = (pagination.value.currentPage - 1) * pagination.value.pageSize
+  const end = start + pagination.value.pageSize
+  return sortedSites.value.slice(start, end)
+})
+
+// 监听搜索词变化，如果变化则返回第一页
+watch(searchQuery, () => {
+  pagination.value.currentPage = 1
+})
+
+const handleSortChange = ({ prop, order }) => {
+  sortState.value = {
+    prop: prop || 'support_role',
+    order: order || 'ascending',
+  }
+  pagination.value.currentPage = 1
+}
+
+onMounted(() => {
+  fetchCookieCloudSettings()
+  fetchSites()
+})
+
+// --- 方法 ---
+
+const fetchCookieCloudSettings = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/settings`)
+    if (response.data && response.data.cookiecloud) {
+      cookieCloudForm.value.url = response.data.cookiecloud.url || ''
+      cookieCloudForm.value.key = response.data.cookiecloud.key || ''
+      cookieCloudForm.value.e2e_password = ''
+    }
+  } catch (error) {
+    ElMessage.error('加载CookieCloud配置失败！')
+  }
+}
+
+// fetchSites 方法以接受筛选参数
+const fetchSites = async () => {
+  isSitesLoading.value = true
+  try {
+    const [allSitesResponse, existingSitesResponse, sitesStatusResponse] = await Promise.all([
+      axios.get(`${API_BASE_URL}/sites`, { params: { filter_by_torrents: 'all' } }),
+      axios.get(`${API_BASE_URL}/sites`, { params: { filter_by_torrents: 'active' } }),
+      axios.get(`${API_BASE_URL}/sites/status`),
+    ])
+
+    sitesList.value = allSitesResponse.data
+    existingSitesSet.value = new Set((existingSitesResponse.data || []).map((s) => s.site))
+    sitesStatusList.value = sitesStatusResponse.data
+  } catch (error) {
+    ElMessage.error('获取站点列表失败！')
+  } finally {
+    isSitesLoading.value = false
+  }
+}
+
+// 当后端筛选器改变时，重置分页并重新获取数据
+const handleFilterChange = () => {
+  pagination.value.currentPage = 1
+}
+
+const getRowClassName = ({ row }) => {
+  if (!shouldHighlightIncompleteConfig.value) return ''
+  return isSiteConfigComplete(row) ? '' : 'row-config-incomplete'
+}
+
+// [新增] 合并后的保存与同步功能
+const handleSaveAndSync = async () => {
+  // 1. 前端校验
+  if (!cookieCloudForm.value.url || !cookieCloudForm.value.key) {
+    ElMessage.warning('CookieCloud URL 和 KEY 不能为空！')
+    return
+  }
+  isCookieActionLoading.value = true
+  try {
+    // 2. 第一步：先保存配置
+    await axios.post(`${API_BASE_URL}/settings`, {
+      cookiecloud: cookieCloudForm.value,
+    })
+
+    // 3. 第二步：配置保存成功后，立即执行同步
+    const syncResponse = await axios.post(`${API_BASE_URL}/cookiecloud/sync`, cookieCloudForm.value)
+
+    // 4. 处理同步结果
+    if (syncResponse.data.success) {
+      // 移除消息中"在 CookieCloud 中另有 X 个未匹配的 Cookie。"部分
+      let message = syncResponse.data.message
+      if (message) {
+        message = message.replace(/在 CookieCloud 中另有 \d+ 个未匹配的 Cookie。?/, '')
+      }
+      ElMessage.success(`配置已保存. ${message || '同步完成！'}`)
+      await fetchSites() // 同步成功后刷新站点列表
+    } else {
+      ElMessage.error(syncResponse.data.message || '同步失败，但配置已保存。')
+    }
+  } catch (error) {
+    const errorMessage = error.response?.data?.message || '操作失败，请检查网络或后端服务。'
+    ElMessage.error(errorMessage)
+  } finally {
+    isCookieActionLoading.value = false
+  }
+}
+
+const handleOpenDialog = (site) => {
+  // 统一使用MB/s单位
+  const siteData = JSON.parse(JSON.stringify(site))
+  if (siteData.ratio_threshold === undefined || siteData.ratio_threshold === null) {
+    siteData.ratio_threshold = 3.0
+  }
+  if (siteData.seed_speed_limit === undefined || siteData.seed_speed_limit === null) {
+    siteData.seed_speed_limit = 5
+  }
+  siteForm.value = siteData
+  dialogVisible.value = true
+}
+
+const handleSave = async () => {
+  isSaving.value = true
+  try {
+    // 统一使用MB/s单位
+    const siteData = JSON.parse(JSON.stringify(siteForm.value))
+
+    // 自动过滤掉cookie最后的换行符
+    if (siteData.cookie) {
+      siteData.cookie = siteData.cookie.trim()
+    }
+
+    if (siteData.ratio_threshold === '' || siteData.ratio_threshold === 0) {
+      siteData.ratio_threshold = 3.0
+    }
+
+    if (siteData.seed_speed_limit === '') {
+      siteData.seed_speed_limit = 5
+    }
+
+    const response = await axios.post(`${API_BASE_URL}/sites/update`, siteData)
+
+    if (response.data.success) {
+      ElMessage.success(response.data.message)
+      dialogVisible.value = false
+      await fetchSites()
+    } else {
+      ElMessage.error(response.data.message || '操作失败！')
+    }
+  } catch (error) {
+    const msg = error.response?.data?.message || '请求失败，请检查网络或后端服务。'
+    ElMessage.error(msg)
+  } finally {
+    isSaving.value = false
+  }
+}
+
+const handleDelete = (site) => {
+  ElMessageBox.confirm('', '警告', {
+    confirmButtonText: '确定删除',
+    cancelButtonText: '取消',
+    type: 'warning',
+    dangerouslyUseHTMLString: true,
+    message: `您确定要删除站点【${site.nickname}】吗？<br/>可以通过修改 config.json 然后重启恢复。`,
+  })
+    .then(async () => {
+      try {
+        const response = await axios.post(`${API_BASE_URL}/sites/delete`, { id: site.id })
+        if (response.data.success) {
+          ElMessage.success('站点已删除。')
+          await fetchSites()
+        } else {
+          ElMessage.error(response.data.message || '删除失败！')
+        }
+      } catch (error) {
+        const msg = error.response?.data?.message || '删除请求失败。'
+        ElMessage.error(msg)
+      }
+    })
+    .catch(() => {
+      ElMessage.info('操作已取消。')
+    })
+}
+
+// [移除] 不再需要独立的 saveCookieCloudSettings 和 syncFromCookieCloud 方法
+</script>
+
+<style scoped>
+/* 样式部分保持不变 */
+.cookie-view-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 40px);
+  overflow: hidden;
+}
+
+.top-actions,
+.settings-footer {
+  flex-shrink: 0;
+}
+
+.top-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.settings-view {
+  flex-grow: 1;
+  min-height: 0;
+  overflow: hidden;
+  background-color: transparent;
+}
+
+.settings-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+}
+
+.cookie-cloud-form {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cookie-cloud-form .el-form-item {
+  margin-bottom: 0;
+}
+
+.right-action-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  width: 250px;
+}
+
+.settings-table {
+  width: 100%;
+}
+
+.pagination-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-size-text {
+  font-size: 14px;
+  color: var(--el-text-color-regular);
+}
+
+.form-tip {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.settings-table :deep(tr.row-config-incomplete > td.el-table__cell) {
+  background-color: #ffecec;
+}
+
+.settings-table :deep(tr.row-config-incomplete:hover > td.el-table__cell) {
+  background-color: #ffd6d6;
+}
+
+.role-tag {
+  display: inline-block;
+  padding: 0px 3px;
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.role-source {
+  background-color: #ecf5ff;
+  color: #409eff;
+  border: 1px solid #b3d8ff;
+}
+
+.role-target {
+  background-color: #f0f9ff;
+  color: #67c23a;
+  border: 1px solid #b3e0ff;
+}
+
+.role-both {
+  background-color: #fdf6ec;
+  color: #e6a23c;
+  border: 1px solid #f5dab1;
+}
+
+.site-edit-dialog :deep(.el-overlay-dialog) {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.site-edit-dialog :deep(.el-dialog) {
+  margin: 0;
+}
+
+@media (max-width: 768px) {
+  .cookie-view-container {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .top-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .cookie-cloud-form {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .cookie-cloud-form .el-form-item {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .cookie-cloud-form :deep(.el-input),
+  .cookie-cloud-form :deep(.el-input__wrapper) {
+    width: 100% !important;
+  }
+
+  .right-action-group {
+    width: 100%;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .settings-view {
+    overflow: auto;
+  }
+
+  .settings-table {
+    min-width: 1080px;
+  }
+
+  .settings-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .pagination-container {
+    overflow-x: auto;
+    justify-content: space-between;
+  }
+
+  .site-edit-dialog :deep(.el-dialog) {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+  }
+}
+</style>

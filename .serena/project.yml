@@ -80,5 +80,5 @@ excluded_tools: []
 # (contrary to the memories, which are loaded on demand).
 initial_prompt: ""
 
-project_name: "Docker.pt-nexus-dev"
+project_name: "PT Nexus"
 included_optional_tools: []

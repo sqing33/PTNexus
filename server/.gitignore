@@ -1,0 +1,38 @@
+# Go build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage/
+coverage.out
+
+# Local build outputs
+server
+
+# Go workspace/vendor (optional)
+go.work
+go.work.sum
+vendor/
+
+# Project tmp/runtime
+tmp/
+.tmp*
+
+# Local env
+.env
+.env.*
+
+# Runtime data (keep DBs tracked)
+/data/logs/
+/data/*.log
+/data/tmp/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.sw?
+

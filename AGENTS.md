@@ -7,6 +7,16 @@
 - `batch/`、`updater/`、`proxy/`：Go 服务；构建后的二进制分别位于 `batch/batch`、`updater/updater`、`proxy/pt-nexus-box-proxy`。
 - `server/configs/`：站点 YAML 映射；`server/data/`：运行时数据；`wiki/`：文档。
 
+## 多版本说明（Python 原版 / Go 版本）
+
+- 本项目同时维护两套实现，互相独立：
+  - **Python 原版**：后端 `server/` + 前端 `webui/`。
+  - **Go 版本**：后端 `server-go/` + 前端 `webui-go/`。
+- 开发与修改必须按版本分隔进行：
+  - 不要在 `server-go/` 中直接调用/依赖 `server/`（Python）里已有的函数或实现。
+  - 若 Go 版本需要与 Python 原版相同的功能，必须在 `server-go/` 内实现等价逻辑（允许保持相同的接口语义/协议，但实现代码必须在 Go 侧独立存在）。
+- 修改 Go 后端（`server-go/`）时遵循 `.codex/skills/server-go-standards/SKILL.md` 中的规范。
+
 ## 构建、测试与开发命令
 
 前端（Node 20+/bun）：

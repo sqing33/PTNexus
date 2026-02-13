@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PT Nexus Cookie 同步结果</title>
+    <link rel="stylesheet" href="results.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="title-row">
+        <h1>同步结果</h1>
+        <div id="meta" class="meta"></div>
+      </div>
+      <div id="summary" class="summary"></div>
+      <div id="filters" class="filters"></div>
+    </header>
+
+    <main class="main">
+      <section class="list">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width: 84px">状态</th>
+                <th style="width: 180px">站点</th>
+                <th style="width: 160px">昵称</th>
+                <th style="width: 240px">网址</th>
+                <th>消息</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div id="empty" class="empty" hidden></div>
+      </section>
+
+      <aside class="details">
+        <div class="details-header">
+          <h2>详情</h2>
+          <button id="copyBtn" type="button" class="btn">复制 JSON</button>
+        </div>
+        <pre id="detailsPre" class="details-pre">点击左侧任意站点查看详情。</pre>
+      </aside>
+    </main>
+
+    <script src="results.js"></script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "PT Nexus Cookie 同步",
+  "description": "将 Chromium 浏览器站点 Cookie 同步到 PT Nexus Go 后端。",
+  "version": "0.1.0",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "PT Nexus Cookie 同步",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    },
+    "default_popup": "popup.html"
+  },
+  "permissions": ["cookies", "storage", "permissions", "tabs"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"]
+}

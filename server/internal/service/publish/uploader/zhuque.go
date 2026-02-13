@@ -1,0 +1,603 @@
+package uploader
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	neturl "net/url"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/pt-nexus/server-go/internal/config"
+	"github.com/pt-nexus/server-go/internal/platform/logx"
+	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
+)
+
+const zhuquePublishLogModule = "发布-朱雀"
+
+var (
+	reZhuqueCSRFTokenMetaNameFirst    = regexp.MustCompile(`(?is)<meta[^>]*name=["']x-csrf-token["'][^>]*content=["']([^"']+)["'][^>]*>`)
+	reZhuqueCSRFTokenMetaContentFirst = regexp.MustCompile(`(?is)<meta[^>]*content=["']([^"']+)["'][^>]*name=["']x-csrf-token["'][^>]*>`)
+	reZhuqueTMDB                      = regexp.MustCompile(`(?is)themoviedb\.org/(movie|tv)/(\d+)`)
+	reZhuqueBBCode                    = regexp.MustCompile(`\[[^\]]*\]`)
+	reZhuqueImgBBCode                 = regexp.MustCompile(`(?is)\[img\](.*?)\[/img\]`)
+	reZhuqueURL                       = regexp.MustCompile(`https?://[^\s\[\]]+`)
+)
+
+// BuildZhuqueUploadFields 构造朱雀站点（TNode/API）的 multipart 表单字段。
+// 参数/返回：uploadData 为发布 payload；title/subtitle/mediainfo/imdbLink/doubanLink 为最终展示字段；返回可直接提交给 /api/torrent/upload 的字段映射。
+// 失败场景：配置缺失、必需映射字段缺失时返回 error。
+// 副作用：读取运行时 config.json 以决定是否匿名发布。
+func BuildZhuqueUploadFields(uploadData map[string]any, title, subtitle, mediainfo, imdbLink, doubanLink string) (map[string]string, error) {
+	siteCfg, err := publishmapping.LoadSitePublishConfig("zhuque")
+	if err != nil {
+		return nil, err
+	}
+
+	standardized := map[string]any{}
+	if uploadData != nil {
+		if typed, ok := uploadData["standardized_params"].(map[string]any); ok && typed != nil {
+			standardized = typed
+		}
+	}
+
+	category := strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["type"], strings.TrimSpace(toStringAny(standardized["type"], ""))))
+	medium := strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["medium"], strings.TrimSpace(toStringAny(standardized["medium"], ""))))
+	videoCoding := strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["video_codec"], strings.TrimSpace(toStringAny(standardized["video_codec"], ""))))
+	resolution := strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["resolution"], strings.TrimSpace(toStringAny(standardized["resolution"], ""))))
+
+	anonymousUpload := true
+	paths := config.ResolveRuntimePaths()
+	if manager, mgrErr := config.NewManager(paths); mgrErr == nil {
+		root := manager.Get()
+		if uploadSettings, ok := root["upload_settings"].(map[string]any); ok && uploadSettings != nil {
+			anonymousUpload = boolFromAnyWithDefault(uploadSettings["anonymous_upload"], true)
+		}
+	}
+
+	tmdbID, tmdbType := extractZhuqueTMDBInfo(uploadData)
+	screenshots := extractZhuqueScreenshots(uploadData)
+	note := buildZhuqueNote(uploadData, imdbLink, doubanLink)
+	tags := mapZhuqueTagIDs(siteCfg, uploadData, standardized)
+
+	fields := map[string]string{
+		"title":       strings.TrimSpace(title),
+		"subtitle":    strings.TrimSpace(subtitle),
+		"mediainfo":   strings.TrimSpace(mediainfo),
+		"anonymous":   boolToLowerString(anonymousUpload),
+		"confirm":     "true",
+		"category":    category,
+		"medium":      medium,
+		"videoCoding": videoCoding,
+		"resolution":  resolution,
+		"tmdbid":      tmdbID,
+		"tmdbtype":    tmdbType,
+		"zwex":        "0",
+	}
+	if strings.TrimSpace(tags) != "" {
+		fields["tags"] = tags
+	}
+	if strings.TrimSpace(screenshots) != "" {
+		fields["screenshot"] = screenshots
+	}
+	if strings.TrimSpace(note) != "" {
+		fields["note"] = note
+	}
+
+	required := []string{"title", "category", "medium", "videoCoding", "resolution"}
+	missing := make([]string, 0, len(required))
+	for _, key := range required {
+		if strings.TrimSpace(fields[key]) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("缺少必需参数: %v", missing)
+	}
+	return fields, nil
+}
+
+// TryUploadTorrentZhuque 执行朱雀站点（TNode/API）上传请求，解析 JSON 响应并返回详情页与直链下载地址。
+// 参数/返回：baseURL/cookie 为站点信息；fileName/torrentFile 为本地种子；formFields 为 BuildZhuqueUploadFields 输出；
+// 返回发布详情页 URL、直链下载 URL、是否“种子已存在”、本次尝试日志，以及错误。
+// 失败场景：请求失败、响应解析失败、站点返回错误等返回 error。
+// 副作用：发起网络请求（获取 CSRF Token、上传、拉取 torrentKey）。
+func TryUploadTorrentZhuque(baseURL, cookie, fileName string, torrentFile []byte, formFields map[string]string) (string, string, bool, string, error) {
+	normalizedBaseURL := normalizeBaseURL(baseURL)
+	detailLines := []string{
+		"朱雀发布模式: API /api/torrent/upload",
+		fmt.Sprintf("站点地址: %s", normalizedBaseURL),
+	}
+	buildDetail := func() string { return strings.Join(detailLines, "\n") }
+
+	if normalizedBaseURL == "" {
+		err := fmt.Errorf("baseURL 为空")
+		detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+		return "", "", false, buildDetail(), err
+	}
+	if strings.TrimSpace(cookie) == "" {
+		err := fmt.Errorf("cookie 为空")
+		detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+		return "", "", false, buildDetail(), err
+	}
+	if len(torrentFile) == 0 {
+		err := fmt.Errorf("torrent 内容为空")
+		detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+		return "", "", false, buildDetail(), err
+	}
+
+	client := &http.Client{
+		Timeout: 120 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	csrfToken, csrfDetail := fetchZhuqueCSRFToken(client, normalizedBaseURL, cookie)
+	if csrfDetail != "" {
+		detailLines = append(detailLines, csrfDetail)
+	}
+
+	postURL := strings.TrimRight(normalizedBaseURL, "/") + "/api/torrent/upload"
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for key, value := range formFields {
+		_ = writer.WriteField(key, value)
+	}
+	part, err := writer.CreateFormFile("torrent", fileName)
+	if err != nil {
+		detailLines = append(detailLines, fmt.Sprintf("构建上传表单失败: %v", err))
+		return "", "", false, buildDetail(), err
+	}
+	if _, err := part.Write(torrentFile); err != nil {
+		detailLines = append(detailLines, fmt.Sprintf("写入种子内容失败: %v", err))
+		return "", "", false, buildDetail(), err
+	}
+	if err := writer.Close(); err != nil {
+		detailLines = append(detailLines, fmt.Sprintf("封装上传请求失败: %v", err))
+		return "", "", false, buildDetail(), err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, postURL, body)
+	if err != nil {
+		detailLines = append(detailLines, fmt.Sprintf("创建 HTTP 请求失败: %v", err))
+		return "", "", false, buildDetail(), err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("Referer", strings.TrimRight(normalizedBaseURL, "/")+"/torrent/upload")
+	req.Header.Set("Origin", normalizedBaseURL)
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	if strings.TrimSpace(csrfToken) != "" {
+		req.Header.Set("x-csrf-token", strings.TrimSpace(csrfToken))
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		detailLines = append(detailLines, fmt.Sprintf("请求失败: %v", err))
+		return "", "", false, buildDetail(), err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	bodyText := string(respBody)
+	responseDetail := summarizeResponseBody(bodyText)
+	detailLines = append(detailLines, fmt.Sprintf("请求地址: %s", postURL))
+	detailLines = append(detailLines, fmt.Sprintf("响应状态: %d %s", resp.StatusCode, strings.TrimSpace(resp.Status)))
+	if location := strings.TrimSpace(resp.Header.Get("Location")); location != "" {
+		detailLines = append(detailLines, fmt.Sprintf("Location: %s", location))
+	}
+	if responseDetail != "" {
+		detailLines = append(detailLines, fmt.Sprintf("站点响应: %s", responseDetail))
+	}
+
+	existing := false
+	if resp.StatusCode == http.StatusBadRequest {
+		parsed := map[string]any{}
+		if err := json.Unmarshal(respBody, &parsed); err == nil {
+			code := strings.TrimSpace(toStringAny(parsed["code"], ""))
+			if code == "TORRENT_ALREADY_UPLOAD" {
+				existing = true
+				detailLines = append(detailLines, "已存在判定: true (TORRENT_ALREADY_UPLOAD)")
+				logx.Infof(zhuquePublishLogModule, "朱雀发布提示种子已存在")
+				return "", "", existing, buildDetail(), nil
+			}
+			if code != "" {
+				err := fmt.Errorf("站点错误: %s", code)
+				detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+				return "", "", existing, buildDetail(), err
+			}
+		}
+		err := fmt.Errorf("参数错误 (400)")
+		detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+		return "", "", existing, buildDetail(), err
+	}
+	if resp.StatusCode == http.StatusInternalServerError {
+		err := fmt.Errorf("站点内部错误 (500)")
+		detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+		return "", "", existing, buildDetail(), err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		if responseDetail == "" {
+			responseDetail = "<empty response body>"
+		}
+		err := fmt.Errorf("HTTP %d 上传失败: %s", resp.StatusCode, responseDetail)
+		detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+		return "", "", existing, buildDetail(), err
+	}
+
+	respJSON := map[string]any{}
+	if err := json.Unmarshal(respBody, &respJSON); err != nil {
+		// 对齐 Python：部分情况下返回非 JSON 文本，包含 success 字样则按成功处理。
+		if strings.Contains(strings.ToLower(bodyText), "success") {
+			detailLines = append(detailLines, "发布成功，但响应不是 JSON（按 success 文本判定）")
+			return "", "", existing, buildDetail(), nil
+		}
+		detailLines = append(detailLines, fmt.Sprintf("响应解析失败: %v", err))
+		return "", "", existing, buildDetail(), err
+	}
+
+	success := false
+	if status, ok := respJSON["status"].(float64); ok && int(status) == 200 {
+		if data, ok := respJSON["data"].(map[string]any); ok && data != nil {
+			if code := strings.TrimSpace(toStringAny(data["code"], "")); code == "UPLOAD_SUCCESS" {
+				success = true
+			}
+		}
+	}
+	if !success {
+		if code, ok := respJSON["code"].(float64); ok && int(code) == 0 {
+			success = true
+		}
+	}
+	if !success {
+		if flag, ok := respJSON["success"].(bool); ok && flag {
+			success = true
+		}
+	}
+
+	if !success {
+		msg := strings.TrimSpace(toStringAny(respJSON["message"], toStringAny(respJSON["msg"], "未知错误")))
+		if data, ok := respJSON["data"].(map[string]any); ok && data != nil {
+			if nested := strings.TrimSpace(toStringAny(data["message"], "")); nested != "" {
+				msg = nested
+			}
+		}
+		err := fmt.Errorf("发布失败: %s", msg)
+		detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+		return "", "", existing, buildDetail(), err
+	}
+
+	torrentID := ""
+	if data, ok := respJSON["data"].(map[string]any); ok && data != nil {
+		torrentID = strings.TrimSpace(toStringAny(data["id"], ""))
+	}
+	if torrentID == "" {
+		torrentID = strings.TrimSpace(toStringAny(respJSON["id"], ""))
+	}
+	if torrentID == "" {
+		detailLines = append(detailLines, "发布成功，但未获取到 ID")
+		return "", "", existing, buildDetail(), nil
+	}
+
+	publishURL := strings.TrimRight(normalizedBaseURL, "/") + "/torrent/info/" + torrentID
+	detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
+
+	torrentKey, keyDetail := fetchZhuqueTorrentKey(client, normalizedBaseURL, cookie)
+	if keyDetail != "" {
+		detailLines = append(detailLines, keyDetail)
+	}
+	directDownloadURL := ""
+	if strings.TrimSpace(torrentKey) != "" {
+		directDownloadURL = strings.TrimRight(normalizedBaseURL, "/") + "/api/torrent/download/" + neturl.PathEscape(torrentID) + "/" + neturl.PathEscape(strings.TrimSpace(torrentKey))
+		detailLines = append(detailLines, fmt.Sprintf("直链下载: %s", directDownloadURL))
+	}
+	logx.Infof(zhuquePublishLogModule, "朱雀发布成功 torrent_id=%s", torrentID)
+	return publishURL, directDownloadURL, existing, buildDetail(), nil
+}
+
+func fetchZhuqueCSRFToken(client *http.Client, baseURL, cookie string) (string, string) {
+	pageURL := strings.TrimRight(baseURL, "/") + "/torrent/upload"
+	req, err := http.NewRequest(http.MethodGet, pageURL, nil)
+	if err != nil {
+		return "", fmt.Sprintf("获取 CSRF Token 失败: %v", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Cookie", cookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Sprintf("获取 CSRF Token 失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	text := string(body)
+	if resp.StatusCode != http.StatusOK {
+		location := strings.TrimSpace(resp.Header.Get("Location"))
+		if location != "" {
+			return "", fmt.Sprintf("获取 CSRF Token 失败: HTTP %d Location=%s", resp.StatusCode, location)
+		}
+		return "", fmt.Sprintf("获取 CSRF Token 失败: HTTP %d", resp.StatusCode)
+	}
+	token := ""
+	if match := reZhuqueCSRFTokenMetaNameFirst.FindStringSubmatch(text); len(match) >= 2 {
+		token = strings.TrimSpace(match[1])
+	}
+	if token == "" {
+		if match := reZhuqueCSRFTokenMetaContentFirst.FindStringSubmatch(text); len(match) >= 2 {
+			token = strings.TrimSpace(match[1])
+		}
+	}
+	if token == "" {
+		return "", "获取 CSRF Token：页面未找到 x-csrf-token"
+	}
+	return token, "获取 CSRF Token：成功"
+}
+
+func fetchZhuqueTorrentKey(client *http.Client, baseURL, cookie string) (string, string) {
+	apiURL := strings.TrimRight(baseURL, "/") + "/api/user/getSecurityInfo"
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", fmt.Sprintf("获取 torrentKey 失败: %v", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("Referer", strings.TrimRight(baseURL, "/")+"/user/rss")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Sprintf("获取 torrentKey 失败: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Sprintf("获取 torrentKey 失败: HTTP %d", resp.StatusCode)
+	}
+
+	parsed := map[string]any{}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Sprintf("获取 torrentKey 失败: 解析响应异常 %v", err)
+	}
+	if status, ok := parsed["status"].(float64); ok && int(status) != 200 {
+		return "", fmt.Sprintf("获取 torrentKey 失败: API status=%d", int(status))
+	}
+	data, ok := parsed["data"].(map[string]any)
+	if !ok || data == nil {
+		return "", "获取 torrentKey 失败: data 为空"
+	}
+	key := strings.TrimSpace(toStringAny(data["torrentKey"], ""))
+	if key == "" {
+		return "", "获取 torrentKey 失败: 响应缺少 torrentKey"
+	}
+	return key, "获取 torrentKey：成功"
+}
+
+func extractZhuqueTMDBInfo(uploadData map[string]any) (string, string) {
+	tmdbLink := ""
+	if uploadData != nil {
+		tmdbLink = strings.TrimSpace(toStringAny(uploadData["tmdb_link"], ""))
+		if tmdbLink == "" {
+			if intro, ok := uploadData["intro"].(map[string]any); ok && intro != nil {
+				tmdbLink = strings.TrimSpace(toStringAny(intro["tmdb_link"], ""))
+			}
+		}
+	}
+	if tmdbLink == "" {
+		return "", "0"
+	}
+	match := reZhuqueTMDB.FindStringSubmatch(tmdbLink)
+	if len(match) < 3 {
+		return "", "0"
+	}
+	kind := strings.ToLower(strings.TrimSpace(match[1]))
+	id := strings.TrimSpace(match[2])
+	if id == "" {
+		return "", "0"
+	}
+	if kind == "tv" {
+		return id, "1"
+	}
+	return id, "0"
+}
+
+func extractZhuqueScreenshots(uploadData map[string]any) string {
+	intro := map[string]any{}
+	if uploadData != nil {
+		if typed, ok := uploadData["intro"].(map[string]any); ok && typed != nil {
+			intro = typed
+		}
+	}
+	raw := strings.TrimSpace(toStringAny(intro["screenshots"], ""))
+	if raw == "" {
+		return ""
+	}
+
+	matches := reZhuqueImgBBCode.FindAllStringSubmatch(raw, -1)
+	if len(matches) > 0 {
+		urls := make([]string, 0, len(matches))
+		for _, match := range matches {
+			if len(match) < 2 {
+				continue
+			}
+			u := strings.TrimSpace(match[1])
+			if u != "" {
+				urls = append(urls, u)
+			}
+		}
+		return strings.Join(urls, "\n")
+	}
+
+	lines := strings.Split(raw, "\n")
+	urlLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+			if match := reZhuqueURL.FindString(trimmed); match != "" {
+				urlLines = append(urlLines, strings.TrimSpace(match))
+			}
+		}
+	}
+	return strings.Join(urlLines, "\n")
+}
+
+func buildZhuqueNote(uploadData map[string]any, imdbLink, doubanLink string) string {
+	intro := map[string]any{}
+	if uploadData != nil {
+		if typed, ok := uploadData["intro"].(map[string]any); ok && typed != nil {
+			intro = typed
+		}
+	}
+	parts := make([]string, 0, 3)
+	statement := strings.TrimSpace(toStringAny(intro["statement"], ""))
+	if statement != "" {
+		filtered := strings.TrimSpace(reZhuqueBBCode.ReplaceAllString(statement, ""))
+		if filtered != "" {
+			parts = append(parts, filtered)
+		}
+	}
+	if strings.TrimSpace(imdbLink) != "" {
+		parts = append(parts, fmt.Sprintf("资源IMDB链接: %s", strings.TrimSpace(imdbLink)))
+	}
+	if strings.TrimSpace(doubanLink) != "" {
+		parts = append(parts, fmt.Sprintf("资源豆瓣链接: %s", strings.TrimSpace(doubanLink)))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func mapZhuqueTagIDs(siteCfg *publishmapping.SitePublishConfig, uploadData map[string]any, standardized map[string]any) string {
+	tagMapping := map[string]string{}
+	if siteCfg != nil {
+		tagMapping = siteCfg.Mappings["tag"]
+	}
+
+	fallback := map[string]string{
+		"官方":    "601",
+		"禁转":    "602",
+		"国语":    "603",
+		"中字":    "604",
+		"杜比视界":  "611",
+		"杜比":    "611",
+		"HDR10": "613",
+		"HDR":   "613",
+		"特效字幕":  "614",
+		"完结":    "621",
+		"分集":    "622",
+	}
+
+	rawTags := collectZhuqueTags(uploadData, standardized)
+	if len(rawTags) == 0 {
+		return ""
+	}
+
+	tagIDs := make([]string, 0, len(rawTags))
+	seen := map[string]struct{}{}
+	for _, tag := range rawTags {
+		if strings.TrimSpace(tag) == "" {
+			continue
+		}
+		candidates := []string{tag}
+		if strings.HasPrefix(tag, "tag.") {
+			candidates = append(candidates, strings.TrimPrefix(tag, "tag."))
+		} else {
+			candidates = append(candidates, "tag."+tag)
+		}
+
+		mappedID := ""
+		for _, candidate := range candidates {
+			if id, ok := tagMapping[candidate]; ok && strings.TrimSpace(id) != "" {
+				mappedID = strings.TrimSpace(id)
+				break
+			}
+		}
+		if mappedID == "" {
+			trimmed := strings.TrimPrefix(tag, "tag.")
+			mappedID = strings.TrimSpace(fallback[trimmed])
+		}
+		if mappedID == "" {
+			continue
+		}
+		if _, exists := seen[mappedID]; exists {
+			continue
+		}
+		seen[mappedID] = struct{}{}
+		tagIDs = append(tagIDs, mappedID)
+	}
+	if len(tagIDs) == 0 {
+		return ""
+	}
+	sort.Strings(tagIDs)
+	return strings.Join(tagIDs, ",")
+}
+
+func collectZhuqueTags(uploadData map[string]any, standardized map[string]any) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 16)
+
+	appendTags := func(value any) {
+		for _, tag := range parseStringArray(value) {
+			trimmed := strings.TrimSpace(tag)
+			if trimmed == "" {
+				continue
+			}
+			if _, exists := seen[trimmed]; exists {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			out = append(out, trimmed)
+		}
+	}
+
+	appendTags(standardized["tags"])
+	if uploadData != nil {
+		appendTags(uploadData["tags"])
+		if sourceParams, ok := uploadData["source_params"].(map[string]any); ok && sourceParams != nil {
+			appendTags(sourceParams["标签"])
+		}
+	}
+	return out
+}
+
+func boolFromAnyWithDefault(value any, fallback bool) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case int:
+		return typed != 0
+	case int64:
+		return typed != 0
+	case float64:
+		return typed != 0
+	case string:
+		text := strings.ToLower(strings.TrimSpace(typed))
+		if text == "" {
+			return fallback
+		}
+		if text == "true" || text == "1" || text == "yes" || text == "y" {
+			return true
+		}
+		if text == "false" || text == "0" || text == "no" || text == "n" {
+			return false
+		}
+		return fallback
+	default:
+		return fallback
+	}
+}
+
+func boolToLowerString(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
+}

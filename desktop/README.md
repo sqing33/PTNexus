@@ -1,97 +1,47 @@
-# PT Nexus Desktop (Tauri)
+# desktop-go
 
-这个目录是 PT Nexus 的桌面壳工程，负责：
+`desktop-go` 是 PT Nexus 的桌面壳工程（Wails 官方骨架）。
 
-1. 拉起 `background_runner` / `server` / `batch` / `updater` 四个 sidecar。
-2. 启动后自动打开 `http://127.0.0.1:5274`。
-3. 退出时回收后端子进程。
+## 当前阶段
 
-## 推荐构建方式（Linux 一键）
+当前仅执行第一部分：只修改 `desktop-go/`，不改 `server-go/`、`webui-go/`、`updater/`。
 
-在仓库根目录执行：
+当前已完成：
 
-```bash
-bash ./desktop/scripts/build-windows-installer-linux.sh
-```
+1. 保留 Wails 官方骨架结构。
+2. 增加桌面路由分流占位层（`internal/desktopapp`）。
+3. 增加文档与脚本占位（`docs/`、`scripts/`）。
 
-或在 `desktop/` 下执行：
+当前未执行（后续第二部分）：
 
-```bash
-bun run build
-```
+1. 挂接 `server-go` 到 `/api/*`。
+2. 挂接 `updater` 到 `/update/*`。
+3. 接入 `webui-go` 生产构建产物并实现桌面轮询分支。
 
-也可以使用：
+## 执行顺序
 
-```bash
-bun run build:win:x64:installer:linux
-# 或
-bun run win
-```
+1. 先阅读 `Plan.md`。
+2. 先完成第一部分（仅本目录）。
+3. 等其他目录改动窗口可用后，再执行第二部分跨目录接入。
 
-该流程会自动完成：
+## 常用命令
 
-- 构建 `webui/dist`
-- 交叉编译 `batch.exe` / `updater.exe`
-- 同步 `server` 源码到 `desktop/runtime/server`
-- 下载 Windows Python Embed
-- 下载并解压 Windows wheels 到 `runtime/server/python/Lib/site-packages`
-- 下载并注入 Windows `mpv/ffmpeg/ffprobe` 到 `runtime/server/tools`
-- 自动裁剪 `runtime/server/core/bdinfo/linux`（仅保留 Windows BDInfo 工具）
-- 自动准备 NSIS（无 sudo）
-- 生成 Windows 单文件安装包
-
-安装包输出目录：
-
-- `desktop/src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/`
-
-构建完成后会自动复制一份到：
-
-- `desktop/release/PT Nexus_<CHANGELOG最后版本号>_x64-setup.exe`
-
-构建成功后，安装包通常在 **60MB+**（包含 Python 运行时与依赖）。
-如果体积只有几 MB，基本可判定为缺少 runtime 资源。
-
-## 运行目录布局
-
-新安装包会在安装结束后自动把目录平铺为：
-
-- `<安装目录>/server`
-- `<安装目录>/batch`
-- `<安装目录>/updater`
-
-内部仍兼容 `_up_/runtime` 旧布局（若存在会自动回退）。
-
-## 数据库配置
-
-桌面版默认使用 SQLite（安装流程不做数据库配置）。
-
-如需切换 MySQL / PostgreSQL：
-
-1. 在应用内进入“其他设置”卡片，点击“打开数据库配置目录”
-2. 打开目录中的 `runtime.env`（首次启动会自动生成，包含注释示例）
-3. 修改数据库参数并保存
-4. 重启应用
-
-`runtime.env` 中可用变量示例：
-
-- `DB_TYPE=sqlite|mysql|postgresql`
-- `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE`
-- `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DATABASE`
-
-## 其他命令
-
-### 仅编译 Windows exe（不打安装包）
+开发：
 
 ```bash
-cd desktop
-bun run build:win:x64
+cd desktop-go
+wails dev
 ```
 
-### Windows 主机打 NSIS（官方推荐）
+构建：
 
 ```bash
-cd desktop
-bun run build:win:x64:installer
+cd desktop-go
+wails build
 ```
 
-调试提示：若启动白屏后退出，请查看用户数据目录下 `logs/background_runner.stderr.log`、`logs/server.stderr.log`、`logs/batch.stderr.log`、`logs/updater.stderr.log`。
+脚本占位：
+
+1. `scripts/dev-desktop.sh`
+2. `scripts/build-windows.ps1`
+

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "pt-nexus",
+  "outputfilename": "pt-nexus",
+  "frontend:install": "bash ../scripts/install-frontend-from-webui-go.sh",
+  "frontend:build": "bash ../scripts/build-frontend-from-webui-go.sh",
+  "frontend:dev:watcher": "bash ../scripts/dev-frontend-from-webui-go.sh",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "sqing",
+    "email": "1395251710@qq.com"
+  },
+  "info": {
+    "companyName": "PT Nexus",
+    "productName": "PT Nexus"
+  }
+}

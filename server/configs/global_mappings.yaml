@@ -1,0 +1,1243 @@
+# 全局标准化键映射配置
+# 定义从原始文本到标准化键的全局映射规则
+
+global_standard_keys:
+  # 类型映射
+  type:
+    # 电影相关
+    "电影": "category.movie"
+    "Movies电影": "category.movie"
+    "Movies/电影": "category.movie"
+    "电影/Movies": "category.movie"
+    "Movies-3D": "category.movie"
+    "Movie(电影)": "category.movie"
+    "Movie": "category.movie"
+    "Movies": "category.movie"
+    "电影 / Movies": "category.movie"
+
+    # 电视剧相关
+    "电视剧": "category.tv_series"
+    "TV Series电视剧": "category.tv_series"
+    "TV Series/电视剧": "category.tv_series"
+    "连续剧/TV Series": "category.tv_series"
+    "TV Series(电视剧)": "category.tv_series"
+    "TV Series": "category.tv_series"
+    "TVSeries": "category.tv_series"
+    "TV-Episode": "category.tv_series"
+    "TV-Pack": "category.tv_series"
+    "剧集": "category.tv_series"
+    "电视剧 / TV Series": "category.tv_series"
+
+    # 综艺相关
+    "综艺": "category.tv_shows"
+    "TV Shows综艺": "category.tv_shows"
+    "TV Shows/综艺": "category.tv_shows"
+    "综艺/TV Shows": "category.tv_shows"
+    "TV Shows(综艺)": "category.tv_shows"
+    "TV Shows": "category.tv_shows"
+    "脱口秀": "category.tv_shows"
+    "综艺 / TV Shows": "category.tv_shows"
+    "TV-Show": "category.tv_shows"
+    "TVShow": "category.tv_shows"
+    "TVShows": "category.tv_shows"
+
+    # 动漫相关
+    "动漫": "category.animation"
+    "Animations动漫": "category.animation"
+    "Animations/动漫": "category.animation"
+    "动漫/Animations": "category.animation"
+    "Animations/动漫、动画": "category.animation"
+    "Anime(动漫)": "category.animation"
+    "Animation": "category.animation"
+    "Anime": "category.animation"
+    "动画": "category.animation"
+    "动漫 / Animations": "category.animation"
+    "Animations": "category.animation"
+    "Cartoon/少儿动画": "category.cartoon"
+    "儿童": "category.cartoon"
+
+    # 音乐相关
+    "音乐": "category.music"
+    "Music/音乐": "category.music"
+    "音乐/Music": "category.music"
+    "Music(音乐)": "category.music"
+    "Music": "category.music"
+    "Musics": "category.music"
+    "HQ音乐": "category.music"
+    "HQ Audio音乐": "category.music"
+    "HQ Audio/音乐": "category.music"
+    "音乐 / Music": "category.music"
+    "无损音乐": "category.music"
+    "HQ音频": "category.music"
+    "HQ Audio": "category.music"
+
+    # 音乐视频相关
+    "MV": "category.mv"
+    "Music Videos/音乐视频": "category.mv"
+    "演唱会、MV/Music Videos": "category.mv"
+    "MV(演唱)": "category.mv"
+    "MV(音乐视频)": "category.mv"
+    "Music Video": "category.mv"
+    "Music Videos": "category.mv"
+    "Music-Video": "category.mv"
+    "演唱会/音乐会": "category.mv"
+    "MV/演唱会": "category.mv"
+    "Concert": "category.mv"
+    "Concern/演唱会": "category.mv"
+    "音乐 MV": "category.mv"
+
+    # 音频相关
+    "音频": "category.audio"
+    "Audio/音频": "category.audio"
+    "Audio(音频)": "category.audio"
+    "Audio": "category.audio"
+
+    # 有声书相关
+    "有声书": "category.audiobook"
+    "Audiobook": "category.audiobook"
+    "Audiobook/有声书": "category.audiobook"
+    "Audio Books/有声读物": "category.audiobook"
+    "有声书 / Audiobook": "category.audiobook"
+    "Audio(有声)": "category.audiobook"
+
+    # 纪录片相关
+    "纪录片": "category.documentaries"
+    "Documentary": "category.documentaries"
+    "documentary": "category.documentaries"
+    "Record Education/纪录教育": "category.documentaries"
+    "纪录片/Docmentaries": "category.documentaries"
+    "Documentaries(纪录片)": "category.documentaries"
+    "Documentaries纪录片": "category.documentaries"
+    "Documentaries/纪录片": "category.documentaries"
+    "Documentaries": "category.documentaries"
+    "纪录": "category.documentaries"
+    "纪录片 / Documentaries": "category.documentaries"
+    "Docs(纪录)": "category.documentaries"
+    "Drama/戏剧": "category.drama"
+    "Doc": "category.documentaries"
+    "纪录片-传记": "category.documentaries"
+    "偶像": "category.documentaries"
+
+    # 短剧相关
+    "短剧": "category.playlet"
+    "ShortDrama/短剧": "category.playlet"
+    "Playlet/短剧": "category.playlet"
+    "Playlet（短剧）": "category.playlet"
+    "Playlet": "category.playlet"
+    "Short Play": "category.playlet"
+    "短剧/ShortDrama": "category.playlet"
+
+    # 游戏相关
+    "游戏": "category.game"
+    "Game游戏": "category.game"
+    "Game/游戏": "category.game"
+    "Game(游戏)": "category.game"
+    "Game": "category.game"
+
+    # 电子书相关
+    "电子书": "category.ebook"
+    "Ebook/电子书": "category.ebook"
+    "电子书&有声读物/E-book": "category.ebook"
+    "E-Book(电子书/有声书)": "category.ebook"
+    "Ebook": "category.ebook"
+    "书籍": "category.books"
+
+    # 体育相关
+    "体育": "category.sports"
+    "Sports体育": "category.sports"
+    "Sports/体育运动": "category.sports"
+    "Sports(体育)": "category.sports"
+    "Sports": "category.sports"
+
+    # 学习教育相关
+    "学习": "category.study"
+    "Study学习": "category.study"
+    "Study/学习": "category.study"
+    "Education/教育视频": "category.study"
+    "Education(资料)": "category.study"
+
+    # 排行榜相关
+    "TOP250": "category.top250"
+    "TOP100": "category.top100"
+
+    # 软件相关
+    "Software": "category.software"
+    "软件": "category.software"
+    "软件 / Software": "category.software"
+    "APP/软件": "category.software"
+    "software/软件": "category.software"
+    "系统镜像": "category.os"
+
+    # HDArea特有类型
+    "Movie UHD-4K": "category.movie"
+    "Movies Blu-ray": "category.movie"
+    "Movies REMUX": "category.movie"
+    "Movies 3D": "category.movie"
+    "Movies 1080p": "category.movie"
+    "Movies 720p": "category.movie"
+    "Movies DVD": "category.movie"
+    "Movies WEB-DL": "category.movie"
+    "Movies HDTV": "category.movie"
+    "Movies iPad": "category.movie"
+
+    # 其他分类
+    "其他": "category.other"
+    "Others/其他": "category.other"
+    "Misc/其他": "category.other"
+    "Other": "category.other"
+    "Othes/其他": "category.other"
+    "其他 / Misc": "category.other"
+    "Other(其他类型)": "category.other"
+    "Misc": "category.other"
+    "other": "category.other"
+    "文档": "category.document"
+    "Blu-Ray原盘": "category.blu_ray"
+    "OS/系统镜像": "category.os"
+    "舞台演出(Stage Performance)": "category.stage"
+
+  # 媒介映射
+  medium:
+    # 编码相关
+    "Encode": "medium.encode"
+    "Encode TV": "medium.encode"
+    "1080p/i压制": "medium.encode"
+    "720P压制": "medium.encode"
+
+    # 蓝光相关
+    "Blu-ray": "medium.bluray"
+    "BluRay": "medium.bluray"
+    "FHD Blu-ray": "medium.bluray"
+    "BD 原盘": "medium.bluray"
+    "BD Discs": "medium.bluray"
+    "BD原盘": "medium.bluray"
+    "BD DIY": "medium.bluray"
+    "Remux": "medium.remux"
+    "BD Remux": "medium.remux"
+    "Remux TV": "medium.remux"
+
+    # UHD/4K蓝光相关
+    "UHD Blu-ray": "medium.uhd_bluray"
+    "Blu-rayUHD": "medium.uhd_bluray"
+    "UHD": "medium.uhd_bluray"
+    "UHD Discs": "medium.uhd_bluray"
+    "UHD原盘": "medium.uhd_bluray"
+    "UHD DIY": "medium.uhd_diy"
+    "UHD Remux": "medium.remux"
+    "UHD Remux TV": "medium.remux"
+    "UHD 压制": "medium.encode"
+    "UHD压制": "medium.encode"
+
+    # DVD相关
+    "DVD": "medium.dvd"
+    "DVDR": "medium.dvdr"
+    "DVDRip": "medium.dvdr"
+    "HD DVD": "medium.hddvd"
+    "VCD": "medium.vcd"
+
+    # WEB相关
+    "WEB": "medium.webdl"
+    "WEB-DL": "medium.webdl"
+    "WEBRip": "medium.webrip"
+    "WEB-DL/WEBRip": "medium.webdl"
+    "WEB-DL/WEBRip TV": "medium.webdl"
+    "WEB-DL(TV)": "medium.webdl"
+    "FEED": "medium.feed"
+
+    # HDTV相关
+    "HDTV": "medium.hdtv"
+    "TV": "medium.tv"
+    "UHDTV": "medium.uhdtv"
+    "TVRip": "medium.tvrip"
+
+    # 音频相关
+    "CD": "medium.cd"
+    "Track": "medium.track"
+    "SACD": "medium.sacd"
+    "CD+VCD": "medium.cd_vcd"
+    "CD+DVD": "medium.cd_dvd"
+    "黑胶": "medium.vinyl"
+
+    # 其他媒介
+    "MiniBD": "medium.minibd"
+    "MiniSD": "medium.minisd"
+    "BDRip": "medium.bdrip"
+    "其他资料": "medium.other"
+    "Other": "medium.other"
+    "Other/其他": "medium.other"
+
+  # 视频编码映射
+  video_codec:
+    # H.264/AVC相关
+    "H.264": "video.h264"
+    "H.264/AVC": "video.h264"
+    "AVC/H.264/x264": "video.h264"
+    "AVC/H264/x264": "video.h264"
+    "AVC": "video.h264"
+    "h264": "video.h264"
+    "x264": "video.x264"
+    "X264": "video.x264"
+
+    # H.265/HEVC相关
+    "H.265": "video.h265"
+    "H.265/HEVC": "video.h265"
+    "HEVC/H.265/x265": "video.h265"
+    "HEVC/H265/x265": "video.h265"
+    "HEVC": "video.h265"
+    "h265": "video.h265"
+    "x265": "video.x265"
+    "X265": "video.x265"
+    "H.265(HEVC)": "video.h265"
+
+    # 其他编码
+    "H.266/VVC": "video.h266"
+    "AV1": "video.av1"
+    "VP9": "video.vp9"
+    "VP8/9": "video.vp9"
+    "VPB/VP9": "video.vp9"
+    "VC-1": "video.vc1"
+    "MPEG-1": "video.mpeg1"
+    "MPEG-2": "video.mpeg2"
+    "MPEG/MPEG-2": "video.mpeg2"
+    "MPEG-4": "video.mpeg4"
+    "H.261": "video.h261"
+    "Xvid": "video.xvid"
+
+    # 其他
+    "Other": "video.other"
+    "Other/其他": "video.other"
+
+  # 音频编码映射
+  audio_codec:
+    # DTS相关
+    "DTS": "audio.dts"
+    "DTS-HD/DTS": "audio.dts"
+    "DTS-HD": "audio.dts_hd"
+    "DTS-HD MA": "audio.dts_hd_ma"
+    "DTS-HD|MA": "audio.dts_hd_ma"
+    "DTS-HDMA": "audio.dts_hd_ma"
+    "DTS-HDMA:X 7.1": "audio.dts_hd_ma"
+    "DTS-HD HR": "audio.dts_hd_hr"
+    "DTS-HDHRA": "audio.dts_hd_hr"
+    "DTS:X": "audio.dtsx"
+    "DTS-X": "audio.dtsx"
+    "DTS X": "audio.dtsx"
+
+    # AC3/DDP相关
+    "DDP": "audio.ddp"
+    "DDP/E-AC3": "audio.ddp"
+    "DDP/EAC3": "audio.ddp"
+    "DDP/DD+/EAC3": "audio.ddp"
+    "DDP/DD+": "audio.ddp"
+    "DDP Atmos": "audio.ddp_atmos"
+    "E-AC-3": "audio.ddp"
+    "E-AC3": "audio.ddp"
+    "DD": "audio.ac3"
+    "DD/AC3": "audio.ac3"
+    "AC3/DD": "audio.ac3"
+    "Dolby Digital/DD": "audio.ac3"
+    "AC3": "audio.ac3"
+    "AC-3": "audio.ac3"
+    "AC3/EAC3": "audio.ac3"
+
+    # 杜比音频
+    "TrueHD": "audio.truehd"
+    "True-HD": "audio.truehd"
+    "TrueHD Atmos": "audio.truehd_atmos"
+
+    # 无损音频
+    "FLAC": "audio.flac"
+    "APE": "audio.ape"
+    "ALAC": "audio.alac"
+    "WAV": "audio.wav"
+    "LPCM": "audio.lpcm"
+    "LPCM/PCM": "audio.lpcm"
+    "PCM": "audio.pcm"
+    "DSD": "audio.dsd"
+    "TTA": "audio.tta"
+    "TAA": "audio.taa"
+
+    # 有损音频
+    "AAC": "audio.aac"
+    "MP3": "audio.mp3"
+    "MP2/3": "audio.mp3"
+    "OGG": "audio.ogg"
+    "M4A": "audio.m4a"
+    "m4a": "audio.m4a"
+    "MPEG": "audio.mpeg"
+    "Opus": "audio.opus"
+    "OPUS": "audio.opus"
+
+    # 其他音频编码
+    "AV3V": "audio.av3v"
+    "AV3A": "audio.av3a"
+    "AVSA": "audio.avsa"
+
+    # 其他
+    "Other": "audio.other"
+    "Other/其他": "audio.other"
+
+  year:
+    "2025": "year.2025"
+    "2024": "year.2024"
+    "2023": "year.2023"
+    "2022": "year.2022"
+    "2021": "year.2021"
+    "2020": "year.2020"
+    "2019": "year.2019"
+    "2018": "year.2018"
+    "2017": "year.2017"
+    "2016": "year.2016"
+    "Earlier/更早": "year.earlier"
+
+  # 分辨率映射
+  resolution:
+    # 8K分辨率
+    "8K": "resolution.r4320p"
+    "8K/4320p": "resolution.r4320p"
+    "8K/4320P": "resolution.r4320p"
+    "8K/4320p/4320i": "resolution.r4320p"
+    "4320p": "resolution.r4320p"
+    "4320p/8K": "resolution.r4320p"
+
+    # 4K分辨率
+    "4K": "resolution.r2160p"
+    "4K/2160p": "resolution.r2160p"
+    "4K/2160P": "resolution.r2160p"
+    "4K/2160p/2160i": "resolution.r2160p"
+    "4K/UHD/2160P": "resolution.r2160p"
+    "2160p/4K": "resolution.r2160p"
+    "2160p": "resolution.r2160p"
+    "2160P": "resolution.r2160p"
+    "2160p(4k)": "resolution.r2160p"
+
+    # 2K分辨率
+    "2K": "resolution.r1440p"
+    "2K/1440p": "resolution.r1440p"
+    "2K/1440p/1440i": "resolution.r1440p"
+    "1440p": "resolution.r1440p"
+    "1440P": "resolution.r1440p"
+
+    # 1080P分辨率
+    "1080p": "resolution.r1080p"
+    "1080P": "resolution.r1080p"
+    "1080p/i": "resolution.r1080p"
+    "1080p/1080i": "resolution.r1080p"
+
+    # 1080I分辨率
+    "1080i": "resolution.r1080i"
+
+    # 720P分辨率
+    "720p": "resolution.r720p"
+    "720P": "resolution.r720p"
+    "720p/i": "resolution.r720p"
+    "720p/720i": "resolution.r720p"
+
+    # 540P分辨率
+    "540p": "resolution.r540p"
+    "540P": "resolution.r540p"
+
+    # 480P分辨率
+    "480p": "resolution.r480p"
+    "480P": "resolution.r480p"
+    "480p/480i": "resolution.r480p"
+    "SD": "resolution.sd"
+
+    # iPad分辨率
+    "iPad": "resolution.ipad"
+
+    # 其他分辨率
+    "Other": "resolution.other"
+    "Other/其他": "resolution.other"
+
+  # 地区映射（包含产地、区域、处理等字段的统一映射）
+  source:
+    # 中国相关地区
+    "中国": "source.china"
+    "中国大陆": "source.china"
+    "中国（含港澳台）": "source.china"
+    "CN": "source.china"
+    "CN/中国": "source.china"
+    "CN/中国大陆": "source.china"
+    "内地": "source.china"
+    "大陆": "source.china"
+    "Mainland(大陆)": "source.china"
+    "国剧": "source.china"
+    "大陆 (Mainland,CHN)": "source.china"
+    "大陆剧": "source.china"
+    "CN(中国大陆)": "source.china"
+    "China": "source.china"
+
+    "HK/TW(港台)": "source.hongkong_taiwan"
+
+    # 香港
+    "香港": "source.hongkong"
+    "中国香港": "source.hongkong"
+    "HK": "source.hongkong"
+    "香港 (HKG,CHN)": "source.hongkong"
+    "HK/香港": "source.hongkong"
+    "Hongkong(香港)": "source.hongkong"
+    "港剧": "source.hongkong"
+    "Hong Kong": "source.hongkong"
+
+    # 台湾
+    "台湾": "source.taiwan"
+    "中国台湾": "source.taiwan"
+    "TW": "source.taiwan"
+    "TW/台湾": "source.taiwan"
+    "台湾 (TWN,CHN)": "source.taiwan"
+    "Taiwan(台湾)": "source.taiwan"
+    "台剧": "source.taiwan"
+    "Taiwan": "source.taiwan"
+
+    # 美国
+    "美国": "source.western"
+    "US": "source.western"
+    "USA": "source.western"
+    "US/美国": "source.western"
+    "America": "source.western"
+    "欧美": "source.western"
+    "欧美 (Western)": "source.western"
+    "West(欧美)": "source.western"
+    "US/EU(欧美)": "source.western"
+    "美剧": "source.western"
+    "United States of America": "source.western"
+
+    # 日本
+    "日本": "source.japan"
+    "JP": "source.japan"
+    "JPN": "source.japan"
+    "JPN/日本": "source.japan"
+    "日本 (JPN)": "source.japan"
+    "JP(日)": "source.japan"
+    "Japan(日本)": "source.japan"
+    "Japan": "source.japan"
+    "日剧": "source.japan"
+
+    # 韩国
+    "韩国": "source.korea"
+    "KR": "source.korea"
+    "Korea": "source.korea"
+    "Kr/韩国": "source.korea"
+    "韩国 (KOR)": "source.korea"
+    "KR(韩)": "source.korea"
+    "Korea(韩国)": "source.korea"
+    "韩剧": "source.korea"
+    "South Korea": "source.korea"
+
+    # 英国
+    "英国": "source.uk"
+    "UK": "source.uk"
+    "GB": "source.uk"
+    "GB/英国": "source.uk"
+    "UK/英国": "source.uk"
+    "英剧": "source.uk"
+    "United Kingdom": "source.uk"
+
+    # 法国
+    "法国": "source.france"
+    "FR": "source.france"
+    "FR/法国": "source.france"
+    "France": "source.france"
+
+    # 德国
+    "德国": "source.germany"
+    "DE": "source.germany"
+    "DE/德国": "source.germany"
+    "Germany": "source.germany"
+
+    # 其他欧洲国家
+    "欧洲": "source.europe"
+    "EU": "source.europe"
+    "EU/欧洲": "source.europe"
+    "Europe": "source.europe"
+
+    # 印度
+    "印度": "source.india"
+    "IN": "source.india"
+    "IN/印度": "source.india"
+    "印度 (IND)": "source.india"
+    "India(印度)": "source.india"
+    "India": "source.india"
+
+    # 俄罗斯
+    "俄罗斯": "source.russia"
+    "RU": "source.russia"
+    "RU/俄罗斯": "source.russia"
+    "Russia(俄国)": "source.russia"
+    "Russia": "source.russia"
+
+    # 加拿大
+    "加拿大": "source.canada"
+    "CA": "source.canada"
+    "CA/加拿大": "source.canada"
+    "Canada": "source.canada"
+
+    # 巴西
+    "巴西": "source.brazil"
+    "BR": "source.brazil"
+    "BR/巴西": "source.brazil"
+    "Brazil": "source.brazil"
+
+    # 瑞典
+    "瑞典": "source.sweden"
+    "SE": "source.sweden"
+    "SE/瑞典": "source.sweden"
+    "Sweden": "source.sweden"
+
+    # 丹麦
+    "丹麦": "source.denmark"
+    "DK": "source.denmark"
+    "DK/丹麦": "source.denmark"
+    "Denmark": "source.denmark"
+
+    # 泰国
+    "泰国": "source.thailand"
+    "TH": "source.thailand"
+    "TH/泰国": "source.thailand"
+    "Thailand(泰国)": "source.thailand"
+    "Thailand": "source.thailand"
+
+    # 新加坡
+    "新加坡": "source.singapore"
+    "新剧": "source.singapore"
+    "Singapore": "source.singapore"
+
+    # 马来西亚
+    "马来西亚": "source.malaysia"
+    "马剧": "source.malaysia"
+    "Malaysia": "source.malaysia"
+
+    # 意大利
+    "意大利": "source.italy"
+    "IT": "source.italy"
+    "IT/意大利": "source.italy"
+    "Italy": "source.italy"
+
+    # 西班牙
+    "西班牙": "source.spain"
+    "ES": "source.spain"
+    "ES/西班牙": "source.spain"
+    "Spain": "source.spain"
+
+    # 澳大利亚
+    "澳大利亚": "source.australia"
+    "AU": "source.australia"
+    "AU/澳大利亚": "source.australia"
+    "Australia": "source.australia"
+
+    # 其他
+    "其他": "source.other"
+    "Other": "source.other"
+    "Other/其他": "source.other"
+    "Other（其他）": "source.other"
+    "OT(其他)": "source.other"
+    "Other(其他地区)": "source.other"
+
+    # 制作组映射
+  team:
+    # 按字母顺序排列
+    "13City": "team.city13"
+    "52pt": "team.pt52"
+    "7³ACG": "team.7acg"
+    "ADE": "team.ade"
+    "ADWeb": "team.adweb"
+    "AGSVWEB": "team.agsvweb"
+    "AI-Raws": "team.ai-raws"
+    "AilMWeb": "team.ailmweb"
+    "AiMWeb": "team.aimweb"
+    "ANK-Raws": "team.ank-raws"
+    "Audiences": "team.audiences"
+    "Audies": "team.audies"
+    "beAst": "team.beast"
+    "BeiTai": "team.beitai"
+    "BeyondHD": "team.beyondhd"
+    "BMDru": "team.bmdru"
+    "BtsTV": "team.btstv"
+    "BtsHD": "team.btshd"
+    "BTN/NTb": "team.btn"
+    "CafeTV": "team.cafetv"
+    "CafeWEB": "team.cafeweb"
+    "CarPT": "team.carpt"
+    "CBGER": "team.cbger"
+    "CBGWT": "team.cbgwt"
+    "CatEDU": "team.catedu"
+    "CHD": "team.chd"
+    "CHDBits": "team.chdbits"
+    "CHD/CHDBits": "team.chdbits"
+    "CHDWEB": "team.chdweb"
+    "CMCT": "team.cmct"
+    "CornerMV": "team.cornermv"
+    "CSPT": "team.cspt"
+    "CSWEB": "team.csweb"
+    "DBTV": "team.dbtv"
+    "DIC": "team.dic"
+    "DJWEB": "team.djweb"
+    "Dream": "team.dream"
+    "DYZ": "team.dyz"
+    "DYZ-Movie": "team.dyztv"
+    "EPSiLON": "team.epsilon"
+    "FraMeSToR": "team.framestor"
+    "FRDS": "team.frds"
+    "FFansDIY": "team.ffansdiy"
+    "FROG": "team.frog"
+    "FROGE": "team.froge"
+    "FROGWeb": "team.frogweb"
+    "GGN": "team.ggn"
+    "GodDramas": "team.goddramas"
+    "Hares": "team.hares"
+    "HDFans": "team.hdfans"
+    "HDC": "team.hdc"
+    "HDC/HDChina": "team.hdchina"
+    "HDo": "team.hdo"
+    "HDHome": "team.hdhome"
+    "HDH": "team.hdh"
+    "HDHTV": "team.hdhtv"
+    "HDHPad": "team.hdhpad"
+    "HDHWEB": "team.hdhomeweb"
+    "HDK": "team.hdk"
+    "HDKGame": "team.hdkgame"
+    "HDKWeb": "team.hdkweb"
+    "HDS": "team.hds"
+    "HDS/HDSky": "team.hds"
+    "HDSky": "team.hds"
+    "HDTime": "team.hdtime"
+    "HHClub": "team.hhclub"
+    "HHWEB": "team.hhweb"
+    "HSPT": "team.hspt"
+    "HSWEB": "team.hsweb"
+    "jsum@U2": "team.jsum"
+    "Kylin": "team.kylin"
+    "LuckWeb": "team.luckweb"
+    "LuckMusic": "team.luckmusic"
+    "LuckAni": "team.luckani"
+    "LuckDIY": "team.luckdiy"
+    "LuckDocu": "team.luckdocu"
+    "LemonHD": "team.lemonhd"
+    "LHD": "team.lhd"
+    "LittleBakas!": "team.littlebakas"
+    "MARK": "team.mark"
+    "M-team": "team.mteam"
+    "MTeam": "team.mteam"
+    "Moozzi2": "team.moozzi2"
+    "MWeb": "team.mweb"
+    "MySiLU": "team.mysilu"
+    "OpenCD": "team.opencd"
+    "OurBits": "team.ourbits"
+    "Ourbits": "team.ourbits"
+    "OurTV": "team.ourtv"
+    "Pack": "team.pack"
+    "PTChina": "team.ptchina"
+    "PTCafe": "team.ptcafe"
+    "PTHome": "team.pthome"
+    "PTP": "team.ptp"
+    "PTer": "team.pter"
+    "PTerWEB": "team.pterweb"
+    "PTZWeb": "team.ptzweb"
+    "QHstudIo": "team.qhstudio"
+    "rain": "team.rain"
+    "rainweb": "team.rainweb"
+    "Red": "team.red"
+    "RedLeaves": "team.redleaves"
+    "RL": "team.rl"
+    "RL/RL4B": "team.rl"
+    "SewageWeb": "team.sewageweb"
+    "Snow-Raws": "team.snow-raws"
+    "Starfall": "team.starfall"
+    "StarfallWeb": "team.starfallweb"
+    "Sunny": "team.sunny"
+    "SHMA": "team.shma"
+    "Telesto": "team.telesto"
+    "TLF": "team.tlf"
+    "TJUPT": "team.tjupt"
+    "TTG": "team.ttg"
+    "U2": "team.u2"
+    "UBits": "team.ubits"
+    "UBWEB": "team.ubweb"
+    "VCB-Studio": "team.vcb-studio"
+    "WiKi": "team.wiki"
+    "ZmAudio": "team.zmaudio"
+    "ZmMusic": "team.zmmusic"
+    "ZmPT": "team.zmpt"
+    "ZmWeb": "team.zmweb"
+    "原创": "team.original"
+    "Other": "team.other"
+    "Other/其他": "team.other"
+    "REMUX": "team.remux"
+    "CHDTV": "team.chdtv"
+    "CHDPAD": "team.chdpad"
+    "CHDHKTV": "team.chdhktv"
+    "OneHD": "team.onehd"
+    "blucook": "team.blucook"
+    "JKCT": "team.jkct"
+    "Destiny": "team.destiny"
+
+  # 标签映射
+  tag:
+    # 禁转相关标签
+    "独占": "tag.禁转"
+    "禁转": "tag.禁转"
+    "限转": "tag.限转"
+    "限时禁转": "tag.限转"
+    "驻站": "tag.驻站"
+    "去头尾广告纯净版": "tag.去头尾广告纯净版"
+
+    # 内容相关标签
+    "合集": "tag.合集"
+    "分集": "tag.分集"
+    "单集": "tag.单集"
+    "完结": "tag.完结"
+    "原声": "tag.原声"
+    "原盘": "tag.原盘"
+    "原生": "tag.原生"
+    "原生原盘": "tag.原生"
+    "重制": "tag.重制"
+    "自压": "tag.自压"
+    "自译": "tag.自译"
+    "外挂字幕": "tag.外挂字幕"
+    "特效字幕": "tag.特效"
+    "特效": "tag.特效"
+    "DIY纯净版": "tag.DIY"
+    "DIY原盘": "tag.DIY"
+    "DIY": "tag.DIY"
+    "Remux": "tag.Remux"
+    "WEB-DL": "tag.WEB-DL"
+    "动画": "tag.动画"
+    "大包": "tag.大包"
+    "超分": "tag.超分"
+    "补帧": "tag.补帧"
+
+    # 语言相关标签
+    "国配": "tag.国语"
+    "次时代国语": "tag.国语"
+    "全景声国语": "tag.国语"
+    "国语": "tag.国语"
+    "粤语": "tag.粤语"
+    "台配": "tag.台配"
+    "中字": "tag.中字"
+    "英字": "tag.英字"
+    "CC": "tag.cc"
+    "英语": "tag.英语"
+    "日语": "tag.日语"
+    "韩语": "tag.韩语"
+    "法语": "tag.法语"
+    "德语": "tag.德语"
+    "俄语": "tag.俄语"
+    "印地语": "tag.印地语"
+    "西班牙语": "tag.西班牙语"
+    "葡萄牙语": "tag.葡萄牙语"
+    "意大利语": "tag.意大利语"
+    "泰语": "tag.泰语"
+    "阿拉伯语": "tag.阿拉伯语"
+    "外语": "tag.外语"
+
+    # HDR相关标签
+    "HDR10": "tag.HDR"
+    "HDR": "tag.HDR"
+    "HDR10+": "tag.HDR10+"
+    "DoVi+HDR": "tag.杜比"
+    "Dolby Vision": "tag.杜比"
+    "杜比": "tag.杜比"
+    "菁彩HDR": "tag.菁彩HDR"
+    "HLG": "tag.HLG"
+
+    # 视频质量标签
+    "高码率": "tag.高码率"
+    "高帧率": "tag.高帧率"
+    "零魔": "tag.零魔"
+    "DV": "tag.DV"
+    "Blu-ray": "tag.Blu-ray"
+    "4 K": "tag.4K"
+    "3D": "tag.3d"
+    "LIVE现场": "tag.LIVE现场"
+
+    # 类型标签
+    "喜剧": "tag.喜剧"
+    "动作": "tag.动作"
+    "爱情": "tag.爱情"
+    "科幻": "tag.科幻"
+    "恐怖": "tag.恐怖"
+    "惊悚": "tag.惊悚"
+    "悬疑": "tag.悬疑"
+    "犯罪": "tag.犯罪"
+    "战争": "tag.战争"
+    "冒险": "tag.冒险"
+    "奇幻": "tag.奇幻"
+    "家庭": "tag.家庭"
+    "剧情": "tag.剧情"
+    "儿童": "tag.儿童"
+
+    # 其他标签
+    "独家": "tag.独家"
+    "已刮削": "tag.已刮削"
+    "三级": "tag.三级"
+    "VCB-Studio": "tag.vcb_studio"
+    "官组": "tag.官组"
+    "官字": "tag.官字"
+    "柠檬爱原盘": "tag.untouch"
+    "转载": "tag.转载"
+    "Criterion": "tag.Criterion"
+    "default": null
+
+# 默认 title_components 配置
+# 大部分站点都使用这个标准配置，只有个别站点需要覆盖特定字段
+default_title_components:
+  title:
+    source_key: "主标题"
+  season_episode:
+    source_key: "季集"
+  year:
+    source_key: "年份"
+  status:
+    source_key: "剧集状态"
+  edition:
+    source_key: "发布版本"
+  resolution:
+    source_key: "分辨率"
+  frame_rate:
+    source_key: "帧率"
+  platform:
+    source_key: "片源平台"
+  medium:
+    source_key: "媒介"
+  hdr_format:
+    source_key: "HDR格式"
+  video_codec:
+    source_key: "视频编码"
+  video_format:
+    source_key: "视频格式"
+  bit_depth:
+    source_key: "色深"
+  audio_codec:
+    source_key: "音频编码"
+
+# 官组致谢声明配置
+team_acknowledgment:
+  enabled: true
+  template: "[quote][b][color=blue][size=5]{team_name}官组作品，感谢原制作者发布。[/size][/color][/b][/quote]"
+
+  # 排除列表
+  exclude_teams:
+    - "team.other"
+    - ""
+
+  # 检测模式（正则表达式），按优先级顺序检测
+  # 注意：所有模式都限制为第一个 quote 块，且内容长度不超过 max_statement_length
+  detection_patterns:
+    # 优先级 1: 通用声明检测
+    # 根据您的反馈优化，此规则将检测第一个 [quote] 块中是否包含以下任一关键词：
+    # "转自", "感谢", "官组", "作品", "出品", "官方"
+    # 只要匹配到其中一个，并且整个 [quote] 块的长度不超过下面的 max_statement_length (100字符)，
+    # 就会被识别为感谢声明，从而防止重复添加。
+    - pattern: '^\[quote\].*?(转自|感谢|官组|作品|出品|官方).*?\[\/quote\]'
+      priority: 1
+      description: "通用感谢声明检测：匹配包含'转自', '感谢', '官组', '作品'等关键词的简短声明"
+
+  # 官组声明最大长度（字符数，用于验证检测到的内容是否为简短声明）
+  # 正常的官组声明通常在 20-80 字符之间
+  # 超过此长度的 quote 块可能是正文内容，不应被识别为官组声明
+  max_statement_length: 80
+
+  # 关键词检测（作为最后的兜底方案，已基本不需要）
+  # 只在前 300 字符内检测，且必须是独立的短句
+  detection_keywords:
+    - "官组作品"
+    - "官方作品"
+    - "官种"
+    - "Official Release"
+    - "高清杜比"
+
+  # 关键词检测范围（字符数，只检查声明开头的部分）
+  keyword_check_length: 300
+
+# ==============================================================================
+# Content Filtering Configuration (内容过滤配置)
+# ==============================================================================
+
+# 不需要的内容模式（用于过滤ARDTU工具和其他自动发布工具的声明）
+content_filtering:
+  # 启用内容过滤功能
+  enabled: true
+
+  # 不需要的声明和签名模式
+  unwanted_patterns:
+    # ARDTU工具相关
+    - "ARDTU工具自动发布"
+    - "CSAUTO工具自动发布"
+    - "FWAUTO工具自动发布"
+    - "有错误请评论或举报"
+    - "郑重声明："
+    - "本站提供的所有作品均是用户自行搜集并且上传"
+    - "用户自行搜集"
+    - "禁止任何涉及商业盈利目的使用"
+    - "请在下载后24小时内尽快删除"
+    - "自动发布"
+    - "财神CSWEB提供的所有资源均是在网上搜集且由用户上传"
+    - "不可用于任何形式的商业盈利活动"
+    - "网上搜集"
+    - "宽带测试"
+
+    # 工具签名
+    - "| A | By ATU"
+    - "A | By ATU"
+    - "| By ARDTU"
+    - "| ARDTU"
+    - "ARDTU"
+    - "| A"
+    - "By ARDTU"
+    - "By CSAUTO"
+    - "By FWAUTO"
+
+    # 不规范的技术信息标记
+    - ".Release.Info"
+
+  # MediaInfo/BDInfo检测关键词（用于识别技术信息块）
+  mediainfo_keywords:
+    required:
+      - "General"
+      - "Video"
+      - "Audio"
+    optional:
+      - "Complete name"
+      - "File size"
+      - "Duration"
+      - "Overall bit rate"
+      - "Frame rate"
+      - "Width"
+      - "Height"
+
+  bdinfo_keywords:
+    required:
+      - "DISC INFO"
+      - "PLAYLIST REPORT"
+    optional:
+      - "VIDEO:"
+      - "AUDIO:"
+      - "SUBTITLES:"
+      - "FILES:"
+      - "Disc Label"
+      - "Disc Size"
+      - "BDInfo:"
+      - "Protection:"
+      - "Codec"
+      - "Bitrate"
+      - "Language"
+      - "Description"
+
+  # MediaInfo/BDInfo 禁止出现的模式（用于检测无效格式）
+  # 如果文本中包含这些模式，即使关键字匹配也会被判定为无效
+  forbidden_patterns:
+    # BBCode 标签
+    - pattern: "a^"
+      description: "BBCode粗体标签"
+    - pattern: "a^"
+      description: "BBCode颜色标签"
+    - pattern: "a^"
+      description: "BBCode大小标签"
+    - pattern: "a^"
+      description: "BBCode结束标签"
+    - pattern: "a^"
+      description: "BBCode通用标签"
+
+    # 特殊符号
+    - pattern: "★{2,}"
+      description: "连续的星星符号"
+    - pattern: "。{3,}"
+      description: "连续的中文句号"
+    - pattern: "…{2,}"
+      description: "连续的省略号"
+    - pattern: "……{2,}"
+      description: "连续的中文省略号"
+
+  # 技术参数quote检测规则
+  technical_params_detection:
+    # 包含这些组合的quote会被识别为技术参数并过滤
+    patterns:
+      - keywords: [".Release.Info", "ENCODER"]
+        description: "Release.Info格式的技术参数"
+
+      - keywords: ["ENCODER", "RELEASE NAME"]
+        description: "包含编码器和发布名称的技术信息"
+
+      - keywords: [".Release.Info", ".Media.Info"]
+        description: "Release.Info和Media.Info组合"
+
+      - keywords: ["ViDEO CODEC", "AUDiO CODEC"]
+        description: "视频和音频编码器信息"
+
+      - keywords: [".x265.Info", "x265"]
+        description: "x265编码信息"
+
+      - keywords: ["RELEASE.NAME", "VIDEO.CODEC"]
+        description: "发布名称和视频编码"
+
+      - keywords: ["RELEASE NAME", "VIDEO CODEC"]
+        description: "发布名称和视频编码（空格版本）"
+
+      - keywords: ["RELEASE.NAME", "FRAME.RATE"]
+        description: "发布名称和帧率"
+
+      - keywords: ["RELEASE NAME", "FRAME RATE"]
+        description: "发布名称和帧率（空格版本）"
+
+      - keywords: ["SUBTITLES", "RELEASE"]
+        min_dots: 5
+        description: "包含字幕和发布信息的技术参数"
+
+      - keywords: ["GENERAL INFORMATION", "RELEASE"]
+        description: "通用发布信息"
+
+      - keywords: ["GENERAL INFORMATION", "VIDEO"]
+        description: "通用视频信息"
+
+      - keywords: ["COMPARISON", "SOURCE", "ENCODE"]
+        has_underscores: true
+        description: "对比截图说明（Source___Encode格式）"
+
+      - keywords: ["文件名称", "文件体积"]
+        description: "杜比的媒体信息"
+
+      - keywords: ["★★★★★ General Information ★★★★★"]
+        description: "通用视频信息"
+
+  # 对比说明过滤规则
+  comparison_filtering:
+    enabled: true
+    patterns:
+      - "COMPARISON.*RIGHT.*SOURCE.*ENCODE"
+      - "COMPARISON.*CLICK.*SOURCE.*ENCODE"
+      - "SOURCE_{10,}ENCODE" # 至少10个下划线
+
+  # 独立关键词过滤（在简介正文中出现的单独一行的关键词）
+  standalone_keywords_to_remove:
+    - "mediainfo"
+    - "screenshot"
+    - "source"
+    - "encode"
+
+  # 需要过滤的图片URL列表（这些图片会在提取时被自动过滤掉）
+  unwanted_image_urls:
+    - "https://www.hddolby.com/pic/Mediainfo.png"
+    - "https://www.hddolby.com/pic/MoreScreenshot.png"
+    - "https://wawawa.me/team/frogteam.svg"
+    - "https://img93.pixhost.to/images/86/435614074_c5134549f13c2c087d67c9fa4089c49e-removebg-preview.png"
+    - "https://pic.imgdb.cn/item/6170004c2ab3f51d91c7782a.png"
+    # 旧版本的PTer图片URL
+    - "https://pterclub.net/pic/CS.png"
+    - "https://pterclub.net/pic/GDJT.png"
+    - "https://pterclub.net/pic/PTerWEB.png"
+    - "https://pterclub.net/pic/PTer.png"
+    - "https://pterclub.net/pic/PTerDIY.png"
+    - "https://pterclub.net/pic/PTerMV.png"
+    - "https://pterclub.net/pic/PTerTV.png"
+    - "https://pterclub.net/pic/PTerGame.png"
+    # 新版本的PTer图片URL (img子域名)
+    - "https://img.pterclub.net/images/CS.png"
+    - "https://img.pterclub.net/images/GDJT.png"
+    - "https://img.pterclub.net/images/PTerWEB.png"
+    - "https://img.pterclub.net/images/PTer.png"
+    - "https://img.pterclub.net/images/PTerDIY.png"
+    - "https://img.pterclub.net/images/PTerMV.png"
+    - "https://img.pterclub.net/images/PTerTV.png"
+    - "https://img.pterclub.net/images/PTerGame.png"
+
+# ==============================================================================
+# Fallback Strategy Configuration (降级策略配置)
+# ==============================================================================
+
+# Chains for parameter fallback. If a specific parameter is not supported by the
+# target site, the system will try the next parameter in the list.
+# 参数降级链。如果目标站点不支持某个特定参数，系统将尝试列表中的下一个参数。
+fallback_chains:
+  type:
+    "category.mv":
+      - "category.music"
+      - "category.other"
+
+  audio_codec:
+    # Dolby / TrueHD Family
+    "audio.truehd_atmos":
+      - "audio.truehd"
+      - "audio.other"
+    "audio.ddp_atmos":
+      - "audio.ddp"
+      - "audio.ac3"
+      - "audio.other"
+    "audio.ddp":
+      - "audio.ac3"
+      - "audio.other"
+
+    # DTS Family
+    "audio.dtsx":
+      - "audio.dts_hd_ma"
+      - "audio.dts"
+      - "audio.other"
+    "audio.dts_hd_ma":
+      - "audio.dts_hd"
+      - "audio.dts"
+      - "audio.other"
+    "audio.dts_hd_hr":
+      - "audio.dts_hd"
+      - "audio.dts"
+      - "audio.other"
+    "audio.mpeg":
+      - "audio.mp3"
+      - "audio.other"
+
+  video_codec:
+    "video.x265":
+      - "video.h265"
+      - "video.other"
+    "video.x264":
+      - "video.h264"
+      - "video.other"
+
+  medium:
+    "medium.remux":
+      - "medium.other"
+    "medium.uhd_bluray":
+      - "medium.bluray"
+      - "medium.other"
+    "medium.bdrip":
+      - "medium.encode"
+      - "medium.other"
+    "medium.minibd":
+      - "medium.encode"
+      - "medium.other"
+    "medium.webrip":
+      - "medium.encode"
+      - "medium.other"
+
+  tag:
+    "tag.菁彩HDR":
+      - "tag.HDR"
+    "tag.HDR10+":
+      - "tag.HDR"
+
+  resolution:
+    "resolution.r1080i":
+      - "resolution.r1080p"
+    "resolution.r480p":
+      - "resolution.sd"
+    "resolution.r540p":
+      - "resolution.sd"
+    "resolution.sd":
+      - "resolution.r480p"
+
+# General configuration for the fallback mechanism.
+# 降级机制的通用配置。
+fallback_config:
+  # Enable or disable the fallback feature.
+  # 启用或禁用降级功能。
+  enabled: true
+
+  # Log when a fallback occurs.
+  # 发生降级时记录日志。
+  log_fallback: true
+
+  # Maximum depth for a fallback chain to prevent infinite loops.
+  # 降级链的最大深度，以防止无限循环。
+  max_fallback_depth: 5
+
+  # If a fallback chain fails or is not found, use the default value from the mapping.
+  # 如果降级链失败或未找到，则使用映射中的默认值。
+  use_default_on_failure: true

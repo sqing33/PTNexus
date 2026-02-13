@@ -1,6 +1,30 @@
 {
   "history": [
     {
+      "version": "v3.6.4",
+      "date": "2026.02.21",
+      "note": "v3.6.1 版本更新需要重新下载 Docker 镜像",
+      "changes": [
+        "修复：末日无法添加种子到下载器"
+      ]
+    },
+    {
+      "version": "v3.6.3",
+      "date": "2026.02.20",
+      "note": "v3.6.1 版本更新需要重新下载 Docker 镜像",
+      "changes": [
+        "新增：站点设置页面表格排序功能"
+      ]
+    },
+    {
+      "version": "v3.6.2",
+      "date": "2026.02.19",
+      "changes": [
+        "新增：转种目标站点-红豆饭",
+        "优化：推送种子至下载器时的状态显示"
+      ]
+    },
+    {
       "version": "v3.6.1",
       "date": "2026.02.10",
       "note": "注：Win 版本正在测试ing...\n盒子端需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",

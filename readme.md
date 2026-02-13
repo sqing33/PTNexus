@@ -153,9 +153,32 @@ services:
 
 > 通过 Docker 部署的 PT Nexus 支持更新功能，您可以在不重新下载镜像的情况下，直接从 GitHub 与 Gitee 拉取最新代码并应用更新。
 
+> **提示：** 若使用“在线更新”把新代码同步进旧镜像，可能会出现依赖缺失（例如 `supervisord`）导致无法启动。新版启动脚本会在启动时自动检测并尝试安装缺失的系统依赖与 Python 依赖（需要容器以 root 运行且可联网）。如需关闭：
+>
+> - `AUTO_INSTALL_SYSTEM_DEPS=false`（不自动安装系统依赖）
+> - `AUTO_INSTALL_PIP_DEPS=false`（不自动执行 `pip install -r /app/requirements.txt`）
+> - `AUTO_PIP_SYNC_MODE=changed`（仅当 requirements 变化时才执行 pip；默认 `always`）
+
 ![更新](https://img1.pixhost.to/images/10201/661470654_79517501-6fc3-4d37-9f44-440ef15b7ac7.png)
 
 # 更新日志
+
+### v3.6.4（2026.02.21）
+
+> **v3.6.1 版本更新需要重新下载 Docker 镜像**
+
+- 修复：末日无法添加种子到下载器
+
+### v3.6.3（2026.02.20）
+
+> **v3.6.1 版本更新需要重新下载 Docker 镜像**
+
+- 新增：站点设置页面表格排序功能
+
+### v3.6.2（2026.02.19）
+
+- 新增：转种目标站点-红豆饭
+- 优化：推送种子至下载器时的状态显示
 
 ### v3.6.1（2026.02.10）
 

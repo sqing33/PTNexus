@@ -1,0 +1,1383 @@
+<template>
+  <div class="batch-fetch-panel">
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      show-icon
+      :closable="false"
+      center
+      style="margin-bottom: 15px"
+    ></el-alert>
+
+    <!-- 搜索和控制栏 -->
+    <div class="search-and-controls">
+      <el-input
+        v-model="nameSearch"
+        placeholder="搜索名称..."
+        clearable
+        class="search-input"
+        style="width: 300px; margin-right: 15px"
+      />
+
+      <!-- 筛选按钮 -->
+      <el-button type="primary" @click="openFilterDialog" plain style="margin-right: 15px">
+        筛选
+      </el-button>
+      <div
+        v-if="hasActiveFilters"
+        class="current-filters"
+        style="margin-right: 15px; display: flex; align-items: center"
+      >
+        <el-tag type="info" size="default" effect="plain">{{ currentFilterText }}</el-tag>
+        <el-button type="danger" link style="padding: 0; margin-left: 8px" @click="clearFilters"
+          >清除</el-button
+        >
+      </div>
+
+      <!-- 设置优先级按钮 -->
+      <el-button
+        type="warning"
+        @click="openPrioritySettingsDialog"
+        plain
+        style="margin-right: 15px"
+      >
+        <el-icon style="margin-right: 5px">
+          <Setting />
+        </el-icon>
+        设置优先级
+      </el-button>
+
+      <!-- 批量获取按钮 -->
+      <el-button
+        type="success"
+        @click="openBatchFetchDialog"
+        plain
+        style="margin-right: 15px"
+        :disabled="selectedRows.length === 0"
+      >
+        批量获取数据 ({{ selectedRows.length }})
+      </el-button>
+
+      <!-- 查看进度按钮 -->
+      <el-button
+        v-if="currentTaskId"
+        type="info"
+        @click="openProgressDialog"
+        plain
+        style="margin-right: 15px"
+      >
+        查看进度
+      </el-button>
+
+      <div class="pagination-controls" v-if="tableData.length > 0">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[20, 50, 100]"
+          :total="total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+          background
+        >
+        </el-pagination>
+      </div>
+    </div>
+
+    <!-- 种子列表表格 -->
+    <div class="table-container">
+      <el-table
+        :data="tableData"
+        v-loading="loading"
+        border
+        style="width: 100%"
+        empty-text="暂无种子数据"
+        height="100%"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column
+          type="selection"
+          width="55"
+          align="center"
+          header-align="center"
+        ></el-table-column>
+        <el-table-column
+          prop="name"
+          label="种子名称"
+          min-width="400"
+          show-overflow-tooltip
+          header-align="center"
+        ></el-table-column>
+        <el-table-column prop="size" label="大小" width="110" align="center" header-align="center">
+          <template #default="scope">
+            {{ formatBytes(scope.row.size) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="save_path" label="保存路径" width="200" header-align="center">
+          <template #default="scope">
+            <div
+              :title="scope.row.save_path"
+              style="width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+            >
+              {{ shortenPath(scope.row.save_path, 30) }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="site_count"
+          label="站点数"
+          width="100"
+          align="center"
+          header-align="center"
+        >
+          <template #default="scope">
+            {{ Object.keys(scope.row.sites || {}).length }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="state"
+          label="状态"
+          width="120"
+          align="center"
+          header-align="center"
+        ></el-table-column>
+        <el-table-column label="已有源站点" min-width="200" header-align="center">
+          <template #default="scope">
+            <el-tag
+              v-for="(siteData, siteName) in getSourceSites(scope.row.sites)"
+              :key="siteName"
+              size="small"
+              type="success"
+              style="margin: 2px"
+            >
+              {{ siteName }}
+            </el-tag>
+            <span
+              v-if="Object.keys(getSourceSites(scope.row.sites)).length === 0"
+              style="color: #909399"
+            >
+              无可用源站点
+            </span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- 筛选器弹窗 -->
+    <div
+      v-if="filterDialogVisible"
+      class="filter-overlay"
+      @click.self="filterDialogVisible = false"
+    >
+      <el-card class="filter-card">
+        <template #header>
+          <div class="filter-card-header">
+            <span>筛选选项</span>
+            <el-button type="danger" circle @click="filterDialogVisible = false" plain>X</el-button>
+          </div>
+        </template>
+        <div class="filter-card-body">
+          <el-divider content-position="left">保存路径</el-divider>
+          <div class="path-tree-container">
+            <el-tree
+              ref="pathTreeRef"
+              :data="pathTreeData"
+              show-checkbox
+              node-key="path"
+              default-expand-all
+              :expand-on-click-node="false"
+              check-on-click-node
+              :check-strictly="true"
+              :props="{ class: 'path-tree-node' }"
+            />
+          </div>
+
+          <el-divider content-position="left">源站点</el-divider>
+          <el-checkbox-group v-model="tempFilters.sourceSiteAvailability">
+            <el-checkbox label="存在源站点">存在源站点</el-checkbox>
+            <el-checkbox label="无可用源站点">无可用源站点</el-checkbox>
+          </el-checkbox-group>
+
+          <el-divider content-position="left">状态</el-divider>
+          <el-checkbox-group v-model="tempFilters.states">
+            <el-checkbox v-for="state in uniqueStates" :key="state" :label="state">{{
+              state
+            }}</el-checkbox>
+          </el-checkbox-group>
+
+          <el-divider content-position="left">下载器</el-divider>
+          <el-checkbox-group v-model="tempFilters.downloaderIds">
+            <el-checkbox
+              v-for="downloader in downloadersList"
+              :key="downloader.id"
+              :label="downloader.id"
+            >
+              {{ downloader.name }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </div>
+        <div class="filter-card-footer">
+          <el-button @click="filterDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="applyFilters">确认</el-button>
+        </div>
+      </el-card>
+    </div>
+
+    <!-- 批量获取配置弹窗 -->
+    <div v-if="batchFetchDialogVisible" class="modal-overlay">
+      <el-card class="batch-fetch-card" shadow="always">
+        <template #header>
+          <div class="modal-header">
+            <span>批量获取种子数据</span>
+            <el-button type="danger" circle @click="closeBatchFetchDialog" plain>X</el-button>
+          </div>
+        </template>
+        <div class="batch-fetch-content">
+          <div class="config-section">
+            <h3>已选择 {{ selectedRows.length }} 个种子</h3>
+            <p style="color: #909399; font-size: 13px; margin-top: 5px">
+              系统将按名称聚合，逐个从源站点获取种子数据并存储到数据库
+            </p>
+          </div>
+        </div>
+        <div class="batch-fetch-footer">
+          <el-button @click="closeBatchFetchDialog">取消</el-button>
+          <el-button type="primary" @click="startBatchFetch"> 开始批量获取 </el-button>
+        </div>
+      </el-card>
+    </div>
+
+    <!-- 源站点优先级设置弹窗 -->
+    <div v-if="prioritySettingsDialogVisible" class="modal-overlay">
+      <el-card class="priority-settings-card" shadow="always">
+        <template #header>
+          <div class="modal-header">
+            <span>源站点优先级设置</span>
+            <el-button type="danger" circle @click="closePrioritySettingsDialog" plain>X</el-button>
+          </div>
+        </template>
+        <div class="priority-settings-content">
+          <el-alert type="info" show-icon :closable="false" style="margin-bottom: 20px">
+            <template #title>
+              设置批量获取种子数据时的源站点优先级顺序，系统将按顺序查找第一个可用的源站点<br />
+              如果第一个源站点无法获取会按顺序自动切换源站点
+            </template>
+          </el-alert>
+
+          <div class="priority-section">
+            <p style="color: #606266; font-size: 14px; margin-bottom: 10px; font-weight: 600">
+              源站点优先级顺序：
+            </p>
+            <div class="priority-list" v-loading="priorityLoading">
+              <el-tag
+                v-for="(site, index) in sourceSitesOrder"
+                :key="site.name"
+                :type="getSitePriorityType(index)"
+                size="large"
+                draggable="true"
+                @dragstart="handleDragStart(index)"
+                @dragover.prevent
+                @drop="handleDrop(index)"
+                style="margin: 5px; cursor: move; user-select: none"
+              >
+                {{ index + 1 }}. {{ site.name }}
+              </el-tag>
+              <span v-if="sourceSitesOrder.length === 0" style="color: #909399; margin-left: 10px">
+                未配置源站点优先级
+              </span>
+            </div>
+
+            <div class="priority-tip" style="margin-top: 10px; font-size: 12px; color: #909399">
+              拖拽调整优先级顺序，系统将按此顺序查找可用的源站点。
+            </div>
+          </div>
+        </div>
+        <div class="priority-settings-footer">
+          <el-button @click="closePrioritySettingsDialog">取消</el-button>
+          <el-button type="primary" @click="savePrioritySettings" :loading="prioritySaving">
+            保存设置
+          </el-button>
+        </div>
+      </el-card>
+    </div>
+
+    <!-- 进度查看弹窗 -->
+    <div v-if="progressDialogVisible" class="modal-overlay">
+      <el-card class="progress-card" shadow="always">
+        <template #header>
+          <div class="modal-header">
+            <span>批量获取进度 {{ progress.isRunning ? '(进行中...)' : '(已完成)' }}</span>
+            <div class="progress-header-controls">
+              <el-button
+                v-if="progress.isRunning"
+                type="warning"
+                size="small"
+                @click="stopAutoRefresh"
+              >
+                停止自动刷新
+              </el-button>
+              <el-button v-else type="primary" size="small" @click="refreshProgress">
+                刷新
+              </el-button>
+              <el-button type="danger" circle @click="closeProgressDialog" plain>X</el-button>
+            </div>
+          </div>
+        </template>
+        <div class="progress-content">
+          <!-- 进度概览 -->
+          <div class="progress-summary">
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="总数">{{ progress.total }}</el-descriptions-item>
+              <el-descriptions-item label="已处理">{{ progress.processed }}</el-descriptions-item>
+              <el-descriptions-item label="成功">
+                <el-tag type="success" size="small">{{ progress.success }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="失败">
+                <el-tag type="danger" size="small">{{ progress.failed }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="跳过">
+                <el-tag type="info" size="small">{{ progress.skipped }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="状态">
+                <el-tag :type="progress.isRunning ? 'warning' : 'success'" size="small">
+                  {{ progress.isRunning ? '进行中' : '已完成' }}
+                </el-tag>
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <!-- BDInfo 处理状态 -->
+            <div v-if="progress.bdinfo_stats" class="bdinfo-stats">
+              <h4 style="margin: 15px 0 10px 0; font-size: 14px; color: #606266;">BDInfo 处理状态</h4>
+              <el-descriptions :column="3" border size="small">
+                <el-descriptions-item label="处理中">
+                  <el-tag type="warning" size="small">{{ progress.bdinfo_stats.processing }}</el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="已完成">
+                  <el-tag type="success" size="small">{{ progress.bdinfo_stats.completed }}</el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="失败">
+                  <el-tag type="danger" size="small">{{ progress.bdinfo_stats.failed }}</el-tag>
+                </el-descriptions-item>
+              </el-descriptions>
+            </div>
+
+            <el-progress
+              :percentage="progressPercentage"
+              :status="progressStatus"
+              style="margin-top: 15px"
+            />
+          </div>
+
+          <!-- 详细结果列表 -->
+          <el-divider content-position="left">处理详情</el-divider>
+          <div class="results-table-container">
+            <el-table
+              :data="progress.results"
+              style="width: 100%"
+              size="small"
+              stripe
+              max-height="400"
+            >
+              <el-table-column prop="name" label="种子名称" min-width="300" show-overflow-tooltip />
+              <el-table-column prop="status" label="状态" width="100" align="center">
+                <template #default="scope">
+                  <el-tag :type="getResultStatusType(scope.row.status)" size="small">
+                    {{ getResultStatusText(scope.row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="source_site" label="源站点" width="120" align="center" />
+              <el-table-column
+                prop="reason"
+                label="失败原因"
+                min-width="200"
+                show-overflow-tooltip
+              />
+            </el-table>
+          </div>
+        </div>
+        <div class="progress-footer">
+          <el-button @click="closeProgressDialog">关闭</el-button>
+        </div>
+      </el-card>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Setting } from '@element-plus/icons-vue'
+import axios from 'axios'
+import type { ElTree } from 'element-plus'
+
+const emit = defineEmits<{
+  (e: 'cancel'): void
+  (e: 'fetch-completed'): void // 新增：批量获取完成事件
+}>()
+
+interface PathNode {
+  path: string
+  label: string
+  children?: PathNode[]
+}
+
+interface Downloader {
+  id: string
+  name: string
+  enabled?: boolean
+}
+
+interface SiteData {
+  comment: string
+  state: string
+  migration: number
+}
+
+interface Torrent {
+  name: string
+  save_path: string
+  size: number
+  progress: number
+  state: string
+  sites: Record<string, SiteData>
+  downloader_ids: string[]
+}
+
+interface SiteStatus {
+  name: string
+  has_cookie: boolean
+  is_source: boolean
+  is_target: boolean
+}
+
+interface BatchProgress {
+  total: number
+  processed: number
+  success: number
+  failed: number
+  skipped: number
+  isRunning: boolean
+  results: Array<{
+    name: string
+    status: string
+    source_site?: string
+    reason?: string
+  }>
+}
+
+const tableData = ref<Torrent[]>([])
+const loading = ref<boolean>(true)
+const error = ref<string | null>(null)
+
+const selectedRows = ref<Torrent[]>([])
+const batchFetchDialogVisible = ref<boolean>(false)
+const progressDialogVisible = ref<boolean>(false)
+
+// 源站点优先级设置相关
+const prioritySettingsDialogVisible = ref<boolean>(false)
+const priorityLoading = ref<boolean>(false)
+const prioritySaving = ref<boolean>(false)
+const sourceSitesOrder = ref<SiteStatus[]>([])
+const draggedIndex = ref<number | null>(null)
+
+const pathTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
+const pathTreeData = ref<PathNode[]>([])
+const uniquePaths = ref<string[]>([])
+const uniqueStates = ref<string[]>([])
+const downloadersList = ref<Downloader[]>([])
+
+const currentPage = ref<number>(1)
+const pageSize = ref<number>(20)
+const total = ref<number>(0)
+
+const nameSearch = ref<string>('')
+
+const filterDialogVisible = ref<boolean>(false)
+const activeFilters = ref({
+  paths: [] as string[],
+  states: [] as string[],
+  downloaderIds: [] as string[],
+  sourceSiteAvailability: [] as string[],
+})
+const tempFilters = ref({ ...activeFilters.value })
+
+// 任务进度相关
+const currentTaskId = ref<string | null>(null)
+const progress = ref<BatchProgress>({
+  total: 0,
+  processed: 0,
+  success: 0,
+  failed: 0,
+  skipped: 0,
+  isRunning: false,
+  results: [],
+})
+const refreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const REFRESH_INTERVAL = 3000 // 3秒刷新一次
+
+const currentFilterText = computed(() => {
+  const filters = activeFilters.value
+  const filterTexts = []
+
+  if (filters.sourceSiteAvailability && filters.sourceSiteAvailability.length > 0) {
+    filterTexts.push(`源站点: ${filters.sourceSiteAvailability.length}`)
+  }
+
+  if (filters.paths && filters.paths.length > 0) {
+    filterTexts.push(`路径: ${filters.paths.length}`)
+  }
+
+  if (filters.states && filters.states.length > 0) {
+    filterTexts.push(`状态: ${filters.states.length}`)
+  }
+
+  if (filters.downloaderIds && filters.downloaderIds.length > 0) {
+    filterTexts.push(`下载器: ${filters.downloaderIds.length}`)
+  }
+
+  return filterTexts.join(', ')
+})
+
+const hasActiveFilters = computed(() => {
+  const filters = activeFilters.value
+  return (
+    (filters.sourceSiteAvailability && filters.sourceSiteAvailability.length > 0) ||
+    (filters.paths && filters.paths.length > 0) ||
+    (filters.states && filters.states.length > 0) ||
+    (filters.downloaderIds && filters.downloaderIds.length > 0)
+  )
+})
+
+const siteStatuses = ref<SiteStatus[]>([])
+
+const loadSiteStatuses = async () => {
+  try {
+    const response = await axios.get('/api/sites/status')
+    siteStatuses.value = response.data
+  } catch (e: any) {
+    console.error('加载站点状态失败:', e)
+  }
+}
+
+const progressPercentage = computed(() => {
+  if (progress.value.total === 0) return 0
+  return Math.round((progress.value.processed / progress.value.total) * 100)
+})
+
+const progressStatus = computed(() => {
+  if (progress.value.isRunning) return undefined
+  if (progress.value.failed > 0) return 'exception'
+  return 'success'
+})
+
+const buildPathTree = (paths: string[]): PathNode[] => {
+  const root: PathNode[] = []
+  const nodeMap = new Map<string, PathNode>()
+  paths.sort().forEach((fullPath) => {
+    const parts = fullPath.replace(/^\/|\/$/g, '').split('/')
+    let currentPath = ''
+    let parentChildren = root
+    parts.forEach((part, index) => {
+      currentPath = index === 0 ? `/${part}` : `${currentPath}/${part}`
+      if (!nodeMap.has(currentPath)) {
+        const newNode: PathNode = {
+          path: index === parts.length - 1 ? fullPath : currentPath,
+          label: part,
+          children: [],
+        }
+        nodeMap.set(currentPath, newNode)
+        parentChildren.push(newNode)
+      }
+      const currentNode = nodeMap.get(currentPath)!
+      parentChildren = currentNode.children!
+    })
+  })
+  nodeMap.forEach((node) => {
+    if (node.children && node.children.length === 0) {
+      delete node.children
+    }
+  })
+  return root
+}
+
+const fetchData = async () => {
+  loading.value = true
+  error.value = null
+  try {
+    const params = new URLSearchParams({
+      page: currentPage.value.toString(),
+      pageSize: pageSize.value.toString(),
+      nameSearch: nameSearch.value,
+      path_filters: JSON.stringify(activeFilters.value.paths),
+      state_filters: JSON.stringify(activeFilters.value.states),
+      downloader_filters: JSON.stringify(activeFilters.value.downloaderIds),
+      source_availability_filters: JSON.stringify(activeFilters.value.sourceSiteAvailability),
+      exclude_existing: 'true', // 排除已存在于 seed_parameters 表的种子
+      only_completed: 'true', // 只返回下载进度达到100%的种子
+    })
+
+    const response = await axios.get(`/api/data?${params.toString()}`)
+    const result = response.data
+
+    if (!result.error) {
+      // 转换数据格式以匹配现有的 Torrent 接口
+      tableData.value = result.data.map((item: any) => ({
+        name: item.name,
+        save_path: item.save_path,
+        size: item.size,
+        progress: item.progress,
+        state: item.state,
+        sites: item.sites || {},
+        downloader_ids: item.downloader_ids || [],
+      }))
+      total.value = result.total
+
+      // 提取唯一状态（路径现在通过专门的API获取）
+      if (uniqueStates.value.length === 0 || !activeFilters.value.states.length) {
+        uniqueStates.value = [...new Set(tableData.value.map((t: Torrent) => t.state))] as string[]
+      }
+    } else {
+      error.value = result.error || '获取数据失败'
+      ElMessage.error(result.error || '获取数据失败')
+    }
+  } catch (e: any) {
+    error.value = e.message || '网络错误'
+    ElMessage.error(e.message || '网络错误')
+  } finally {
+    loading.value = false
+  }
+}
+
+const fetchDownloadersList = async () => {
+  try {
+    const response = await axios.get('/api/all_downloaders')
+    const allDownloaders = response.data
+    downloadersList.value = allDownloaders.filter((d: any) => d.enabled)
+  } catch (e: any) {
+    error.value = e.message
+  }
+}
+
+const fetchAllPaths = async () => {
+  try {
+    const params = new URLSearchParams({
+      page: '1',
+      page_size: '1', // 只需要获取路径信息，不需要实际数据
+      path_filters: JSON.stringify([]), // 清空路径筛选以获取所有路径
+      state_filters: JSON.stringify([]), // 清空状态筛选
+      downloader_filters: JSON.stringify([]), // 清空下载器筛选
+      source_availability_filters: JSON.stringify([]), // 清空源站点筛选
+    })
+
+    const response = await axios.get(`/api/data?${params.toString()}`)
+    const result = response.data
+
+    if (result.unique_paths) {
+      uniquePaths.value = result.unique_paths
+      pathTreeData.value = buildPathTree(uniquePaths.value)
+    }
+  } catch (e: any) {
+    console.error('获取路径列表失败:', e)
+  }
+}
+
+const handleSizeChange = (val: number) => {
+  pageSize.value = val
+  currentPage.value = 1
+  fetchData()
+}
+
+const handleCurrentChange = (val: number) => {
+  currentPage.value = val
+  fetchData()
+}
+
+const clearFilters = () => {
+  activeFilters.value = {
+    paths: [],
+    states: [],
+    downloaderIds: [],
+    sourceSiteAvailability: [],
+  }
+  nameSearch.value = ''
+  currentPage.value = 1
+
+  // 保存清空的筛选条件到配置
+  saveFiltersToConfig()
+
+  fetchData()
+}
+
+const openFilterDialog = () => {
+  tempFilters.value = { ...activeFilters.value }
+  filterDialogVisible.value = true
+  nextTick(() => {
+    if (pathTreeRef.value && activeFilters.value.paths.length > 0) {
+      pathTreeRef.value.setCheckedKeys(activeFilters.value.paths, false)
+    }
+  })
+}
+
+const applyFilters = () => {
+  if (pathTreeRef.value) {
+    const selectedPaths = pathTreeRef.value.getCheckedKeys(false) as string[]
+    tempFilters.value.paths = selectedPaths
+  }
+
+  activeFilters.value = { ...tempFilters.value }
+  filterDialogVisible.value = false
+  currentPage.value = 1
+
+  // 保存筛选条件到配置
+  saveFiltersToConfig()
+
+  fetchData()
+}
+
+const saveFiltersToConfig = async () => {
+  try {
+    await axios.post('/api/config/batch_fetch_filters', {
+      batch_fetch_filters: activeFilters.value,
+      batch_fetch_name_search: nameSearch.value,
+    })
+  } catch (e: any) {
+    console.error('保存筛选条件失败:', e)
+  }
+}
+
+const loadFiltersFromConfig = async () => {
+  try {
+    const response = await axios.get('/api/config/batch_fetch_filters')
+    const result = response.data
+    if (result.success && result.data) {
+      const defaultFilters = {
+        paths: [] as string[],
+        states: [] as string[],
+        downloaderIds: [] as string[],
+        sourceSiteAvailability: [] as string[],
+      }
+      activeFilters.value = { ...defaultFilters, ...result.data }
+    }
+    // 加载搜索内容
+    if (result.success && result.name_search !== undefined) {
+      nameSearch.value = result.name_search
+    }
+  } catch (e: any) {
+    console.error('加载筛选条件失败:', e)
+  }
+}
+
+const handleSelectionChange = (selection: Torrent[]) => {
+  selectedRows.value = selection
+}
+
+const getSourceSites = (sites: Record<string, SiteData>) => {
+  const sourceSites: Record<string, SiteData> = {}
+  const excludedSites = new Set(["我堡", "OurBits"])
+  for (const [siteName, siteData] of Object.entries(sites || {})) {
+    // 过滤掉被排除的站点
+    if (excludedSites.has(siteName)) continue
+
+    if (
+      (siteData.migration === 1 || siteData.migration === 3) &&
+      siteStatuses.value.find((s) => s.name === siteName)?.has_cookie
+    ) {
+      sourceSites[siteName] = siteData
+    }
+  }
+  return sourceSites
+}
+
+const openBatchFetchDialog = () => {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要获取数据的种子')
+    return
+  }
+  batchFetchDialogVisible.value = true
+}
+
+const closeBatchFetchDialog = () => {
+  batchFetchDialogVisible.value = false
+}
+
+const openPrioritySettingsDialog = async () => {
+  prioritySettingsDialogVisible.value = true
+  await loadPrioritySettings()
+}
+
+const closePrioritySettingsDialog = () => {
+  prioritySettingsDialogVisible.value = false
+}
+
+const loadPrioritySettings = async () => {
+  priorityLoading.value = true
+  try {
+    // 加载所有源站点状态
+    const sitesResponse = await axios.get('/api/sites/status')
+    const allSites = sitesResponse.data
+
+    // 过滤出有cookie的源站点，并排除"我堡"和"OurBits"站点
+    const excludedSites = new Set(["我堡", "OurBits"])
+    const availableSites = allSites.filter((s: SiteStatus) =>
+      s.is_source && s.has_cookie && !excludedSites.has(s.name)
+    )
+
+    // 加载已保存的优先级配置
+    const configResponse = await axios.get('/api/config/source_priority')
+    const configResult = configResponse.data
+    const savedPriority = configResult.success ? configResult.data || [] : []
+
+    // 构建有序的站点列表：首先按保存的优先级排序，然后添加其他站点
+    const orderedSites: SiteStatus[] = []
+    const usedSites = new Set<string>()
+
+    // 先添加按优先级排序的站点
+    savedPriority.forEach((siteName: string) => {
+      // 过滤掉被排除的站点
+      if (excludedSites.has(siteName)) return
+
+      const site = availableSites.find((s: SiteStatus) => s.name === siteName)
+      if (site && !usedSites.has(site.name)) {
+        orderedSites.push(site)
+        usedSites.add(site.name)
+      }
+    })
+
+    // 添加剩余的站点，按原始顺序
+    availableSites.forEach((site: SiteStatus) => {
+      if (!usedSites.has(site.name)) {
+        orderedSites.push(site)
+      }
+    })
+
+    sourceSitesOrder.value = orderedSites
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载配置失败')
+  } finally {
+    priorityLoading.value = false
+  }
+}
+
+const savePrioritySettings = async () => {
+  prioritySaving.value = true
+  try {
+    // 过滤掉被排除的站点后再保存
+    const excludedSites = new Set(["我堡", "OurBits"])
+    const sourcePriority = sourceSitesOrder.value
+      .map((site) => site.name)
+      .filter((siteName) => !excludedSites.has(siteName))
+
+    const response = await axios.post('/api/config/source_priority', {
+      source_priority: sourcePriority,
+    })
+
+    if (response.data.success) {
+      ElMessage.success('源站点优先级配置已保存')
+      closePrioritySettingsDialog()
+    } else {
+      throw new Error(response.data.message || '保存失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存配置失败')
+  } finally {
+    prioritySaving.value = false
+  }
+}
+
+const getSitePriorityType = (index: number) => {
+  if (index === 0) return 'success'
+  if (index === 1) return 'primary'
+  if (index === 2) return 'warning'
+  return 'info'
+}
+
+const handleDragStart = (index: number) => {
+  draggedIndex.value = index
+}
+
+const handleDrop = (dropIndex: number) => {
+  if (draggedIndex.value === null) return
+
+  const draggedItem = sourceSitesOrder.value[draggedIndex.value]
+  sourceSitesOrder.value.splice(draggedIndex.value, 1)
+  sourceSitesOrder.value.splice(dropIndex, 0, draggedItem)
+
+  draggedIndex.value = null
+}
+
+const startBatchFetch = async () => {
+  try {
+    const noSourceCount = selectedRows.value.filter(
+      (row) => Object.keys(getSourceSites(row.sites)).length === 0,
+    ).length
+    if (noSourceCount > 0) {
+      ElMessage.info(
+        `选中 ${noSourceCount} 个无可用源站点的种子，将自动尝试通过 IYUU 批量补全站点信息（如已配置）`,
+      )
+    }
+
+    const torrentNames = selectedRows.value.map((row) => row.name)
+
+    const response = await axios.post('/api/migrate/batch_fetch_seed_data', {
+      torrentNames,
+    })
+
+    const result = response.data
+
+    if (result.success) {
+      currentTaskId.value = result.task_id
+      ElMessage.success('批量获取任务已启动')
+      closeBatchFetchDialog()
+      openProgressDialog()
+    } else {
+      // 处理业务逻辑错误，显示服务器返回的错误信息
+      ElMessage.error(result.message || '批量获取任务启动失败')
+    }
+  } catch (error: any) {
+    // 处理网络错误或其他异常，axios错误可能包含响应信息
+    const errorMessage = error.response?.data?.message || error.message || '网络错误'
+    ElMessage.error(errorMessage)
+  }
+}
+
+const openProgressDialog = () => {
+  progressDialogVisible.value = true
+  startAutoRefresh()
+}
+
+const closeProgressDialog = () => {
+  progressDialogVisible.value = false
+  stopAutoRefresh()
+}
+
+const startAutoRefresh = () => {
+  stopAutoRefresh()
+  refreshProgress()
+
+  refreshTimer.value = setInterval(async () => {
+    if (progressDialogVisible.value && currentTaskId.value) {
+      await refreshProgress()
+
+      if (progress.value && !progress.value.isRunning) {
+        setTimeout(() => {
+          if (!progress.value.isRunning) {
+            stopAutoRefresh()
+          }
+        }, 3000)
+      }
+    } else {
+      stopAutoRefresh()
+    }
+  }, REFRESH_INTERVAL)
+}
+
+const stopAutoRefresh = () => {
+  if (refreshTimer.value) {
+    clearInterval(refreshTimer.value)
+    refreshTimer.value = null
+  }
+}
+
+const refreshProgress = async () => {
+  if (!currentTaskId.value) return
+
+  try {
+    const response = await axios.get(
+      `/api/migrate/batch_fetch_progress?task_id=${currentTaskId.value}`,
+    )
+    const result = response.data
+    if (result.success) {
+      const wasRunning = progress.value.isRunning
+      progress.value = result.progress
+
+      // 添加 BDInfo 处理统计
+      if (progress.value.results && progress.value.results.length > 0) {
+        const bdinfoStats = {
+          processing: progress.value.results.filter(r => 
+            r.bdinfo_status === 'processing_bdinfo' || 
+            (r.mediainfo && r.mediainfo.includes('正在处理 BDInfo'))
+          ).length,
+          completed: progress.value.results.filter(r => 
+            r.bdinfo_status === 'completed' || 
+            (r.mediainfo && r.mediainfo.includes('DISC INFO'))
+          ).length,
+          failed: progress.value.results.filter(r => 
+            r.bdinfo_status === 'failed' || 
+            (r.mediainfo && r.mediainfo.includes('bdinfo提取失败'))
+          ).length
+        }
+        
+        // 更新进度对象中的 BDInfo 统计
+        progress.value.bdinfo_stats = bdinfoStats
+      }
+
+      // 如果任务从运行中变为已完成，触发完成事件
+      if (wasRunning && !progress.value.isRunning) {
+        emit('fetch-completed')
+      }
+    } else {
+      ElMessage.error(result.message || '获取进度失败')
+    }
+  } catch (error: any) {
+    console.error('获取进度时出错:', error)
+  }
+}
+
+const getResultStatusType = (status: string) => {
+  switch (status) {
+    case 'success':
+      return 'success'
+    case 'failed':
+      return 'danger'
+    case 'skipped':
+      return 'info'
+    default:
+      return 'info'
+  }
+}
+
+const getResultStatusText = (status: string) => {
+  switch (status) {
+    case 'success':
+      return '成功'
+    case 'failed':
+      return '失败'
+    case 'skipped':
+      return '跳过'
+    default:
+      return '未知'
+  }
+}
+
+const formatBytes = (bytes: number): string => {
+  if (!bytes || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
+}
+
+const shortenPath = (path: string, maxLength: number = 50) => {
+  if (!path || path.length <= maxLength) {
+    return path
+  }
+
+  // 对于路径，我们尝试保留开头和结尾的部分
+  const halfLength = Math.floor((maxLength - 3) / 2)
+
+  // 确保我们不会在路径分隔符中间截断
+  let start = path.substring(0, halfLength)
+  let end = path.substring(path.length - halfLength)
+
+  // 如果可能的话，尝试在路径分隔符处截断
+  const lastSeparatorInStart = start.lastIndexOf('/')
+  const firstSeparatorInEnd = end.indexOf('/')
+
+  if (lastSeparatorInStart > 0 && firstSeparatorInEnd >= 0) {
+    start = start.substring(0, lastSeparatorInStart)
+    end = end.substring(firstSeparatorInEnd + 1)
+  }
+
+  return `${start}...${end}`
+}
+
+onMounted(async () => {
+  await fetchDownloadersList()
+  await loadFiltersFromConfig()
+  await loadSiteStatuses() // 加载站点状态
+  await fetchAllPaths() // 获取所有路径
+  fetchData()
+})
+
+onUnmounted(() => {
+  stopAutoRefresh()
+})
+
+watch(nameSearch, () => {
+  currentPage.value = 1
+  fetchData()
+  saveFiltersToConfig()
+})
+</script>
+
+<style scoped>
+.batch-fetch-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.search-and-controls {
+  display: flex;
+  align-items: center;
+  padding: 10px 15px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #ebeef5;
+  flex-shrink: 0;
+}
+
+.pagination-controls {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.table-container {
+  flex: 1;
+  overflow: hidden;
+  min-height: 300px;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 3000;
+}
+
+.filter-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 3000;
+}
+
+.filter-card {
+  width: 600px;
+  max-width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.filter-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+:deep(.filter-card .el-card__body) {
+  padding: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.filter-card-body {
+  overflow-y: auto;
+  padding: 10px 15px;
+}
+
+.filter-card-footer {
+  padding: 5px 10px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.path-tree-container {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  padding: 5px;
+  margin-bottom: 20px;
+}
+
+.batch-fetch-card {
+  padding: 10px;
+  max-width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.batch-fetch-card .el-card__body) {
+  padding: 20px;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.batch-fetch-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.batch-fetch-footer {
+  padding: 10px 0 0 0;
+  border-top: 1px solid var(--el-border-color-lighter);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.config-section {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #409eff;
+}
+
+.config-section h3 {
+  margin: 0 0 5px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.priority-settings-card {
+  width: 700px;
+  max-width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0 10px 10px;
+}
+
+:deep(.priority-settings-card .el-card__body) {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.priority-settings-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.priority-settings-footer {
+  padding: 10px 0 0 0;
+  border-top: 1px solid var(--el-border-color-lighter);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.priority-section {
+  margin-top: 15px;
+}
+
+.priority-list {
+  min-height: 80px;
+  padding: 15px;
+  border: 2px dashed #dcdfe6;
+  border-radius: 6px;
+  background-color: #f5f7fa;
+  transition: all 0.3s;
+}
+
+.priority-list:hover {
+  border-color: #409eff;
+  background-color: #ecf5ff;
+}
+
+.available-sites {
+  min-height: 60px;
+  padding: 15px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background-color: #fafafa;
+}
+
+.progress-card {
+  width: 90vw;
+  max-width: 1000px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0 10px 10px;
+}
+
+:deep(.progress-card .el-card__body) {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.progress-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.progress-footer {
+  padding: 10px 0 0 0;
+  border-top: 1px solid var(--el-border-color-lighter);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.progress-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-summary {
+  margin-bottom: 20px;
+}
+
+.results-table-container {
+  margin-top: 15px;
+}
+
+@media (max-width: 768px) {
+  .search-and-controls {
+    gap: 10px;
+  }
+
+  .search-and-controls .search-input {
+    width: 100% !important;
+    margin-right: 0 !important;
+  }
+
+  .search-and-controls :deep(.el-button) {
+    margin-right: 0 !important;
+  }
+
+  .priority-settings-footer,
+  .batch-fetch-footer,
+  .progress-footer,
+  .filter-card-footer {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .progress-header-controls {
+    flex-wrap: wrap;
+  }
+
+  .table-container {
+    overflow: auto;
+  }
+
+  .table-container :deep(.el-table) {
+    min-width: 820px;
+  }
+}
+</style>
