@@ -1478,6 +1478,14 @@ def _migrate_publish_impl(db_manager, data):
         if not original_torrent_path or not os.path.exists(original_torrent_path):
             raise Exception("原始种子文件路径无效或文件不存在。")
 
+        # 注入 HDFans 等站点特殊逻辑所需的源站信息（仅服务端内部使用）
+        try:
+            upload_data["source_site_nickname"] = (source_info or {}).get("nickname", "")
+            upload_data["source_site_code"] = (source_info or {}).get("site", "")
+            upload_data["_db_manager"] = db_manager
+        except Exception:
+            pass
+
         upload_data["torrent_dir"] = torrent_dir  # 确保上传器能获取到 torrent_dir
         result = migrator.publish_prepared_torrent(upload_data, original_torrent_path)
 
@@ -1587,9 +1595,10 @@ def _migrate_publish_impl(db_manager, data):
                         )
 
                         limit_reached = success == "LIMIT_REACHED"
+                        add_ok = success is True
 
                         result["auto_add_result"] = {
-                            "success": not limit_reached,
+                            "success": add_ok and (not limit_reached),
                             "message": message,
                             "sync": True,
                             "downloader_id": downloader_id if not limit_reached else None,
@@ -2230,9 +2239,10 @@ def migrate_publish():
 
                         # 检查是否触发发种限制
                         limit_reached = success == "LIMIT_REACHED"
+                        add_ok = success is True
 
                         result["auto_add_result"] = {
-                            "success": not limit_reached,  # 限制触发时视为失败
+                            "success": add_ok and (not limit_reached),  # 限制触发时视为失败
                             "message": message,
                             "sync": True,
                             "downloader_id": downloader_id if not limit_reached else None,

@@ -46,6 +46,9 @@ handle_error() {
 
 echo "🔨 [pre-commit] 开始智能检测与构建流程..."
 
+# 仓库根目录（兼容包含空格的路径）
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
 # 获取所有已暂存的文件列表
 STAGED_FILES=$(git diff --cached --name-only)
 
@@ -128,7 +131,7 @@ if echo "$STAGED_FILES" | grep -q "^CHANGELOG.json"; then
     echo -e "${YELLOW}📝 检测到 'CHANGELOG.json' 有变更，开始更新文档...${NC}"
 
     # 执行现有的同步脚本
-    (cd /home/sqing/Codes/Docker.pt-nexus-dev && python3 sync_changelog.py) || handle_error "更新文档失败"
+    (cd "$REPO_ROOT" && python3 sync_changelog.py) || handle_error "更新文档失败"
 
     # 暂存更新后的文档
     git add readme.md wiki/docs/index.md

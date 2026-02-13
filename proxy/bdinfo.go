@@ -4,6 +4,9 @@ package main
 import (
 	"bufio"
 	"bytes" // 【新增】需要引入 bytes 包
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -218,7 +221,7 @@ func executeBDInfoWithProgressMonitoring(bdinfoPath string, args []string, taskI
 				}
 				discSizeStr := strings.ReplaceAll(discMatch[1], ",", "")
 				fmt.Printf("[DEBUG] Disc Size: %s bytes\n", discSizeStr)
-				
+
 				// 解析并存储Disc Size
 				if parsedSize, err := strconv.ParseInt(discSizeStr, 10, 64); err == nil {
 					discSize = parsedSize
@@ -254,7 +257,7 @@ func executeBDInfoWithProgressMonitoring(bdinfoPath string, args []string, taskI
 
 				// 更新内存存储中的进度
 				updateProgress(taskID, progressPercent, currentFile, elapsedTime, remainingTime, "running")
-				
+
 				// 发送回调保持不变
 				if callbackURL != "" {
 					sendProgressCallback(callbackURL, taskID, progressPercent, currentFile, elapsedTime, remainingTime)
@@ -324,13 +327,23 @@ func sendProgressCallback(callbackURL, taskID string, progressPercent float64, c
 	}
 
 	progressURL := callbackURL + "/progress"
-	
+
 	// 创建带超时的HTTP客户端
 	client := &http.Client{
 		Timeout: 180 * time.Second, // 180秒超时
 	}
-	
-	resp, err := client.Post(progressURL, "application/json", strings.NewReader(string(jsonData)))
+
+	req, err := http.NewRequest(http.MethodPost, progressURL, strings.NewReader(string(jsonData)))
+	if err != nil {
+		fmt.Printf("创建进度回调请求失败: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key := buildInternalAPIKey(); strings.TrimSpace(key) != "" {
+		req.Header.Set("X-Internal-API-Key", key)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		// 回调失败通常不需要中断主流程，打印错误即可
 		fmt.Printf("发送进度回调失败: %v\n", err)
@@ -359,18 +372,43 @@ func sendCompletionCallback(callbackURL, taskID string, success bool, bdinfoCont
 	}
 
 	completionURL := callbackURL + "/complete"
-	
+
 	// 创建带超时的HTTP客户端
 	client := &http.Client{
 		Timeout: 180 * time.Second, // 180秒超时，完成回调可能数据较大
 	}
-	
-	resp, err := client.Post(completionURL, "application/json", strings.NewReader(string(jsonData)))
+
+	req, err := http.NewRequest(http.MethodPost, completionURL, strings.NewReader(string(jsonData)))
+	if err != nil {
+		fmt.Printf("创建完成回调请求失败: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key := buildInternalAPIKey(); strings.TrimSpace(key) != "" {
+		req.Header.Set("X-Internal-API-Key", key)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("发送完成回调失败: %v\n", err)
 		return
 	}
 	defer resp.Body.Close()
+}
+
+func buildInternalAPIKey() string {
+	secret := os.Getenv("INTERNAL_SECRET")
+	if strings.TrimSpace(secret) == "" {
+		secret = "pt-nexus-2024-secret-key"
+	}
+	currentHour := time.Now().Unix() / 3600
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte("pt-nexus-internal-" + strconv.FormatInt(currentHour, 10)))
+	digest := hex.EncodeToString(mac.Sum(nil))
+	if len(digest) >= 16 {
+		digest = digest[:16]
+	}
+	return strings.TrimSpace(digest)
 }
 
 // bdinfoHandler 处理BDInfo提取请求
@@ -427,12 +465,12 @@ func bdinfoHandler(w http.ResponseWriter, r *http.Request) {
 		if callbackURL != "" {
 			sendProgressCallback(callbackURL, taskID, 0, "开始处理", "0s", "估算中...")
 		}
-		
+
 		updateProgress(taskID, 5, "初始化BDInfo", "1s", "估算中...", "running")
 		if callbackURL != "" {
 			sendProgressCallback(callbackURL, taskID, 5, "初始化BDInfo", "1s", "估算中...")
 		}
-		
+
 		bdinfoContent, err := extractBDInfoWithProgress(remotePath, taskID, callbackURL)
 		if err != nil {
 			fmt.Printf("BDInfo异步请求: 提取失败 '%s': %v\n", remotePath, err)
@@ -450,7 +488,7 @@ func bdinfoHandler(w http.ResponseWriter, r *http.Request) {
 			sendCompletionCallback(callbackURL, taskID, true, strings.TrimSpace(bdinfoContent), "")
 		}
 	}()
-	
+
 	writeJSONResponse(w, r, http.StatusOK, BDInfoResponse{
 		Success: true,
 		Message: "BDInfo任务已提交，正在异步处理",
@@ -524,7 +562,7 @@ func filterEmptyLines(content string) string {
 func updateProgress(taskID string, progressPercent float64, currentFile, elapsedTime, remainingTime, status string) {
 	progressMutex.Lock()
 	defer progressMutex.Unlock()
-	
+
 	if task, exists := progressStore[taskID]; exists {
 		task.ProgressPercent = progressPercent
 		task.CurrentFile = currentFile
@@ -538,7 +576,7 @@ func updateProgress(taskID string, progressPercent float64, currentFile, elapsed
 func updateDiscSize(taskID string, discSize int64) {
 	progressMutex.Lock()
 	defer progressMutex.Unlock()
-	
+
 	if task, exists := progressStore[taskID]; exists {
 		task.DiscSize = discSize
 	}
@@ -548,7 +586,7 @@ func updateDiscSize(taskID string, discSize int64) {
 func createTask(taskID string) {
 	progressMutex.Lock()
 	defer progressMutex.Unlock()
-	
+
 	progressStore[taskID] = &BDInfoTaskStatus{
 		TaskID:          taskID,
 		ProgressPercent: 0.0,
@@ -564,7 +602,7 @@ func createTask(taskID string) {
 func completeTask(taskID string, success bool, bdinfoContent, errorMessage string) {
 	progressMutex.Lock()
 	defer progressMutex.Unlock()
-	
+
 	if task, exists := progressStore[taskID]; exists {
 		task.EndTime = time.Now()
 		if success {
@@ -582,7 +620,7 @@ func completeTask(taskID string, success bool, bdinfoContent, errorMessage strin
 func getTask(taskID string) (*BDInfoTaskStatus, bool) {
 	progressMutex.RLock()
 	defer progressMutex.RUnlock()
-	
+
 	task, exists := progressStore[taskID]
 	return task, exists
 }
@@ -597,7 +635,7 @@ func bdinfoProgressHandler(w http.ResponseWriter, r *http.Request) {
 	// 从URL路径中提取taskID
 	path := strings.TrimPrefix(r.URL.Path, "/api/media/bdinfo/progress/")
 	taskID := strings.TrimSuffix(path, "/")
-	
+
 	if taskID == "" {
 		writeJSONResponse(w, r, http.StatusBadRequest, BDInfoResponse{Success: false, Message: "task_id 不能为空"})
 		return
@@ -614,7 +652,7 @@ func bdinfoProgressHandler(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"task":    task,
 	}
-	
+
 	writeJSONResponse(w, r, http.StatusOK, response)
 }
 

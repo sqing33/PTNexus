@@ -15,7 +15,7 @@
       </el-form>
       <p class="tip">
         Docker 端初始随机密码请查看容器日志；<br>Windows 端初始密码请查看
-        %APPDATA%\com.ptnexus.desktop\logs\server.stderr.log 对应日志文件。
+        %APPDATA%\com.ptnexus.desktop\logs\server.stderr.log <br>对应日志文件。
       </p>
     </el-card>
   </div>

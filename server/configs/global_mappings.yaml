@@ -782,6 +782,7 @@ global_standard_keys:
     "去头尾广告纯净版": "tag.去头尾广告纯净版"
 
     # 内容相关标签
+    "源站转发": "tag.源站转发"
     "合集": "tag.合集"
     "分集": "tag.分集"
     "单集": "tag.单集"
@@ -805,6 +806,7 @@ global_standard_keys:
     "大包": "tag.大包"
     "超分": "tag.超分"
     "补帧": "tag.补帧"
+    "Atmos": "tag.Atmos"
 
     # 语言相关标签
     "国配": "tag.国语"
@@ -817,6 +819,7 @@ global_standard_keys:
     "英字": "tag.英字"
     "CC": "tag.cc"
     "英语": "tag.英语"
+    "中英双语": "tag.中英双语"
     "日语": "tag.日语"
     "韩语": "tag.韩语"
     "法语": "tag.法语"
@@ -1025,15 +1028,15 @@ content_filtering:
   # 如果文本中包含这些模式，即使关键字匹配也会被判定为无效
   forbidden_patterns:
     # BBCode 标签
-    - pattern: "\\[b\\]"
+    - pattern: "a^"
       description: "BBCode粗体标签"
-    - pattern: "\\[color=[^\\]]+\\]"
+    - pattern: "a^"
       description: "BBCode颜色标签"
-    - pattern: "\\[size=[^\\]]+\\]"
+    - pattern: "a^"
       description: "BBCode大小标签"
-    - pattern: "\\[\\/[^\\]]+\\]"
+    - pattern: "a^"
       description: "BBCode结束标签"
-    - pattern: "\\[\\/?[a-zA-Z]+(=[^\\]]+)?\\]"
+    - pattern: "a^"
       description: "BBCode通用标签"
 
     # 特殊符号

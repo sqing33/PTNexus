@@ -64,9 +64,24 @@
         class="settings-table glass-table"
         height="100%"
         :row-class-name="getRowClassName"
+        @sort-change="handleSortChange"
+        :default-sort="defaultSort"
       >
-        <el-table-column prop="nickname" label="站点昵称" width="100" sortable />
-        <el-table-column label="支持" width="100" align="center">
+        <el-table-column
+          prop="nickname"
+          label="站点昵称"
+          width="100"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        />
+        <el-table-column
+          prop="support_role"
+          label="支持"
+          width="100"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="scope">
             <span v-if="getSiteRole(scope.row) === 'both'" class="role-tag role-both">
               源站/目标站
@@ -79,10 +94,37 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="site" label="站点标识" width="100" show-overflow-tooltip />
-        <el-table-column prop="base_url" label="基础URL" width="150" show-overflow-tooltip />
-        <el-table-column prop="group" label="官组" show-overflow-tooltip />
-        <el-table-column label="限速" width="100" align="center">
+        <el-table-column
+          prop="site"
+          label="站点标识"
+          width="100"
+          show-overflow-tooltip
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        />
+        <el-table-column
+          prop="base_url"
+          label="基础URL"
+          width="150"
+          show-overflow-tooltip
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        />
+        <el-table-column
+          prop="group"
+          label="官组"
+          show-overflow-tooltip
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        />
+        <el-table-column
+          prop="speed_limit"
+          label="限速"
+          width="100"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="scope">
             <div
               style="
@@ -103,7 +145,14 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="分享率阈值" width="110" align="center">
+        <el-table-column
+          prop="ratio_threshold"
+          label="分享率阈值"
+          width="120"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="scope">
             <el-tag v-if="scope.row.ratio_threshold" size="small" type="warning">
               ≥ {{ scope.row.ratio_threshold }}
@@ -111,7 +160,14 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="出种限速" width="110" align="center">
+        <el-table-column
+          prop="seed_speed_limit"
+          label="出种限速"
+          width="110"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="scope">
             <el-tag
               v-if="scope.row.ratio_threshold && scope.row.seed_speed_limit !== null"
@@ -123,7 +179,14 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="Cookie" width="100" align="center">
+        <el-table-column
+          prop="has_cookie"
+          label="Cookie"
+          width="100"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="scope">
             <el-tag v-if="scope.row.site === 'rousi'" type="info"> 无需配置 </el-tag>
             <el-tag v-else :type="scope.row.has_cookie ? 'success' : 'danger'">
@@ -131,7 +194,14 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Passkey" width="100" align="center">
+        <el-table-column
+          prop="has_passkey"
+          label="Passkey"
+          width="100"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="scope">
             <el-tag
               v-if="['hddolby', 'm-team', 'hdtime', 'rousi'].includes(scope.row.site)"
@@ -294,6 +364,17 @@ const cookieCloudForm = ref({ url: '', key: '', e2e_password: '' })
 const searchQuery = ref('')
 const siteFilter = ref('existing_supported')
 
+// --- 排序状态 ---
+const sortState = ref({
+  prop: 'support_role',
+  order: 'ascending',
+})
+
+const defaultSort = computed(() => ({
+  prop: sortState.value.prop,
+  order: sortState.value.order,
+}))
+
 // --- 分页状态 ---
 const pagination = ref({
   currentPage: 1,
@@ -360,6 +441,84 @@ const shouldHighlightIncompleteConfig = computed(() =>
   ['existing_supported', 'supported'].includes(siteFilter.value),
 )
 
+const normalizeString = (value) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+
+const compareStrings = (a, b) => {
+  const aText = normalizeString(a)
+  const bText = normalizeString(b)
+  if (!aText && !bText) return 0
+  if (!aText) return 1
+  if (!bText) return -1
+  return aText.localeCompare(bText, 'zh-CN', { numeric: true, sensitivity: 'base' })
+}
+
+const compareNullableNumbers = (a, b) => {
+  const aNull = a === null || a === undefined
+  const bNull = b === null || b === undefined
+  const aNumber = aNull ? NaN : Number(a)
+  const bNumber = bNull ? NaN : Number(b)
+  const aInvalid = aNull || Number.isNaN(aNumber)
+  const bInvalid = bNull || Number.isNaN(bNumber)
+  if (aInvalid && bInvalid) return 0
+  if (aInvalid) return 1
+  if (bInvalid) return -1
+  return aNumber - bNumber
+}
+
+const getSupportRank = (site) => {
+  const role = getSiteRole(site)
+  if (role === 'both') return 0
+  if (role === 'source') return 1
+  if (role === 'target') return 2
+  return 3
+}
+
+const getCookieSortKey = (site) => {
+  if (site?.site === 'rousi') return 2 // 无需配置，放在已配置之后
+  return site?.has_cookie ? 1 : 0
+}
+
+const getPasskeySortKey = (site) => {
+  const needsPasskey = ['hddolby', 'm-team', 'hdtime', 'rousi'].includes(site?.site)
+  if (!needsPasskey) return 2 // 自动获取，放在已配置之后
+  return site?.has_passkey ? 1 : 0
+}
+
+const compareByProp = (a, b, prop) => {
+  switch (prop) {
+    case 'nickname':
+      return compareStrings(a?.nickname, b?.nickname)
+    case 'support_role':
+      return getSupportRank(a) - getSupportRank(b)
+    case 'site':
+      return compareStrings(a?.site, b?.site)
+    case 'base_url':
+      return compareStrings(a?.base_url, b?.base_url)
+    case 'group':
+      return compareStrings(a?.group, b?.group)
+    case 'speed_limit':
+      return compareNullableNumbers(a?.speed_limit, b?.speed_limit)
+    case 'ratio_threshold':
+      return compareNullableNumbers(a?.ratio_threshold, b?.ratio_threshold)
+    case 'seed_speed_limit':
+      return compareNullableNumbers(a?.seed_speed_limit, b?.seed_speed_limit)
+    case 'has_cookie':
+      return getCookieSortKey(a) - getCookieSortKey(b)
+    case 'has_passkey':
+      return getPasskeySortKey(a) - getPasskeySortKey(b)
+    default:
+      return 0
+  }
+}
+
+const applySortOrder = (compareResult, order) => {
+  if (!order) return 0
+  return order === 'descending' ? -compareResult : compareResult
+}
+
 // 1. 先根据前端搜索框进行过滤
 const filteredSites = computed(() => {
   let sites = sitesList.value || []
@@ -387,31 +546,60 @@ const filteredSites = computed(() => {
     })
   }
 
-  if (!shouldHighlightIncompleteConfig.value) return sites
+  return sites
+})
 
-  // 将缺少 Cookie /（手动站点缺少 Passkey） 的站点置顶显示
-  return sites.slice().sort((a, b) => {
-    const aIncomplete = isSiteConfigComplete(a) ? 0 : 1
-    const bIncomplete = isSiteConfigComplete(b) ? 0 : 1
-    if (aIncomplete !== bIncomplete) return bIncomplete - aIncomplete
-    return String(a?.nickname || '').localeCompare(String(b?.nickname || ''))
+// 2. 再根据排序规则对过滤后的结果进行排序
+const sortedSites = computed(() => {
+  const sites = (filteredSites.value || []).slice()
+
+  return sites.sort((a, b) => {
+    if (shouldHighlightIncompleteConfig.value) {
+      const aIncomplete = isSiteConfigComplete(a) ? 0 : 1
+      const bIncomplete = isSiteConfigComplete(b) ? 0 : 1
+      if (aIncomplete !== bIncomplete) return bIncomplete - aIncomplete
+    }
+
+    const { prop, order } = sortState.value || {}
+    const hasUserSort = Boolean(prop && order)
+
+    if (hasUserSort) {
+      const result = compareByProp(a, b, prop)
+      const ordered = applySortOrder(result, order)
+      if (ordered !== 0) return ordered
+    } else {
+      const result = compareByProp(a, b, 'support_role')
+      if (result !== 0) return result
+    }
+
+    const nicknameTie = compareByProp(a, b, 'nickname')
+    if (nicknameTie !== 0) return nicknameTie
+
+    return compareByProp(a, b, 'site')
   })
 })
 
-// 2. 再根据分页信息对过滤后的结果进行切片
+// 3. 再根据分页信息对排序后的结果进行切片
 const paginatedSites = computed(() => {
-  // 更新分页的总数
-  pagination.value.total = filteredSites.value.length
+  pagination.value.total = sortedSites.value.length
 
   const start = (pagination.value.currentPage - 1) * pagination.value.pageSize
   const end = start + pagination.value.pageSize
-  return filteredSites.value.slice(start, end)
+  return sortedSites.value.slice(start, end)
 })
 
 // 监听搜索词变化，如果变化则返回第一页
 watch(searchQuery, () => {
   pagination.value.currentPage = 1
 })
+
+const handleSortChange = ({ prop, order }) => {
+  sortState.value = {
+    prop: prop || 'support_role',
+    order: order || 'ascending',
+  }
+  pagination.value.currentPage = 1
+}
 
 onMounted(() => {
   fetchCookieCloudSettings()

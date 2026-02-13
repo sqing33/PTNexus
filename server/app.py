@@ -29,7 +29,6 @@ logging.basicConfig(
 logging.info("=== Flask 应用日志系统已初始化 ===")
 
 
-
 def cleanup_old_tmp_structure():
     """
     清理旧的 tmp 目录结构，只保留：
@@ -38,7 +37,7 @@ def cleanup_old_tmp_structure():
     删除其他所有文件和目录（包括 extracted_data）
 
     清理 BDInfo 目录下的 .log 文件：
-    - 开发环境：/home/sqing/Codes/Docker.pt-nexus-dev/server/core/bdinfo/
+    - 开发环境：/home/sqing/Codes/PTNexus/server/core/bdinfo/
     - 生产环境：/app/bdinfo/
     """
     # 检查是否为开发环境
@@ -145,7 +144,6 @@ def cleanup_old_tmp_structure():
         import traceback
 
         traceback.print_exc()
-
 
 
 def initialize_db_manager() -> DatabaseManager:
@@ -524,6 +522,7 @@ def create_app():
             ),
             200,
         )
+
     # 后台线程服务与启动时刷新任务已移到 background_runner 中执行。
 
     # --- 步骤 7: 配置前端静态文件服务 ---
@@ -541,7 +540,6 @@ def create_app():
 
     logging.info("应用设置完成，准备好接收请求。")
     return app
-
 
 
 # --- 程序主入口 ---

@@ -2103,6 +2103,9 @@ const startBDInfoSSE = () => {
   // 关闭之前的连接
   stopBDInfoSSE(false)
 
+  // 重置原盘体积，避免沿用上一次任务的值
+  discSize.value = 0
+
   // 显示进度条
   bdinfoProgress.value = {
     visible: true,
@@ -2271,6 +2274,11 @@ const requestCurrentProgress = async () => {
     if (response.data && response.data.task_status) {
       const taskStatus = response.data.task_status
       console.log('获取到当前进度状态:', taskStatus)
+
+      // 回填原盘体积（byte）
+      if (taskStatus.disc_size) {
+        discSize.value = taskStatus.disc_size
+      }
 
       // 如果任务正在进行中，更新进度显示
       if (taskStatus.status === 'processing_bdinfo') {
@@ -4611,10 +4619,10 @@ const nextButtonTooltipContent = computed(() => {
 const _hasForbiddenPatterns = (text: string): boolean => {
   const forbiddenPatterns = [
     // BBCode 标签
-    { pattern: /\[b\]/, description: 'BBCode粗体标签' },
-    { pattern: /\[color=[^\]]+\]/, description: 'BBCode颜色标签' },
-    { pattern: /\[size=[^\]]+\]/, description: 'BBCode大小标签' },
-    { pattern: /\[\/[^\]]+\]/, description: 'BBCode结束标签' },
+    { pattern: /a^/, description: 'BBCode粗体标签' },
+    { pattern: /a^/, description: 'BBCode颜色标签' },
+    { pattern: /a^/, description: 'BBCode大小标签' },
+    { pattern: /a^/, description: 'BBCode结束标签' },
 
     // 特殊符号
     { pattern: /★{2,}/, description: '连续的星星符号' },

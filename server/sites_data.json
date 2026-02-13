@@ -355,7 +355,7 @@
     "special_tracker_domain": null,
     "group": "-HDFans",
     "description": "HDFans",
-    "migration": 0,
+    "migration": 2,
     "speed_limit": 10
   },
   {
@@ -570,7 +570,7 @@
   {
     "site": "agsv",
     "nickname": "末日",
-    "base_url": "www.agsvpt.com",
+    "base_url": "pt.agsvpt.cn",
     "special_tracker_domain": null,
     "group": "-AGSVWEB,-AGSVMUS,-AGSVPT,-AGSVMUSIC",
     "description": "AGSV",

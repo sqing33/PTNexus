@@ -301,14 +301,46 @@ def validate_media_info_format(mediaInfo: str):
 
     # 检查禁止模式（只在关键字验证通过后才检查）
     if is_mediainfo or is_bdinfo:
+        # 一些 MediaInfo 字段的值可能包含类似 “[Windows]” 这样的中括号标记，
+        # 这并不是 BBCode，但会被通用 BBCode 正则误判。对这些字段放宽检测。
+        bracket_allowed_fields = {
+            "complete name",
+            "movie name",
+            "writing application",
+            "writing library",
+            "encoded date",
+            "unique id",
+        }
+
+        def _is_bracket_allowed_line(line: str) -> bool:
+            if not line or ":" not in line:
+                return False
+            field_name = line.split(":", 1)[0].strip().lower()
+            return field_name in bracket_allowed_fields
+
         for pattern_item in forbidden_patterns_list:
             pattern = pattern_item.get("pattern", "")
             if pattern:
                 try:
+                    description = pattern_item.get("description", pattern)
+
+                    # 对 BBCode 通用/结束标签做逐行过滤，避免把 MediaInfo 的工具标记误判成 BBCode。
+                    # 兼容：description 可能不存在或被修改，因此也匹配对应的正则 pattern。
+                    is_generic_bbcode = description in {"BBCode通用标签", "BBCode结束标签"} or pattern in {
+                        "\\[\\/?[a-zA-Z]+(=[^\\]]+)?\\]",
+                        "\\[\\/[^\\]]+\\]",
+                    }
+                    if is_generic_bbcode:
+                        for line in mediaInfo.splitlines():
+                            if _is_bracket_allowed_line(line):
+                                continue
+                            if re.search(pattern, line):
+                                print(f"检测到禁止模式: {description}")
+                                return (False, False, 0, 0, 0, 0)
+                        continue
+
                     if re.search(pattern, mediaInfo):
-                        description = pattern_item.get("description", pattern)
                         print(f"检测到禁止模式: {description}")
-                        # 如果检测到禁止模式，返回无效
                         return (False, False, 0, 0, 0, 0)
                 except re.error as e:
                     print(f"正则表达式错误: {pattern}, 错误: {e}")
@@ -645,35 +677,39 @@ def _check_language_in_section(section_lines) -> str | None:
         "阿拉伯语": ["arabic", "阿拉伯语", "sa"],
     }
 
+    # 优先使用 Language 字段（更可靠），避免 Title 中出现如 “English Theme Song” 造成误判。
+    for line in section_lines:
+        if not line:
+            continue
+        line_lower = line.lower()
+        if "language" in line_lower and ":" in line_lower:
+            lang_match = re.search(r"language\s*:\s*(.+)", line_lower, re.IGNORECASE)
+            if not lang_match:
+                continue
+            lang_value = lang_match.group(1).strip()
+            for lang, keywords in language_keywords_map.items():
+                for keyword in keywords:
+                    if keyword.lower() in lang_value:
+                        return lang
+
     for line in section_lines:
         if not line:
             continue
         line_lower = line.lower()
 
-        # 优先检查 Title: 字段（因为中文音轨常在这里标注）
+        # 仅对中文相关音轨使用 Title 兜底（中文音轨常在 Title 中标注）。
+        # 其他语言（尤其是英语）容易在 Title 里出现歌曲/片头曲描述，导致误判。
         if "title" in line_lower and ":" in line_lower:
             # 提取 Title 字段的值
             title_match = re.search(r"title\s*:\s*(.+)", line_lower, re.IGNORECASE)
             if title_match:
                 title_value = title_match.group(1).strip()
-                # 检查 Title 值中是否包含语言关键词
-                for lang, keywords in language_keywords_map.items():
+                # 检查 Title 值中是否包含语言关键词（限定中文相关）
+                for lang in ("国语", "粤语", "台配"):
+                    keywords = language_keywords_map.get(lang, [])
                     for keyword in keywords:
                         keyword_lower = keyword.lower()
                         if keyword_lower in title_value:
-                            return lang
-
-        # 其次检查 Language: 字段
-        if "language" in line_lower and ":" in line_lower:
-            # 提取 Language 字段的值
-            lang_match = re.search(r"language\s*:\s*(.+)", line_lower, re.IGNORECASE)
-            if lang_match:
-                lang_value = lang_match.group(1).strip()
-                # 检查 Language 值中是否包含语言关键词
-                for lang, keywords in language_keywords_map.items():
-                    for keyword in keywords:
-                        keyword_lower = keyword.lower()
-                        if keyword_lower in lang_value:
                             return lang
 
     return None

@@ -13,6 +13,7 @@ export default defineConfig({
     },
   },
   server: {
+    allowedHosts: ['dev.916337.xyz'],
     proxy: {
       '/api': {
         target: 'http://localhost:5274',

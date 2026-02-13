@@ -614,6 +614,10 @@ def extract_tags_from_title(
             (r"\bVCB-Studio\b", "VCB-Studio"),
             (r"\bVCB\b", "VCB-Studio"),
         ],
+        "音频编码": [
+            # Atmos 可能写作 "TrueHD Atmos" / "DDP Atmos" / "Dolby Atmos" 或无空格 "Atmos7.1"
+            (r"\bAtmos\b|Atmos(?=\d)", "Atmos"),
+        ],
         "HDR格式": [
             (r"\bDolby\s+Vision\b|\bDV\b", "Dolby Vision"),
             (r"\bHDR10\+", "HDR10+"),

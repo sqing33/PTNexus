@@ -9,12 +9,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 def _resolve_runtime_paths():
     is_dev_env = os.getenv("DEV_ENV") == "true"
 
     if is_dev_env:
-        default_base_dir = "/home/sqing/Codes/Docker.pt-nexus-dev/server"
-        default_data_dir = "/home/sqing/Codes/Docker.pt-nexus-dev/server/data"
+        default_base_dir = "/home/sqing/Codes/PTNexus/server"
+        default_data_dir = "/home/sqing/Codes/PTNexus/server/data"
     else:
         default_base_dir = "/app"
         default_data_dir = "/app/data"
