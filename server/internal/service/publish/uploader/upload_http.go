@@ -17,8 +17,7 @@ import (
 // 副作用：发起 HTTP 请求并读取响应正文。
 func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile []byte, fileName string, formFields map[string]string) (string, bool, string, error) {
 	detailLines := []string{
-		fmt.Sprintf("请求地址: %s", strings.TrimSpace(uploadURL)),
-		fmt.Sprintf("上传字段: %s", strings.TrimSpace(fileField)),
+		fmt.Sprintf("正在上传种子文件..."),
 	}
 	buildDetail := func() string {
 		return strings.Join(detailLines, "\n")
@@ -70,19 +69,20 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	bodyText := string(respBody)
-	responseDetail := summarizeResponseBody(bodyText)
-	detailLines = append(detailLines, fmt.Sprintf("响应状态: %d %s", resp.StatusCode, strings.TrimSpace(resp.Status)))
-	if location := strings.TrimSpace(resp.Header.Get("Location")); location != "" {
-		detailLines = append(detailLines, fmt.Sprintf("Location: %s", location))
-	}
-	if responseDetail != "" {
-		detailLines = append(detailLines, fmt.Sprintf("站点响应: %s", responseDetail))
-	}
 
 	isExisting := looksLikeExistingTorrent(bodyText)
-	detailLines = append(detailLines, fmt.Sprintf("已存在判定: %t", isExisting))
+	responseDetail := summarizeResponseBody(bodyText)
 
-	if location := resp.Header.Get("Location"); location != "" {
+	// 检查 Location URL 中是否包含 existed=1 参数
+	location := strings.TrimSpace(resp.Header.Get("Location"))
+	if location != "" && strings.Contains(location, "existed=1") {
+		isExisting = true
+	}
+	if isExisting {
+		detailLines = append(detailLines, "✓ 种子已存在（站点已有相同种子）")
+	}
+
+	if location != "" {
 		if publishURL := NormalizePublishURLWithOfferSupport(baseURL, location); publishURL != "" {
 			detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
 			return publishURL, isExisting, buildDetail(), nil

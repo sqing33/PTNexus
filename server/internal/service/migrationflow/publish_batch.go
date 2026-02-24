@@ -39,6 +39,17 @@ func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
 		}
 	}
 
+	// 对齐 Go 版扩展：auto_update_existing_torrent 默认取 cross_seed 配置（缺失时按 false 处理）。
+	if _, exists := normalizedPayload["auto_update_existing_torrent"]; !exists {
+		if _, existsCamel := normalizedPayload["autoUpdateExistingTorrent"]; !existsCamel {
+			if raw, ok := crossSeed["auto_update_existing_torrent"]; ok {
+				normalizedPayload["auto_update_existing_torrent"] = raw
+			} else {
+				normalizedPayload["auto_update_existing_torrent"] = false
+			}
+		}
+	}
+
 	// 对齐 Python：当 cross_seed.default_downloader 有值时，发布后自动添加优先使用该下载器。
 	if defaultID := strings.TrimSpace(processingshared.ToString(crossSeed["default_downloader"], "")); defaultID != "" {
 		normalizedPayload["useDefaultDownloader"] = true

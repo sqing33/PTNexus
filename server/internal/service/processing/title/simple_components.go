@@ -865,31 +865,75 @@ func normalizeTitleAudioTokens(title string) string {
 func extractAudioFromTitle(title string) string {
 	upper := strings.ToUpper(title)
 	audioCodec := ""
+	audioCodecPos := -1
 	switch {
 	case strings.Contains(upper, "TRUEHD"):
 		audioCodec = "TrueHD"
+		audioCodecPos = strings.Index(upper, "TRUEHD")
 	case strings.Contains(upper, "DTS:X"), strings.Contains(upper, "DTS X"):
 		audioCodec = "DTS:X"
+		if idx := strings.Index(upper, "DTS:X"); idx >= 0 {
+			audioCodecPos = idx
+		} else {
+			audioCodecPos = strings.Index(upper, "DTS X")
+		}
 	case strings.Contains(upper, "DTS-HD MA"), strings.Contains(upper, "DTS HD MA"):
 		audioCodec = "DTS-HD MA"
+		if idx := strings.Index(upper, "DTS-HD MA"); idx >= 0 {
+			audioCodecPos = idx
+		} else {
+			audioCodecPos = strings.Index(upper, "DTS HD MA")
+		}
 	case strings.Contains(upper, "DTS-HD HR"), strings.Contains(upper, "DTS HD HR"):
 		audioCodec = "DTS-HD HR"
+		if idx := strings.Index(upper, "DTS-HD HR"); idx >= 0 {
+			audioCodecPos = idx
+		} else {
+			audioCodecPos = strings.Index(upper, "DTS HD HR")
+		}
 	case strings.Contains(upper, "DTS"):
 		audioCodec = "DTS"
+		audioCodecPos = strings.Index(upper, "DTS")
 	case strings.Contains(upper, "E-AC-3"), strings.Contains(upper, "DDP"), strings.Contains(upper, "DD+"), strings.Contains(upper, "DD＋"), strings.Contains(upper, "DD﹢"):
 		audioCodec = "DDP"
+		// 查找 DDP 或 DD+ 的位置
+		if idx := strings.Index(upper, "DDP"); idx >= 0 {
+			audioCodecPos = idx
+		} else if idx := strings.Index(upper, "DD+"); idx >= 0 {
+			audioCodecPos = idx
+		} else if idx := strings.Index(upper, "DD＋"); idx >= 0 {
+			audioCodecPos = idx
+		} else if idx := strings.Index(upper, "DD﹢"); idx >= 0 {
+			audioCodecPos = idx
+		} else if idx := strings.Index(upper, "E-AC-3"); idx >= 0 {
+			audioCodecPos = idx
+		}
 	case strings.Contains(upper, "AC-3"), strings.Contains(upper, "AC3"):
 		audioCodec = "AC3"
+		if idx := strings.Index(upper, "AC-3"); idx >= 0 {
+			audioCodecPos = idx
+		} else {
+			audioCodecPos = strings.Index(upper, "AC3")
+		}
 	case strings.Contains(upper, "FLAC"):
 		audioCodec = "FLAC"
+		audioCodecPos = strings.Index(upper, "FLAC")
 	case strings.Contains(upper, "AAC"):
 		audioCodec = "AAC"
+		audioCodecPos = strings.Index(upper, "AAC")
 	case strings.Contains(upper, "LPCM"), strings.Contains(upper, "PCM"):
 		audioCodec = "LPCM"
+		if idx := strings.Index(upper, "LPCM"); idx >= 0 {
+			audioCodecPos = idx
+		} else {
+			audioCodecPos = strings.Index(upper, "PCM")
+		}
 	case strings.Contains(upper, "OPUS"):
 		audioCodec = "Opus"
+		audioCodecPos = strings.Index(upper, "OPUS")
 	case strings.Contains(upper, "MP3"):
 		audioCodec = "MP3"
+		audioCodecPos = strings.Index(upper, "MP3")
 	}
 	if audioCodec == "" {
 		return ""
@@ -897,8 +941,16 @@ func extractAudioFromTitle(title string) string {
 
 	parts := []string{audioCodec}
 	channelRe := regexp.MustCompile(`(?i)\b(\d{1,2}\.\d(?:\.\d+)?)\b`)
-	if channelMatch := channelRe.FindStringSubmatch(title); len(channelMatch) >= 2 {
-		parts = append(parts, channelMatch[1])
+	// 在音频编码之后搜索声道信息，避免误匹配标题中的版本号（如 "M3GAN 2.0"）
+	searchStart := 0
+	if audioCodecPos >= 0 {
+		searchStart = audioCodecPos + len(audioCodec)
+	}
+	if searchStart < len(title) {
+		channelMatch := channelRe.FindStringSubmatch(title[searchStart:])
+		if len(channelMatch) >= 2 {
+			parts = append(parts, channelMatch[1])
+		}
 	}
 	if strings.Contains(upper, "ATMOS") {
 		parts = append(parts, "Atmos")

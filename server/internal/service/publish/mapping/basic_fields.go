@@ -25,22 +25,16 @@ func ResolveBasicPublishMappings(siteCode string, uploadData map[string]any) map
 		if siteCfg != nil {
 			if resolvedField := strings.TrimSpace(siteCfg.FormFields[formKey]); resolvedField != "" {
 				fieldName = resolvedField
+			} else if requireConfiguredField {
+				return
 			}
-			mappedValue = pickMappedValueWithFallback(mappingKey, siteCfg.Mappings[mappingKey], value, true, true)
-		}
-
-		fieldName := fallbackField
-		if resolvedField := strings.TrimSpace(siteCfg.FormFields[formKey]); resolvedField != "" {
-			fieldName = resolvedField
+			mappedValue = strings.TrimSpace(PickMappedValue(siteCfg.Mappings[mappingKey], value))
 		} else if requireConfiguredField {
 			return
 		}
-
-		mappedValue := strings.TrimSpace(PickMappedValue(siteCfg.Mappings[mappingKey], value))
 		if fieldName == "" || mappedValue == "" {
 			return
 		}
-
 		mapped[fieldName] = mappedValue
 	}
 

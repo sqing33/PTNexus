@@ -823,7 +823,13 @@
       <!-- 步骤 2: 选择发布站点 -->
       <div v-if="activeStep === 2" class="step-container site-selection-container">
         <h3 class="selection-title">请选择要发布的目标站点</h3>
-        <p class="selection-subtitle">已存在的站点已被自动禁用。红色站点表示配置不完整。</p>
+        <p class="selection-subtitle">
+          {{
+            autoUpdateExistingTorrent
+              ? '已存在的站点可被选择并更新。红色站点表示配置不完整。'
+              : '已存在的站点已被自动禁用。红色站点表示配置不完整。'
+          }}
+        </p>
 
         <!-- 禁止转载警告 -->
         <el-alert
@@ -849,12 +855,23 @@
                 <el-button type="info" @click="clearAllTargetSites">清空</el-button>
               </el-button-group>
             </div>
-            <div class="toolbar-toggle-text">目标站点已存在时是否添加到下载器</div>
-            <div class="toolbar-toggle-switch">
-              <el-switch
-                v-model="autoAddExistingToDownloader"
-                @change="saveAutoAddExistingSetting"
-              />
+            <div class="toolbar-toggle-row">
+              <div class="toolbar-toggle-item">
+                <span class="toolbar-toggle-text">目标站点已存在时是否添加到下载器</span>
+                <el-switch
+                  v-model="autoAddExistingToDownloader"
+                  @change="saveAutoAddExistingSetting"
+                />
+              </div>
+              <div class="toolbar-toggle-item">
+                <span class="toolbar-toggle-text auto-update-toggle-text"
+                  >目标站点已存在时是否更新种子信息</span
+                >
+                <el-switch
+                  v-model="autoUpdateExistingTorrent"
+                  @change="saveAutoUpdateExistingTorrentSetting"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -868,7 +885,14 @@
             :disabled="!isTargetSiteSelectable(site.name)"
             @click="toggleSiteSelection(site.name)"
           >
-            {{ site.name }}
+            <span
+              :class="{
+                'site-name-highlight': isAutoUpdateHighlightSite(site),
+                'site-name-highlight-selected':
+                  isAutoUpdateHighlightSite(site) && selectedTargetSites.includes(site.name),
+              }"
+              >{{ site.name }}</span
+            >
             <el-tooltip
               v-if="site.name === 'ubits' && !isTargetSiteSelectable(site.name)"
               content="该制作组禁止转载到 uBits 站点"
@@ -976,11 +1000,14 @@
                   >
                     <Clock />
                   </el-icon>
+                  <div v-if="result.isExisted" class="existed-tag">
+                    <el-tag type="warning" size="small">已存在</el-tag>
+                    <div v-if="result.auto_edit_result?.success" style="margin-top: 4px">
+                      <el-tag type="success" size="small">已编辑</el-tag>
+                    </div>
+                  </div>
                 </div>
                 <h4 class="card-title">{{ result.siteName }}</h4>
-                <div v-if="result.isExisted" class="existed-tag">
-                  <el-tag type="warning" size="small">已存在</el-tag>
-                </div>
                 <div v-if="result.displayStatus === 'waiting'" class="status-tag">
                   <el-tag size="small" class="waiting-tag">等待中</el-tag>
                 </div>
@@ -1458,6 +1485,8 @@ interface SiteStatus {
   has_passkey: boolean
   is_source: boolean
   is_target: boolean
+  uses_public_publisher?: boolean
+  uses_public_extractor?: boolean
 }
 
 interface Torrent {
@@ -1805,6 +1834,7 @@ const steps = [
 const allSitesStatus = ref<SiteStatus[]>([])
 const selectedTargetSites = ref<string[]>([])
 const autoAddExistingToDownloader = ref(false)
+const autoUpdateExistingTorrent = ref(false)
 const isLoading = ref(false)
 const torrentData = ref(getInitialTorrentData())
 const taskId = ref<string | null>(null)
@@ -1931,6 +1961,22 @@ const isIloliconSite = (siteStatus: SiteStatus | undefined) => {
   )
 }
 
+const isPublicPublisherSite = (siteStatus: SiteStatus | undefined): boolean => {
+  if (!siteStatus) return false
+  if (typeof siteStatus.uses_public_publisher === 'boolean') {
+    return siteStatus.uses_public_publisher
+  }
+  if (typeof siteStatus.uses_public_extractor === 'boolean') {
+    return siteStatus.uses_public_extractor
+  }
+  return false
+}
+
+const isAutoUpdateHighlightSite = (siteStatus: SiteStatus | undefined): boolean => {
+  if (!autoUpdateExistingTorrent.value) return false
+  return isPublicPublisherSite(siteStatus)
+}
+
 const isTargetSiteSelectable = (siteName: string): boolean => {
   // 步骤 1: 查找站点的状态信息
   const siteStatus = allSitesStatus.value.find((s) => s.name === siteName)
@@ -1953,8 +1999,8 @@ const isTargetSiteSelectable = (siteName: string): boolean => {
     return false
   }
 
-  // 条件 2: 如果种子已经存在于该站点，则不可选
-  if (torrent.value?.sites?.[siteName]) {
+  // 条件 2: 如果种子已经存在于该站点，且未开启“更新种子信息”，则不可选
+  if (torrent.value?.sites?.[siteName] && !autoUpdateExistingTorrent.value) {
     return false
   }
 
@@ -3031,6 +3077,7 @@ const fetchCrossSeedSettings = async () => {
   try {
     const response = await axios.get('/api/settings/cross_seed')
     autoAddExistingToDownloader.value = !!response.data?.auto_add_existing_to_downloader
+    autoUpdateExistingTorrent.value = !!response.data?.auto_update_existing_torrent
   } catch (error) {
     console.warn('获取发种设置失败:', error)
   }
@@ -3040,6 +3087,17 @@ const saveAutoAddExistingSetting = async () => {
   try {
     await axios.post('/api/settings/cross_seed', {
       auto_add_existing_to_downloader: autoAddExistingToDownloader.value,
+    })
+  } catch (error) {
+    console.warn('保存发种设置失败:', error)
+    ElNotification.error({ title: '错误', message: '保存设置失败' })
+  }
+}
+
+const saveAutoUpdateExistingTorrentSetting = async () => {
+  try {
+    await axios.post('/api/settings/cross_seed', {
+      auto_update_existing_torrent: autoUpdateExistingTorrent.value,
     })
   } catch (error) {
     console.warn('保存发种设置失败:', error)
@@ -4024,6 +4082,16 @@ watch(isCurrentSeedAnimationRelated, (isAnimationRelated) => {
   })
 })
 
+watch(autoUpdateExistingTorrent, (isEnabled) => {
+  if (isEnabled) {
+    return
+  }
+
+  selectedTargetSites.value = selectedTargetSites.value.filter((siteName) =>
+    isTargetSiteSelectable(siteName),
+  )
+})
+
 const normalizePublishResult = (siteName: string, raw: any) => {
   const result: any = {
     siteName,
@@ -4031,7 +4099,9 @@ const normalizePublishResult = (siteName: string, raw: any) => {
     message: getCleanMessage(raw?.logs || '发布成功'),
   }
 
-  if (raw?.logs && raw.logs.includes('种子已存在')) {
+  if (raw?.is_existing_torrent === true) {
+    result.isExisted = true
+  } else if (raw?.logs && (raw.logs.includes('种子已存在') || raw.logs.includes('该种子已存在'))) {
     result.isExisted = true
   }
 
@@ -4116,6 +4186,7 @@ const handlePublishBatch = async (): Promise<boolean> => {
       downloaderId: torrent.value.downloaderId,
       auto_add_to_downloader: true,
       auto_add_existing_to_downloader: autoAddExistingToDownloader.value,
+      auto_update_existing_torrent: autoUpdateExistingTorrent.value,
     })
 
     if (!startResponse.data?.success || !startResponse.data?.batch_id) {
@@ -4289,6 +4360,7 @@ const handlePublishSerial = async () => {
         downloaderId: torrent.value.downloaderId, // 新增：传递下载器ID
         auto_add_to_downloader: true, // 新增：启用自动添加
         auto_add_existing_to_downloader: autoAddExistingToDownloader.value,
+        auto_update_existing_torrent: autoUpdateExistingTorrent.value,
       })
 
       const result = {
@@ -4297,7 +4369,12 @@ const handlePublishSerial = async () => {
         ...response.data,
       }
 
-      if (response.data.logs && response.data.logs.includes('种子已存在')) {
+      if (response.data?.is_existing_torrent === true) {
+        result.isExisted = true
+      } else if (
+        response.data?.logs &&
+        (response.data.logs.includes('种子已存在') || response.data.logs.includes('该种子已存在'))
+      ) {
         result.isExisted = true
       }
 
@@ -6351,6 +6428,28 @@ const filterUploadedParam = (url: string): string => {
   justify-content: center;
 }
 
+.toolbar-toggle-row {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  width: 100%;
+}
+
+.toolbar-toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-toggle-item .toolbar-toggle-text {
+  white-space: nowrap;
+}
+
+.auto-update-toggle-text {
+  color: #ff8f1f;
+  font-weight: 600;
+}
+
 .site-buttons-group {
   display: flex;
   flex-wrap: wrap;
@@ -6360,6 +6459,15 @@ const filterUploadedParam = (url: string): string => {
 
 .site-button {
   min-width: 120px;
+}
+
+.site-name-highlight {
+  color: #ff8f1f !important;
+  font-weight: 600;
+}
+
+.site-name-highlight-selected {
+  color: #ffd8b0 !important;
 }
 
 .site-button.is-disabled {
@@ -6374,6 +6482,15 @@ const filterUploadedParam = (url: string): string => {
 
   .site-button {
     margin-left: 0 !important;
+  }
+
+  .toolbar-toggle-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .toolbar-toggle-item {
+    justify-content: center;
   }
 }
 
@@ -6504,9 +6621,11 @@ const filterUploadedParam = (url: string): string => {
   border-top: 4px solid #e6a23c;
 }
 
-/* .card-icon {
-  margin-bottom: 8px;
-} */
+.card-icon {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: flex-start;
+}
 
 .card-title {
   font-size: 1.1rem;
@@ -6516,8 +6635,11 @@ const filterUploadedParam = (url: string): string => {
 }
 
 .existed-tag {
-  position: absolute;
-  transform: translate(65px, 35px);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-left: 8px;
+  vertical-align: top;
 }
 
 .status-tag {

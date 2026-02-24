@@ -1751,7 +1751,10 @@ const hasLink = (siteData: SiteData, siteName: string): boolean => {
 }
 const getLink = (siteData: SiteData, siteName: string): string | null => {
   const { comment } = siteData
-  if (comment.startsWith('http')) return comment
+  if (comment.startsWith('http')) {
+    // 过滤掉 &existed=1 参数
+    return comment.replace(/&existed=1/g, '').replace(/\?&/, '?').replace(/\?$/, '')
+  }
   const rule = site_link_rules.value[siteName]
   if (rule && /^\d+$/.test(comment)) {
     const baseUrl = rule.base_url.startsWith('http') ? rule.base_url : `https://${rule.base_url}`

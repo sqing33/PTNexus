@@ -14,6 +14,11 @@ type SitesHandler struct {
 	repo *repository.SiteRepository
 }
 
+var specialPublisherSiteCodes = map[string]struct{}{
+	"zhuque": {},
+	"rousi":  {},
+}
+
 func NewSitesHandler(repo *repository.SiteRepository) *SitesHandler {
 	return &SitesHandler{repo: repo}
 }
@@ -125,7 +130,20 @@ func (h *SitesHandler) SitesStatus(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取站点状态失败"})
 		return
 	}
+	for _, siteStatus := range status {
+		siteCode := strings.TrimSpace(toString(siteStatus["site"], ""))
+		siteStatus["uses_public_publisher"] = h.usesPublicPublisher(siteCode)
+	}
 	c.JSON(http.StatusOK, status)
+}
+
+func (h *SitesHandler) usesPublicPublisher(siteCode string) bool {
+	normalizedCode := strings.ToLower(strings.TrimSpace(siteCode))
+	if normalizedCode == "" {
+		return false
+	}
+	_, isSpecialPublisher := specialPublisherSiteCodes[normalizedCode]
+	return !isSpecialPublisher
 }
 
 func (h *SitesHandler) SetNotExist(c *gin.Context) {

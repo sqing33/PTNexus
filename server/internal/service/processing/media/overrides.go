@@ -108,7 +108,7 @@ func findBestMatchingAudioTrack(sourceAudio string, tracks []AudioTrack) AudioTr
 		}
 	}
 
-	if m := regexp.MustCompile(`\b(\d{1,2}\.\d)\b`).FindStringSubmatch(sourceAudio); len(m) == 2 {
+	if m := regexp.MustCompile(`\b(\d{1,2}\.\d(?:\.\d)?)\b`).FindStringSubmatch(sourceAudio); len(m) == 2 {
 		sourceChannels = m[1]
 	}
 
@@ -255,7 +255,7 @@ func supplementAudioInfo(sourceAudio string, track AudioTrack) string {
 		}
 	}
 
-	if m := regexp.MustCompile(`\b(\d{1,2}\.\d)\b`).FindStringSubmatch(sourceAudio); len(m) == 2 {
+	if m := regexp.MustCompile(`\b(\d{1,2}\.\d(?:\.\d)?)\b`).FindStringSubmatch(sourceAudio); len(m) == 2 {
 		parts["channels"] = m[1]
 	}
 

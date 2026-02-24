@@ -21,7 +21,7 @@ func PublishTorrentToTarget(
 	torrentPath string,
 	sourceSiteNickname string,
 	findSiteNicknameByGroup func(releaseGroup string) (string, error),
-) (string, string, string, bool, error) {
+) (string, string, string, bool, map[string]string, error) {
 	targetName := strings.TrimSpace(toStringAny(targetInfo["nickname"], toStringAny(targetInfo["site"], "目标站点")))
 	logLines := []string{
 		fmt.Sprintf("--- [步骤2] 开始发布种子到 %s ---", targetName),
@@ -55,20 +55,20 @@ func PublishTorrentToTarget(
 			err := fmt.Errorf("目标站点缺少 base_url")
 			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
 			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, err
+			return "", "", strings.Join(logLines, "\n"), false, nil, err
 		}
 		if cookie == "" {
 			err := fmt.Errorf("目标站点缺少 cookie")
 			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
 			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, err
+			return "", "", strings.Join(logLines, "\n"), false, nil, err
 		}
 
 		zhuqueFields, buildErr := publishuploader.BuildZhuqueUploadFields(uploadData, title, subtitle, mediainfo, imdbLink, doubanLink)
 		if buildErr != nil {
 			appendLog(fmt.Sprintf("朱雀参数构建失败: %v", buildErr))
 			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, buildErr
+			return "", "", strings.Join(logLines, "\n"), false, nil, buildErr
 		}
 
 		if dumpPath, dumpErr := publishuploader.DumpUploadParametersToTmp(
@@ -93,7 +93,7 @@ func PublishTorrentToTarget(
 			appendLog("测试模式：跳过实际发布，模拟成功响应")
 			appendLog(fmt.Sprintf("发布结果：发布到 %s 成功 (测试模式)", targetName))
 			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "https://demo.site.test/torrent/info/999999999?test=true", "https://demo.site.test/api/torrent/download/999999999/TEST_KEY", strings.Join(logLines, "\n"), false, nil
+			return "https://demo.site.test/torrent/info/999999999?test=true", "https://demo.site.test/api/torrent/download/999999999/TEST_KEY", strings.Join(logLines, "\n"), false, zhuqueFields, nil
 		}
 
 		torrentFile, err := os.ReadFile(torrentPath)
@@ -101,7 +101,7 @@ func PublishTorrentToTarget(
 			wrappedErr := fmt.Errorf("读取种子文件失败: %w", err)
 			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, wrappedErr))
 			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, wrappedErr
+			return "", "", strings.Join(logLines, "\n"), false, zhuqueFields, wrappedErr
 		}
 
 		publishURL, directDownloadURL, existing, attemptDetail, attemptErr := publishuploader.TryUploadTorrentZhuque(
@@ -115,12 +115,16 @@ func PublishTorrentToTarget(
 		if attemptErr != nil {
 			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, attemptErr))
 			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), existing, attemptErr
+			return "", "", strings.Join(logLines, "\n"), existing, zhuqueFields, attemptErr
 		}
 
-		appendLog(fmt.Sprintf("发布结果：发布到 %s 成功", targetName))
+		if existing {
+			appendLog(fmt.Sprintf("发布结果：种子已存在于 %s，已自动更新信息", targetName))
+		} else {
+			appendLog(fmt.Sprintf("发布结果：成功发布到 %s", targetName))
+		}
 		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return publishURL, directDownloadURL, strings.Join(logLines, "\n"), existing, nil
+		return publishURL, directDownloadURL, strings.Join(logLines, "\n"), existing, zhuqueFields, nil
 	}
 
 	siteCfg, _ := publishmapping.LoadSitePublishConfig(siteCode)
@@ -184,14 +188,14 @@ func PublishTorrentToTarget(
 		appendLog("测试模式：跳过实际发布，模拟成功响应")
 		appendLog(fmt.Sprintf("发布结果：发布到 %s 成功 (测试模式)", targetName))
 		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "https://demo.site.test/details.php?id=999999999&uploaded=1&test=true", "", strings.Join(logLines, "\n"), false, nil
+		return "https://demo.site.test/details.php?id=999999999&uploaded=1&test=true", "", strings.Join(logLines, "\n"), false, formFields, nil
 	}
 
 	if baseURL == "" {
 		err := fmt.Errorf("目标站点缺少 base_url")
 		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
 		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), false, err
+		return "", "", strings.Join(logLines, "\n"), false, formFields, err
 	}
 
 	torrentFile, err := os.ReadFile(torrentPath)
@@ -199,7 +203,7 @@ func PublishTorrentToTarget(
 		wrappedErr := fmt.Errorf("读取种子文件失败: %w", err)
 		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, wrappedErr))
 		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), false, wrappedErr
+		return "", "", strings.Join(logLines, "\n"), false, formFields, wrappedErr
 	}
 
 	if isRousiSite(siteCode) {
@@ -207,20 +211,24 @@ func PublishTorrentToTarget(
 		publishURL, existing, attemptDetail, attemptErr := tryUploadTorrentRousiAPI(baseURL, targetName, torrentPath, targetInfo, uploadData, torrentFile, title, description)
 		appendLog(attemptDetail)
 		if attemptErr == nil {
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 成功", targetName))
+			if existing {
+				appendLog(fmt.Sprintf("发布结果：种子已存在于 %s，已自动更新信息", targetName))
+			} else {
+				appendLog(fmt.Sprintf("发布结果：成功发布到 %s", targetName))
+			}
 			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return publishURL, "", strings.Join(logLines, "\n"), existing, nil
+			return publishURL, "", strings.Join(logLines, "\n"), existing, formFields, nil
 		}
 		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, attemptErr))
 		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), existing, attemptErr
+		return "", "", strings.Join(logLines, "\n"), existing, formFields, attemptErr
 	}
 
 	if cookie == "" {
 		err := fmt.Errorf("目标站点缺少 cookie")
 		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
 		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), false, err
+		return "", "", strings.Join(logLines, "\n"), false, formFields, err
 	}
 
 	uploadURLs := []string{
@@ -238,13 +246,12 @@ func PublishTorrentToTarget(
 			attemptTargets = append(attemptTargets, uploadAttemptTarget{uploadURL: uploadURL, fileField: fileField})
 		}
 	}
-	appendLog(fmt.Sprintf("上传候选地址: %s", strings.Join(uploadURLs, " | ")))
-	appendLog(fmt.Sprintf("上传字段候选: %s", strings.Join(fileFields, ", ")))
+	// 简化日志输出，不再显示技术细节
 	if len(attemptTargets) == 0 {
 		err := fmt.Errorf("上传配置缺失")
 		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
 		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), false, err
+		return "", "", strings.Join(logLines, "\n"), false, formFields, err
 	}
 
 	lastErr := error(nil)
@@ -254,19 +261,20 @@ func PublishTorrentToTarget(
 	if totalAttempts > len(attemptTargets) {
 		totalAttempts = len(attemptTargets)
 	}
-	appendLog(fmt.Sprintf("上传重试策略：失败后最多重试 %d 次", maxRetryCount))
 	for attemptIndex := 0; attemptIndex < totalAttempts; attemptIndex++ {
 		target := attemptTargets[attemptIndex]
-		appendLog(fmt.Sprintf("尝试 %d/%d: 地址=%s 字段=%s", attemptIndex+1, totalAttempts, target.uploadURL, target.fileField))
 		publishURL, attemptExisting, attemptDetail, attemptErr := publishuploader.TryUploadTorrent(target.uploadURL, baseURL, cookie, target.fileField, torrentFile, filepath.Base(torrentPath), formFields)
 		existing = existing || attemptExisting
 		appendLog(attemptDetail)
 		if attemptErr == nil {
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 成功", targetName))
+			if existing {
+				appendLog(fmt.Sprintf("发布结果：种子已存在于 %s，已自动更新信息", targetName))
+			} else {
+				appendLog(fmt.Sprintf("发布结果：成功发布到 %s", targetName))
+			}
 			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return publishURL, "", strings.Join(logLines, "\n"), existing, nil
+			return publishURL, "", strings.Join(logLines, "\n"), existing, formFields, nil
 		}
-		appendLog(fmt.Sprintf("本次尝试失败: %v", attemptErr))
 		lastErr = attemptErr
 	}
 	if lastErr == nil {
@@ -274,7 +282,7 @@ func PublishTorrentToTarget(
 	}
 	appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, lastErr))
 	appendLog("--- [步骤2] 任务执行完毕 ---")
-	return "", "", strings.Join(logLines, "\n"), existing, lastErr
+	return "", "", strings.Join(logLines, "\n"), existing, formFields, lastErr
 }
 
 func toStringAny(value any, fallback string) string {

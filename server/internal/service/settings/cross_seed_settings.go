@@ -10,6 +10,7 @@ func (s *SettingsService) GetCrossSeedSettings() map[string]any {
 		"image_hoster":                     "pixhost",
 		"default_downloader":               "",
 		"auto_add_existing_to_downloader":  true,
+		"auto_update_existing_torrent":     false,
 		"publish_batch_concurrency_mode":   "cpu",
 		"publish_batch_concurrency_manual": BatchPublishDefaultConcurrency,
 	}
@@ -33,6 +34,7 @@ func (s *SettingsService) SaveCrossSeedSettings(newSettings map[string]any) erro
 	}
 	merged["publish_batch_concurrency_manual"] = manual
 	merged["auto_add_existing_to_downloader"] = toBool(merged["auto_add_existing_to_downloader"], true)
+	merged["auto_update_existing_torrent"] = toBool(merged["auto_update_existing_torrent"], false)
 	if toString(merged["image_hoster"], "") == "" {
 		merged["image_hoster"] = "pixhost"
 	}

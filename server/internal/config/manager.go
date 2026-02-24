@@ -150,6 +150,7 @@ func defaultConfig() map[string]any {
 			"seedvault_password":               "",
 			"default_downloader":               "",
 			"auto_add_existing_to_downloader":  true,
+			"auto_update_existing_torrent":     false,
 			"publish_batch_concurrency_mode":   "cpu",
 			"publish_batch_concurrency_manual": 5,
 			"review_filter":                    "",
