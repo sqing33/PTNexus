@@ -65,6 +65,12 @@ func (m *SchemaManager) EnsureSchema() error {
 		}
 	}
 
+	// 迁移阶段：修复 seed_parameters 表中 removed_ardtudeclarations 列的类型
+	// 旧版本该列可能为 VARCHAR(255)，导致长数据写入失败
+	if err := m.fixSeedParametersColumnTypes(); err != nil {
+		return err
+	}
+
 	logx.Infof(schemaLogModule, "数据库结构校验完成 db_type=%s", m.store.DBType)
 	return nil
 }
@@ -734,4 +740,49 @@ func isSafeIdentifier(identifier string) bool {
 		return false
 	}
 	return true
+}
+
+// fixSeedParametersColumnTypes 修复 seed_parameters 表中某些列的类型。
+// 旧版本 removed_ardtudeclarations 列可能是 VARCHAR(255)，导致长 JSON 数据写入失败。
+// 参数/返回：无参数，成功返回 nil，失败返回详细错误。
+// 失败场景：数据库连接异常、DDL 执行失败。
+// 副作用：会执行 ALTER TABLE MODIFY COLUMN。
+func (m *SchemaManager) fixSeedParametersColumnTypes() error {
+	if m.store.DBType != "mysql" {
+		// PostgreSQL 和 SQLite 的 TEXT 类型无长度限制，无需修复
+		return nil
+	}
+
+	// 检查 removed_ardtudeclarations 列的类型
+	type columnTypeRow struct {
+		DataType   string `gorm:"column:data_type"`
+		ColumnType string `gorm:"column:column_type"`
+	}
+	rows := make([]columnTypeRow, 0)
+	if err := m.store.DB.Raw(
+		`SELECT DATA_TYPE AS data_type, COLUMN_TYPE AS column_type
+		 FROM information_schema.columns
+		 WHERE table_schema = DATABASE()
+		   AND table_name = 'seed_parameters'
+		   AND column_name = 'removed_ardtudeclarations'`,
+	).Scan(&rows).Error; err != nil {
+		return fmt.Errorf("检查 seed_parameters.removed_ardtudeclarations 列类型失败: %w", err)
+	}
+
+	if len(rows) == 0 {
+		// 列不存在，由 ensureTableColumns 处理
+		return nil
+	}
+
+	// 如果是 varchar 类型，需要修改为 text
+	if rows[0].DataType == "varchar" {
+		logx.Infof(schemaLogModule, "检测到 removed_ardtudeclarations 列为 VARCHAR，正在修改为 TEXT")
+		sqlText := "ALTER TABLE `seed_parameters` MODIFY COLUMN `removed_ardtudeclarations` TEXT"
+		if err := m.store.DB.Exec(sqlText).Error; err != nil {
+			return fmt.Errorf("修改 removed_ardtudeclarations 列类型失败: %w", err)
+		}
+		logx.Infof(schemaLogModule, "✓ 成功修改 removed_ardtudeclarations 列类型为 TEXT")
+	}
+
+	return nil
 }
