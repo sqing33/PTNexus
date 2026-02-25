@@ -6089,6 +6089,11 @@ const filterUploadedParam = (url: string): string => {
   margin-bottom: 16px;
 }
 
+.param-row .half-width {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 /* 响应式布局：小屏幕上垂直排列 */
 @media (max-width: 768px) {
   .param-row {
@@ -6116,6 +6121,7 @@ const filterUploadedParam = (url: string): string => {
 
 .half-width {
   flex: 1;
+  min-width: 0;
 }
 
 .imdb-item {
@@ -6197,16 +6203,17 @@ const filterUploadedParam = (url: string): string => {
 }
 
 .stacked-tags-values {
-  display: inline-flex !important;
-  flex-direction: row !important;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: nowrap !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start;
+  gap: 4px;
+  flex-wrap: wrap !important;
 }
 
 .stacked-tags-values .param-standard-key {
   margin-top: 0;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .tags-item {
@@ -6217,6 +6224,12 @@ const filterUploadedParam = (url: string): string => {
 .tags-item:hover {
   background-color: #ce93d8;
   border-color: #ba68c8;
+}
+
+/* 标签项内的值容器允许换行 */
+.tags-item .stacked-param-value-line {
+  white-space: normal;
+  overflow-x: visible;
 }
 
 /* 标签值的特殊处理 */
