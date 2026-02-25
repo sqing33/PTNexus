@@ -17,6 +17,7 @@ type SitesHandler struct {
 var specialPublisherSiteCodes = map[string]struct{}{
 	"zhuque": {},
 	"rousi":  {},
+	"ptlgs":  {},
 }
 
 func NewSitesHandler(repo *repository.SiteRepository) *SitesHandler {

@@ -44,6 +44,10 @@ func PublishTorrentToTarget(
 	}
 	subtitle := strings.TrimSpace(toStringAny(uploadData["subtitle"], ""))
 	description := publishuploader.BuildUploadDescription(siteCode, uploadData)
+	if isPTLGSSite(siteCode) {
+		description = buildPTLGSDescription(uploadData)
+		appendLog("检测到 PTLGS 站点：启用特殊字段分离流程")
+	}
 	imdbLink, doubanLink := resolvePublishExternalLinks(uploadData)
 	mediainfo := strings.TrimSpace(toStringAny(uploadData["mediainfo"], ""))
 
@@ -156,6 +160,11 @@ func PublishTorrentToTarget(
 	setField(formFields, "douban_url", "dburl", doubanLink)
 	setField(formFields, "pt_gen", "pt_gen", doubanLink)
 	setField(formFields, "technical_info", "technical_info", mediainfo)
+	if isPTLGSSite(siteCode) {
+		cover, screenshots := buildPTLGSImageFields(uploadData)
+		setField(formFields, "cover", "cover", cover)
+		setField(formFields, "screenshots", "screenshots", screenshots)
+	}
 
 	if mapped := publishmapping.ResolvePublishMappings(siteCode, uploadData, publishmapping.MappingContext{
 		SourceSiteNickname:      sourceSiteNickname,
