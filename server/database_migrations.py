@@ -511,24 +511,28 @@ class DatabaseMigrationManager:
 
             # 8. 执行MySQL字符集统一迁移
             if self.db_type == "mysql":
-                logging.info("迁移阶段: 9/13 MySQL 字符集统一")
+                logging.info("迁移阶段: 9/14 MySQL 字符集统一")
                 self._migrate_mysql_collation_unification(conn, cursor)
 
             # 9. 执行完整的Schema完整性检查
-            logging.info("迁移阶段: 10/13 Schema 完整性检查")
+            logging.info("迁移阶段: 10/14 Schema 完整性检查")
             self._ensure_schema_integrity(conn, cursor)
 
             # 10. 执行复合主键迁移
-            logging.info("迁移阶段: 11/13 复合主键迁移")
+            logging.info("迁移阶段: 11/14 复合主键迁移")
             self._migrate_composite_primary_key(conn, cursor)
 
             # 11. 执行片源平台格式修复迁移
-            logging.info("迁移阶段: 12/13 片源平台格式修复")
+            logging.info("迁移阶段: 12/14 片源平台格式修复")
             self._migrate_source_platform_format(conn, cursor)
 
             # 12. 执行添加tmdb_link列迁移
-            logging.info("迁移阶段: 13/13 添加 tmdb_link 列")
+            logging.info("迁移阶段: 13/14 添加 tmdb_link 列")
             self._migrate_add_tmdb_link_column(conn, cursor)
+
+            # 13. 修复 removed_ardtudeclarations 列类型（MySQL）
+            logging.info("迁移阶段: 14/14 修复 removed_ardtudeclarations 列类型")
+            self._migrate_fix_removed_ardtudeclarations_type(conn, cursor)
 
             conn.commit()
             logging.info("✓ 所有数据库迁移检查完成 (%.2fs)", time.time() - start_ts)
@@ -1348,6 +1352,44 @@ class DatabaseMigrationManager:
 
         except Exception as e:
             logging.warning(f"迁移添加tmdb_link列时出错: {e}")
+
+    def _migrate_fix_removed_ardtudeclarations_type(self, conn, cursor):
+        """迁移：修复 removed_ardtudeclarations 列类型。
+
+        旧版本该列可能是 VARCHAR(255)，导致长 JSON 数据写入失败。
+        需要将其修改为 TEXT 类型。
+        """
+        if self.db_type != "mysql":
+            # PostgreSQL 和 SQLite 的 TEXT 类型无长度限制，无需修复
+            return
+
+        try:
+            logging.info("检查 removed_ardtudeclarations 列类型...")
+
+            # 检查列类型
+            cursor.execute("""
+                SELECT DATA_TYPE
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'seed_parameters'
+                  AND column_name = 'removed_ardtudeclarations'
+            """)
+            row = cursor.fetchone()
+
+            if row is None:
+                logging.info("removed_ardtudeclarations 列不存在，跳过类型修复")
+                return
+
+            data_type = row[0] if isinstance(row, tuple) else row.get('DATA_TYPE', '')
+            if data_type.lower() == 'varchar':
+                logging.info("检测到 removed_ardtudeclarations 列为 VARCHAR，正在修改为 TEXT...")
+                cursor.execute("ALTER TABLE seed_parameters MODIFY COLUMN removed_ardtudeclarations TEXT")
+                logging.info("✓ 成功修改 removed_ardtudeclarations 列类型为 TEXT")
+            else:
+                logging.info("removed_ardtudeclarations 列类型正常，无需修复")
+
+        except Exception as e:
+            logging.warning(f"迁移 removed_ardtudeclarations 列类型时出错: {e}")
 
     def _column_exists(self, cursor, table_name: str, column_name: str) -> bool:
         """检查列是否存在"""
