@@ -1,6 +1,7 @@
 package persist
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -128,20 +129,19 @@ func parseStringArray(value any) []string {
 	}
 	switch typed := value.(type) {
 	case []string:
-		return typed
+		return normalizeStringArray(typed)
 	case []any:
-		result := make([]string, 0, len(typed))
-		for _, item := range typed {
-			text := strings.TrimSpace(toStringAny(item, ""))
-			if text != "" {
-				result = append(result, text)
-			}
-		}
-		return result
+		return normalizeAnyStringArray(typed)
+	case []byte:
+		return parseStringArray(string(typed))
 	case string:
 		trimmed := strings.TrimSpace(typed)
 		if trimmed == "" {
 			return []string{}
+		}
+		// 优先按 JSON 数组解析，避免把 JSON 字符串再次序列化导致长度膨胀。
+		if parsed, ok := parseJSONStringArray(trimmed); ok {
+			return parsed
 		}
 		parts := strings.Split(trimmed, ",")
 		result := make([]string, 0, len(parts))
@@ -155,4 +155,40 @@ func parseStringArray(value any) []string {
 	default:
 		return []string{}
 	}
+}
+
+func parseJSONStringArray(raw string) ([]string, bool) {
+	parsedStrings := make([]string, 0)
+	if err := json.Unmarshal([]byte(raw), &parsedStrings); err == nil {
+		return normalizeStringArray(parsedStrings), true
+	}
+
+	parsedAny := make([]any, 0)
+	if err := json.Unmarshal([]byte(raw), &parsedAny); err == nil {
+		return normalizeAnyStringArray(parsedAny), true
+	}
+
+	return nil, false
+}
+
+func normalizeAnyStringArray(values []any) []string {
+	result := make([]string, 0, len(values))
+	for _, item := range values {
+		text := strings.TrimSpace(toStringAny(item, ""))
+		if text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
+}
+
+func normalizeStringArray(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		text := strings.TrimSpace(value)
+		if text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
 }
