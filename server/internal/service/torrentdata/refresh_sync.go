@@ -19,11 +19,22 @@ var (
 	commentObTid      = regexp.MustCompile(`ob_tid=(\d+)`)
 	commentHDH        = regexp.MustCompile(`[A-Za-z0-9]+x(\d+)x\d+x[0-9a-zA-Z]+`)
 	commentOnlyID     = regexp.MustCompile(`^\s*(\d+)\s*$`)
+	groupBracket      = regexp.MustCompile(`\[.*?\]`)
 )
 
 type refreshSiteMatcher struct {
 	hostMap map[string]string
 	coreMap map[string]string
+}
+
+type refreshGroupEntry struct {
+	original   string
+	lower      string
+	cleanLower string
+}
+
+type refreshGroupMatcher struct {
+	groups []refreshGroupEntry
 }
 
 func (s *TorrentDataService) refreshFromDownloaders() map[string]any {
@@ -45,6 +56,7 @@ func (s *TorrentDataService) refreshFromDownloaders() map[string]any {
 		siteRows = []repository.SiteIdentity{}
 	}
 	siteMatcher := newRefreshSiteMatcher(siteRows)
+	groupMatcher := newRefreshGroupMatcher(siteRows)
 
 	nowStr := time.Now().Format("2006-01-02 15:04:05")
 	hiddenDisabledCount := int64(0)
@@ -108,7 +120,7 @@ func (s *TorrentDataService) refreshFromDownloaders() map[string]any {
 			continue
 		}
 
-		records := buildSyncRecords(downloader.ID, snapshots, siteMatcher)
+		records := buildSyncRecords(downloader.ID, snapshots, siteMatcher, groupMatcher)
 		syncStats, syncErr := s.repo.SyncDownloaderTorrents(downloader.ID, records, nowStr)
 		if syncErr != nil {
 			failedDownloaders++
@@ -246,7 +258,12 @@ func collectEnabledDownloaders(settings map[string]any) ([]string, []string, []d
 	return configuredIDs, enabledIDs, enabledDownloaders, failedConfigs
 }
 
-func buildSyncRecords(downloaderID string, snapshots []downloaderclient.TorrentSnapshot, matcher refreshSiteMatcher) []repository.TorrentSyncRecord {
+func buildSyncRecords(
+	downloaderID string,
+	snapshots []downloaderclient.TorrentSnapshot,
+	siteMatcher refreshSiteMatcher,
+	groupMatcher refreshGroupMatcher,
+) []repository.TorrentSyncRecord {
 	records := make([]repository.TorrentSyncRecord, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		hash := strings.TrimSpace(snapshot.Hash)
@@ -255,7 +272,8 @@ func buildSyncRecords(downloaderID string, snapshots []downloaderclient.TorrentS
 			continue
 		}
 		details := extractDetailFromComment(snapshot.Comment)
-		siteName := matcher.Match(snapshot.Trackers, details, snapshot.Comment)
+		siteName := siteMatcher.Match(snapshot.Trackers, details, snapshot.Comment)
+		torrentGroup := groupMatcher.Match(name, snapshot.Group)
 		records = append(records, repository.TorrentSyncRecord{
 			Hash:         hash,
 			Name:         name,
@@ -265,13 +283,166 @@ func buildSyncRecords(downloaderID string, snapshots []downloaderclient.TorrentS
 			State:        strings.TrimSpace(snapshot.State),
 			Sites:        siteName,
 			Details:      details,
-			TorrentGroup: strings.TrimSpace(snapshot.Group),
+			TorrentGroup: torrentGroup,
 			DownloaderID: downloaderID,
 			Seeders:      snapshot.Seeders,
 			Uploaded:     snapshot.Uploaded,
 		})
 	}
 	return records
+}
+
+func newRefreshGroupMatcher(rows []repository.SiteIdentity) refreshGroupMatcher {
+	entries := make([]refreshGroupEntry, 0)
+	seen := map[string]struct{}{}
+	for _, row := range rows {
+		if strings.TrimSpace(row.SiteGroup) == "" {
+			continue
+		}
+		parts := strings.Split(row.SiteGroup, ",")
+		for _, part := range parts {
+			original := strings.TrimSpace(part)
+			if original == "" {
+				continue
+			}
+			lower := strings.ToLower(original)
+			if _, exists := seen[lower]; exists {
+				continue
+			}
+			cleanLower := strings.TrimSpace(strings.TrimLeft(lower, "-"))
+			if cleanLower == "" {
+				continue
+			}
+			seen[lower] = struct{}{}
+			entries = append(entries, refreshGroupEntry{
+				original:   original,
+				lower:      lower,
+				cleanLower: cleanLower,
+			})
+		}
+	}
+	return refreshGroupMatcher{groups: entries}
+}
+
+func (m refreshGroupMatcher) Match(name string, snapshotGroup string) string {
+	nameLower := strings.ToLower(strings.TrimSpace(name))
+	if nameLower == "" {
+		return m.matchSnapshotGroup(snapshotGroup)
+	}
+
+	exactMatches := make([]string, 0)
+	partialMatches := make([]string, 0)
+	exactSet := map[string]struct{}{}
+	partialSet := map[string]struct{}{}
+
+	if strings.Contains(nameLower, "@") {
+		parts := strings.Split(nameLower, "@")
+		for _, part := range parts {
+			cleanPart := strings.TrimSpace(strings.TrimLeft(part, "-"))
+			cleanPart = strings.TrimSpace(groupBracket.ReplaceAllString(cleanPart, ""))
+			if cleanPart == "" {
+				continue
+			}
+			for _, entry := range m.groups {
+				if entry.cleanLower == cleanPart {
+					if _, exists := exactSet[entry.original]; !exists {
+						exactSet[entry.original] = struct{}{}
+						exactMatches = append(exactMatches, entry.original)
+					}
+					continue
+				}
+				if strings.Contains(cleanPart, entry.cleanLower) || strings.Contains(entry.cleanLower, cleanPart) {
+					if _, exists := exactSet[entry.original]; exists {
+						continue
+					}
+					if _, exists := partialSet[entry.original]; !exists {
+						partialSet[entry.original] = struct{}{}
+						partialMatches = append(partialMatches, entry.original)
+					}
+				}
+			}
+		}
+	}
+
+	if len(exactMatches) > 0 {
+		return shortestString(exactMatches)
+	}
+	if len(partialMatches) > 0 {
+		return longestString(partialMatches)
+	}
+
+	for _, entry := range m.groups {
+		if strings.Contains(nameLower, entry.lower) {
+			if _, exists := partialSet[entry.original]; !exists {
+				partialSet[entry.original] = struct{}{}
+				partialMatches = append(partialMatches, entry.original)
+			}
+		}
+	}
+
+	if len(partialMatches) > 0 {
+		return longestString(partialMatches)
+	}
+	return m.matchSnapshotGroup(snapshotGroup)
+}
+
+func (m refreshGroupMatcher) matchSnapshotGroup(snapshotGroup string) string {
+	trimmed := strings.TrimSpace(snapshotGroup)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.Contains(trimmed, ",") {
+		parts := strings.Split(trimmed, ",")
+		trimmed = ""
+		for _, part := range parts {
+			item := strings.TrimSpace(part)
+			if item != "" {
+				trimmed = item
+				break
+			}
+		}
+		if trimmed == "" {
+			return ""
+		}
+	}
+
+	normalized := strings.TrimSpace(strings.TrimLeft(strings.ToLower(trimmed), "-"))
+	if normalized == "" {
+		return ""
+	}
+
+	for _, entry := range m.groups {
+		if entry.cleanLower == normalized {
+			return entry.original
+		}
+	}
+	return ""
+}
+
+func shortestString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	best := values[0]
+	for _, value := range values[1:] {
+		if len(value) < len(best) {
+			best = value
+		}
+	}
+	return best
+}
+
+func longestString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	best := values[0]
+	for _, value := range values[1:] {
+		if len(value) > len(best) {
+			best = value
+		}
+	}
+	return best
 }
 
 func newRefreshSiteMatcher(rows []repository.SiteIdentity) refreshSiteMatcher {

@@ -22,6 +22,7 @@ type SiteIdentity struct {
 	Site                 string
 	BaseURL              string
 	SpecialTrackerDomain string
+	SiteGroup            string `gorm:"column:site_group"`
 }
 
 // TorrentSyncRecord 表示一条待写入数据库的标准化种子记录。
@@ -81,8 +82,9 @@ type torrentUploadUpsertRow struct {
 // 副作用：无副作用，仅读取 sites 表。
 func (r *TorrentDataRepository) ListSiteIdentities() ([]SiteIdentity, error) {
 	rows := make([]SiteIdentity, 0)
+	groupColumn := r.store.GroupColumn()
 	err := r.store.DB.Table("sites").
-		Select("nickname, site, base_url, special_tracker_domain").
+		Select("nickname, site, base_url, special_tracker_domain, " + groupColumn + " AS site_group").
 		Where("nickname IS NOT NULL AND nickname != ''").
 		Scan(&rows).Error
 	if err != nil {
