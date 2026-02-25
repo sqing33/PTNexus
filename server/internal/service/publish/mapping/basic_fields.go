@@ -28,7 +28,7 @@ func ResolveBasicPublishMappings(siteCode string, uploadData map[string]any) map
 			} else if requireConfiguredField {
 				return
 			}
-			mappedValue = strings.TrimSpace(PickMappedValue(siteCfg.Mappings[mappingKey], value))
+			mappedValue = strings.TrimSpace(PickMappedValueWithFallback(mappingKey, siteCfg.Mappings[mappingKey], value))
 		} else if requireConfiguredField {
 			return
 		}

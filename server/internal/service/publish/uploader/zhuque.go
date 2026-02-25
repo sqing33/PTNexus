@@ -46,10 +46,10 @@ func BuildZhuqueUploadFields(uploadData map[string]any, title, subtitle, mediain
 		}
 	}
 
-	category := strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["type"], strings.TrimSpace(toStringAny(standardized["type"], ""))))
-	medium := strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["medium"], strings.TrimSpace(toStringAny(standardized["medium"], ""))))
-	videoCoding := strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["video_codec"], strings.TrimSpace(toStringAny(standardized["video_codec"], ""))))
-	resolution := strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["resolution"], strings.TrimSpace(toStringAny(standardized["resolution"], ""))))
+	category := strings.TrimSpace(publishmapping.PickMappedValueWithFallback("type", siteCfg.Mappings["type"], strings.TrimSpace(toStringAny(standardized["type"], ""))))
+	medium := strings.TrimSpace(publishmapping.PickMappedValueWithFallback("medium", siteCfg.Mappings["medium"], strings.TrimSpace(toStringAny(standardized["medium"], ""))))
+	videoCoding := strings.TrimSpace(publishmapping.PickMappedValueWithFallback("video_codec", siteCfg.Mappings["video_codec"], strings.TrimSpace(toStringAny(standardized["video_codec"], ""))))
+	resolution := strings.TrimSpace(publishmapping.PickMappedValueWithFallback("resolution", siteCfg.Mappings["resolution"], strings.TrimSpace(toStringAny(standardized["resolution"], ""))))
 
 	anonymousUpload := true
 	paths := config.ResolveRuntimePaths()
@@ -515,8 +515,8 @@ func mapZhuqueTagIDs(siteCfg *publishmapping.SitePublishConfig, uploadData map[s
 
 		mappedID := ""
 		for _, candidate := range candidates {
-			if id, ok := tagMapping[candidate]; ok && strings.TrimSpace(id) != "" {
-				mappedID = strings.TrimSpace(id)
+			if id := strings.TrimSpace(publishmapping.PickMappedValueWithFallbackNoDefault("tag", tagMapping, candidate)); id != "" {
+				mappedID = id
 				break
 			}
 		}

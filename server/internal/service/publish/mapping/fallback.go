@@ -14,9 +14,10 @@ import (
 const publishFallbackLogModule = "发布-参数降级"
 
 type fallbackConfig struct {
-	Enabled          bool `yaml:"enabled"`
-	LogFallback      bool `yaml:"log_fallback"`
-	MaxFallbackDepth int  `yaml:"max_fallback_depth"`
+	Enabled             bool `yaml:"enabled"`
+	LogFallback         bool `yaml:"log_fallback"`
+	MaxFallbackDepth    int  `yaml:"max_fallback_depth"`
+	UseDefaultOnFailure bool `yaml:"use_default_on_failure"`
 }
 
 type globalFallbackRoot struct {
@@ -25,10 +26,11 @@ type globalFallbackRoot struct {
 }
 
 type fallbackRuntime struct {
-	Enabled     bool
-	LogFallback bool
-	MaxDepth    int
-	Chains      map[string]map[string][]string
+	Enabled             bool
+	LogFallback         bool
+	MaxDepth            int
+	UseDefaultOnFailure bool
+	Chains              map[string]map[string][]string
 }
 
 var fallbackRuntimeCache sync.Map
@@ -64,10 +66,11 @@ func loadFallbackRuntime() (fallbackRuntime, bool) {
 	}
 
 	rt := fallbackRuntime{
-		Enabled:     root.FallbackConfig.Enabled,
-		LogFallback: root.FallbackConfig.LogFallback,
-		MaxDepth:    maxDepth,
-		Chains:      root.FallbackChains,
+		Enabled:             root.FallbackConfig.Enabled,
+		LogFallback:         root.FallbackConfig.LogFallback,
+		MaxDepth:            maxDepth,
+		UseDefaultOnFailure: root.FallbackConfig.UseDefaultOnFailure,
+		Chains:              root.FallbackChains,
 	}
 	fallbackRuntimeCache.Store(cacheKey, rt)
 	return rt, true
@@ -141,7 +144,9 @@ func pickMappedValueWithFallback(paramType string, mapping map[string]string, st
 		return mapped
 	}
 
-	if rt, ok := loadFallbackRuntime(); ok && rt.Enabled {
+	rt, hasRuntime := loadFallbackRuntime()
+
+	if hasRuntime && rt.Enabled {
 		chain := pickFallbackChainIgnoreCase(rt, paramType, trimmed)
 		if len(chain) > 0 {
 			limited := chain
@@ -178,4 +183,24 @@ func pickMappedValueWithFallback(paramType string, mapping map[string]string, st
 		return trimmed
 	}
 	return ""
+}
+
+// PickMappedValueWithFallback 基于参数类型执行发布值映射并自动降级。
+// 参数/返回：paramType 为参数类型（如 audio_codec）；mapping 为站点映射；standardized 为标准化值；返回可提交到目标站点的字段值。
+// 失败场景：映射缺失、降级链未命中且 default 缺失时返回空字符串。
+// 副作用：可能读取 global_mappings.yaml 并按配置输出降级日志。
+func PickMappedValueWithFallback(paramType string, mapping map[string]string, standardized string) string {
+	useDefault := true
+	if rt, ok := loadFallbackRuntime(); ok {
+		useDefault = rt.UseDefaultOnFailure
+	}
+	return strings.TrimSpace(pickMappedValueWithFallback(paramType, mapping, standardized, useDefault, false))
+}
+
+// PickMappedValueWithFallbackNoDefault 基于参数类型执行发布值映射并自动降级（不使用 default）。
+// 参数/返回：paramType 为参数类型（如 tag）；mapping 为站点映射；standardized 为标准化值；返回可提交到目标站点的字段值。
+// 失败场景：映射缺失或降级链未命中时返回空字符串。
+// 副作用：可能读取 global_mappings.yaml 并按配置输出降级日志。
+func PickMappedValueWithFallbackNoDefault(paramType string, mapping map[string]string, standardized string) string {
+	return strings.TrimSpace(pickMappedValueWithFallback(paramType, mapping, standardized, false, false))
 }

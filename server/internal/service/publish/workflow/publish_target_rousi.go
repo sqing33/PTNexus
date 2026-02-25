@@ -790,7 +790,7 @@ func shouldAttachRousiBearer(baseURL string, targetURL string) bool {
 func resolveRousiCategory(rawCategory string, siteCfg *publishmapping.SitePublishConfig) string {
 	candidate := strings.TrimSpace(rawCategory)
 	if siteCfg != nil && candidate != "" {
-		candidate = strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["type"], candidate))
+		candidate = strings.TrimSpace(publishmapping.PickMappedValueWithFallback("type", siteCfg.Mappings["type"], candidate))
 	}
 	candidate = normalizeRousiToken(candidate)
 	lower := strings.ToLower(candidate)
@@ -829,7 +829,7 @@ func resolveRousiMappedValue(siteCfg *publishmapping.SitePublishConfig, mappingK
 		return ""
 	}
 	if siteCfg != nil {
-		candidate = strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings[mappingKey], candidate))
+		candidate = strings.TrimSpace(publishmapping.PickMappedValueWithFallback(mappingKey, siteCfg.Mappings[mappingKey], candidate))
 	}
 	return normalizeRousiToken(candidate)
 }
