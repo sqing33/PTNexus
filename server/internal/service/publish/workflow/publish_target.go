@@ -131,6 +131,86 @@ func PublishTorrentToTarget(
 		return publishURL, directDownloadURL, strings.Join(logLines, "\n"), existing, zhuqueFields, nil
 	}
 
+	// 海胆站点走特殊发布逻辑：有专门的截图字段，描述不包含截图。
+	if strings.EqualFold(siteCode, "haidan") {
+		appendLog("检测到海胆站点：启用特殊发布流程")
+
+		if baseURL == "" {
+			err := fmt.Errorf("目标站点缺少 base_url")
+			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
+			appendLog("--- [步骤2] 任务执行完毕 ---")
+			return "", "", strings.Join(logLines, "\n"), false, nil, err
+		}
+		if cookie == "" {
+			err := fmt.Errorf("目标站点缺少 cookie")
+			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
+			appendLog("--- [步骤2] 任务执行完毕 ---")
+			return "", "", strings.Join(logLines, "\n"), false, nil, err
+		}
+
+		haidanFields, buildErr := publishuploader.BuildHaidanUploadFields(uploadData, title, subtitle, mediainfo, imdbLink, doubanLink)
+		if buildErr != nil {
+			appendLog(fmt.Sprintf("海胆参数构建失败: %v", buildErr))
+			appendLog("--- [步骤2] 任务执行完毕 ---")
+			return "", "", strings.Join(logLines, "\n"), false, nil, buildErr
+		}
+
+		if dumpPath, dumpErr := publishuploader.DumpUploadParametersToTmp(
+			targetName,
+			torrentPath,
+			haidanFields,
+			uploadData,
+			title,
+			haidanFields["descr"],
+			subtitle,
+			imdbLink,
+			doubanLink,
+			mediainfo,
+		); dumpErr != nil {
+			appendLog(fmt.Sprintf("发布参数保存失败: %v", dumpErr))
+		} else if strings.TrimSpace(dumpPath) != "" {
+			appendLog(fmt.Sprintf("发布参数已保存到: %s", dumpPath))
+		}
+
+		// 对齐 Python：UPLOAD_TEST_MODE=true 时跳过真实发布，返回模拟的详情页链接。
+		if os.Getenv("UPLOAD_TEST_MODE") == "true" {
+			appendLog("测试模式：跳过实际发布，模拟成功响应")
+			appendLog(fmt.Sprintf("发布结果：发布到 %s 成功 (测试模式)", targetName))
+			appendLog("--- [步骤2] 任务执行完毕 ---")
+			return "https://demo.site.test/details.php?id=999999999&uploaded=1&test=true", "", strings.Join(logLines, "\n"), false, haidanFields, nil
+		}
+
+		torrentFile, err := os.ReadFile(torrentPath)
+		if err != nil {
+			wrappedErr := fmt.Errorf("读取种子文件失败: %w", err)
+			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, wrappedErr))
+			appendLog("--- [步骤2] 任务执行完毕 ---")
+			return "", "", strings.Join(logLines, "\n"), false, haidanFields, wrappedErr
+		}
+
+		publishURL, existing, attemptDetail, attemptErr := publishuploader.TryUploadTorrentHaidan(
+			baseURL,
+			cookie,
+			filepath.Base(torrentPath),
+			torrentFile,
+			haidanFields,
+		)
+		appendLog(attemptDetail)
+		if attemptErr != nil {
+			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, attemptErr))
+			appendLog("--- [步骤2] 任务执行完毕 ---")
+			return "", "", strings.Join(logLines, "\n"), existing, haidanFields, attemptErr
+		}
+
+		if existing {
+			appendLog(fmt.Sprintf("发布结果：种子已存在于 %s，已自动更新信息", targetName))
+		} else {
+			appendLog(fmt.Sprintf("发布结果：成功发布到 %s", targetName))
+		}
+		appendLog("--- [步骤2] 任务执行完毕 ---")
+		return publishURL, "", strings.Join(logLines, "\n"), existing, haidanFields, nil
+	}
+
 	siteCfg, _ := publishmapping.LoadSitePublishConfig(siteCode)
 	resolveFieldName := func(mappingKey string, fallback string) string {
 		if siteCfg == nil {

@@ -15,9 +15,6 @@ func ResolvePublishMappings(siteCode string, uploadData map[string]any, ctx Mapp
 	if strings.EqualFold(strings.TrimSpace(siteCode), "hdfans") {
 		applyHdfansOverrides(mapped, uploadData, ctx)
 	}
-	if strings.EqualFold(strings.TrimSpace(siteCode), "haidan") {
-		applyHaidanOverrides(mapped, uploadData)
-	}
 
 	return mapped
 }
