@@ -1,0 +1,13 @@
+[base]
+branch = "autodetect" # autodetect=use current branch; explicit mismatch asks whether to switch to current
+
+[workdir]
+root = ".parafork"
+rule = "{YYMMDD}-{HEX4}"
+
+[custom]
+autoplan = false # when true, init creates and check requires paradoc/Plan.md
+autoformat = true
+
+[control]
+squash = true
