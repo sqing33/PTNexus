@@ -68,6 +68,11 @@ Go 服务（版本见各自 `go.mod`）：
 
 ## 提交与 PR 指南
 
+- ✅ 默认分支策略（用于每次会话的代码修改）：
+  - 只要任务需要对仓库代码进行**写入/修改**（新增/改动/删除受 Git 跟踪的文件），先检查 `git status --porcelain`。
+  - 若工作区干净且当前在 `main` / `master`（或处于 detached HEAD），则先创建并切换到新分支再开始改代码：`git switch -c codex/<YYYYMMDD>-<topic>`。
+  - 若当前已在非 `main`/`master` 分支，默认继续复用当前分支；除非用户要求“再开一个新分支”。
+  - 若工作区不干净（已有未提交改动），先停下来问用户要不要：继续在当前分支修改 / 先手动清理后再建分支（不要自动执行 stash/reset/restore）。
 - ⚠️ Git 安全约束：千万不要触碰任何 Git 回滚/提交/改写历史/批量还原工作区的操作（例如 `git reset` / `git restore` / `git checkout -- .` / `git revert` / `git commit` / `git merge` / `git rebase` / `git cherry-pick` 等），除非用户在当前对话中明确要求。
 - ✅ 允许使用只读方式查看之前代码的修改内容与历史（例如 `git status` / `git diff` / `git log` / `git show` / `git blame`）。
 - Git 历史提交信息过去常用极简数字（例如 `7`）；没有强制规范，建议使用简短且能说明范围的描述。
