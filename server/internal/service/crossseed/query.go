@@ -22,6 +22,78 @@ func stateRankExpr(alias string) string {
 	return fmt.Sprintf("CASE WHEN %s.state NOT IN (%s) THEN 0 ELSE 1 END", alias, statesSQL)
 }
 
+func buildReviewStatusCondition(dbType string, reviewStatus string) (string, []any) {
+	normalized := strings.ToLower(strings.TrimSpace(reviewStatus))
+	if normalized == "" {
+		return "", nil
+	}
+
+	isDeletedCondition := "ct.hash IS NULL"
+	isNotDeletedCondition := "ct.hash IS NOT NULL"
+	tagArgs := []any{"%禁转%", "%限转%", "%分集%"}
+
+	switch normalized {
+	case "reviewed", "unreviewed":
+		if strings.EqualFold(dbType, "postgresql") {
+			isReviewedValue := "false"
+			if normalized == "reviewed" {
+				isReviewedValue = "true"
+			}
+			condition := fmt.Sprintf(
+				`sp.is_reviewed = %s AND %s AND (sp.tags IS NULL OR (sp.tags::text NOT LIKE ? AND sp.tags::text NOT LIKE ? AND sp.tags::text NOT LIKE ?)) AND (sp.title_components IS NULL OR sp.title_components::text !~ ?)`,
+				isReviewedValue,
+				isNotDeletedCondition,
+			)
+			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
+		}
+
+		isReviewedValue := "0"
+		if normalized == "reviewed" {
+			isReviewedValue = "1"
+		}
+
+		if strings.EqualFold(dbType, "mysql") {
+			condition := fmt.Sprintf(
+				`sp.is_reviewed = %s AND %s AND (sp.tags IS NULL OR (sp.tags NOT LIKE ? AND sp.tags NOT LIKE ? AND sp.tags NOT LIKE ?)) AND (sp.title_components IS NULL OR sp.title_components NOT REGEXP ?)`,
+				isReviewedValue,
+				isNotDeletedCondition,
+			)
+			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
+		}
+
+		condition := fmt.Sprintf(
+			`sp.is_reviewed = %s AND %s AND (sp.tags IS NULL OR (sp.tags NOT LIKE ? AND sp.tags NOT LIKE ? AND sp.tags NOT LIKE ?)) AND (sp.title_components IS NULL OR NOT (sp.title_components LIKE ? AND sp.title_components NOT LIKE ?))`,
+			isReviewedValue,
+			isNotDeletedCondition,
+		)
+		return condition, append(tagArgs, `%"无法识别"%`, `%"value": ""%`)
+	case "error":
+		if strings.EqualFold(dbType, "postgresql") {
+			condition := fmt.Sprintf(
+				`(%s OR sp.tags::text LIKE ? OR sp.tags::text LIKE ? OR sp.tags::text LIKE ? OR sp.title_components::text ~ ?)`,
+				isDeletedCondition,
+			)
+			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
+		}
+
+		if strings.EqualFold(dbType, "mysql") {
+			condition := fmt.Sprintf(
+				`(%s OR sp.tags LIKE ? OR sp.tags LIKE ? OR sp.tags LIKE ? OR sp.title_components REGEXP ?)`,
+				isDeletedCondition,
+			)
+			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
+		}
+
+		condition := fmt.Sprintf(
+			`(%s OR sp.tags LIKE ? OR sp.tags LIKE ? OR sp.tags LIKE ? OR (sp.title_components LIKE ? AND sp.title_components NOT LIKE ?))`,
+			isDeletedCondition,
+		)
+		return condition, append(tagArgs, `%"无法识别"%`, `%"value": ""%`)
+	default:
+		return "", nil
+	}
+}
+
 func buildCurrentTorrentsSubquery(dbType string) string {
 	// Match Python build_current_torrents_subquery().
 	if strings.EqualFold(dbType, "postgresql") {
@@ -118,6 +190,11 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		whereConditions = append(whereConditions, "ct.hash IS NULL")
 	case "0":
 		whereConditions = append(whereConditions, "ct.hash IS NOT NULL")
+	}
+
+	if reviewCondition, reviewArgs := buildReviewStatusCondition(dbType, params.ReviewStatus); reviewCondition != "" {
+		whereConditions = append(whereConditions, reviewCondition)
+		args = append(args, reviewArgs...)
 	}
 
 	whereClause := ""
