@@ -43,6 +43,15 @@
             </el-icon>
             <span>同步Cookie</span>
           </el-button>
+          <el-link
+            href="https://github.com/sqing33/PTNexus"
+            target="_blank"
+            rel="noopener noreferrer"
+            type="primary"
+            class="browser-extension-link"
+          >
+            浏览器插件
+          </el-link>
         </el-form-item>
       </el-form>
 
@@ -812,6 +821,11 @@ const handleDelete = (site) => {
 
 .cookie-cloud-form .el-form-item {
   margin-bottom: 0;
+}
+
+.browser-extension-link {
+  margin-left: 8px;
+  white-space: nowrap;
 }
 
 .right-action-group {
