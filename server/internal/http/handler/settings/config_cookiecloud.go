@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pt-nexus/server-go/internal/platform/logx"
 )
+
+const settingsUpdateModule = "设置-保存配置"
 
 func (h *Handler) GetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, h.settings.GetSettingsMasked())
@@ -27,7 +30,45 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法保存配置到文件。"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "配置已成功保存。"})
+
+	// 删除/停用下载器配置后，旧 downloader_id 对应的历史种子会继续存在于 DB 中；
+	// 若不及时隐藏，会导致前端仍可用 downloader_filters 筛选出“伪删除”数据。
+	cleanup := map[string]any{
+		"hidden_disabled_records": int64(0),
+		"hidden_removed_records":  int64(0),
+	}
+	if h.torrentData != nil {
+		configuredIDs := make([]string, 0)
+		enabledIDs := make([]string, 0)
+		for _, cfg := range h.settings.DownloaderConfigs() {
+			id := strings.TrimSpace(handlerToString(cfg["id"], ""))
+			if id == "" {
+				continue
+			}
+			configuredIDs = append(configuredIDs, id)
+			if handlerToBool(cfg["enabled"], true) {
+				enabledIDs = append(enabledIDs, id)
+			}
+		}
+
+		hiddenDisabled, err := h.torrentData.HideDisabledDownloaderData(enabledIDs, configuredIDs)
+		if err != nil {
+			logx.Warnf(settingsUpdateModule, "隐藏停用下载器数据失败 err=%v", err)
+		} else if hiddenDisabled > 0 {
+			logx.Infof(settingsUpdateModule, "已隐藏停用下载器种子 hidden=%d", hiddenDisabled)
+			cleanup["hidden_disabled_records"] = hiddenDisabled
+		}
+
+		hiddenRemoved, err := h.torrentData.HideRemovedDownloaderData(configuredIDs)
+		if err != nil {
+			logx.Warnf(settingsUpdateModule, "隐藏已删除下载器数据失败 err=%v", err)
+		} else if hiddenRemoved > 0 {
+			logx.Infof(settingsUpdateModule, "已隐藏无效下载器种子 hidden=%d", hiddenRemoved)
+			cleanup["hidden_removed_records"] = hiddenRemoved
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "配置已成功保存。", "cleanup": cleanup})
 }
 
 func (h *Handler) CookieCloudSync(c *gin.Context) {

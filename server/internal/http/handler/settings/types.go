@@ -8,9 +8,10 @@ import (
 type Handler struct {
 	settings *service.SettingsService
 	torrents *repository.TorrentRepository
+	torrentData *repository.TorrentDataRepository
 	sites    *repository.SiteRepository
 }
 
-func New(settings *service.SettingsService, torrents *repository.TorrentRepository, sites *repository.SiteRepository) *Handler {
-	return &Handler{settings: settings, torrents: torrents, sites: sites}
+func New(settings *service.SettingsService, torrents *repository.TorrentRepository, torrentData *repository.TorrentDataRepository, sites *repository.SiteRepository) *Handler {
+	return &Handler{settings: settings, torrents: torrents, torrentData: torrentData, sites: sites}
 }

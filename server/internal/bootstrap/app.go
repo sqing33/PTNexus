@@ -53,7 +53,8 @@ func NewApp() (*App, error) {
 	statsService := service.NewStatsService(statsRepo, cfgManager)
 	trackerService := service.NewTrackerService(statsRepo, cfgManager)
 	trackerService.Start()
-	torrentDataService := service.NewTorrentDataService(repository.NewTorrentDataRepository(store), cfgManager)
+	torrentDataRepo := repository.NewTorrentDataRepository(store)
+	torrentDataService := service.NewTorrentDataService(torrentDataRepo, cfgManager)
 	torrentDataService.SetIYUULogger(func(level string, message string) {
 		settingsService.AppendIYUULog(level, message)
 	})
@@ -123,7 +124,7 @@ func NewApp() (*App, error) {
 	})
 
 	authHandler := handler.NewAuthHandler(authService)
-	settingsHandler := handler.NewSettingsHandler(settingsService, torrentRepo, siteRepo)
+	settingsHandler := handler.NewSettingsHandler(settingsService, torrentRepo, torrentDataRepo, siteRepo)
 	configHandler := handler.NewConfigHandler(settingsService)
 	sitesHandler := handler.NewSitesHandler(siteRepo)
 	torrentsHandler := handler.NewTorrentsHandler(torrentRepo)

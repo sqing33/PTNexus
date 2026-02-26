@@ -221,6 +221,7 @@ import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Select, Link, FolderOpened } from '@element-plus/icons-vue'
+import { useTorrentsViewState } from '@/stores/torrentsViewState'
 
 const settings = ref({
   downloaders: [],
@@ -231,6 +232,7 @@ const isSaving = ref(false)
 const testingConnectionId = ref(null)
 const connectionTestResults = ref({})
 const API_BASE_URL = '/api'
+const torrentsViewState = useTorrentsViewState()
 
 // 路径映射相关状态
 const pathMappingDialogVisible = ref(false)
@@ -275,6 +277,9 @@ const saveSettings = async () => {
   try {
     await axios.post(`${API_BASE_URL}/settings`, settings.value)
     ElMessage.success('设置已成功保存并应用！')
+    // 关键：删除/停用下载器后，TorrentsView 的下载器筛选列表使用缓存，
+    // 不强制刷新会导致“已删除下载器仍可筛选”的错觉。
+    await torrentsViewState.fetchDownloadersList(true)
     fetchSettings()
   } catch (error) {
     ElMessage.error('保存设置失败！')

@@ -8,6 +8,6 @@ import (
 
 type SettingsHandler = settingshandler.Handler
 
-func NewSettingsHandler(settings *service.SettingsService, torrents *repository.TorrentRepository, sites *repository.SiteRepository) *SettingsHandler {
-	return settingshandler.New(settings, torrents, sites)
+func NewSettingsHandler(settings *service.SettingsService, torrents *repository.TorrentRepository, torrentData *repository.TorrentDataRepository, sites *repository.SiteRepository) *SettingsHandler {
+	return settingshandler.New(settings, torrents, torrentData, sites)
 }
