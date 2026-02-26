@@ -1,3 +1,4 @@
 # Local runtime output (avoid committing dev logs/cache created when running from repo root)
 /data/
 .parafork/
+.worktree-lite/
