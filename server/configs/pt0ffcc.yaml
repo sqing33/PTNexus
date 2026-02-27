@@ -12,7 +12,7 @@ form_fields:
   audio_codec: "audiocodec_sel[4]"
   team: "team_sel[4]"
   processing: "processing_sel[4]"
-  category: "type"  # 类别字段映射到type参数
+  category: "type" # 类别字段映射到type参数
 
 # 标准化键映射 - 定义源文本到标准化键的映射规则
 # source_parsers部分：定义如何从原始数据解析出标准化参数
@@ -135,8 +135,6 @@ source_parsers:
       "OGG": "audio.ogg"
       "其它 (Other)": "audio.other"
       "DTS-HDMA": "audio.dts_hdma"
-      "E-AC3 Atmos(DDP Atmos)": "audio.ddp_atmos"
-      "E-AC3(DDP)": "audio.ddp"
       "AC3(DD)": "audio.ac3"
 
     team:
@@ -254,9 +252,6 @@ mappings:
     "audio.wav": "11"
     "audio.ogg": "21"
     "audio.other": "22"
-    "audio.dts_hdma": "18"
-    "audio.ddp_atmos": "23"
-    "audio.ddp": "24"
     "default": "22"
 
   team:

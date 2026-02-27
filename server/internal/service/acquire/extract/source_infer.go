@@ -39,12 +39,12 @@ func InferSourceFromDescription(description string) string {
 	// 常见形式：日本 / 韩国、美国, 英国、China/Hong Kong 等。
 	sourceLower := strings.ToLower(sourceText)
 	switch {
-	case strings.Contains(sourceLower, "中国") || strings.Contains(sourceLower, "china") || strings.Contains(sourceLower, "chn"):
-		return "source.china"
-	case strings.Contains(sourceLower, "香港") || strings.Contains(sourceLower, "hong kong") || strings.Contains(sourceLower, "hkg"):
-		return "source.hongkong"
 	case strings.Contains(sourceLower, "台湾") || strings.Contains(sourceLower, "taiwan") || strings.Contains(sourceLower, "twn"):
 		return "source.taiwan"
+	case strings.Contains(sourceLower, "香港") || strings.Contains(sourceLower, "hong kong") || strings.Contains(sourceLower, "hkg"):
+		return "source.hongkong"
+	case strings.Contains(sourceLower, "中国") || strings.Contains(sourceLower, "china") || strings.Contains(sourceLower, "chn"):
+		return "source.china"
 	case strings.Contains(sourceLower, "日本") || strings.Contains(sourceLower, "japan") || strings.Contains(sourceLower, "jpn"):
 		return "source.japan"
 	case strings.Contains(sourceLower, "韩国") || strings.Contains(sourceLower, "korea") || strings.Contains(sourceLower, "kor"):
