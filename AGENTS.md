@@ -74,13 +74,19 @@ Go 服务（版本见各自 `go.mod`）：
 
 - ✅ 分支 / Worktree 策略（用于每次会话的代码修改，使用 `worktree-lite` skill）：
   - 只要任务需要对仓库代码进行**写入/修改**（新增/改动/删除受 Git 跟踪的文件），默认将 base repo 视为只读；状态变更操作在独立 worktree 内执行。
-  - 写入前创建新 worktree（Bash 路由）：`bash ".codex/skills/worktree-lite/scripts/worktree-lite.sh" init`。
-    - worktree 默认创建在 `.worktree-lite/<YYMMDD>-<HEX4>/`，对应分支 `worktree-lite/<YYMMDD>-<HEX4>`。
+  - 写入前创建新 worktree（Bash 路由）：`bash ".codex/skills/worktree-lite/scripts/worktree-lite.sh" init --topic "<问题摘要>"`。
+    - worktree 默认创建在 `.worktree-lite/<YYMMDD>-<summary>-<HEX4>/`，对应分支 `worktree-lite/<YYMMDD>-<summary>-<HEX4>`；`summary` 由问题摘要自动归一化生成。
   - 不要手动用 `git switch -c ...` 创建会话分支；由 `worktree-lite init` 统一创建分支与 worktree。
   - 修改完成后先执行 `review` 输出变更摘要，先让用户审查。
-  - 审查后必须显式询问用户是否合并；仅在用户明确同意后执行 `merge`。
-  - 合并前执行 `propose-message` 生成 `动作：修改内容` 格式的推荐/备选提交标题，并先让用户确认最终文案。
-  - 若当前工作区不干净（已有未提交改动），先停下来问用户要不要：继续在当前状态修改 / 先手动清理后再开 worktree（不要自动执行 stash/reset/restore）。
+  - 审查后执行 `merge-options`：默认 `plain` 输出单题 5 选项；若会话支持 Codex 原生选项，则用 `--format codex` 输出 `request_user_input` payload。
+  - 若 `merge-options` 判定与上次同系列改动内容接近，则直接复用上次提交标题并跳过提问。
+  - `plain` 模式在**一个问题**里给出 5 个选项：1/2/3 为“合并到目标分支（含提交标题）”，4/5 为“不合并”路径。
+  - 仅当用户选择 1/2/3 时执行 `merge`，并使用对应选项里的提交标题。
+  - 若目标分支最新一次也是同系列来源分支合并，执行 `merge` 时将前一次提交折叠到当前提交。
+  - 合并成功后自动删除本次来源 worktree；若来源分支为 `worktree-lite/*`，同时删除该来源分支，后续修改重新 `init` 创建新 worktree。
+  - 允许当前工作区存在未暂存/未提交改动；创建/合并 worktree 时保持这些改动原样不动（不要自动执行 stash/reset/restore）。
+  - 若目标分支工作区有本地改动，合并后自动对齐“用户未改动但被合并提交影响”的路径，避免出现整批文件反向 staged 的错觉。
+  - 若文件同时被本地改动与合并提交修改，保留本地改动优先并提示该路径跳过自动对齐。
 - ⚠️ Git 安全约束：千万不要触碰任何 Git 回滚/提交/改写历史/批量还原工作区的操作（例如 `git reset` / `git restore` / `git checkout -- .` / `git revert` / `git commit` / `git merge` / `git rebase` / `git cherry-pick` 等），除非用户在当前对话中明确要求。
 - ✅ 允许使用只读方式查看之前代码的修改内容与历史（例如 `git status` / `git diff` / `git log` / `git show` / `git blame`）。
 - Git 历史提交信息过去常用极简数字（例如 `7`）；没有强制规范，建议使用简短且能说明范围的描述。
