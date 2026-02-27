@@ -162,45 +162,52 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 						"torrent_id": torrentID,
 						"message":    fmt.Sprintf("跳过：获取详情页失败: %v", fetchErr),
 					}
-				} else if !strings.Contains(detailHTML, "edit.php?id="+torrentID) {
-					autoEditResult = map[string]any{
-						"success":    false,
-						"skipped":    true,
-						"torrent_id": torrentID,
-						"message":    "跳过：详情页未检测到编辑按钮",
-					}
 				} else {
-					editFields := copyStringMap(uploadFormFields)
-					editFields["id"] = torrentID
-					takeEditURL := strings.TrimRight(normalizedBaseURL, "/") + "/takeedit.php"
-					referer := strings.TrimRight(normalizedBaseURL, "/") + "/edit.php?id=" + torrentID
-
-					editSuccess, editDetail, editErr := publishuploader.TryEditTorrent(takeEditURL, cookie, referer, editFields)
-					autoEditExecuted = true
-					if strings.TrimSpace(editDetail) != "" {
-						trimmedLogs += "\n" + editDetail
-					}
-
-					if editErr != nil {
+					canEdit, denyReason := publishuploader.CheckExistingTorrentEditPermission(detailHTML, torrentID)
+					if !canEdit {
+						reason := strings.TrimSpace(denyReason)
+						if reason == "" {
+							reason = "详情页校验未通过"
+						}
 						autoEditResult = map[string]any{
 							"success":    false,
-							"skipped":    false,
+							"skipped":    true,
 							"torrent_id": torrentID,
-							"message":    fmt.Sprintf("编辑失败: %v", editErr),
-						}
-					} else if editSuccess {
-						autoEditResult = map[string]any{
-							"success":    true,
-							"skipped":    false,
-							"torrent_id": torrentID,
-							"message":    "编辑成功",
+							"message":    fmt.Sprintf("跳过：%s", reason),
 						}
 					} else {
-						autoEditResult = map[string]any{
-							"success":    false,
-							"skipped":    false,
-							"torrent_id": torrentID,
-							"message":    "编辑请求已提交，但未能确认是否成功（请自行打开详情页确认）",
+						editFields := copyStringMap(uploadFormFields)
+						editFields["id"] = torrentID
+						takeEditURL := strings.TrimRight(normalizedBaseURL, "/") + "/takeedit.php"
+						referer := strings.TrimRight(normalizedBaseURL, "/") + "/edit.php?id=" + torrentID
+
+						editSuccess, editDetail, editErr := publishuploader.TryEditTorrent(takeEditURL, cookie, referer, editFields)
+						autoEditExecuted = true
+						if strings.TrimSpace(editDetail) != "" {
+							trimmedLogs += "\n" + editDetail
+						}
+
+						if editErr != nil {
+							autoEditResult = map[string]any{
+								"success":    false,
+								"skipped":    false,
+								"torrent_id": torrentID,
+								"message":    fmt.Sprintf("编辑失败: %v", editErr),
+							}
+						} else if editSuccess {
+							autoEditResult = map[string]any{
+								"success":    true,
+								"skipped":    false,
+								"torrent_id": torrentID,
+								"message":    "编辑成功",
+							}
+						} else {
+							autoEditResult = map[string]any{
+								"success":    false,
+								"skipped":    false,
+								"torrent_id": torrentID,
+								"message":    "编辑请求已提交，但未能确认是否成功（请自行打开详情页确认）",
+							}
 						}
 					}
 				}
