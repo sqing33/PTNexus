@@ -135,7 +135,7 @@ func BuildHaidanUploadFields(uploadData map[string]any, title, subtitle, mediain
 }
 
 // buildHaidanDescription 构建海胆站点的描述正文。
-// 注意：海胆站点有专门的 preview-pics 字段提交截图，描述区域不应包含截图。
+// 注意：海胆站点描述仅保留声明与简介正文；截图走 preview-pics 字段，海报不进入描述。
 func buildHaidanDescription(uploadData map[string]any) string {
 	intro := map[string]any{}
 	if uploadData != nil {
@@ -145,11 +145,10 @@ func buildHaidanDescription(uploadData map[string]any) string {
 	}
 
 	statement := strings.TrimSpace(pickHaidanSection(uploadData, intro, "statement"))
-	poster := strings.TrimSpace(pickHaidanSection(uploadData, intro, "poster"))
 	body := strings.TrimSpace(pickHaidanSection(uploadData, intro, "body"))
 
-	parts := make([]string, 0, 3)
-	for _, section := range []string{statement, poster, body} {
+	parts := make([]string, 0, 2)
+	for _, section := range []string{statement, body} {
 		if section != "" {
 			parts = append(parts, section)
 		}
