@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/cookiejar"
 	neturl "net/url"
 	"regexp"
 	"sort"
@@ -131,14 +132,13 @@ func TryUploadTorrentZhuque(baseURL, cookie, fileName string, torrentFile []byte
 		return "", "", false, buildDetail(), err
 	}
 
-	client := &http.Client{
-		Timeout: 120 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+	client, clientErr := newZhuqueHTTPClient(normalizedBaseURL, cookie)
+	if clientErr != nil {
+		detailLines = append(detailLines, fmt.Sprintf("创建 HTTP Client 失败: %v", clientErr))
+		return "", "", false, buildDetail(), clientErr
 	}
 
-	csrfToken, csrfDetail := fetchZhuqueCSRFToken(client, normalizedBaseURL, cookie)
+	csrfToken, csrfDetail := fetchZhuqueCSRFToken(client, normalizedBaseURL)
 	if csrfDetail != "" {
 		detailLines = append(detailLines, csrfDetail)
 	}
@@ -170,7 +170,6 @@ func TryUploadTorrentZhuque(baseURL, cookie, fileName string, torrentFile []byte
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Cookie", cookie)
 	req.Header.Set("Referer", strings.TrimRight(normalizedBaseURL, "/")+"/torrent/upload")
 	req.Header.Set("Origin", normalizedBaseURL)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
@@ -290,7 +289,7 @@ func TryUploadTorrentZhuque(baseURL, cookie, fileName string, torrentFile []byte
 	publishURL := strings.TrimRight(normalizedBaseURL, "/") + "/torrent/info/" + torrentID
 	detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
 
-	torrentKey, keyDetail := fetchZhuqueTorrentKey(client, normalizedBaseURL, cookie)
+	torrentKey, keyDetail := fetchZhuqueTorrentKey(client, normalizedBaseURL)
 	if keyDetail != "" {
 		detailLines = append(detailLines, keyDetail)
 	}
@@ -303,14 +302,55 @@ func TryUploadTorrentZhuque(baseURL, cookie, fileName string, torrentFile []byte
 	return publishURL, directDownloadURL, existing, buildDetail(), nil
 }
 
-func fetchZhuqueCSRFToken(client *http.Client, baseURL, cookie string) (string, string) {
+func newZhuqueHTTPClient(baseURL, cookieHeader string) (*http.Client, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+	u, err := neturl.Parse(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
+	if err != nil {
+		return nil, err
+	}
+	jar.SetCookies(u, parseCookieHeader(cookieHeader))
+
+	return &http.Client{
+		Timeout: 120 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Jar: jar,
+	}, nil
+}
+
+func parseCookieHeader(cookieHeader string) []*http.Cookie {
+	parts := strings.Split(cookieHeader, ";")
+	cookies := make([]*http.Cookie, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		kv := strings.SplitN(trimmed, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		name := strings.TrimSpace(kv[0])
+		value := strings.TrimSpace(kv[1])
+		if name == "" {
+			continue
+		}
+		cookies = append(cookies, &http.Cookie{Name: name, Value: value})
+	}
+	return cookies
+}
+
+func fetchZhuqueCSRFToken(client *http.Client, baseURL string) (string, string) {
 	pageURL := strings.TrimRight(baseURL, "/") + "/torrent/upload"
 	req, err := http.NewRequest(http.MethodGet, pageURL, nil)
 	if err != nil {
 		return "", fmt.Sprintf("获取 CSRF Token 失败: %v", err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Cookie", cookie)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Sprintf("获取 CSRF Token 失败: %v", err)
@@ -341,15 +381,16 @@ func fetchZhuqueCSRFToken(client *http.Client, baseURL, cookie string) (string, 
 	return token, "获取 CSRF Token：成功"
 }
 
-func fetchZhuqueTorrentKey(client *http.Client, baseURL, cookie string) (string, string) {
+func fetchZhuqueTorrentKey(client *http.Client, baseURL string) (string, string) {
 	apiURL := strings.TrimRight(baseURL, "/") + "/api/user/getSecurityInfo"
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return "", fmt.Sprintf("获取 torrentKey 失败: %v", err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Cookie", cookie)
 	req.Header.Set("Referer", strings.TrimRight(baseURL, "/")+"/user/rss")
+	req.Header.Set("Origin", strings.TrimRight(baseURL, "/"))
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 
 	resp, err := client.Do(req)
@@ -359,6 +400,10 @@ func fetchZhuqueTorrentKey(client *http.Client, baseURL, cookie string) (string,
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
+		detail := summarizeResponseBody(string(body))
+		if strings.TrimSpace(detail) != "" {
+			return "", fmt.Sprintf("获取 torrentKey 失败: HTTP %d %s", resp.StatusCode, detail)
+		}
 		return "", fmt.Sprintf("获取 torrentKey 失败: HTTP %d", resp.StatusCode)
 	}
 
