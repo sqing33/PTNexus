@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -73,9 +74,9 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 	isExisting := looksLikeExistingTorrent(bodyText)
 	responseDetail := summarizeResponseBody(bodyText)
 
-	// 检查 Location URL 中是否包含 existed=1 参数
+	// 检查 Location URL 中是否包含 existed=1 / exist=1 参数
 	location := strings.TrimSpace(resp.Header.Get("Location"))
-	if location != "" && strings.Contains(location, "existed=1") {
+	if hasExistingFlagInLocation(location) {
 		isExisting = true
 	}
 	if isExisting {
@@ -131,4 +132,31 @@ func summarizeResponseBody(text string) string {
 		return ""
 	}
 	return strings.Join(strings.Fields(trimmed), " ")
+}
+
+func hasExistingFlagInLocation(location string) bool {
+	trimmed := strings.TrimSpace(location)
+	if trimmed == "" {
+		return false
+	}
+
+	// 兼容部分站点返回非标准 URL 的场景。
+	if strings.Contains(trimmed, "existed=1") || strings.Contains(trimmed, "exist=1") {
+		return true
+	}
+
+	parsed, err := neturl.Parse(trimmed)
+	if err != nil {
+		return false
+	}
+	return queryContainsOne(parsed.Query(), "existed") || queryContainsOne(parsed.Query(), "exist")
+}
+
+func queryContainsOne(values neturl.Values, key string) bool {
+	for _, value := range values[key] {
+		if strings.TrimSpace(value) == "1" {
+			return true
+		}
+	}
+	return false
 }
