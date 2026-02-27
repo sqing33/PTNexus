@@ -164,6 +164,9 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 						"message":    fmt.Sprintf("跳过：获取详情页失败: %v", fetchErr),
 					}
 				} else {
+					if permissionLog := strings.TrimSpace(publishchecker.BuildExistingTorrentEditPermissionLog(detailHTML, torrentID)); permissionLog != "" {
+						trimmedLogs += "\n" + permissionLog
+					}
 					canEdit, denyReason := publishchecker.CheckExistingTorrentEditPermission(detailHTML, torrentID)
 					if !canEdit {
 						reason := strings.TrimSpace(denyReason)
