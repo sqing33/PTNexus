@@ -10,6 +10,8 @@ import (
 var (
 	rePublishURLAbsolute = regexp.MustCompile(`(?is)https?://[^"'\s>]+/(?:details\.php\?id=\d+|offers\.php\?id=\d+|torrent/[0-9a-fA-F\-]{36})`)
 	rePublishURLRelative = regexp.MustCompile(`(?is)/(?:details\.php\?id=\d+|offers\.php\?id=\d+|torrent/[0-9a-fA-F\-]{36})`)
+	// pterclub 等站点在“该种子已存在”页面会在表格中给出详情页链接，页面可能包含多个 details 链接，优先取该表格内的。
+	rePublishURLExistingTable = regexp.MustCompile(`(?is)<table[^>]*class=["'][^"']*torrent-exists-tbl[^"']*["'][^>]*>.*?<a[^>]*href=["']([^"']*(?:details\.php\?[^"']*id=\d+|offers\.php\?[^"']*id=\d+|torrent/[0-9a-fA-F\-]{36})[^"']*)["']`)
 )
 
 // DetectRestrictedTags 检测上传参数中的禁转/限转/分集标签。
@@ -96,6 +98,11 @@ func shouldInlineMediainfo(siteCode string) bool {
 
 // ExtractPublishURLFromText 从上传响应文本中提取详情页/offer 链接。
 func ExtractPublishURLFromText(baseURL, text string) string {
+	if match := rePublishURLExistingTable.FindStringSubmatch(text); len(match) >= 2 {
+		if publishURL := NormalizePublishURLWithOfferSupport(baseURL, match[1]); publishURL != "" {
+			return strings.TrimSpace(publishURL)
+		}
+	}
 	if match := rePublishURLAbsolute.FindString(text); match != "" {
 		return strings.TrimSpace(match)
 	}
