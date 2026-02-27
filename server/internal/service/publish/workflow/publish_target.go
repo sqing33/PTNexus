@@ -365,6 +365,10 @@ func PublishTorrentToTarget(
 			return publishURL, "", strings.Join(logLines, "\n"), existing, formFields, nil
 		}
 		lastErr = attemptErr
+		// 站点已明确提示“种子已存在”时不再重试，避免后续尝试把错误覆盖为冗长 HTML 页面。
+		if attemptExisting {
+			break
+		}
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("发布失败")
