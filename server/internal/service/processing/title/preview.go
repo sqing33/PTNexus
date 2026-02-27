@@ -203,11 +203,25 @@ func normalizeTitleForDisplayLocal(title string) string {
 		}
 		prevDigit := i > 0 && unicode.IsDigit(runes[i-1])
 		nextDigit := i+1 < len(runes) && unicode.IsDigit(runes[i+1])
-		if !(prevDigit && nextDigit) {
+		if !(prevDigit && nextDigit) && !isVideoCodecDot(runes, i) {
 			runes[i] = ' '
 		}
 	}
 	return strings.Join(strings.Fields(string(runes)), " ")
+}
+
+func isVideoCodecDot(runes []rune, dotIndex int) bool {
+	if dotIndex <= 0 || dotIndex+3 >= len(runes) {
+		return false
+	}
+	if unicode.ToUpper(runes[dotIndex-1]) != 'H' {
+		return false
+	}
+	if !unicode.IsDigit(runes[dotIndex+1]) || !unicode.IsDigit(runes[dotIndex+2]) || !unicode.IsDigit(runes[dotIndex+3]) {
+		return false
+	}
+	codecSuffix := string([]rune{runes[dotIndex+1], runes[dotIndex+2], runes[dotIndex+3]})
+	return codecSuffix == "264" || codecSuffix == "265" || codecSuffix == "266"
 }
 
 func toStringAny(value any, fallback string) string {
