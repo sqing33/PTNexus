@@ -444,43 +444,10 @@ func normalizeNestedQuoteBlocks(bbcode string) string {
 	}
 }
 
-func detectStatementTags(bbcode string) []string {
-	tags := make([]string, 0, 3)
-	addTag := func(tag string) {
-		if tag == "" {
-			return
-		}
-		if !containsString(tags, tag) {
-			tags = append(tags, tag)
-		}
-	}
-
-	// 对齐 Python：仅从声明类 quote 块中检测标签，避免正文中的关键词误判。
-	// 例如正文出现"禁转"字样但并非标签时，不应添加 tag.禁转。
-	quoteBlocks := reQuoteBlock.FindAllStringSubmatch(bbcode, -1)
-	for _, block := range quoteBlocks {
-		if len(block) < 2 {
-			continue
-		}
-		quoteText := strings.TrimSpace(block[1])
-		if quoteText == "" {
-			continue
-		}
-		// 仅当 quote 块看起来像声明文本时才检测标签
-		if !looksLikeDeclarationText(quoteText) {
-			continue
-		}
-		if strings.Contains(quoteText, "禁转") {
-			addTag("tag.禁转")
-		}
-		if strings.Contains(quoteText, "限转") {
-			addTag("tag.限转")
-		}
-		if strings.Contains(quoteText, "分集") {
-			addTag("tag.分集")
-		}
-	}
-	return tags
+func detectStatementTags(_ string) []string {
+	// 对齐 Python：不再从声明文本推断“禁转/限转/分集”标签。
+	// 受限标签仅允许来自页面标签字段或站点特殊提取器（如种子列表显式标签）。
+	return []string{}
 }
 
 func extractQuoteBlocks(bbcode string) []quoteBlock {
