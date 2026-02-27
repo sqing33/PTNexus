@@ -376,6 +376,17 @@
 | `internal/service/publish/mapping/site_mapping.go` | 目标站点发布映射配置加载 |
 | `internal/service/publish/mapping/basic_fields.go` | 基础字段映射 |
 
+### `publish/checker`
+
+发布后页面校验与权限判断（例如：已存在种子时是否允许自动编辑）。
+
+| 文件 | 说明 |
+|---|---|
+| `internal/service/publish/checker/existing_edit_permission.go` | 已存在种子自动编辑权限校验入口（按站点页面特征分派） |
+| `internal/service/publish/checker/nexusphp_edit_permission.go` | NexusPHP 详情页权限校验（发布者=当前登录用户且存在编辑入口） |
+| `internal/service/publish/checker/zhuque_edit_permission.go` | 朱雀（TNode）详情页权限校验（对比发布者与 user-info-side 当前用户） |
+| `internal/service/publish/checker/name_normalize.go` | HTML 文本提取与用户名标准化 |
+
 ### `publish/uploader`
 
 | 文件 | 说明 |
@@ -385,6 +396,14 @@
 | `internal/service/publish/uploader/published_url.go` | 发布 URL 标准化与直链构建 |
 | `internal/service/publish/uploader/path.go` | 种子路径识别 |
 | `internal/service/publish/uploader/params_dump.go` | DEV 环境发布参数落盘（写入 `data/tmp/torrents`） |
+
+### `publish/guard`
+
+发布前预检查（例如：下载器做种数限制）。
+
+| 文件 | 说明 |
+|---|---|
+| `internal/service/publish/guard/seeding_limit.go` | 发布前下载器限制检查（支持远端 guard 与本地降级） |
 
 ### `publish/downloader`
 

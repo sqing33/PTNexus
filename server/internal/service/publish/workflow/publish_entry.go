@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
+	publishchecker "github.com/pt-nexus/server-go/internal/service/publish/checker"
 	publishguard "github.com/pt-nexus/server-go/internal/service/publish/guard"
 	publishuploader "github.com/pt-nexus/server-go/internal/service/publish/uploader"
 )
@@ -163,7 +164,7 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 						"message":    fmt.Sprintf("跳过：获取详情页失败: %v", fetchErr),
 					}
 				} else {
-					canEdit, denyReason := publishuploader.CheckExistingTorrentEditPermission(detailHTML, torrentID)
+					canEdit, denyReason := publishchecker.CheckExistingTorrentEditPermission(detailHTML, torrentID)
 					if !canEdit {
 						reason := strings.TrimSpace(denyReason)
 						if reason == "" {

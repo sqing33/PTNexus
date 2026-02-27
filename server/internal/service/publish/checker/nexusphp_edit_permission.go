@@ -1,19 +1,16 @@
-package uploader
+package checker
 
 import (
 	"fmt"
-	"html"
 	"regexp"
 	"strings"
 )
 
-var reEditPermissionHTMLTag = regexp.MustCompile(`(?is)<[^>]+>`)
-
-// CheckExistingTorrentEditPermission 校验“已存在种子自动编辑”是否允许执行。
+// checkNexusPHPExistingTorrentEditPermission 校验 NexusPHP 详情页的“已存在种子自动编辑”是否允许执行。
 // 参数/返回：detailHTML 为详情页 HTML，torrentID 为详情页 id；返回是否允许编辑及失败原因。
 // 失败场景：缺少编辑按钮、无法解析发布者/当前登录用户、或发布者与当前用户不一致。
 // 副作用：无。
-func CheckExistingTorrentEditPermission(detailHTML, torrentID string) (bool, string) {
+func checkNexusPHPExistingTorrentEditPermission(detailHTML, torrentID string) (bool, string) {
 	trimmedHTML := strings.TrimSpace(detailHTML)
 	trimmedID := strings.TrimSpace(torrentID)
 	if trimmedHTML == "" {
@@ -76,12 +73,4 @@ func extractNameByPatterns(detailHTML string, patterns []string) string {
 		}
 	}
 	return ""
-}
-
-func normalizeExtractedName(raw string) string {
-	text := reEditPermissionHTMLTag.ReplaceAllString(strings.TrimSpace(raw), " ")
-	text = html.UnescapeString(text)
-	text = strings.ReplaceAll(text, "\u00a0", " ")
-	text = strings.ReplaceAll(text, "&nbsp;", " ")
-	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
 }
