@@ -54,8 +54,8 @@ func extractTorrentPublisherName(detailHTML, torrentID string) string {
 
 func extractCurrentLoginName(detailHTML string) string {
 	patterns := []string{
-		`(?is)欢迎回来\s*,?.{0,1200}?<a[^>]*href=["'][^"']*userdetails\.php[^"']*["'][^>]*>(.*?)</a>`,
-		`(?is)welcome\s+back\s*,?.{0,1200}?<a[^>]*href=["'][^"']*userdetails\.php[^"']*["'][^>]*>(.*?)</a>`,
+		`(?is)欢迎回来\s*,?.{0,1000}?<a[^>]*href=["'][^"']*userdetails\.php[^"']*["'][^>]*>(.*?)</a>`,
+		`(?is)welcome\s+back\s*,?.{0,1000}?<a[^>]*href=["'][^"']*userdetails\.php[^"']*["'][^>]*>(.*?)</a>`,
 	}
 	return extractNameByPatterns(detailHTML, patterns)
 }

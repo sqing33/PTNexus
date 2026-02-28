@@ -96,6 +96,10 @@ func BuildSimpleTitleComponentsWithMediaInfo(title string, releaseGroup string, 
 		titlePart = updated
 	}
 
+	// 对齐 Python：在提取技术标签前，对视频编码 token 做容错修正（H264 -> H.264 等缺点号情况）。
+	titlePart = normalizeTitleVideoCodecTokens(titlePart)
+	titlePartWithYear = normalizeTitleVideoCodecTokens(titlePartWithYear)
+
 	// 对齐 Python：在提取技术标签前，对音频相关 token 做容错修正（缺空格/缺小数点/单复数）。
 	titlePart = normalizeTitleAudioTokens(titlePart)
 	titlePartWithYear = normalizeTitleAudioTokens(titlePartWithYear)
@@ -807,6 +811,23 @@ func extractFrameRateFromTitle(title string) string {
 		return strings.TrimSpace(match[1]) + "fps"
 	}
 	return ""
+}
+
+// normalizeTitleVideoCodecTokens 对齐 Python：修复视频编码 token 中缺少点号的情况。
+// 典型场景：H264 -> H.264、H 264 -> H.264、H265 -> H.265、H 265 -> H.265。
+var (
+	reVideoCodecH265 = regexp.MustCompile(`(?i)\bH\s*[\s.]?\s*265\b`)
+	reVideoCodecH264 = regexp.MustCompile(`(?i)\bH\s*[\s.]?\s*264\b`)
+)
+
+func normalizeTitleVideoCodecTokens(title string) string {
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
+		return title
+	}
+	out := reVideoCodecH265.ReplaceAllString(trimmed, "H.265")
+	out = reVideoCodecH264.ReplaceAllString(out, "H.264")
+	return out
 }
 
 func normalizeTitleAudioTokens(title string) string {
