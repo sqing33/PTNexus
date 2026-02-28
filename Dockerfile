@@ -3,13 +3,13 @@ FROM node:20-alpine AS webui-go-builder
 
 WORKDIR /app/webui-go
 
-RUN npm install -g bun
+RUN corepack enable
 
-COPY ./webui-go/package.json ./webui-go/bun.lock ./
-RUN bun install --frozen-lockfile
+COPY ./webui-go/package.json ./
+RUN pnpm install --no-frozen-lockfile
 
 COPY ./webui-go ./
-RUN bun run build
+RUN pnpm run build
 
 
 # 阶段 2: 构建 Go 更新服务

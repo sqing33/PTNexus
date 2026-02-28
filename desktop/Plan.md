@@ -96,7 +96,7 @@
 说明：以下是“仅为验证打包/安装流程”的接线，不修改 `webui-go/`、`server-go/`、`updater/` 的业务逻辑实现。
 
 - [x] C1. 前端构建改为使用 `../webui-go`
-  - [x] `desktop-go/wails.json` 使用脚本调用 `bun install/build/dev`。
+  - [x] `desktop-go/wails.json` 使用脚本调用 `pnpm install/build/dev`。
   - [x] `webui-go/dist` 同步到 `desktop-go/frontend/dist` 供 embed。
 
 - [x] C2. 后端接入 `../server-go`（进程内）

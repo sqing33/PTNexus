@@ -13,14 +13,14 @@ UPDATER_ROOT="$REPO_ROOT/updater"
 UPDATER_OUT_DIR="$DESKTOP_ROOT/build/windows/sidecar"
 UPDATER_EXE="$UPDATER_OUT_DIR/updater.exe"
 
-if ! command -v bun >/dev/null 2>&1; then
-  echo "bun is required but not found in PATH" >&2
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "pnpm is required but not found in PATH" >&2
   exit 1
 fi
 
 echo "[desktop-go] building frontend from: $WEBUI_ROOT"
 cd "$WEBUI_ROOT"
-bun run build
+pnpm run build
 
 echo "[desktop-go] syncing dist to: $TARGET_DIST"
 mkdir -p "$TARGET_DIST"

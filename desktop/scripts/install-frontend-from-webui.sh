@@ -6,12 +6,11 @@ DESKTOP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$DESKTOP_ROOT/.." && pwd)"
 WEBUI_ROOT="$REPO_ROOT/webui-go"
 
-if ! command -v bun >/dev/null 2>&1; then
-  echo "bun is required but not found in PATH" >&2
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "pnpm is required but not found in PATH" >&2
   exit 1
 fi
 
 echo "[desktop-go] installing frontend dependencies from: $WEBUI_ROOT"
 cd "$WEBUI_ROOT"
-bun install
-
+pnpm install

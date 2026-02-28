@@ -83,7 +83,7 @@ stop_known_conflicts() {
   # This only kills processes that look like:
   # - PT Nexus server-go (dev bin / air / go run ./cmd/server) bound to :SERVER_PORT
   # - PT Nexus updater (./updater) bound to :UPDATER_PORT
-  # - PT Nexus webui (vite/bun dev) bound to :WEBUI_PORT
+  # - PT Nexus webui (vite/pnpm dev) bound to :WEBUI_PORT
 
   local pid cwd cmd
 
@@ -135,10 +135,17 @@ stop_known_conflicts() {
         kill -TERM "$pid" 2>/dev/null || true
       fi
     done
-    for pid in $(pgrep -f "bun run dev" 2>/dev/null || true); do
+    for pid in $(pgrep -f "pnpm run dev" 2>/dev/null || true); do
       cwd="$(get_cwd "$pid")"
       if [[ "$cwd" == "$WEBUI_DIR" ]]; then
-        echo "kill conflict: webui (bun) pid=${pid}"
+        echo "kill conflict: webui (pnpm run dev) pid=${pid}"
+        kill -TERM "$pid" 2>/dev/null || true
+      fi
+    done
+    for pid in $(pgrep -f "pnpm dev" 2>/dev/null || true); do
+      cwd="$(get_cwd "$pid")"
+      if [[ "$cwd" == "$WEBUI_DIR" ]]; then
+        echo "kill conflict: webui (pnpm dev) pid=${pid}"
         kill -TERM "$pid" 2>/dev/null || true
       fi
     done
@@ -246,10 +253,14 @@ start_webui() {
     echo "webui dir missing: $WEBUI_DIR (set WEBUI_DIR=... or WEBUI=0)" >&2
     exit 1
   fi
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "pnpm not found. install pnpm first, or disable webui with WEBUI=0" >&2
+    exit 1
+  fi
 
   echo "start: webui dev :${WEBUI_PORT} (dir: $WEBUI_DIR log: $WEBUI_LOG)"
   rm -f "$WEBUI_LOG" 2>/dev/null || true
-  (cd "$WEBUI_DIR" && nohup bun run dev -- --host 0.0.0.0 --port "$WEBUI_PORT" --strictPort \
+  (cd "$WEBUI_DIR" && nohup pnpm run dev -- --host 0.0.0.0 --port "$WEBUI_PORT" --strictPort \
     >"$WEBUI_LOG" 2>&1 </dev/null & echo $! >"$WEBUI_PIDFILE")
 
   if ! wait_http_ok "http://127.0.0.1:${WEBUI_PORT}/" 20; then
