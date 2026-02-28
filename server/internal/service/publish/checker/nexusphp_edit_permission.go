@@ -57,7 +57,35 @@ func extractCurrentLoginName(detailHTML string) string {
 		`(?is)欢迎回来\s*,?.{0,1000}?<a[^>]*href=["'][^"']*userdetails\.php[^"']*["'][^>]*>(.*?)</a>`,
 		`(?is)welcome\s+back\s*,?.{0,1000}?<a[^>]*href=["'][^"']*userdetails\.php[^"']*["'][^>]*>(.*?)</a>`,
 	}
-	return extractNameByPatterns(detailHTML, patterns)
+	if name := extractNameByPatterns(detailHTML, patterns); name != "" {
+		return name
+	}
+	return extractCurrentLoginNameFromInfoBlock(detailHTML)
+}
+
+func extractCurrentLoginNameFromInfoBlock(detailHTML string) string {
+	if strings.TrimSpace(detailHTML) == "" {
+		return ""
+	}
+	lowerHTML := strings.ToLower(detailHTML)
+	start := strings.Index(lowerHTML, `id="info_block"`)
+	if start < 0 {
+		start = strings.Index(lowerHTML, `id='info_block'`)
+	}
+	if start < 0 {
+		return ""
+	}
+
+	segmentEnd := start + 12000
+	if segmentEnd > len(detailHTML) {
+		segmentEnd = len(detailHTML)
+	}
+	segment := detailHTML[start:segmentEnd]
+	patterns := []string{
+		`(?is)<a[^>]*href=["'][^"']*userdetails\.php[^"']*["'][^>]*class=["'][^"']*name[^"']*["'][^>]*>(.*?)</a>`,
+		`(?is)<a[^>]*href=["'][^"']*userdetails\.php[^"']*["'][^>]*>(.*?)</a>`,
+	}
+	return extractNameByPatterns(segment, patterns)
 }
 
 func extractNameByPatterns(detailHTML string, patterns []string) string {
