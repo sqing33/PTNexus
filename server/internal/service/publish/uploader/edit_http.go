@@ -166,6 +166,7 @@ func TryEditTorrent(takeEditURL, cookie, referer string, formFields map[string]s
 }
 
 func looksLikeEditSuccess(statusCode int, location string, bodyText string) bool {
+	// 3xx 重定向：检查 Location
 	if statusCode >= 300 && statusCode < 400 {
 		loc := strings.ToLower(strings.TrimSpace(location))
 		if loc == "" || strings.Contains(loc, "login.php") {
@@ -178,10 +179,39 @@ func looksLikeEditSuccess(statusCode int, location string, bodyText string) bool
 	}
 
 	trimmed := strings.TrimSpace(bodyText)
+
+	// 200 + 空 body → 视为成功（服务端已处理）
 	if trimmed == "" {
-		return false
+		return true
 	}
+
 	lower := strings.ToLower(trimmed)
+
+	// 完整 HTML 页面：改用更精确的匹配方式，避免 JS/CSS 中的 error 等词误判
+	if strings.HasPrefix(lower, "<!doctype") || strings.HasPrefix(lower, "<html") {
+		// 提取 <title> 内容做精确判断
+		if title := extractHTMLTitle(lower); title != "" {
+			if strings.Contains(title, "error") || strings.Contains(title, "失败") ||
+				strings.Contains(title, "无权") || strings.Contains(title, "denied") {
+				return false
+			}
+		}
+		// HTML 中含 details.php 链接 → 成功
+		if strings.Contains(lower, "details.php?id=") {
+			return true
+		}
+		// HTML 中含 meta refresh 或 JS 跳转到 details → 成功
+		if strings.Contains(lower, "location.href") || strings.Contains(lower, "http-equiv=\"refresh\"") ||
+			strings.Contains(lower, "http-equiv='refresh'") {
+			if strings.Contains(lower, "details.php") {
+				return true
+			}
+		}
+		// 完整 HTML 页面 + 无明确失败信号 → 视为成功
+		return true
+	}
+
+	// 纯文本/短响应：保留原有关键词匹配
 	if strings.Contains(lower, "error") || strings.Contains(trimmed, "失败") || strings.Contains(trimmed, "无权") || strings.Contains(lower, "denied") {
 		return false
 	}
@@ -189,6 +219,23 @@ func looksLikeEditSuccess(statusCode int, location string, bodyText string) bool
 		return true
 	}
 	return strings.Contains(lower, "details.php?id=")
+}
+
+func extractHTMLTitle(lowerHTML string) string {
+	start := strings.Index(lowerHTML, "<title")
+	if start == -1 {
+		return ""
+	}
+	gt := strings.Index(lowerHTML[start:], ">")
+	if gt == -1 {
+		return ""
+	}
+	contentStart := start + gt + 1
+	end := strings.Index(lowerHTML[contentStart:], "</title>")
+	if end == -1 {
+		return ""
+	}
+	return strings.TrimSpace(lowerHTML[contentStart : contentStart+end])
 }
 
 func looksLikeLoginHTML(content []byte) bool {
