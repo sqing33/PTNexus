@@ -1000,11 +1000,11 @@
                   >
                     <Clock />
                   </el-icon>
-                  <div v-if="result.isExisted" class="existed-tag">
+                  <div v-if="result.isExisted" class="existed-tags">
                     <el-tag type="warning" size="small">已存在</el-tag>
-                    <div v-if="result.auto_edit_result?.success" style="margin-top: 4px">
-                      <el-tag type="success" size="small">已编辑</el-tag>
-                    </div>
+                    <el-tag v-if="result.auto_edit_result?.success" type="success" size="small"
+                      >已编辑</el-tag
+                    >
                   </div>
                 </div>
                 <h4 class="card-title">{{ result.siteName }}</h4>
@@ -1119,42 +1119,24 @@
           @click="handleCompleteClick"
           v-if="props.showCompleteButton"
           :disabled="isLoading || !isScrolledToBottom"
-          :class="{ 'scrolled-to-bottom': isScrolledToBottom }"
         >
           修改完成
         </el-button>
 
-        <!-- 注意：原本这里的 hint 移到了下面 -->
-
         <el-button
           type="primary"
-          @click="goToSelectSiteStep"
-          :disabled="isLoading || !isScrolledToBottom"
-          :class="{ 'scrolled-to-bottom': isScrolledToBottom }"
+          @click="handleScrollOrNextStep"
+          :disabled="isLoading"
         >
-          下一步：选择发布站点
+          {{ isScrolledToBottom ? '下一步：选择发布站点' : '继续浏览 ↓' }}
         </el-button>
 
-        <!-- 将所有提示组件移到按钮组的末尾，这样它们会统一显示在按钮组的最右侧 -->
-
-        <!-- 提示 1：针对修改完成按钮 (如果需要区分显示，可以使用 v-else-if，防止重叠) -->
         <transition name="el-fade-in-linear">
-          <div v-if="props.showCompleteButton && !isScrolledToBottom" class="validation-hint">
+          <div v-if="!isScrolledToBottom" class="validation-hint">
             <el-icon class="hint-icon">
               <Warning />
             </el-icon>
-            <span>请滚动到页面底部检查完种子信息无误再发布！</span>
-          </div>
-        </transition>
-
-        <!-- 提示 2：针对下一步按钮 -->
-        <!-- 使用 v-else-if 避免两个提示同时出现重叠显示 -->
-        <transition name="el-fade-in-linear">
-          <div v-if="!props.showCompleteButton && !isScrolledToBottom" class="validation-hint">
-            <el-icon class="hint-icon">
-              <Warning />
-            </el-icon>
-            <span>请先滚动到页面底部检查完种子信息再发布！</span>
+            <span>请先浏览完所有参数信息再继续</span>
           </div>
         </transition>
       </div>
@@ -4619,6 +4601,44 @@ const handleCancelClick = () => {
   }
 }
 
+// 滚动预览区域到底部（一次点击慢速滚动到底部，让用户可以肉眼浏览内容）
+const scrollPreviewToBottom = () => {
+  const panelContent = document.querySelector('.panel-content')
+  if (!panelContent) return
+  const { scrollTop, scrollHeight, clientHeight } = panelContent
+  const remaining = scrollHeight - scrollTop - clientHeight
+  if (remaining <= 5) return
+
+  // 固定滚动速度：每秒滚动 500px，时长由剩余距离决定
+  const duration = remaining / 600 * 1000
+  const startTime = performance.now()
+  const startScroll = panelContent.scrollTop
+  const target = scrollHeight - clientHeight
+
+  const animate = (currentTime: number) => {
+    const elapsed = currentTime - startTime
+    const progress = Math.min(elapsed / duration, 1)
+    // easeInOutCubic 缓动函数
+    const ease = progress < 0.5
+      ? 4 * progress * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 3) / 2
+    panelContent.scrollTop = startScroll + (target - startScroll) * ease
+    if (progress < 1) {
+      requestAnimationFrame(animate)
+    }
+  }
+  requestAnimationFrame(animate)
+}
+
+// 步骤1：点击"下一步"按钮的处理（未到底先滚动，到底再跳转）
+const handleScrollOrNextStep = () => {
+  if (isScrolledToBottom.value) {
+    goToSelectSiteStep()
+  } else {
+    scrollPreviewToBottom()
+  }
+}
+
 // 处理完成按钮点击
 const handleCompleteClick = () => {
   emit('complete')
@@ -6635,9 +6655,11 @@ const filterUploadedParam = (url: string): string => {
 }
 
 .card-icon {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: flex-start;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
 }
 
 .card-title {
@@ -6647,12 +6669,15 @@ const filterUploadedParam = (url: string): string => {
   color: #303133;
 }
 
-.existed-tag {
-  display: inline-flex;
+.existed-tags {
+  position: absolute;
+  left: calc(50% + 22px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  margin-left: 8px;
-  vertical-align: top;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .status-tag {

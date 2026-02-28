@@ -1219,6 +1219,26 @@ fallback_chains:
     "resolution.sd":
       - "resolution.r480p"
 
+  source:
+    # 港台合并键 → 分别尝试香港/台湾 → 中国 → 其他
+    "source.hongkong_taiwan":
+      - "source.hongkong"
+      - "source.taiwan"
+      - "source.china"
+      - "source.other"
+
+    # 香港 → 港台合并 → 中国 → 其他
+    "source.hongkong":
+      - "source.hongkong_taiwan"
+      - "source.china"
+      - "source.other"
+
+    # 台湾 → 港台合并 → 中国 → 其他
+    "source.taiwan":
+      - "source.hongkong_taiwan"
+      - "source.china"
+      - "source.other"
+
 # General configuration for the fallback mechanism.
 # 降级机制的通用配置。
 fallback_config:

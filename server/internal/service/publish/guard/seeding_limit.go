@@ -24,10 +24,17 @@ const (
 	seedingLimitPath    = "/seeding-limit/check"
 	seedingLimitTimeout = 15 * time.Second
 
-	maxRecentAdditions  = 15
 	minSeedsThreshold   = 5
 	recentWindowSeconds = int64(864000)
 )
+
+var maxRecentAdditions = 15
+
+func init() {
+	if os.Getenv("DEV_ENV") == "true" {
+		maxRecentAdditions = 999
+	}
+}
 
 type seedingLimitResponse struct {
 	Success     bool   `json:"success"`
