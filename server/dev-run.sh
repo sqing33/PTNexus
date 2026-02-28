@@ -15,6 +15,7 @@ set -euo pipefail
 #   SERVER_PORT=5275 UPDATER_PORT=5274 BATCH_PORT=5276 WEBUI_PORT=5173
 #   WEBUI=1 WEBUI_DIR=/home/sqing/Codes/PTNexus/webui-go
 #   UPLOAD_TEST_MODE=true  # 跳过真实发布，模拟成功响应（仅用于调试）
+#   CURL_CONNECT_TIMEOUT=1 CURL_MAX_TIME=2 TCP_PROBE_TIMEOUT=1
 
 SERVERGO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SERVERGO_DIR/.." && pwd)"
@@ -40,6 +41,10 @@ WEBUI_PIDFILE="${WEBUI_PIDFILE:-/tmp/ptnexus-webui.${WEBUI_PORT}.pid}"
 SERVER_LOG="${SERVER_LOG:-/tmp/ptnexus-server-go.${SERVER_PORT}.log}"
 UPDATER_LOG="${UPDATER_LOG:-/tmp/ptnexus-updater.${UPDATER_PORT}.log}"
 WEBUI_LOG="${WEBUI_LOG:-/tmp/ptnexus-webui.${WEBUI_PORT}.log}"
+
+CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-1}"
+CURL_MAX_TIME="${CURL_MAX_TIME:-2}"
+TCP_PROBE_TIMEOUT="${TCP_PROBE_TIMEOUT:-1}"
 
 get_cmdline() {
   local pid="$1"
@@ -154,12 +159,26 @@ stop_known_conflicts() {
   sleep 0.6
 }
 
+curl_http_ok() {
+  local url="$1"
+  curl -fsS \
+    --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+    --max-time "$CURL_MAX_TIME" \
+    "$url" >/dev/null 2>&1
+}
+
+tcp_port_open() {
+  local host="${1:-127.0.0.1}"
+  local port="$2"
+  timeout "$TCP_PROBE_TIMEOUT" bash -c "exec 3<>/dev/tcp/${host}/${port}" >/dev/null 2>&1
+}
+
 wait_http_ok() {
   local url="$1"
   local timeout_s="${2:-10}"
   local deadline=$((SECONDS + timeout_s))
   while (( SECONDS < deadline )); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if curl_http_ok "$url"; then
       return 0
     fi
     sleep 0.1
@@ -170,11 +189,22 @@ wait_http_ok() {
 ensure_port_free_or_fail() {
   local url="$1"
   local label="$2"
-  if curl -fsS "$url" >/dev/null 2>&1; then
+  local port="$3"
+  local host="${4:-127.0.0.1}"
+
+  if curl_http_ok "$url"; then
+    stop_known_conflicts
+  elif tcp_port_open "$host" "$port"; then
+    echo "port check: ${label} tcp listener found at ${host}:${port}, trying to stop known conflicts" >&2
     stop_known_conflicts
   fi
-  if curl -fsS "$url" >/dev/null 2>&1; then
+
+  if curl_http_ok "$url"; then
     echo "port conflict: ${label} is already responding at ${url}" >&2
+    exit 1
+  fi
+  if tcp_port_open "$host" "$port"; then
+    echo "port conflict: ${label} has tcp listener at ${host}:${port} but no valid HTTP response" >&2
     exit 1
   fi
 }
@@ -299,17 +329,17 @@ fi
 if [[ "$ACTION" == "status" ]]; then
   echo "health:"
   if [[ "$WEBUI" != "0" ]]; then
-    curl -fsS "http://127.0.0.1:${WEBUI_PORT}/" 2>/dev/null >/dev/null && echo "webui: up" || echo "webui: down"
+    curl_http_ok "http://127.0.0.1:${WEBUI_PORT}/" && echo "webui: up" || echo "webui: down"
   fi
-  curl -fsS "http://127.0.0.1:${UPDATER_PORT}/health" 2>/dev/null || echo "updater: down"
-  curl -fsS "http://127.0.0.1:${SERVER_PORT}/health" 2>/dev/null || echo "server-go: down"
+  curl_http_ok "http://127.0.0.1:${UPDATER_PORT}/health" && echo "updater: up" || echo "updater: down"
+  curl_http_ok "http://127.0.0.1:${SERVER_PORT}/health" && echo "server-go: up" || echo "server-go: down"
   exit 0
 fi
 
-ensure_port_free_or_fail "http://127.0.0.1:${SERVER_PORT}/health" "server-go"
-ensure_port_free_or_fail "http://127.0.0.1:${UPDATER_PORT}/health" "updater"
+ensure_port_free_or_fail "http://127.0.0.1:${SERVER_PORT}/health" "server-go" "$SERVER_PORT"
+ensure_port_free_or_fail "http://127.0.0.1:${UPDATER_PORT}/health" "updater" "$UPDATER_PORT"
 if [[ "$WEBUI" != "0" ]]; then
-  ensure_port_free_or_fail "http://127.0.0.1:${WEBUI_PORT}/" "webui"
+  ensure_port_free_or_fail "http://127.0.0.1:${WEBUI_PORT}/" "webui" "$WEBUI_PORT"
 fi
 
 build_binaries
