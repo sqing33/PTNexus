@@ -1,7 +1,9 @@
-package uploader
+package sites
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -9,6 +11,8 @@ import (
 	"github.com/pt-nexus/server-go/internal/config"
 	"github.com/pt-nexus/server-go/internal/platform/logx"
 	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
+	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
+	publishuploader "github.com/pt-nexus/server-go/internal/service/publish/uploader"
 )
 
 const haidanPublishLogModule = "发布-海胆"
@@ -18,6 +22,113 @@ var (
 	reHaidanSeasonEpisodeCN = regexp.MustCompile(`第(\d+)季(?:第(\d+)集)?`)
 	reHaidanImgTag          = regexp.MustCompile(`(?is)\[img\](.*?)\[/img\]`)
 )
+
+// PublishHaidan 执行海胆站点特殊发布流程（截图走 preview-pics 字段，描述不包含截图）。
+// 参数/返回：input 提供站点信息、发布数据与通用字段；返回发布详情页 URL、是否疑似“种子已存在”、用于自动编辑的表单字段，以及发布过程日志。
+// 失败场景：配置缺失、必需映射字段缺失、读取种子失败、上传失败等返回 error。
+// 副作用：读取本地种子文件并向目标站点发起上传请求；可选写入 data/tmp/torrents 参数落盘。
+func PublishHaidan(input publisher.PublishInput) (publisher.PublishResult, error) {
+	targetName := strings.TrimSpace(input.TargetName)
+	if targetName == "" {
+		targetName = "目标站点"
+	}
+
+	logLines := []string{
+		"检测到海胆站点：启用特殊发布流程",
+	}
+	appendLog := func(text string) {
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			return
+		}
+		logLines = append(logLines, trimmed)
+	}
+	buildDetail := func() string { return strings.Join(logLines, "\n") }
+
+	baseURL := strings.TrimSpace(input.BaseURL)
+	cookie := strings.TrimSpace(input.Cookie)
+	if baseURL == "" {
+		err := fmt.Errorf("目标站点缺少 base_url")
+		appendLog(fmt.Sprintf("参数校验失败: %v", err))
+		return publisher.PublishResult{AttemptDetailLog: buildDetail()}, err
+	}
+	if cookie == "" {
+		err := fmt.Errorf("目标站点缺少 cookie")
+		appendLog(fmt.Sprintf("参数校验失败: %v", err))
+		return publisher.PublishResult{AttemptDetailLog: buildDetail()}, err
+	}
+
+	haidanFields, buildErr := BuildHaidanUploadFields(
+		input.UploadData,
+		strings.TrimSpace(input.Title),
+		strings.TrimSpace(input.Subtitle),
+		strings.TrimSpace(input.MediaInfo),
+		strings.TrimSpace(input.IMDbLink),
+		strings.TrimSpace(input.DoubanLink),
+	)
+	if buildErr != nil {
+		appendLog(fmt.Sprintf("海胆参数构建失败: %v", buildErr))
+		return publisher.PublishResult{AttemptDetailLog: buildDetail()}, buildErr
+	}
+
+	if dumpPath, dumpErr := publishuploader.DumpUploadParametersToTmp(
+		targetName,
+		strings.TrimSpace(input.TorrentPath),
+		haidanFields,
+		input.UploadData,
+		strings.TrimSpace(input.Title),
+		strings.TrimSpace(haidanFields["descr"]),
+		strings.TrimSpace(input.Subtitle),
+		strings.TrimSpace(input.IMDbLink),
+		strings.TrimSpace(input.DoubanLink),
+		strings.TrimSpace(input.MediaInfo),
+	); dumpErr != nil {
+		appendLog(fmt.Sprintf("发布参数保存失败: %v", dumpErr))
+	} else if strings.TrimSpace(dumpPath) != "" {
+		appendLog(fmt.Sprintf("发布参数已保存到: %s", dumpPath))
+	}
+
+	// 对齐 Python：UPLOAD_TEST_MODE=true 时跳过真实发布，返回模拟的详情页链接。
+	if os.Getenv("UPLOAD_TEST_MODE") == "true" {
+		appendLog("测试模式：跳过实际发布，模拟成功响应")
+		return publisher.PublishResult{
+			PublishURL:       "https://demo.site.test/details.php?id=999999999&uploaded=1&test=true",
+			UploadFormFields: haidanFields,
+			AttemptDetailLog: buildDetail(),
+		}, nil
+	}
+
+	torrentPath := strings.TrimSpace(input.TorrentPath)
+	torrentFile, err := os.ReadFile(torrentPath)
+	if err != nil {
+		wrappedErr := fmt.Errorf("读取种子文件失败: %w", err)
+		appendLog(fmt.Sprintf("读取种子失败: %v", wrappedErr))
+		return publisher.PublishResult{UploadFormFields: haidanFields, AttemptDetailLog: buildDetail()}, wrappedErr
+	}
+
+	publishURL, existing, attemptDetail, attemptErr := TryUploadTorrentHaidan(
+		baseURL,
+		cookie,
+		filepath.Base(torrentPath),
+		torrentFile,
+		haidanFields,
+	)
+	appendLog(attemptDetail)
+	if attemptErr != nil {
+		return publisher.PublishResult{
+			IsExistingTorrent: existing,
+			UploadFormFields:  haidanFields,
+			AttemptDetailLog:  buildDetail(),
+		}, attemptErr
+	}
+
+	return publisher.PublishResult{
+		PublishURL:        publishURL,
+		IsExistingTorrent: existing,
+		UploadFormFields:  haidanFields,
+		AttemptDetailLog:  buildDetail(),
+	}, nil
+}
 
 // BuildHaidanUploadFields 构造海胆站点的表单字段。
 // 参数/返回：uploadData 为发布 payload；title/subtitle/mediainfo/imdbLink/doubanLink 为最终展示字段；
@@ -78,14 +189,14 @@ func BuildHaidanUploadFields(uploadData map[string]any, title, subtitle, mediain
 
 	// 构建字段映射
 	fields := map[string]string{
-		"name":        strings.TrimSpace(title),
-		"small_descr": strings.TrimSpace(subtitle),
-		"url":         strings.TrimSpace(imdbLink),
-		"descr":       buildHaidanDescription(uploadData),
-		"uplver":      uplverValue,
-		"type":        strings.TrimSpace(typeValue),
-		"medium_sel":  strings.TrimSpace(mediumValue),
-		"codec_sel":   strings.TrimSpace(codecValue),
+		"name":           strings.TrimSpace(title),
+		"small_descr":    strings.TrimSpace(subtitle),
+		"url":            strings.TrimSpace(imdbLink),
+		"descr":          buildHaidanDescription(uploadData),
+		"uplver":         uplverValue,
+		"type":           strings.TrimSpace(typeValue),
+		"medium_sel":     strings.TrimSpace(mediumValue),
+		"codec_sel":      strings.TrimSpace(codecValue),
 		"audiocodec_sel": strings.TrimSpace(audioValue),
 		"standard_sel":   strings.TrimSpace(resolutionValue),
 	}
@@ -523,7 +634,7 @@ func TryUploadTorrentHaidan(baseURL, cookie, fileName string, torrentFile []byte
 	}
 
 	uploadURL := normalizedBaseURL + "/takeupload.php"
-	publishURL, existing, attemptDetail, attemptErr := TryUploadTorrent(uploadURL, baseURL, cookie, "file", torrentFile, fileName, formFields)
+	publishURL, existing, attemptDetail, attemptErr := publishuploader.TryUploadTorrent(uploadURL, baseURL, cookie, "file", torrentFile, fileName, formFields)
 	detailLines = append(detailLines, attemptDetail)
 
 	if attemptErr != nil {
@@ -533,13 +644,4 @@ func TryUploadTorrentHaidan(baseURL, cookie, fileName string, torrentFile []byte
 
 	logx.Infof(haidanPublishLogModule, "海胆发布成功: %s", publishURL)
 	return publishURL, existing, buildDetail(), nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }

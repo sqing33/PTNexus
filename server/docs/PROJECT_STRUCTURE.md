@@ -357,7 +357,7 @@
 | `internal/service/publish/workflow/publish_entry.go` | 单目标发布执行入口 |
 | `internal/service/publish/workflow/publish_payload_entry.go` | 从 payload 直接发布入口 |
 | `internal/service/publish/workflow/publish_with_context.go` | 基于上下文发布执行 |
-| `internal/service/publish/workflow/publish_target.go` | 对目标站点执行上传请求 |
+| `internal/service/publish/workflow/publish_target.go` | 发布分派入口（按站点选择 public/special 发布器执行上传） |
 | `internal/service/publish/workflow/context_state.go` | 上下文状态存储 |
 | `internal/service/publish/workflow/context_build.go` | 上下文对象构建 |
 | `internal/service/publish/workflow/context_register.go` | 抓取/DB 结果注册上下文 |
@@ -368,6 +368,22 @@
 | `internal/service/publish/workflow/batch_runner.go` | 批量发布执行器 |
 | `internal/service/publish/workflow/batch_execute.go` | 批量发布管理入口 |
 | `internal/service/publish/workflow/batch_payload_execute.go` | 基于 payload 的批量发布入口 |
+
+### `publish/publisher`
+
+发布器实现：保持“公共发布器 + 站点特殊发布器”结构，站点差异逻辑收敛到 `sites/` 单文件内，避免散落在 workflow/uploader 中。
+
+| 文件 | 说明 |
+|---|---|
+| `internal/service/publish/publisher/types.go` | 发布器输入输出结构体 |
+| `internal/service/publish/publisher/public.go` | 公共发布器（表单 takeupload.php/upload.php） |
+| `internal/service/publish/publisher/engine/engine.go` | 发布器路由（按站点选择 public/special 发布器） |
+| `internal/service/publish/publisher/sites/helpers.go` | 特殊发布器公共辅助（字符串/布尔转换等） |
+| `internal/service/publish/publisher/sites/ptlgs.go` | PTLGS 字段分离发布器（封面/截图独立字段） |
+| `internal/service/publish/publisher/sites/hdfans.go` | HDFans 标签/媒介覆盖发布器 |
+| `internal/service/publish/publisher/sites/haidan.go` | 海胆特殊发布器（截图独立字段） |
+| `internal/service/publish/publisher/sites/zhuque.go` | 朱雀（TNode/API）特殊发布器 |
+| `internal/service/publish/publisher/sites/rousi.go` | 肉丝（API v1）特殊发布器 |
 
 ### `publish/mapping`
 

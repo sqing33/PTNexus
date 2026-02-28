@@ -1,4 +1,4 @@
-package mapping
+package sites
 
 import (
 	"encoding/json"
@@ -7,12 +7,31 @@ import (
 	"strings"
 
 	"github.com/pt-nexus/server-go/internal/platform/logx"
+	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
+	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
 )
 
 const hdfansPublishMappingLogModule = "发布-HDFans"
 
-func applyHdfansOverrides(mapped map[string]string, uploadData map[string]any, ctx MappingContext) {
-	if mapped == nil {
+// PublishHdfans 执行 HDFans 站点特殊发布流程（标签/媒介覆盖规则）。
+// 参数/返回：input 提供站点信息、发布数据与通用字段；返回发布详情页 URL、是否疑似“种子已存在”、用于自动编辑的表单字段，以及发布过程日志。
+// 失败场景：同 Public 发布器。
+// 副作用：读取本地种子文件并向目标站点发起上传请求；可选写入 data/tmp/torrents 参数落盘。
+func PublishHdfans(input publisher.PublishInput) (publisher.PublishResult, error) {
+	next := input
+	prevAdjust := input.AdjustFormFields
+	next.AdjustFormFields = func(formFields map[string]string) {
+		if prevAdjust != nil {
+			prevAdjust(formFields)
+		}
+		applyHdfansOverrides(formFields, input.UploadData, strings.TrimSpace(input.SourceSiteNickname), input.FindSiteNicknameByGroup)
+	}
+
+	return publisher.PublishPublic(next)
+}
+
+func applyHdfansOverrides(formFields map[string]string, uploadData map[string]any, sourceSiteNickname string, findSiteNicknameByGroup func(releaseGroup string) (string, error)) {
+	if formFields == nil {
 		return
 	}
 
@@ -24,26 +43,26 @@ func applyHdfansOverrides(mapped map[string]string, uploadData map[string]any, c
 	}
 
 	tags := collectHdfansAllTags(uploadData, standardized)
-	enhanced := buildHdfansEnhancedTags(tags, uploadData, standardized, ctx)
+	enhanced := buildHdfansEnhancedTags(tags, uploadData, standardized, strings.TrimSpace(sourceSiteNickname), findSiteNicknameByGroup)
 
-	rebuildHdfansTagFields(mapped, enhanced)
-	refineHdfansMedium(mapped, standardized, enhanced)
+	rebuildHdfansTagFields(formFields, enhanced)
+	refineHdfansMedium(formFields, standardized, enhanced)
 }
 
 func collectHdfansAllTags(uploadData map[string]any, standardized map[string]any) map[string]struct{} {
 	seen := map[string]struct{}{}
-	for _, tag := range parseStringSlice(standardized["tags"]) {
-		addTag(seen, tag)
+	for _, tag := range parseHdfansStringSlice(standardized["tags"]) {
+		addHdfansTag(seen, tag)
 	}
 	if uploadData != nil {
-		for _, tag := range parseStringSlice(uploadData["tags"]) {
-			addTag(seen, tag)
+		for _, tag := range parseHdfansStringSlice(uploadData["tags"]) {
+			addHdfansTag(seen, tag)
 		}
 	}
 	return seen
 }
 
-func buildHdfansEnhancedTags(tags map[string]struct{}, uploadData map[string]any, standardized map[string]any, ctx MappingContext) map[string]struct{} {
+func buildHdfansEnhancedTags(tags map[string]struct{}, uploadData map[string]any, standardized map[string]any, sourceSiteNickname string, findSiteNicknameByGroup func(releaseGroup string) (string, error)) map[string]struct{} {
 	result := map[string]struct{}{}
 	for tag := range tags {
 		result[tag] = struct{}{}
@@ -56,14 +75,13 @@ func buildHdfansEnhancedTags(tags map[string]struct{}, uploadData map[string]any
 	}
 
 	// --- 源站转发：仅数据库 ---
-	sourceNickname := strings.TrimSpace(ctx.SourceSiteNickname)
-	if sourceNickname != "" && ctx.FindSiteNicknameByGroup != nil {
+	if sourceSiteNickname != "" && findSiteNicknameByGroup != nil {
 		releaseGroup := normalizeHdfansReleaseGroup(extractHdfansReleaseGroupRaw(uploadData, standardized))
 		if releaseGroup != "" {
-			matchedNickname, err := ctx.FindSiteNicknameByGroup(releaseGroup)
+			matchedNickname, err := findSiteNicknameByGroup(releaseGroup)
 			if err != nil {
 				logx.Warnf(hdfansPublishMappingLogModule, "源站转发匹配失败 release_group=%s err=%v", releaseGroup, err)
-			} else if strings.TrimSpace(matchedNickname) == sourceNickname {
+			} else if strings.TrimSpace(matchedNickname) == sourceSiteNickname {
 				result["tag.源站转发"] = struct{}{}
 			}
 		}
@@ -72,19 +90,19 @@ func buildHdfansEnhancedTags(tags map[string]struct{}, uploadData map[string]any
 	return result
 }
 
-func rebuildHdfansTagFields(mapped map[string]string, tags map[string]struct{}) {
-	if mapped == nil {
+func rebuildHdfansTagFields(formFields map[string]string, tags map[string]struct{}) {
+	if formFields == nil {
 		return
 	}
 
 	// 移除可能残留的 tags[...] 字段，避免重复/污染。
-	for key := range mapped {
+	for key := range formFields {
 		if strings.HasPrefix(key, "tags[") {
-			delete(mapped, key)
+			delete(formFields, key)
 		}
 	}
 
-	siteCfg, err := LoadSitePublishConfig("hdfans")
+	siteCfg, err := publishmapping.LoadSitePublishConfig("hdfans")
 	if err != nil || siteCfg == nil {
 		return
 	}
@@ -102,7 +120,7 @@ func rebuildHdfansTagFields(mapped map[string]string, tags map[string]struct{}) 
 			candidates = append(candidates, "tag."+tag)
 		}
 		for _, candidate := range candidates {
-			if mappedValue := pickMappedValueWithFallback("tag", tagMapping, candidate, false, false); strings.TrimSpace(mappedValue) != "" {
+			if mappedValue := publishmapping.PickMappedValueWithFallbackNoDefault("tag", tagMapping, candidate); strings.TrimSpace(mappedValue) != "" {
 				tagIDs = append(tagIDs, strings.TrimSpace(mappedValue))
 				break
 			}
@@ -123,25 +141,25 @@ func rebuildHdfansTagFields(mapped map[string]string, tags map[string]struct{}) 
 	sort.Strings(finalIDs)
 
 	for idx, id := range finalIDs {
-		mapped[fmt.Sprintf("tags[4][%d]", idx)] = id
+		formFields[fmt.Sprintf("tags[4][%d]", idx)] = id
 	}
 }
 
-func refineHdfansMedium(mapped map[string]string, standardized map[string]any, tags map[string]struct{}) {
-	if mapped == nil {
+func refineHdfansMedium(formFields map[string]string, standardized map[string]any, tags map[string]struct{}) {
+	if formFields == nil {
 		return
 	}
 
 	mediumField := "medium_sel[4]"
-	siteCfg, _ := LoadSitePublishConfig("hdfans")
+	siteCfg, _ := publishmapping.LoadSitePublishConfig("hdfans")
 	if siteCfg != nil {
 		if resolved := strings.TrimSpace(siteCfg.FormFields["medium"]); resolved != "" {
 			mediumField = resolved
 		}
 	}
 
-	medium := strings.TrimSpace(toStringAnyBasic(standardized["medium"], ""))
-	resolution := strings.TrimSpace(toStringAnyBasic(standardized["resolution"], ""))
+	medium := strings.TrimSpace(toStringAny(standardized["medium"], ""))
+	resolution := strings.TrimSpace(toStringAny(standardized["resolution"], ""))
 
 	hasDIY := false
 	if _, ok := tags["tag.DIY"]; ok {
@@ -158,17 +176,17 @@ func refineHdfansMedium(mapped map[string]string, standardized map[string]any, t
 	// UHD / BD 原盘（仅 DIY 细分）
 	if medium == "medium.uhd_bluray" || medium == "medium.uhd_diy" {
 		if hasDIY {
-			mapped[mediumField] = "18"
+			formFields[mediumField] = "18"
 		} else {
-			mapped[mediumField] = "17"
+			formFields[mediumField] = "17"
 		}
 		return
 	}
 	if medium == "medium.bluray" || medium == "medium.bluray_diy" {
 		if hasDIY {
-			mapped[mediumField] = "22"
+			formFields[mediumField] = "22"
 		} else {
-			mapped[mediumField] = "21"
+			formFields[mediumField] = "21"
 		}
 		return
 	}
@@ -176,22 +194,22 @@ func refineHdfansMedium(mapped map[string]string, standardized map[string]any, t
 	// Encode：按分辨率细分（UHD=20 / 1080P/i=24 / 720P=25）
 	switch medium {
 	case "medium.encode_2160p":
-		mapped[mediumField] = "20"
+		formFields[mediumField] = "20"
 		return
 	case "medium.encode_720p":
-		mapped[mediumField] = "25"
+		formFields[mediumField] = "25"
 		return
 	case "medium.encode_1080p":
-		mapped[mediumField] = "24"
+		formFields[mediumField] = "24"
 		return
 	case "medium.encode":
 		switch resolution {
 		case "resolution.r2160p":
-			mapped[mediumField] = "20"
+			formFields[mediumField] = "20"
 		case "resolution.r720p":
-			mapped[mediumField] = "25"
+			formFields[mediumField] = "25"
 		default:
-			mapped[mediumField] = "24"
+			formFields[mediumField] = "24"
 		}
 		return
 	default:
@@ -202,22 +220,22 @@ func refineHdfansMedium(mapped map[string]string, standardized map[string]any, t
 func extractHdfansReleaseGroupRaw(uploadData map[string]any, standardized map[string]any) string {
 	// 1) 优先使用 title_components 的原始制作组
 	if uploadData != nil {
-		if raw := strings.TrimSpace(extractTeamFromTitleComponents(uploadData["title_components"])); raw != "" {
+		if raw := strings.TrimSpace(extractHdfansTeamFromTitleComponents(uploadData["title_components"])); raw != "" {
 			return raw
 		}
 
 		if sourceParams, ok := uploadData["source_params"].(map[string]any); ok {
-			if raw := strings.TrimSpace(toStringAnyBasic(sourceParams["制作组"], "")); raw != "" {
+			if raw := strings.TrimSpace(toStringAny(sourceParams["制作组"], "")); raw != "" {
 				return raw
 			}
 		}
 	}
 
 	// 2) 兜底使用 standardized team（可能是 team.xxx；但仍做一下清洗）
-	return strings.TrimSpace(toStringAnyBasic(standardized["team"], ""))
+	return strings.TrimSpace(toStringAny(standardized["team"], ""))
 }
 
-func extractTeamFromTitleComponents(raw any) string {
+func extractHdfansTeamFromTitleComponents(raw any) string {
 	if raw == nil {
 		return ""
 	}
@@ -235,7 +253,7 @@ func extractTeamFromTitleComponents(raw any) string {
 					continue
 				}
 			}
-			if strings.TrimSpace(toStringAnyBasic(component["key"], "")) != "制作组" {
+			if strings.TrimSpace(toStringAny(component["key"], "")) != "制作组" {
 				continue
 			}
 			value := component["value"]
@@ -248,14 +266,14 @@ func extractTeamFromTitleComponents(raw any) string {
 			case []any:
 				parts := make([]string, 0, len(typed))
 				for _, entry := range typed {
-					text := strings.TrimSpace(toStringAnyBasic(entry, ""))
+					text := strings.TrimSpace(toStringAny(entry, ""))
 					if text != "" {
 						parts = append(parts, text)
 					}
 				}
 				return strings.TrimSpace(strings.Join(parts, " "))
 			default:
-				return strings.TrimSpace(toStringAnyBasic(typed, ""))
+				return strings.TrimSpace(toStringAny(typed, ""))
 			}
 		}
 		return ""
@@ -322,10 +340,64 @@ func hasAnyTagLower(tags map[string]struct{}, candidates ...string) bool {
 	return false
 }
 
-func addTag(target map[string]struct{}, value string) {
+func addHdfansTag(target map[string]struct{}, value string) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return
 	}
 	target[trimmed] = struct{}{}
+}
+
+func parseHdfansStringSlice(value any) []string {
+	switch typed := value.(type) {
+	case nil:
+		return []string{}
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			trimmed := strings.TrimSpace(item)
+			if trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			trimmed := strings.TrimSpace(toStringAny(item, ""))
+			if trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	case string:
+		text := strings.TrimSpace(typed)
+		if text == "" {
+			return []string{}
+		}
+		if strings.HasPrefix(text, "[") {
+			parsed := []string{}
+			if err := json.Unmarshal([]byte(text), &parsed); err == nil {
+				return parseHdfansStringSlice(parsed)
+			}
+			parsedAny := []any{}
+			if err := json.Unmarshal([]byte(text), &parsedAny); err == nil {
+				return parseHdfansStringSlice(parsedAny)
+			}
+		}
+		if strings.Contains(text, ",") {
+			parts := strings.Split(text, ",")
+			out := make([]string, 0, len(parts))
+			for _, part := range parts {
+				trimmed := strings.TrimSpace(part)
+				if trimmed != "" {
+					out = append(out, trimmed)
+				}
+			}
+			return out
+		}
+		return []string{text}
+	default:
+		return []string{strings.TrimSpace(toStringAny(typed, ""))}
+	}
 }

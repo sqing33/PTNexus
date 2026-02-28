@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
+	publishpublisher "github.com/pt-nexus/server-go/internal/service/publish/publisher"
+	publishengine "github.com/pt-nexus/server-go/internal/service/publish/publisher/engine"
 	publishuploader "github.com/pt-nexus/server-go/internal/service/publish/uploader"
 )
 
@@ -44,338 +45,51 @@ func PublishTorrentToTarget(
 	}
 	subtitle := strings.TrimSpace(toStringAny(uploadData["subtitle"], ""))
 	description := publishuploader.BuildUploadDescription(siteCode, uploadData)
-	if isPTLGSSite(siteCode) {
-		description = buildPTLGSDescription(uploadData)
-		appendLog("检测到 PTLGS 站点：启用特殊字段分离流程")
-	}
 	imdbLink, doubanLink := resolvePublishExternalLinks(uploadData)
 	mediainfo := strings.TrimSpace(toStringAny(uploadData["mediainfo"], ""))
 
-	// 朱雀站点（TNode/API）走特殊发布逻辑：不使用 takeupload.php/upload.php 表单。
-	if strings.EqualFold(siteCode, "zhuque") {
-		appendLog("检测到朱雀站点：启用 API 发布流程")
+	pubInput := publishpublisher.PublishInput{
+		TargetName: targetName,
+		SiteCode:   siteCode,
+		BaseURL:    baseURL,
+		Cookie:     cookie,
+		TargetInfo: targetInfo,
 
-		if baseURL == "" {
-			err := fmt.Errorf("目标站点缺少 base_url")
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, nil, err
-		}
-		if cookie == "" {
-			err := fmt.Errorf("目标站点缺少 cookie")
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, nil, err
-		}
+		UploadData:  uploadData,
+		TorrentPath: strings.TrimSpace(torrentPath),
 
-		zhuqueFields, buildErr := publishuploader.BuildZhuqueUploadFields(uploadData, title, subtitle, mediainfo, imdbLink, doubanLink)
-		if buildErr != nil {
-			appendLog(fmt.Sprintf("朱雀参数构建失败: %v", buildErr))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, nil, buildErr
-		}
+		Title:       title,
+		Subtitle:    subtitle,
+		Description: description,
+		IMDbLink:    imdbLink,
+		DoubanLink:  doubanLink,
+		MediaInfo:   mediainfo,
 
-		if dumpPath, dumpErr := publishuploader.DumpUploadParametersToTmp(
-			targetName,
-			torrentPath,
-			zhuqueFields,
-			uploadData,
-			title,
-			zhuqueFields["note"],
-			subtitle,
-			imdbLink,
-			doubanLink,
-			mediainfo,
-		); dumpErr != nil {
-			appendLog(fmt.Sprintf("发布参数保存失败: %v", dumpErr))
-		} else if strings.TrimSpace(dumpPath) != "" {
-			appendLog(fmt.Sprintf("发布参数已保存到: %s", dumpPath))
-		}
-
-		// 对齐 Python：UPLOAD_TEST_MODE=true 时跳过真实发布，返回模拟的详情页链接。
-		if os.Getenv("UPLOAD_TEST_MODE") == "true" {
-			appendLog("测试模式：跳过实际发布，模拟成功响应")
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 成功 (测试模式)", targetName))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "https://demo.site.test/torrent/info/999999999?test=true", "https://demo.site.test/api/torrent/download/999999999/TEST_KEY", strings.Join(logLines, "\n"), false, zhuqueFields, nil
-		}
-
-		torrentFile, err := os.ReadFile(torrentPath)
-		if err != nil {
-			wrappedErr := fmt.Errorf("读取种子文件失败: %w", err)
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, wrappedErr))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, zhuqueFields, wrappedErr
-		}
-
-		publishURL, directDownloadURL, existing, attemptDetail, attemptErr := publishuploader.TryUploadTorrentZhuque(
-			baseURL,
-			cookie,
-			filepath.Base(torrentPath),
-			torrentFile,
-			zhuqueFields,
-		)
-		appendLog(attemptDetail)
-		if attemptErr != nil {
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, attemptErr))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), existing, zhuqueFields, attemptErr
-		}
-
-		if existing {
-			appendLog(fmt.Sprintf("发布结果：种子已存在于 %s，已自动更新信息", targetName))
-		} else {
-			appendLog(fmt.Sprintf("发布结果：成功发布到 %s", targetName))
-		}
-		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return publishURL, directDownloadURL, strings.Join(logLines, "\n"), existing, zhuqueFields, nil
-	}
-
-	// 海胆站点走特殊发布逻辑：有专门的截图字段，描述不包含截图。
-	if strings.EqualFold(siteCode, "haidan") {
-		appendLog("检测到海胆站点：启用特殊发布流程")
-
-		if baseURL == "" {
-			err := fmt.Errorf("目标站点缺少 base_url")
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, nil, err
-		}
-		if cookie == "" {
-			err := fmt.Errorf("目标站点缺少 cookie")
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, nil, err
-		}
-
-		haidanFields, buildErr := publishuploader.BuildHaidanUploadFields(uploadData, title, subtitle, mediainfo, imdbLink, doubanLink)
-		if buildErr != nil {
-			appendLog(fmt.Sprintf("海胆参数构建失败: %v", buildErr))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, nil, buildErr
-		}
-
-		if dumpPath, dumpErr := publishuploader.DumpUploadParametersToTmp(
-			targetName,
-			torrentPath,
-			haidanFields,
-			uploadData,
-			title,
-			haidanFields["descr"],
-			subtitle,
-			imdbLink,
-			doubanLink,
-			mediainfo,
-		); dumpErr != nil {
-			appendLog(fmt.Sprintf("发布参数保存失败: %v", dumpErr))
-		} else if strings.TrimSpace(dumpPath) != "" {
-			appendLog(fmt.Sprintf("发布参数已保存到: %s", dumpPath))
-		}
-
-		// 对齐 Python：UPLOAD_TEST_MODE=true 时跳过真实发布，返回模拟的详情页链接。
-		if os.Getenv("UPLOAD_TEST_MODE") == "true" {
-			appendLog("测试模式：跳过实际发布，模拟成功响应")
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 成功 (测试模式)", targetName))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "https://demo.site.test/details.php?id=999999999&uploaded=1&test=true", "", strings.Join(logLines, "\n"), false, haidanFields, nil
-		}
-
-		torrentFile, err := os.ReadFile(torrentPath)
-		if err != nil {
-			wrappedErr := fmt.Errorf("读取种子文件失败: %w", err)
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, wrappedErr))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), false, haidanFields, wrappedErr
-		}
-
-		publishURL, existing, attemptDetail, attemptErr := publishuploader.TryUploadTorrentHaidan(
-			baseURL,
-			cookie,
-			filepath.Base(torrentPath),
-			torrentFile,
-			haidanFields,
-		)
-		appendLog(attemptDetail)
-		if attemptErr != nil {
-			appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, attemptErr))
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return "", "", strings.Join(logLines, "\n"), existing, haidanFields, attemptErr
-		}
-
-		if existing {
-			appendLog(fmt.Sprintf("发布结果：种子已存在于 %s，已自动更新信息", targetName))
-		} else {
-			appendLog(fmt.Sprintf("发布结果：成功发布到 %s", targetName))
-		}
-		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return publishURL, "", strings.Join(logLines, "\n"), existing, haidanFields, nil
-	}
-
-	siteCfg, _ := publishmapping.LoadSitePublishConfig(siteCode)
-	resolveFieldName := func(mappingKey string, fallback string) string {
-		if siteCfg == nil {
-			return fallback
-		}
-		for _, key := range []string{mappingKey, fallback} {
-			if resolved := strings.TrimSpace(siteCfg.FormFields[key]); resolved != "" {
-				return resolved
-			}
-		}
-		return fallback
-	}
-	setField := func(formFields map[string]string, mappingKey string, fallback string, value string) {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			return
-		}
-		formFields[resolveFieldName(mappingKey, fallback)] = trimmed
-	}
-
-	formFields := map[string]string{}
-	setField(formFields, "name", "name", title)
-	setField(formFields, "title", "title", title)
-	setField(formFields, "small_descr", "small_descr", subtitle)
-	setField(formFields, "description", "descr", description)
-	setField(formFields, "imdb_url", "url", imdbLink)
-	setField(formFields, "douban_url", "dburl", doubanLink)
-	setField(formFields, "pt_gen", "pt_gen", doubanLink)
-	setField(formFields, "technical_info", "technical_info", mediainfo)
-	if isPTLGSSite(siteCode) {
-		cover, screenshots := buildPTLGSImageFields(uploadData)
-		setField(formFields, "cover", "cover", cover)
-		setField(formFields, "screenshots", "screenshots", screenshots)
-	}
-
-	if mapped := publishmapping.ResolvePublishMappings(siteCode, uploadData, publishmapping.MappingContext{
-		SourceSiteNickname:      sourceSiteNickname,
+		SourceSiteNickname:      strings.TrimSpace(sourceSiteNickname),
 		FindSiteNicknameByGroup: findSiteNicknameByGroup,
-	}); len(mapped) > 0 {
-		for key, value := range mapped {
-			formFields[key] = value
-		}
 	}
 
-	if dumpPath, dumpErr := publishuploader.DumpUploadParametersToTmp(
-		targetName,
-		torrentPath,
-		formFields,
-		uploadData,
-		title,
-		description,
-		subtitle,
-		imdbLink,
-		doubanLink,
-		mediainfo,
-	); dumpErr != nil {
-		appendLog(fmt.Sprintf("发布参数保存失败: %v", dumpErr))
-	} else if strings.TrimSpace(dumpPath) != "" {
-		appendLog(fmt.Sprintf("发布参数已保存到: %s", dumpPath))
+	result, publishErr := publishengine.Publish(pubInput)
+
+	if strings.TrimSpace(result.AttemptDetailLog) != "" {
+		appendLog(result.AttemptDetailLog)
 	}
 
-	// 对齐 Python：UPLOAD_TEST_MODE=true 时跳过真实发布，返回模拟的详情页链接。
+	if publishErr != nil {
+		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, publishErr))
+		appendLog("--- [步骤2] 任务执行完毕 ---")
+		return "", "", strings.Join(logLines, "\n"), result.IsExistingTorrent, result.UploadFormFields, publishErr
+	}
+
 	if os.Getenv("UPLOAD_TEST_MODE") == "true" {
-		appendLog("测试模式：跳过实际发布，模拟成功响应")
 		appendLog(fmt.Sprintf("发布结果：发布到 %s 成功 (测试模式)", targetName))
-		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "https://demo.site.test/details.php?id=999999999&uploaded=1&test=true", "", strings.Join(logLines, "\n"), false, formFields, nil
+	} else if result.IsExistingTorrent {
+		appendLog(fmt.Sprintf("发布结果：种子已存在于 %s，已自动更新信息", targetName))
+	} else {
+		appendLog(fmt.Sprintf("发布结果：成功发布到 %s", targetName))
 	}
-
-	if baseURL == "" {
-		err := fmt.Errorf("目标站点缺少 base_url")
-		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
-		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), false, formFields, err
-	}
-
-	torrentFile, err := os.ReadFile(torrentPath)
-	if err != nil {
-		wrappedErr := fmt.Errorf("读取种子文件失败: %w", err)
-		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, wrappedErr))
-		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), false, formFields, wrappedErr
-	}
-
-	if isRousiSite(siteCode) {
-		appendLog("上传方式: API v1 JSON")
-		publishURL, existing, attemptDetail, attemptErr := tryUploadTorrentRousiAPI(baseURL, targetName, torrentPath, targetInfo, uploadData, torrentFile, title, description)
-		appendLog(attemptDetail)
-		if attemptErr == nil {
-			if existing {
-				appendLog(fmt.Sprintf("发布结果：种子已存在于 %s，已自动更新信息", targetName))
-			} else {
-				appendLog(fmt.Sprintf("发布结果：成功发布到 %s", targetName))
-			}
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return publishURL, "", strings.Join(logLines, "\n"), existing, formFields, nil
-		}
-		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, attemptErr))
-		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), existing, formFields, attemptErr
-	}
-
-	if cookie == "" {
-		err := fmt.Errorf("目标站点缺少 cookie")
-		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
-		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), false, formFields, err
-	}
-
-	uploadURLs := []string{
-		strings.TrimRight(baseURL, "/") + "/takeupload.php",
-		strings.TrimRight(baseURL, "/") + "/upload.php",
-	}
-	fileFields := []string{"file", "torrent", "torrentfile", "uplfile"}
-	type uploadAttemptTarget struct {
-		uploadURL string
-		fileField string
-	}
-	attemptTargets := make([]uploadAttemptTarget, 0, len(uploadURLs)*len(fileFields))
-	for _, fileField := range fileFields {
-		for _, uploadURL := range uploadURLs {
-			attemptTargets = append(attemptTargets, uploadAttemptTarget{uploadURL: uploadURL, fileField: fileField})
-		}
-	}
-	// 简化日志输出，不再显示技术细节
-	if len(attemptTargets) == 0 {
-		err := fmt.Errorf("上传配置缺失")
-		appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, err))
-		appendLog("--- [步骤2] 任务执行完毕 ---")
-		return "", "", strings.Join(logLines, "\n"), false, formFields, err
-	}
-
-	lastErr := error(nil)
-	existing := false
-	maxRetryCount := 1
-	totalAttempts := maxRetryCount + 1
-	if totalAttempts > len(attemptTargets) {
-		totalAttempts = len(attemptTargets)
-	}
-	for attemptIndex := 0; attemptIndex < totalAttempts; attemptIndex++ {
-		target := attemptTargets[attemptIndex]
-		publishURL, attemptExisting, attemptDetail, attemptErr := publishuploader.TryUploadTorrent(target.uploadURL, baseURL, cookie, target.fileField, torrentFile, filepath.Base(torrentPath), formFields)
-		existing = existing || attemptExisting
-		appendLog(attemptDetail)
-		if attemptErr == nil {
-			if existing {
-				appendLog(fmt.Sprintf("发布结果：种子已存在于 %s，已自动更新信息", targetName))
-			} else {
-				appendLog(fmt.Sprintf("发布结果：成功发布到 %s", targetName))
-			}
-			appendLog("--- [步骤2] 任务执行完毕 ---")
-			return publishURL, "", strings.Join(logLines, "\n"), existing, formFields, nil
-		}
-		lastErr = attemptErr
-		// 站点已明确提示“种子已存在”时不再重试，避免后续尝试把错误覆盖为冗长 HTML 页面。
-		if attemptExisting {
-			break
-		}
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("发布失败")
-	}
-	appendLog(fmt.Sprintf("发布结果：发布到 %s 失败: %v", targetName, lastErr))
 	appendLog("--- [步骤2] 任务执行完毕 ---")
-	return "", "", strings.Join(logLines, "\n"), existing, formFields, lastErr
+	return result.PublishURL, result.DirectDownloadURL, strings.Join(logLines, "\n"), result.IsExistingTorrent, result.UploadFormFields, nil
 }
 
 func toStringAny(value any, fallback string) string {

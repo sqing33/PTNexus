@@ -1,0 +1,31 @@
+package engine
+
+import (
+	"strings"
+
+	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
+	publishsites "github.com/pt-nexus/server-go/internal/service/publish/publisher/sites"
+)
+
+// Publish 按站点 code 路由到公共发布器或对应站点的特殊发布器。
+// 参数/返回：input 由 workflow 统一构建；返回 PublishResult 与 error。
+// 失败场景：发布器内部参数缺失、读取 torrent 失败、站点返回错误等返回 error。
+// 副作用：读取本地 torrent 文件并向目标站点发起请求（由具体发布器实现）。
+func Publish(input publisher.PublishInput) (publisher.PublishResult, error) {
+	siteCode := strings.ToLower(strings.TrimSpace(input.SiteCode))
+
+	switch siteCode {
+	case "zhuque":
+		return publishsites.PublishZhuque(input)
+	case "haidan":
+		return publishsites.PublishHaidan(input)
+	case "rousi":
+		return publishsites.PublishRousi(input)
+	case "ptlgs":
+		return publishsites.PublishPTLGS(input)
+	case "hdfans":
+		return publishsites.PublishHdfans(input)
+	default:
+		return publisher.PublishPublic(input)
+	}
+}

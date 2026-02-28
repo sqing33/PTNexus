@@ -1,4 +1,4 @@
-package uploader
+package sites
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	neturl "net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -17,6 +19,8 @@ import (
 	"github.com/pt-nexus/server-go/internal/config"
 	"github.com/pt-nexus/server-go/internal/platform/logx"
 	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
+	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
+	publishuploader "github.com/pt-nexus/server-go/internal/service/publish/uploader"
 )
 
 const zhuquePublishLogModule = "发布-朱雀"
@@ -29,6 +33,115 @@ var (
 	reZhuqueImgBBCode                 = regexp.MustCompile(`(?is)\[img\](.*?)\[/img\]`)
 	reZhuqueURL                       = regexp.MustCompile(`https?://[^\s\[\]]+`)
 )
+
+// PublishZhuque 执行朱雀站点特殊发布流程（TNode/API：/api/torrent/upload）。
+// 参数/返回：input 提供站点信息、发布数据与通用字段；返回发布详情页 URL、直链下载 URL、是否疑似“种子已存在”、以及发布过程日志。
+// 失败场景：配置缺失、必需映射字段缺失、读取种子失败、上传失败等返回 error。
+// 副作用：读取本地种子文件并向目标站点发起上传请求；可选写入 data/tmp/torrents 参数落盘。
+func PublishZhuque(input publisher.PublishInput) (publisher.PublishResult, error) {
+	targetName := strings.TrimSpace(input.TargetName)
+	if targetName == "" {
+		targetName = "目标站点"
+	}
+
+	logLines := []string{
+		"检测到朱雀站点：启用 API 发布流程",
+	}
+	appendLog := func(text string) {
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			return
+		}
+		logLines = append(logLines, trimmed)
+	}
+	buildDetail := func() string { return strings.Join(logLines, "\n") }
+
+	baseURL := strings.TrimSpace(input.BaseURL)
+	cookie := strings.TrimSpace(input.Cookie)
+	if baseURL == "" {
+		err := fmt.Errorf("目标站点缺少 base_url")
+		appendLog(fmt.Sprintf("参数校验失败: %v", err))
+		return publisher.PublishResult{AttemptDetailLog: buildDetail()}, err
+	}
+	if cookie == "" {
+		err := fmt.Errorf("目标站点缺少 cookie")
+		appendLog(fmt.Sprintf("参数校验失败: %v", err))
+		return publisher.PublishResult{AttemptDetailLog: buildDetail()}, err
+	}
+
+	zhuqueFields, buildErr := BuildZhuqueUploadFields(
+		input.UploadData,
+		strings.TrimSpace(input.Title),
+		strings.TrimSpace(input.Subtitle),
+		strings.TrimSpace(input.MediaInfo),
+		strings.TrimSpace(input.IMDbLink),
+		strings.TrimSpace(input.DoubanLink),
+	)
+	if buildErr != nil {
+		appendLog(fmt.Sprintf("朱雀参数构建失败: %v", buildErr))
+		return publisher.PublishResult{AttemptDetailLog: buildDetail()}, buildErr
+	}
+
+	if dumpPath, dumpErr := publishuploader.DumpUploadParametersToTmp(
+		targetName,
+		strings.TrimSpace(input.TorrentPath),
+		zhuqueFields,
+		input.UploadData,
+		strings.TrimSpace(input.Title),
+		strings.TrimSpace(zhuqueFields["note"]),
+		strings.TrimSpace(input.Subtitle),
+		strings.TrimSpace(input.IMDbLink),
+		strings.TrimSpace(input.DoubanLink),
+		strings.TrimSpace(input.MediaInfo),
+	); dumpErr != nil {
+		appendLog(fmt.Sprintf("发布参数保存失败: %v", dumpErr))
+	} else if strings.TrimSpace(dumpPath) != "" {
+		appendLog(fmt.Sprintf("发布参数已保存到: %s", dumpPath))
+	}
+
+	// 对齐 Python：UPLOAD_TEST_MODE=true 时跳过真实发布，返回模拟的详情页链接。
+	if os.Getenv("UPLOAD_TEST_MODE") == "true" {
+		appendLog("测试模式：跳过实际发布，模拟成功响应")
+		return publisher.PublishResult{
+			PublishURL:        "https://demo.site.test/torrent/info/999999999?test=true",
+			DirectDownloadURL: "https://demo.site.test/api/torrent/download/999999999/TEST_KEY",
+			UploadFormFields:  zhuqueFields,
+			AttemptDetailLog:  buildDetail(),
+		}, nil
+	}
+
+	torrentPath := strings.TrimSpace(input.TorrentPath)
+	torrentFile, err := os.ReadFile(torrentPath)
+	if err != nil {
+		wrappedErr := fmt.Errorf("读取种子文件失败: %w", err)
+		appendLog(fmt.Sprintf("读取种子失败: %v", wrappedErr))
+		return publisher.PublishResult{UploadFormFields: zhuqueFields, AttemptDetailLog: buildDetail()}, wrappedErr
+	}
+
+	publishURL, directDownloadURL, existing, attemptDetail, attemptErr := TryUploadTorrentZhuque(
+		baseURL,
+		cookie,
+		filepath.Base(torrentPath),
+		torrentFile,
+		zhuqueFields,
+	)
+	appendLog(attemptDetail)
+	if attemptErr != nil {
+		return publisher.PublishResult{
+			IsExistingTorrent: existing,
+			UploadFormFields:  zhuqueFields,
+			AttemptDetailLog:  buildDetail(),
+		}, attemptErr
+	}
+
+	return publisher.PublishResult{
+		PublishURL:        publishURL,
+		DirectDownloadURL: directDownloadURL,
+		IsExistingTorrent: existing,
+		UploadFormFields:  zhuqueFields,
+		AttemptDetailLog:  buildDetail(),
+	}, nil
+}
 
 // BuildZhuqueUploadFields 构造朱雀站点（TNode/API）的 multipart 表单字段。
 // 参数/返回：uploadData 为发布 payload；title/subtitle/mediainfo/imdbLink/doubanLink 为最终展示字段；返回可直接提交给 /api/torrent/upload 的字段映射。
@@ -611,33 +724,6 @@ func collectZhuqueTags(uploadData map[string]any, standardized map[string]any) [
 		}
 	}
 	return out
-}
-
-func boolFromAnyWithDefault(value any, fallback bool) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case int:
-		return typed != 0
-	case int64:
-		return typed != 0
-	case float64:
-		return typed != 0
-	case string:
-		text := strings.ToLower(strings.TrimSpace(typed))
-		if text == "" {
-			return fallback
-		}
-		if text == "true" || text == "1" || text == "yes" || text == "y" {
-			return true
-		}
-		if text == "false" || text == "0" || text == "no" || text == "n" {
-			return false
-		}
-		return fallback
-	default:
-		return fallback
-	}
 }
 
 func boolToLowerString(value bool) string {

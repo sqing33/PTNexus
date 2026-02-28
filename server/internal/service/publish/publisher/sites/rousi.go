@@ -1,4 +1,4 @@
-package workflow
+package sites
 
 import (
 	"bytes"
@@ -19,6 +19,7 @@ import (
 
 	"github.com/pt-nexus/server-go/internal/config"
 	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
+	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
 )
 
 var (
@@ -55,6 +56,77 @@ var (
 type rousiImageSource struct {
 	URL     string
 	Referer string
+}
+
+// PublishRousi 执行肉丝站点特殊发布流程（API v1 JSON：/api/v1/torrents）。
+// 参数/返回：input 提供站点信息、发布数据与通用字段；返回发布详情页 URL、是否疑似“种子已存在”，以及发布过程日志。
+// 失败场景：目标站点缺少 base_url/passkey、读取种子失败、上传失败等返回 error。
+// 副作用：读取本地种子文件并向目标站点发起上传请求。
+func PublishRousi(input publisher.PublishInput) (publisher.PublishResult, error) {
+	targetName := strings.TrimSpace(input.TargetName)
+	if targetName == "" {
+		targetName = "目标站点"
+	}
+
+	logLines := []string{
+		"检测到肉丝站点：启用 API v1 发布流程",
+	}
+	appendLog := func(text string) {
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			return
+		}
+		logLines = append(logLines, trimmed)
+	}
+	buildDetail := func() string { return strings.Join(logLines, "\n") }
+
+	baseURL := strings.TrimSpace(input.BaseURL)
+	if baseURL == "" {
+		err := fmt.Errorf("目标站点缺少 base_url")
+		appendLog(fmt.Sprintf("参数校验失败: %v", err))
+		return publisher.PublishResult{AttemptDetailLog: buildDetail()}, err
+	}
+
+	// 对齐 Python：UPLOAD_TEST_MODE=true 时跳过真实发布，返回模拟的详情页链接。
+	if os.Getenv("UPLOAD_TEST_MODE") == "true" {
+		appendLog("测试模式：跳过实际发布，模拟成功响应")
+		return publisher.PublishResult{
+			PublishURL:       "https://demo.site.test/torrent/99999999-9999-9999-9999-999999999999?test=true",
+			AttemptDetailLog: buildDetail(),
+		}, nil
+	}
+
+	torrentPath := strings.TrimSpace(input.TorrentPath)
+	torrentFile, err := os.ReadFile(torrentPath)
+	if err != nil {
+		wrappedErr := fmt.Errorf("读取种子文件失败: %w", err)
+		appendLog(fmt.Sprintf("读取种子失败: %v", wrappedErr))
+		return publisher.PublishResult{AttemptDetailLog: buildDetail()}, wrappedErr
+	}
+
+	publishURL, existing, attemptDetail, attemptErr := tryUploadTorrentRousiAPI(
+		baseURL,
+		targetName,
+		torrentPath,
+		input.TargetInfo,
+		input.UploadData,
+		torrentFile,
+		strings.TrimSpace(input.Title),
+		strings.TrimSpace(input.Description),
+	)
+	appendLog(attemptDetail)
+	if attemptErr != nil {
+		return publisher.PublishResult{
+			IsExistingTorrent: existing,
+			AttemptDetailLog:  buildDetail(),
+		}, attemptErr
+	}
+
+	return publisher.PublishResult{
+		PublishURL:        publishURL,
+		IsExistingTorrent: existing,
+		AttemptDetailLog:  buildDetail(),
+	}, nil
 }
 
 func isRousiSite(siteCode string) bool {
