@@ -146,6 +146,8 @@ download_bdinfo_tools() {
     mkdir -p "bdinfo"
     cd "bdinfo"
 
+    local bdinfo_platform_dir="linux"
+
     # BDInfo文件列表
     local files=(
         "BDInfo"
@@ -153,28 +155,46 @@ download_bdinfo_tools() {
         "liblzfse.so"
     )
 
+    local downloader=""
+    if command -v curl >/dev/null 2>&1; then
+        downloader="curl"
+    elif command -v wget >/dev/null 2>&1; then
+        downloader="wget"
+    else
+        error "未找到curl或wget，请先安装其中一个"
+        cd ..
+        return 1
+    fi
+
     # 下载每个文件
     for file in "${files[@]}"; do
-        local url="https://raw.githubusercontent.com/$REPO_OWNER/PTNexus/refs/heads/main/server/core/bdinfo/$file"
-        
+        local downloaded=false
+        local path_candidates=(
+            "server/core/bdinfo/$bdinfo_platform_dir/$file"
+            "server/core/bdinfo/$file"
+        )
+
         log "正在下载 $file..."
-        
-        # 尝试使用curl下载
-        if command -v curl >/dev/null 2>&1; then
-            if ! curl -L -f -o "$file" "$url"; then
-                error "curl下载 $file 失败"
-                cd ..
-                return 1
+
+        for remote_path in "${path_candidates[@]}"; do
+            local url="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/refs/heads/$REPO_REF/$remote_path"
+            log "尝试下载: $remote_path"
+
+            if [ "$downloader" = "curl" ]; then
+                if curl -L -f -o "$file" "$url"; then
+                    downloaded=true
+                    break
+                fi
+            else
+                if wget -O "$file" "$url"; then
+                    downloaded=true
+                    break
+                fi
             fi
-        # 如果curl不可用，尝试使用wget
-        elif command -v wget >/dev/null 2>&1; then
-            if ! wget -O "$file" "$url"; then
-                error "wget下载 $file 失败"
-                cd ..
-                return 1
-            fi
-        else
-            error "未找到curl或wget，请先安装其中一个"
+        done
+
+        if [ "$downloaded" != "true" ]; then
+            error "下载 $file 失败，未找到可用的 BDInfo 文件路径"
             cd ..
             return 1
         fi
@@ -216,10 +236,20 @@ set_permissions() {
     
     # 设置BDInfo工具权限
     if [ -d "bdinfo" ]; then
-        chmod -R 755 "bdinfo"
-        chmod +x "bdinfo/BDInfo"
-        chmod +x "bdinfo/BDInfoDataSubstractor"
-        chmod 644 "bdinfo/liblzfse.so"
+        chmod 755 "bdinfo"
+
+        if [ -f "bdinfo/BDInfo" ]; then
+            chmod +x "bdinfo/BDInfo"
+        fi
+
+        if [ -f "bdinfo/BDInfoDataSubstractor" ]; then
+            chmod +x "bdinfo/BDInfoDataSubstractor"
+        fi
+
+        if [ -f "bdinfo/liblzfse.so" ]; then
+            chmod 644 "bdinfo/liblzfse.so"
+        fi
+
         log "BDInfo工具权限设置完成"
     fi
 }
