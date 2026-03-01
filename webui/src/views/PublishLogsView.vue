@@ -6,8 +6,7 @@
       type="error"
       show-icon
       :closable="false"
-      center
-      style="margin-bottom: 15px"
+      style="margin: 0; border-radius: 0"
     />
 
     <div class="search-and-controls glass-table">
@@ -16,7 +15,7 @@
         placeholder="搜索标题/副标题/种子ID/站点..."
         clearable
         class="search-input"
-        style="width: 320px; margin-right: 12px"
+        style="width: 320px; margin-right: 15px"
         @keyup.enter="applyFilters"
       />
 
@@ -24,7 +23,7 @@
         v-model="sceneFilter"
         placeholder="场景"
         clearable
-        style="width: 140px; margin-right: 12px"
+        style="width: 140px; margin-right: 15px"
       >
         <el-option label="一种多站" value="multi_site" />
         <el-option label="一站多种" value="multi_torrent" />
@@ -34,7 +33,7 @@
         v-model="triggerFilter"
         placeholder="触发方式"
         clearable
-        style="width: 140px; margin-right: 12px"
+        style="width: 140px; margin-right: 15px"
       >
         <el-option label="手动" value="manual" />
         <el-option label="队列" value="queue" />
@@ -42,13 +41,15 @@
 
       <el-select
         v-model="statusFilter"
-        placeholder="状态"
+        placeholder="发布状态"
         clearable
-        style="width: 150px; margin-right: 12px"
+        style="width: 160px; margin-right: 15px"
       >
-        <el-option label="等待" value="queued" />
-        <el-option label="成功" value="success" />
-        <el-option label="失败" value="failed" />
+        <el-option label="待发布" value="queued" />
+        <el-option label="发布成功" value="success" />
+        <el-option label="发布失败" value="failed" />
+        <el-option label="已存在" value="exists" />
+        <el-option label="已编辑" value="edited" />
         <el-option label="预检查限制" value="pre_check_limit" />
       </el-select>
 
@@ -56,7 +57,7 @@
         v-model="targetSiteFilter"
         placeholder="目标站点"
         clearable
-        style="width: 140px; margin-right: 12px"
+        style="width: 140px; margin-right: 15px"
         @keyup.enter="applyFilters"
       />
 
@@ -82,24 +83,19 @@
         :data="rows"
         v-loading="loading"
         border
+        style="width: 100%"
         height="100%"
         empty-text="暂无发种日志"
         class="glass-table"
       >
-        <el-table-column label="加入时间" width="170" align="center">
+        <el-table-column label="加入时间" width="150" align="center">
           <template #default="scope">
-            <div class="datetime-cell">
-              <div class="date-line">{{ formatDateTimeTwoLines(scope.row.created_at)[0] }}</div>
-              <div class="time-line">{{ formatDateTimeTwoLines(scope.row.created_at)[1] }}</div>
-            </div>
+            <div class="datetime-cell">{{ formatDateTimeTwoLines(scope.row.created_at) }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="更新时间" width="170" align="center">
+        <el-table-column label="更新时间" width="150" align="center">
           <template #default="scope">
-            <div class="datetime-cell">
-              <div class="date-line">{{ formatDateTimeTwoLines(scope.row.updated_at)[0] }}</div>
-              <div class="time-line">{{ formatDateTimeTwoLines(scope.row.updated_at)[1] }}</div>
-            </div>
+            <div class="datetime-cell">{{ formatDateTimeTwoLines(scope.row.updated_at) }}</div>
           </template>
         </el-table-column>
         <el-table-column label="场景" width="110" align="center">
@@ -125,40 +121,54 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="状态" width="120" align="center">
+        <el-table-column label="发布状态" width="120" align="center">
           <template #default="scope">
-            <el-tag :type="statusTagType(scope.row.status)" effect="dark">
-              {{ formatStatus(scope.row.status) }}
-            </el-tag>
+            <div class="status-tags">
+              <el-tag :type="publishStatusTagType(scope.row.status)" size="small">
+                {{ formatPublishStatus(scope.row.status) }}
+              </el-tag>
+            </div>
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="210" align="center" fixed="right">
+        <el-table-column label="下载器" width="120" align="center">
           <template #default="scope">
-            <el-button size="small" type="primary" @click="openLogs(scope.row)">日志</el-button>
-            <el-button
-              size="small"
-              type="info"
-              @click="openAutoAdd(scope.row)"
-              :disabled="!scope.row.auto_add_result"
-            >
-              下载器
-            </el-button>
-            <a
-              v-if="scope.row.result_url"
-              :href="scope.row.result_url"
-              target="_blank"
-              rel="noopener noreferrer"
-              style="text-decoration: none"
-            >
-              <el-button size="small" type="success">打开</el-button>
-            </a>
+            <div class="status-tags">
+              <el-tag :type="downloaderTagType(scope.row)" size="small">
+                {{ formatDownloaderStatus(scope.row) }}
+              </el-tag>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="操作" width="170" align="center" fixed="right">
+          <template #default="scope">
+            <div class="action-buttons">
+              <el-button size="small" type="primary" @click="openLogs(scope.row)">日志</el-button>
+              <el-button
+                size="small"
+                type="success"
+                style="margin-left: 5px"
+                :disabled="!scope.row.result_url"
+                @click="openResultURL(scope.row)"
+              >
+                打开
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="80%" top="8vh">
+    <el-dialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      width="min(900px, calc(100vw - 32px))"
+      align-center
+      destroy-on-close
+      append-to-body
+      class="publish-log-dialog"
+    >
       <pre class="log-pre">{{ dialogContent }}</pre>
     </el-dialog>
   </div>
@@ -188,19 +198,23 @@ const dialogVisible = ref(false)
 const dialogTitle = ref('日志')
 const dialogContent = ref('')
 
-const statusTagType = (status: string) => {
+const publishStatusTagType = (status: string) => {
   if (status === 'queued') return 'info'
   if (status === 'success') return 'success'
+  if (status === 'edited') return 'success'
+  if (status === 'exists') return 'warning'
   if (status === 'pre_check_limit') return 'warning'
   if (status === 'failed') return 'danger'
   return 'info'
 }
 
-const formatStatus = (status: string) => {
-  if (status === 'queued') return '等待'
-  if (status === 'success') return '成功'
+const formatPublishStatus = (status: string) => {
+  if (status === 'queued') return '待发布'
+  if (status === 'success') return '发布成功'
+  if (status === 'failed') return '发布失败'
+  if (status === 'exists') return '已存在'
+  if (status === 'edited') return '已编辑'
   if (status === 'pre_check_limit') return '预检查限制'
-  if (status === 'failed') return '失败'
   return status || '未知'
 }
 
@@ -218,24 +232,13 @@ const formatScene = (scene: string) => {
 
 const formatDateTimeTwoLines = (raw: string) => {
   const trimmed = (raw || '').trim()
-  if (!trimmed) return ['-', '-']
+  if (!trimmed) return '-\n-'
 
   const parts = trimmed.split(' ')
   if (parts.length >= 2) {
     const datePart = parts[0] || ''
     const timePart = parts[1] || ''
-    const datePieces = datePart.split('-')
-    if (datePieces.length === 3) {
-      const [yyyy, mm, dd] = datePieces
-      const dateLine = `${yyyy}年${mm}月${dd}日`
-      const timePieces = timePart.split(':')
-      if (timePieces.length >= 3) {
-        const [hh, mi, ss] = timePieces
-        return [dateLine, `${hh}时${mi}分${ss}秒`]
-      }
-      return [dateLine, timePart]
-    }
-    return [datePart, timePart]
+    return `${datePart}\n${timePart}`
   }
 
   const dt = new Date(trimmed)
@@ -246,10 +249,50 @@ const formatDateTimeTwoLines = (raw: string) => {
     const hh = String(dt.getHours()).padStart(2, '0')
     const mi = String(dt.getMinutes()).padStart(2, '0')
     const ss = String(dt.getSeconds()).padStart(2, '0')
-    return [`${yyyy}年${mm}月${dd}日`, `${hh}时${mi}分${ss}秒`]
+    return `${yyyy}-${mm}-${dd}\n${hh}:${mi}:${ss}`
   }
 
-  return [trimmed, '']
+  return trimmed
+}
+
+const parseAutoAddResult = (row: any) => {
+  const raw = (row?.auto_add_result || '').trim()
+  if (!raw) return { success: false, message: '' }
+  try {
+    const parsed = JSON.parse(raw)
+    return {
+      success: parsed?.success === true,
+      message: String(parsed?.message || ''),
+      downloaderName: String(parsed?.downloader_name || ''),
+      downloaderId: String(parsed?.downloader_id || ''),
+    }
+  } catch {
+    return { success: false, message: raw }
+  }
+}
+
+const downloaderTagType = (row: any) => {
+  const parsed = parseAutoAddResult(row)
+  if (parsed.success) {
+    const seed = (parsed.downloaderId || parsed.downloaderName || '').trim()
+    if (!seed) return 'success'
+
+    let hash = 0
+    for (let i = 0; i < seed.length; i++) {
+      hash = seed.charCodeAt(i) + ((hash << 5) - hash)
+    }
+    const types = ['primary', 'success', 'warning', 'info']
+    return types[Math.abs(hash) % types.length]
+  }
+  return 'danger'
+}
+
+const formatDownloaderStatus = (row: any) => {
+  const parsed = parseAutoAddResult(row)
+  if (parsed.success) {
+    return parsed.downloaderName || parsed.downloaderId || '成功'
+  }
+  return '失败'
 }
 
 const fetchLogs = async () => {
@@ -309,19 +352,24 @@ const handleCurrentChange = async (page: number) => {
 
 const openLogs = (row: any) => {
   dialogTitle.value = `日志 - ${row.target_site || ''}`
-  dialogContent.value = row.logs || ''
+  const base = row.logs || ''
+  const parsed = parseAutoAddResult(row)
+  let addon = ''
+  if (parsed.success) {
+    const name = parsed.downloaderName || parsed.downloaderId
+    addon = `\n\n--- [下载器] ---\n成功${name ? `：${name}` : ''}`
+  } else {
+    const reason = (parsed.message || '').trim()
+    addon = `\n\n--- [下载器] ---\n失败${reason ? `：${reason}` : ''}`
+  }
+  dialogContent.value = `${base}${addon}`.trim()
   dialogVisible.value = true
 }
 
-const openAutoAdd = (row: any) => {
-  dialogTitle.value = `下载器结果 - ${row.target_site || ''}`
-  const raw = row.auto_add_result || ''
-  try {
-    dialogContent.value = JSON.stringify(JSON.parse(raw), null, 2)
-  } catch {
-    dialogContent.value = raw
-  }
-  dialogVisible.value = true
+const openResultURL = (row: any) => {
+  const url = String(row?.result_url || '').trim()
+  if (!url) return
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 onMounted(async () => {
@@ -331,19 +379,68 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.datetime-cell {
+.publish-logs-view {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  line-height: 1.15;
+  padding: 0;
+  box-sizing: border-box;
 }
-.date-line {
+
+.search-and-controls {
+  display: flex;
+  align-items: center;
+  padding: 10px 15px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.pagination-controls {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.table-container {
+  flex: 1;
+  overflow: hidden;
+  min-height: 300px;
+}
+
+.table-container :deep(.el-table) {
+  height: 100%;
+}
+
+.table-container :deep(.el-table__body-wrapper) {
+  overflow-y: auto;
+}
+
+.table-container :deep(.el-table__header-wrapper) {
+  overflow-x: hidden;
+}
+
+.datetime-cell {
+  white-space: pre-line;
+  line-height: 1.2;
   font-size: 12px;
 }
-.time-line {
-  font-size: 12px;
-  color: #909399;
+
+.status-tags {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
 }
+
+.action-buttons {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
 .title-cell {
   display: flex;
   flex-direction: column;
@@ -365,5 +462,16 @@ onMounted(async () => {
   margin: 0;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.publish-log-dialog :deep(.el-dialog) {
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.publish-log-dialog :deep(.el-dialog__body) {
+  overflow-y: auto;
+  flex: 1;
 }
 </style>

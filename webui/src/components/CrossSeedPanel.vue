@@ -6912,8 +6912,7 @@ const filterUploadedParam = (url: string): string => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 75vw;
-  max-width: 900px;
+  width: min(900px, calc(100vw - 32px));
   z-index: 2000;
   display: flex;
   flex-direction: column;

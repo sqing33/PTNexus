@@ -1793,8 +1793,8 @@ const getDownloaderTagType = (downloaderId: string | null) => {
     hash = downloaderId.charCodeAt(i) + ((hash << 5) - hash)
   }
 
-  // Map hash to Element Plus tag types
-  const types = ['primary', 'success', 'warning', 'danger', 'info']
+  // Map hash to Element Plus tag types（移除红色 danger）
+  const types = ['primary', 'success', 'warning', 'info']
   return types[Math.abs(hash) % types.length]
 }
 

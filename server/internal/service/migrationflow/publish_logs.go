@@ -82,17 +82,29 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 	}
 
 	logStatus := "failed"
-	if statusCode == 200 {
-		if ok, exists := result["success"].(bool); exists && ok {
-			logStatus = "success"
-		}
-	}
 	if result != nil {
-		if preCheck, _ := result["pre_check"].(bool); preCheck {
-			if limitReached, _ := result["limit_reached"].(bool); limitReached {
-				logStatus = "pre_check_limit"
+		preCheck := processingshared.ToBool(result["pre_check"])
+		limitReached := processingshared.ToBool(result["limit_reached"])
+		if preCheck && limitReached {
+			logStatus = "pre_check_limit"
+		} else if statusCode == 200 && processingshared.ToBool(result["success"]) {
+			autoEdited := false
+			if processingshared.ToBool(result["auto_edit_executed"]) {
+				if autoEditResult, ok := result["auto_edit_result"].(map[string]any); ok && autoEditResult != nil {
+					autoEdited = processingshared.ToBool(autoEditResult["success"])
+				}
+			}
+
+			if autoEdited {
+				logStatus = "edited"
+			} else if processingshared.ToBool(result["is_existing_torrent"]) {
+				logStatus = "exists"
+			} else {
+				logStatus = "success"
 			}
 		}
+	} else if statusCode == 200 {
+		logStatus = "success"
 	}
 
 	resultURL := strings.TrimSpace(processingshared.ToString(result["url"], ""))
