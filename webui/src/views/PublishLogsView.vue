@@ -115,8 +115,8 @@
         <el-table-column label="标题" min-width="360">
           <template #default="scope">
             <div class="title-cell">
-              <div class="main-title-line" :title="scope.row.title">{{ scope.row.title || '' }}</div>
               <div class="subtitle-line" :title="scope.row.subtitle">{{ scope.row.subtitle || '' }}</div>
+              <div class="main-title-line" :title="scope.row.title">{{ scope.row.title || '' }}</div>
             </div>
           </template>
         </el-table-column>
@@ -135,6 +135,7 @@
           <template #default="scope">
             <div class="status-tags">
               <el-tag
+                v-if="scope.row.status !== 'queued'"
                 :type="downloaderTagType(scope.row)"
                 size="small"
                 :style="downloaderTagStyle(scope.row)"

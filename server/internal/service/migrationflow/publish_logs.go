@@ -136,6 +136,14 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 	}
 
 	if queueTaskID != nil && *queueTaskID > 0 {
+		if existing, ok, err := s.publishLogRepo.FindLatestByQueueTaskID(*queueTaskID); err == nil && ok && existing != nil {
+			if strings.TrimSpace(existing.Title) != "" {
+				entry.Title = existing.Title
+			}
+			if strings.TrimSpace(existing.Subtitle) != "" {
+				entry.Subtitle = existing.Subtitle
+			}
+		}
 		if err := s.publishLogRepo.UpsertByQueueTaskID(&entry); err != nil {
 			logx.Warnf(publishLogModule, "更新发种日志失败 queue_task_id=%d trigger=%s scene=%s target=%s err=%v", *queueTaskID, trigger, scene, targetSite, err)
 		}
