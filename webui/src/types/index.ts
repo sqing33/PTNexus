@@ -33,4 +33,5 @@ export interface Downloader {
   id: string
   name: string
   enabled: boolean
+  color?: string
 }

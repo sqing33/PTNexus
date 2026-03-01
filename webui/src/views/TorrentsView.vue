@@ -183,6 +183,7 @@
                 :key="downloaderId"
                 size="small"
                 :type="getDownloaderTagType(downloaderId)"
+                :style="getDownloaderTagStyle(downloaderId)"
                 style="margin: 2px"
               >
                 {{ getDownloaderName(downloaderId) }}
@@ -774,6 +775,7 @@ interface Downloader {
   id: string
   name: string
   enabled?: boolean
+  color?: string
 }
 
 // const router = useRouter();
@@ -1781,21 +1783,38 @@ const getDownloaderName = (downloaderId: string | null) => {
   return downloader ? downloader.name : '未知下载器'
 }
 
-const getDownloaderTagType = (downloaderId: string | null) => {
-  if (!downloaderId) return 'info'
-  // Generate a consistent color based on the downloader ID
-  const downloader = allDownloadersList.value.find((d) => d.id === downloaderId)
-  if (!downloader) return 'info'
+const deriveDownloaderColor = (seed: string) => {
+  const value = (seed || '').trim()
+  if (!value) return ''
 
-  // Simple hash function to generate a consistent color index
   let hash = 0
-  for (let i = 0; i < downloaderId.length; i++) {
-    hash = downloaderId.charCodeAt(i) + ((hash << 5) - hash)
+  for (let i = 0; i < value.length; i++) {
+    hash = value.charCodeAt(i) + ((hash << 5) - hash)
   }
 
-  // Map hash to Element Plus tag types（移除红色 danger）
-  const types = ['primary', 'success', 'warning', 'info']
-  return types[Math.abs(hash) % types.length]
+  const hue = (Math.abs(hash) % 320) + 20
+  const saturation = 72
+  const lightness = 45
+  return `hsl(${hue} ${saturation}% ${lightness}%)`
+}
+
+const getDownloaderTagStyle = (downloaderId: string | null) => {
+  if (!downloaderId) return {}
+  const downloader = allDownloadersList.value.find((d) => d.id === downloaderId)
+  const rawColor = (downloader as any)?.color
+  const configured = typeof rawColor === 'string' ? rawColor.trim() : ''
+  const color = configured || deriveDownloaderColor(downloaderId)
+  if (!color) return {}
+  return {
+    '--el-tag-bg-color': color,
+    '--el-tag-border-color': color,
+    '--el-tag-text-color': '#ffffff',
+  } as any
+}
+
+const getDownloaderTagType = (downloaderId: string | null) => {
+  if (!downloaderId) return 'info'
+  return 'info'
 }
 
 const sortedDownloaderIds = (downloaderIds: string[]) => {

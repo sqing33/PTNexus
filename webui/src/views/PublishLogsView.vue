@@ -134,7 +134,11 @@
         <el-table-column label="下载器" width="120" align="center">
           <template #default="scope">
             <div class="status-tags">
-              <el-tag :type="downloaderTagType(scope.row)" size="small">
+              <el-tag
+                :type="downloaderTagType(scope.row)"
+                size="small"
+                :style="downloaderTagStyle(scope.row)"
+              >
                 {{ formatDownloaderStatus(scope.row) }}
               </el-tag>
             </div>
@@ -177,11 +181,15 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import axios from 'axios'
+import { useTorrentsViewState } from '@/stores/torrentsViewState'
 
 const emits = defineEmits(['ready'])
 
 const loading = ref(false)
 const error = ref('')
+
+const torrentsViewState = useTorrentsViewState()
+const allDownloadersList = ref<any[]>([])
 
 const rows = ref<any[]>([])
 const total = ref(0)
@@ -271,20 +279,53 @@ const parseAutoAddResult = (row: any) => {
   }
 }
 
+const deriveDownloaderColor = (seed: string) => {
+  const value = (seed || '').trim()
+  if (!value) return ''
+
+  let hash = 0
+  for (let i = 0; i < value.length; i++) {
+    hash = value.charCodeAt(i) + ((hash << 5) - hash)
+  }
+
+  const hue = (Math.abs(hash) % 320) + 20
+  const saturation = 72
+  const lightness = 45
+  return `hsl(${hue} ${saturation}% ${lightness}%)`
+}
+
+const resolveDownloaderColor = (downloaderId: string, downloaderName: string) => {
+  const id = (downloaderId || '').trim()
+  if (id) {
+    const item = allDownloadersList.value.find((d) => String(d?.id || '').trim() === id)
+    const configured = String(item?.color || '').trim()
+    if (configured) return configured
+    return deriveDownloaderColor(id)
+  }
+
+  const name = (downloaderName || '').trim()
+  if (name) return deriveDownloaderColor(name)
+  return ''
+}
+
 const downloaderTagType = (row: any) => {
   const parsed = parseAutoAddResult(row)
-  if (parsed.success) {
-    const seed = (parsed.downloaderId || parsed.downloaderName || '').trim()
-    if (!seed) return 'success'
-
-    let hash = 0
-    for (let i = 0; i < seed.length; i++) {
-      hash = seed.charCodeAt(i) + ((hash << 5) - hash)
-    }
-    const types = ['primary', 'success', 'warning', 'info']
-    return types[Math.abs(hash) % types.length]
-  }
+  if (parsed.success) return 'info'
   return 'danger'
+}
+
+const downloaderTagStyle = (row: any) => {
+  const parsed = parseAutoAddResult(row)
+  if (!parsed.success) return {}
+
+  const color = resolveDownloaderColor(parsed.downloaderId || '', parsed.downloaderName || '')
+  if (!color) return {}
+
+  return {
+    '--el-tag-bg-color': color,
+    '--el-tag-border-color': color,
+    '--el-tag-text-color': '#ffffff',
+  } as any
 }
 
 const formatDownloaderStatus = (row: any) => {
@@ -373,6 +414,12 @@ const openResultURL = (row: any) => {
 }
 
 onMounted(async () => {
+  try {
+    const result = await torrentsViewState.fetchDownloadersList(false)
+    allDownloadersList.value = result.allDownloadersList || []
+  } catch {
+    allDownloadersList.value = []
+  }
   await fetchLogs()
   emits('ready', fetchLogs)
 })

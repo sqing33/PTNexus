@@ -139,6 +139,7 @@ func (s *SettingsService) DownloadersList(enabledOnly bool) []map[string]any {
 			"id":      toString(downloader["id"], ""),
 			"name":    toString(downloader["name"], ""),
 			"enabled": enabled,
+			"color":   toString(downloader["color"], ""),
 		}
 		if enabledOnly {
 			delete(item, "enabled")

@@ -34,8 +34,44 @@
       >
         <template #header>
           <div class="card-header">
-            <span>{{ downloader.name || '新下载器' }}</span>
+            <el-tag
+              class="downloader-name-tag"
+              size="default"
+              :style="downloaderNameTagStyle(downloader)"
+            >
+              {{ downloader.name || '新下载器' }}
+            </el-tag>
             <div class="header-controls">
+              <div class="downloader-color-controls">
+                <el-popover trigger="click" placement="bottom-start" popper-class="downloader-color-popover">
+                  <template #reference>
+                    <button
+                      type="button"
+                      class="downloader-color-trigger"
+                      :style="{ backgroundColor: downloader.color }"
+                      aria-label="选择下载器颜色"
+                    />
+                  </template>
+                  <el-color-picker-panel
+                    v-model="downloader.color"
+                    :predefine="predefinedDownloaderColors"
+                    :border="false"
+                    :validate-event="false"
+                  >
+                    <template #footer>
+                      <el-button
+                        size="small"
+                        text
+                        class="downloader-color-random-btn"
+                        :icon="Refresh"
+                        @click="downloader.color = randomDownloaderColor()"
+                      >
+                        随机
+                      </el-button>
+                    </template>
+                  </el-color-picker-panel>
+                </el-popover>
+              </div>
               <el-button
                 :type="
                   connectionTestResults[downloader.id] === 'success'
@@ -45,12 +81,12 @@
                       : 'info'
                 "
                 :plain="!connectionTestResults[downloader.id]"
-                style="width: 90px"
+                style="width: 70px"
                 @click="testConnection(downloader)"
                 :loading="testingConnectionId === downloader.id"
                 :icon="Link"
               >
-                测试连接
+                测试
               </el-button>
               <el-button
                 type="warning"
@@ -220,7 +256,7 @@
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Select, Link, FolderOpened } from '@element-plus/icons-vue'
+import { Plus, Delete, Select, Link, FolderOpened, Refresh } from '@element-plus/icons-vue'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 
 const settings = ref({
@@ -233,6 +269,76 @@ const testingConnectionId = ref(null)
 const connectionTestResults = ref({})
 const API_BASE_URL = '/api'
 const torrentsViewState = useTorrentsViewState()
+
+const predefinedDownloaderColors = [
+  '#409EFF',
+  '#67C23A',
+  '#E6A23C',
+  '#909399',
+  '#00C9A7',
+  '#6C5CE7',
+  '#0984E3',
+  '#00B894',
+  '#FDCB6E',
+  '#A29BFE',
+  '#74B9FF',
+  '#55EFC4',
+]
+
+const clampInt = (value, min, max) => Math.min(max, Math.max(min, value))
+
+const hslToHex = (h, s, l) => {
+  const sat = clampInt(Number(s), 0, 100) / 100
+  const lig = clampInt(Number(l), 0, 100) / 100
+
+  const c = (1 - Math.abs(2 * lig - 1)) * sat
+  const hp = (((Number(h) % 360) + 360) % 360) / 60
+  const x = c * (1 - Math.abs((hp % 2) - 1))
+
+  let r1 = 0
+  let g1 = 0
+  let b1 = 0
+  if (hp >= 0 && hp < 1) [r1, g1, b1] = [c, x, 0]
+  else if (hp >= 1 && hp < 2) [r1, g1, b1] = [x, c, 0]
+  else if (hp >= 2 && hp < 3) [r1, g1, b1] = [0, c, x]
+  else if (hp >= 3 && hp < 4) [r1, g1, b1] = [0, x, c]
+  else if (hp >= 4 && hp < 5) [r1, g1, b1] = [x, 0, c]
+  else if (hp >= 5 && hp < 6) [r1, g1, b1] = [c, 0, x]
+
+  const m = lig - c / 2
+  const toHex = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
+  return `#${toHex(r1)}${toHex(g1)}${toHex(b1)}`
+}
+
+const deriveDownloaderColor = (seed) => {
+  const value = String(seed || '').trim()
+  if (!value) return predefinedDownloaderColors[0]
+  let hash = 0
+  for (let i = 0; i < value.length; i++) {
+    hash = value.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  // 避免纯红色：hue 取 20~339
+  const hue = (Math.abs(hash) % 320) + 20
+  return hslToHex(hue, 72, 45)
+}
+
+const randomDownloaderColor = () => {
+  if (Math.random() < 0.35) {
+    return predefinedDownloaderColors[Math.floor(Math.random() * predefinedDownloaderColors.length)]
+  }
+  const hue = Math.floor(Math.random() * 320) + 20
+  return hslToHex(hue, 72, 45)
+}
+
+const downloaderNameTagStyle = (downloader) => {
+  const color = String(downloader?.color || '').trim()
+  if (!color) return {}
+  return {
+    '--el-tag-bg-color': color,
+    '--el-tag-border-color': color,
+    '--el-tag-text-color': '#ffffff',
+  }
+}
 
 // 路径映射相关状态
 const pathMappingDialogVisible = ref(false)
@@ -255,6 +361,7 @@ const fetchSettings = async () => {
         if (!d.id) d.id = `client_${Date.now()}_${Math.random()}`
         if (typeof d.use_proxy !== 'boolean') d.use_proxy = false
         if (!d.proxy_port) d.proxy_port = 9090
+        if (!d.color) d.color = deriveDownloaderColor(String(d.id || ''))
         // 初始化 path_mappings 字段
         if (!d.path_mappings || !Array.isArray(d.path_mappings)) {
           d.path_mappings = []
@@ -290,8 +397,9 @@ const saveSettings = async () => {
 }
 
 const addDownloader = () => {
+  const id = `new_${Date.now()}`
   settings.value.downloaders.push({
-    id: `new_${Date.now()}`,
+    id,
     enabled: true,
     name: '新下载器',
     type: 'qbittorrent',
@@ -300,6 +408,7 @@ const addDownloader = () => {
     password: '',
     use_proxy: false,
     proxy_port: 9090,
+    color: deriveDownloaderColor(id),
     path_mappings: [], // 初始化空的路径映射数组
     enable_ratio_limiter: false, // 默认关闭出种限速
   })
@@ -455,11 +564,54 @@ const savePathMappings = async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
 }
 
 .header-controls {
   display: flex;
   align-items: center;
+}
+
+.downloader-name-tag {
+  font-weight: 600;
+  border-radius: 8px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.downloader-color-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+}
+
+.downloader-color-trigger {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--el-border-color-light);
+  cursor: pointer;
+  outline: none;
+}
+
+.downloader-color-trigger:hover {
+  border-color: var(--el-border-color);
+}
+
+.downloader-color-trigger:focus-visible {
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
+}
+
+.downloader-color-popover :deep(.el-color-picker-panel__footer) {
+  align-items: center;
+}
+
+.downloader-color-random-btn {
+  margin-left: 8px;
 }
 
 .name-and-client-row {
