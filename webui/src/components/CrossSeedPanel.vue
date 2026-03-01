@@ -1168,16 +1168,7 @@
   </div>
 
   <!-- 日志弹窗 (保持不变) -->
-  <div v-if="showLogCard" class="log-card-overlay" @click="hideLog"></div>
-  <el-card v-if="showLogCard" class="log-card" shadow="xl">
-    <template #header>
-      <div class="card-header">
-        <span>操作日志</span>
-        <el-button type="danger" :icon="Close" circle @click="hideLog" />
-      </div>
-    </template>
-    <pre class="log-content-pre">{{ logContent }}</pre>
-  </el-card>
+  <LogViewerCard v-model="showLogCard" title="操作日志" :content="logContent" />
 
   <!-- 日志进度组件 -->
   <LogProgress
@@ -1267,6 +1258,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
 import LogProgress from './LogProgress.vue'
+import LogViewerCard from './LogViewerCard.vue'
 
 // 过滤多余空行的辅助函数
 const filterExtraEmptyLines = (text: string): string => {
@@ -5355,10 +5347,6 @@ const checkScreenshotValidity = async () => {
   screenshotValid.value = allValid
 }
 
-const hideLog = () => {
-  showLogCard.value = false
-}
-
 const showSiteLog = (siteName: string, logs: string) => {
   let siteLogContent = `--- Log for ${siteName} ---\n${logs || 'No logs available.'}`
   const siteResult = finalResultsList.value.find((result: any) => result.siteName === siteName)
@@ -6894,49 +6882,6 @@ const filterUploadedParam = (url: string): string => {
     flex-direction: column;
     gap: 16px;
   }
-}
-
-/* --- 日志弹窗 --- */
-.log-card-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  z-index: 1999;
-}
-
-.log-card {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: min(900px, calc(100vw - 32px));
-  z-index: 2000;
-  display: flex;
-  flex-direction: column;
-  max-height: 80vh;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.log-card :deep(.el-card__body) {
-  overflow-y: auto;
-  flex: 1;
-}
-
-.log-content-pre {
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  margin: 0;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 13px;
-  color: #606266;
 }
 
 /* 表单标签中的按钮样式 */

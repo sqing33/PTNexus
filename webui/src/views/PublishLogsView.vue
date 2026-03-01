@@ -165,17 +165,7 @@
       </el-table>
     </div>
 
-    <el-dialog
-      v-model="dialogVisible"
-      :title="dialogTitle"
-      width="min(900px, calc(100vw - 32px))"
-      align-center
-      destroy-on-close
-      append-to-body
-      class="publish-log-dialog"
-    >
-      <pre class="log-pre">{{ dialogContent }}</pre>
-    </el-dialog>
+    <LogViewerCard v-model="dialogVisible" :title="dialogTitle" :content="dialogContent" />
   </div>
 </template>
 
@@ -183,6 +173,7 @@
 import { onMounted, ref } from 'vue'
 import axios from 'axios'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
+import LogViewerCard from '@/components/LogViewerCard.vue'
 
 const emits = defineEmits(['ready'])
 
@@ -503,23 +494,5 @@ onMounted(async () => {
   font-size: 13px;
   line-height: 1.25;
   white-space: normal;
-}
-.log-pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.publish-log-dialog :deep(.el-dialog) {
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.publish-log-dialog :deep(.el-dialog__body) {
-  overflow-y: auto;
-  flex: 1;
 }
 </style>
