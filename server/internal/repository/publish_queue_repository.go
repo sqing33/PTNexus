@@ -84,15 +84,15 @@ func (r *PublishQueueRepository) DB() *gorm.DB {
 }
 
 // EnqueueTasks 批量写入发布队列任务。
-// 参数/返回：tasks 为待写入任务；返回写入条数与 error。
+// 参数/返回：tasks 为待写入任务；返回写入后的任务切片（包含自增 ID）与 error。
 // 失败场景：数据库不可用或写入失败返回 error。
 // 副作用：写入 publish_queue_tasks。
-func (r *PublishQueueRepository) EnqueueTasks(tasks []PublishQueueTask) (int, error) {
+func (r *PublishQueueRepository) EnqueueTasks(tasks []PublishQueueTask) ([]PublishQueueTask, error) {
 	if r == nil || r.store == nil || r.store.DB == nil {
-		return 0, errors.New("publish queue repo is nil")
+		return nil, errors.New("publish queue repo is nil")
 	}
 	if len(tasks) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 
 	now := time.Now().Format(PublishQueueTimeLayout)
@@ -110,9 +110,9 @@ func (r *PublishQueueRepository) EnqueueTasks(tasks []PublishQueueTask) (int, er
 	}
 
 	if err := r.store.DB.Table("publish_queue_tasks").Create(&tasks).Error; err != nil {
-		return 0, err
+		return nil, err
 	}
-	return len(tasks), nil
+	return tasks, nil
 }
 
 // CountActiveTasks 统计当前队列中“排队中/运行中”的任务数。

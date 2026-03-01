@@ -123,6 +123,13 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 		CostMS:        cost.Milliseconds(),
 	}
 
+	if queueTaskID != nil && *queueTaskID > 0 {
+		if err := s.publishLogRepo.UpsertByQueueTaskID(&entry); err != nil {
+			logx.Warnf(publishLogModule, "更新发种日志失败 queue_task_id=%d trigger=%s scene=%s target=%s err=%v", *queueTaskID, trigger, scene, targetSite, err)
+		}
+		return
+	}
+
 	if _, err := s.publishLogRepo.Insert(&entry); err != nil {
 		logx.Warnf(publishLogModule, "写入发种日志失败 trigger=%s scene=%s target=%s err=%v", trigger, scene, targetSite, err)
 	}

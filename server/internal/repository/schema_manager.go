@@ -815,6 +815,7 @@ func (m *SchemaManager) indexSpecs() []schemaIndexSpec {
 		{table: "publish_logs", name: "idx_publish_logs_torrent_id", columns: []string{"torrent_id"}},
 		{table: "publish_logs", name: "idx_publish_logs_publish_trigger", columns: []string{"publish_trigger"}},
 		{table: "publish_logs", name: "idx_publish_logs_scene", columns: []string{"scene"}},
+		{table: "publish_logs", name: "idx_publish_logs_queue_task_id", columns: []string{"queue_task_id"}},
 	}
 }
 

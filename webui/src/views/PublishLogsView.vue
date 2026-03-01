@@ -46,6 +46,7 @@
         clearable
         style="width: 150px; margin-right: 12px"
       >
+        <el-option label="等待" value="queued" />
         <el-option label="成功" value="success" />
         <el-option label="失败" value="failed" />
         <el-option label="预检查限制" value="pre_check_limit" />
@@ -85,7 +86,22 @@
         empty-text="暂无发种日志"
         class="glass-table"
       >
-        <el-table-column prop="created_at" label="时间" width="160" align="center" />
+        <el-table-column label="加入时间" width="170" align="center">
+          <template #default="scope">
+            <div class="datetime-cell">
+              <div class="date-line">{{ formatDateTimeTwoLines(scope.row.created_at)[0] }}</div>
+              <div class="time-line">{{ formatDateTimeTwoLines(scope.row.created_at)[1] }}</div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="更新时间" width="170" align="center">
+          <template #default="scope">
+            <div class="datetime-cell">
+              <div class="date-line">{{ formatDateTimeTwoLines(scope.row.updated_at)[0] }}</div>
+              <div class="time-line">{{ formatDateTimeTwoLines(scope.row.updated_at)[1] }}</div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="场景" width="110" align="center">
           <template #default="scope">
             {{ formatScene(scope.row.scene) }}
@@ -103,8 +119,8 @@
         <el-table-column label="标题" min-width="360">
           <template #default="scope">
             <div class="title-cell">
-              <div class="subtitle-line" :title="scope.row.subtitle">{{ scope.row.subtitle || '' }}</div>
               <div class="main-title-line" :title="scope.row.title">{{ scope.row.title || '' }}</div>
+              <div class="subtitle-line" :title="scope.row.subtitle">{{ scope.row.subtitle || '' }}</div>
             </div>
           </template>
         </el-table-column>
@@ -173,6 +189,7 @@ const dialogTitle = ref('日志')
 const dialogContent = ref('')
 
 const statusTagType = (status: string) => {
+  if (status === 'queued') return 'info'
   if (status === 'success') return 'success'
   if (status === 'pre_check_limit') return 'warning'
   if (status === 'failed') return 'danger'
@@ -180,6 +197,7 @@ const statusTagType = (status: string) => {
 }
 
 const formatStatus = (status: string) => {
+  if (status === 'queued') return '等待'
   if (status === 'success') return '成功'
   if (status === 'pre_check_limit') return '预检查限制'
   if (status === 'failed') return '失败'
@@ -196,6 +214,42 @@ const formatScene = (scene: string) => {
   if (scene === 'multi_site') return '一种多站'
   if (scene === 'multi_torrent') return '一站多种'
   return scene || '未知'
+}
+
+const formatDateTimeTwoLines = (raw: string) => {
+  const trimmed = (raw || '').trim()
+  if (!trimmed) return ['-', '-']
+
+  const parts = trimmed.split(' ')
+  if (parts.length >= 2) {
+    const datePart = parts[0] || ''
+    const timePart = parts[1] || ''
+    const datePieces = datePart.split('-')
+    if (datePieces.length === 3) {
+      const [yyyy, mm, dd] = datePieces
+      const dateLine = `${yyyy}年${mm}月${dd}日`
+      const timePieces = timePart.split(':')
+      if (timePieces.length >= 3) {
+        const [hh, mi, ss] = timePieces
+        return [dateLine, `${hh}时${mi}分${ss}秒`]
+      }
+      return [dateLine, timePart]
+    }
+    return [datePart, timePart]
+  }
+
+  const dt = new Date(trimmed)
+  if (!Number.isNaN(dt.getTime())) {
+    const yyyy = dt.getFullYear()
+    const mm = String(dt.getMonth() + 1).padStart(2, '0')
+    const dd = String(dt.getDate()).padStart(2, '0')
+    const hh = String(dt.getHours()).padStart(2, '0')
+    const mi = String(dt.getMinutes()).padStart(2, '0')
+    const ss = String(dt.getSeconds()).padStart(2, '0')
+    return [`${yyyy}年${mm}月${dd}日`, `${hh}时${mi}分${ss}秒`]
+  }
+
+  return [trimmed, '']
 }
 
 const fetchLogs = async () => {
@@ -277,6 +331,19 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.datetime-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.15;
+}
+.date-line {
+  font-size: 12px;
+}
+.time-line {
+  font-size: 12px;
+  color: #909399;
+}
 .title-cell {
   display: flex;
   flex-direction: column;
@@ -300,4 +367,3 @@ onMounted(async () => {
   line-height: 1.4;
 }
 </style>
-

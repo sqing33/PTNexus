@@ -273,8 +273,46 @@ func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string
 		return map[string]any{"success": false, "message": "没有可入队的站点"}, 400
 	}
 
-	if _, err := s.queueRepo.EnqueueTasks(queueTasks); err != nil {
+	createdTasks, err := s.queueRepo.EnqueueTasks(queueTasks)
+	if err != nil {
 		return map[string]any{"success": false, "message": "入队失败: " + err.Error()}, 500
+	}
+
+	if len(createdTasks) > 0 && s.publishLogRepo != nil {
+		for _, task := range createdTasks {
+			if task.ID <= 0 {
+				continue
+			}
+			taskID := task.ID
+			message := "等待发布"
+			if task.ScheduledAt != nil && strings.TrimSpace(*task.ScheduledAt) != "" {
+				message = "等待发布（计划时间：" + strings.TrimSpace(*task.ScheduledAt) + "）"
+			}
+
+			entry := repository.PublishLogEntry{
+				Trigger:       "queue",
+				Scene:         task.Scene,
+				QueueTaskID:   &taskID,
+				TaskID:        task.TaskID,
+				TorrentID:     task.TorrentID,
+				SourceSite:    task.SourceSite,
+				TargetSite:    task.TargetSite,
+				DownloaderID:  task.DownloaderID,
+				Title:         task.Title,
+				Subtitle:      task.Subtitle,
+				Status:        "queued",
+				ResultURL:     "",
+				Logs:          message,
+				AutoAddResult: "",
+				CostMS:        0,
+				CreatedAt:     task.CreatedAt,
+				UpdatedAt:     task.UpdatedAt,
+			}
+
+			if _, err := s.publishLogRepo.Insert(&entry); err != nil {
+				logx.Warnf(publishLogModule, "写入队列等待日志失败 queue_task_id=%d target=%s err=%v", taskID, task.TargetSite, err)
+			}
+		}
 	}
 
 	logx.Infof(publishQueueLogModule, "已入队 group_id=%s task_id=%s torrent_id=%s sites=%d", groupID, taskID, torrentID, len(queueTasks))
@@ -332,7 +370,11 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 
 	payload := map[string]any{}
 	if err := json.Unmarshal([]byte(taskRecord.PayloadJSON), &payload); err != nil {
-		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, "payload_json 解析失败: "+err.Error(), "")
+		reason := "payload_json 解析失败: " + err.Error()
+		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, reason, "")
+		if s.publishLogRepo != nil {
+			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "failed", reason)
+		}
 		return
 	}
 
@@ -352,7 +394,11 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 		stats, err := publishguard.CheckDownloaderGateStats(downloaderID)
 		if err != nil {
 			nextRunAt := time.Now().Add(time.Duration(clampInt(cfg.MonitorIntervalSec, 5, 3600)) * time.Second)
-			_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, "预检查统计失败: "+err.Error(), "")
+			reason := "预检查统计失败: " + err.Error()
+			_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, reason, "")
+			if s.publishLogRepo != nil {
+				_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", reason)
+			}
 			logx.Warnf(publishQueueLogModule, "队列任务等待预检查恢复 id=%d downloader_id=%s err=%v", taskID, downloaderID, err)
 			return
 		}
@@ -362,7 +408,11 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 			if reason == "" {
 				reason = "已触发限制"
 			}
-			_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, "发布前限制: "+reason, "")
+			waitMessage := "发布前限制: " + reason
+			_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, waitMessage, "")
+			if s.publishLogRepo != nil {
+				_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", waitMessage)
+			}
 			logx.Infof(publishQueueLogModule, "队列任务等待限制解除 id=%d downloader_id=%s next_run_at=%s", taskID, downloaderID, nextRunAt.Format(time.RFC3339))
 			return
 		}
@@ -385,7 +435,11 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 
 		if !recentOK && !speedOK {
 			nextRunAt := time.Now().Add(time.Duration(clampInt(cfg.MonitorIntervalSec, 5, 3600)) * time.Second)
-			_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, "等待触发条件", "")
+			reason := "等待触发条件"
+			_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, reason, "")
+			if s.publishLogRepo != nil {
+				_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", reason)
+			}
 			return
 		}
 	}
@@ -451,25 +505,39 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	if isPreCheck && limitReached && strings.Contains(logText, "发布前预检查触发限制") {
 		nextRunAt := time.Now().Add(time.Duration(clampInt(cfg.MonitorIntervalSec, 5, 3600)) * time.Second)
 		_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, logText, resultText)
+		if s.publishLogRepo != nil {
+			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", logText)
+		}
 		logx.Infof(publishQueueLogModule, "队列任务等待限制解除 id=%d next_run_at=%s", taskID, nextRunAt.Format(time.RFC3339))
 		return
 	}
 
 	if isPreCheck && limitReached && strings.Contains(logText, "发布前标签限制") {
 		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, logText, resultText)
+		if s.publishLogRepo != nil {
+			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "pre_check_limit", logText)
+		}
 		logx.Warnf(publishQueueLogModule, "队列任务失败（标签限制） id=%d", taskID)
 		return
 	}
 
 	if status >= 400 && status < 500 {
-		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, fmt.Sprintf("请求失败 status=%d: %s", status, logText), resultText)
+		reason := fmt.Sprintf("请求失败 status=%d: %s", status, logText)
+		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, reason, resultText)
+		if s.publishLogRepo != nil {
+			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "failed", reason)
+		}
 		logx.Warnf(publishQueueLogModule, "队列任务失败（不可重试） id=%d status=%d", taskID, status)
 		return
 	}
 
 	attempt := taskRecord.AttemptCount + 1
 	if cfg.MaxRetries >= 0 && attempt > cfg.MaxRetries {
-		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, attempt, nil, fmt.Sprintf("超过最大重试次数(%d): %s", cfg.MaxRetries, logText), resultText)
+		reason := fmt.Sprintf("超过最大重试次数(%d): %s", cfg.MaxRetries, logText)
+		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, attempt, nil, reason, resultText)
+		if s.publishLogRepo != nil {
+			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "failed", reason)
+		}
 		logx.Warnf(publishQueueLogModule, "队列任务失败（达到最大重试） id=%d attempts=%d", taskID, attempt)
 		return
 	}
@@ -477,6 +545,9 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	delaySec := computeBackoffSeconds(cfg.RetryDelayBase, attempt, cfg.MaxRetryDelaySec)
 	nextRunAt := time.Now().Add(time.Duration(delaySec) * time.Second)
 	_ = s.queueRepo.UpdateTaskAfterFailure(taskID, attempt, &nextRunAt, logText, resultText)
+	if s.publishLogRepo != nil {
+		_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", logText)
+	}
 	logx.Warnf(publishQueueLogModule, "队列任务失败，已重试入队 id=%d attempt=%d next_run_at=%s", taskID, attempt, nextRunAt.Format(time.RFC3339))
 }
 

@@ -61,6 +61,32 @@ type PublishLogRepository struct {
 	store *Store
 }
 
+// FindLatestByQueueTaskID 按 queue_task_id 查询最新的一条日志记录。
+// 参数/返回：queueTaskID 为队列任务自增 ID；返回日志记录、是否命中与 error。
+// 失败场景：DB 未初始化或查询失败返回 error。
+// 副作用：读取 publish_logs。
+func (r *PublishLogRepository) FindLatestByQueueTaskID(queueTaskID int64) (*PublishLogEntry, bool, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, false, errors.New("publish log repo is nil")
+	}
+	if queueTaskID <= 0 {
+		return nil, false, nil
+	}
+
+	row := PublishLogEntry{}
+	if err := r.store.DB.Model(&PublishLogEntry{}).
+		Where("queue_task_id = ?", queueTaskID).
+		Order("id DESC").
+		Limit(1).
+		Find(&row).Error; err != nil {
+		return nil, false, err
+	}
+	if row.ID == 0 {
+		return nil, false, nil
+	}
+	return &row, true, nil
+}
+
 // NewPublishLogRepository 创建发种日志仓储实例。
 // 参数/返回：store 为数据库连接容器；返回可复用的仓储对象。
 // 失败场景：无直接失败场景（store 为 nil 时由调用方处理）。
@@ -97,6 +123,107 @@ func (r *PublishLogRepository) Insert(entry *PublishLogEntry) (uint64, error) {
 		return 0, err
 	}
 	return entry.ID, nil
+}
+
+// UpsertByQueueTaskID 按 queue_task_id 更新日志（若不存在则插入）。
+// 参数/返回：entry 必须包含 QueueTaskID；返回 error 表示失败原因。
+// 失败场景：DB 未初始化、查询/更新/插入失败时返回 error。
+// 副作用：写入/更新 publish_logs。
+func (r *PublishLogRepository) UpsertByQueueTaskID(entry *PublishLogEntry) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("publish log repo is nil")
+	}
+	if entry == nil {
+		return errors.New("entry is nil")
+	}
+	if entry.QueueTaskID == nil || *entry.QueueTaskID <= 0 {
+		return errors.New("queue_task_id is required")
+	}
+	if strings.TrimSpace(entry.Trigger) == "" {
+		entry.Trigger = "manual"
+	}
+	if strings.TrimSpace(entry.Status) == "" {
+		entry.Status = "unknown"
+	}
+
+	now := time.Now().Format(publishLogTimeLayout)
+	entry.UpdatedAt = now
+	if strings.TrimSpace(entry.CreatedAt) == "" {
+		entry.CreatedAt = now
+	}
+
+	existing, ok, err := r.FindLatestByQueueTaskID(*entry.QueueTaskID)
+	if err != nil {
+		return err
+	}
+	if !ok || existing == nil || existing.ID == 0 {
+		_, err := r.Insert(entry)
+		return err
+	}
+
+	updates := map[string]any{
+		"publish_trigger": entry.Trigger,
+		"scene":           entry.Scene,
+		"task_id":         entry.TaskID,
+		"torrent_id":      entry.TorrentID,
+		"source_site":     entry.SourceSite,
+		"target_site":     entry.TargetSite,
+		"downloader_id":   entry.DownloaderID,
+		"title":           entry.Title,
+		"subtitle":        entry.Subtitle,
+		"status":          entry.Status,
+		"result_url":      entry.ResultURL,
+		"logs":            entry.Logs,
+		"auto_add_result": entry.AutoAddResult,
+		"cost_ms":         entry.CostMS,
+		"updated_at":      entry.UpdatedAt,
+	}
+
+	return r.store.DB.Model(&PublishLogEntry{}).Where("id = ?", existing.ID).Updates(updates).Error
+}
+
+// UpdateStatusAndLogsByQueueTaskID 更新队列日志的状态与文本（若不存在则插入最小记录）。
+// 参数/返回：queueTaskID 为队列任务 ID；status/logs 为新状态与日志文本；返回 error。
+// 失败场景：DB 未初始化、查询/更新/插入失败返回 error。
+// 副作用：写入/更新 publish_logs。
+func (r *PublishLogRepository) UpdateStatusAndLogsByQueueTaskID(queueTaskID int64, status string, logs string) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("publish log repo is nil")
+	}
+	if queueTaskID <= 0 {
+		return nil
+	}
+
+	trimmedStatus := strings.TrimSpace(status)
+	if trimmedStatus == "" {
+		trimmedStatus = "unknown"
+	}
+
+	now := time.Now().Format(publishLogTimeLayout)
+	existing, ok, err := r.FindLatestByQueueTaskID(queueTaskID)
+	if err != nil {
+		return err
+	}
+	if !ok || existing == nil || existing.ID == 0 {
+		entry := PublishLogEntry{
+			Trigger:     "queue",
+			QueueTaskID: &queueTaskID,
+			Status:      trimmedStatus,
+			Logs:        strings.TrimSpace(logs),
+			CostMS:      0,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		_, err := r.Insert(&entry)
+		return err
+	}
+
+	updates := map[string]any{
+		"status":     trimmedStatus,
+		"logs":       strings.TrimSpace(logs),
+		"updated_at": now,
+	}
+	return r.store.DB.Model(&PublishLogEntry{}).Where("id = ?", existing.ID).Updates(updates).Error
 }
 
 // List 分页查询发种日志。
