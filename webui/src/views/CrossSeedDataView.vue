@@ -375,6 +375,7 @@
         <div class="cross-seed-content">
           <CrossSeedPanel
             :show-complete-button="true"
+            publish-scene="multi_torrent"
             @complete="handleCrossSeedComplete"
             @cancel="closeCrossSeedDialog"
           />

@@ -12,6 +12,8 @@ import (
 )
 
 func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
+	startedAt := time.Now()
+
 	normalizedPayload := map[string]any{}
 	for key, value := range payload {
 		normalizedPayload[key] = value
@@ -55,7 +57,7 @@ func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
 		normalizedPayload["useDefaultDownloader"] = true
 	}
 
-	return publishworkflow.ExecutePublishFromPayload(
+	result, status := publishworkflow.ExecutePublishFromPayload(
 		publishworkflow.PublishFromPayloadInput{
 			Payload:     normalizedPayload,
 			TorrentPath: "",
@@ -77,6 +79,16 @@ func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
 			AddToDownloader: s.AddToDownloader,
 		},
 	)
+
+	ctxTaskID := strings.TrimSpace(processingshared.ToString(normalizedPayload["task_id"], processingshared.ToString(normalizedPayload["taskId"], "")))
+	ctxTorrentID := ""
+	if ctxTaskID != "" && s.contextState != nil {
+		if ctx, ok := s.contextState.Get(ctxTaskID); ok {
+			ctxTorrentID = strings.TrimSpace(ctx.TorrentID)
+		}
+	}
+	s.appendPublishLog(normalizedPayload, ctxTaskID, ctxTorrentID, result, status, time.Since(startedAt))
+	return result, status
 }
 
 func (s *MigrateService) StartPublishBatch(payload map[string]any) (map[string]any, int) {

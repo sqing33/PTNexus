@@ -3,6 +3,7 @@ package migrationflow
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/pt-nexus/server-go/internal/config"
@@ -24,6 +25,14 @@ type MigrateService struct {
 	batchFetchState *acquirefetch.BatchFetchState
 	publishState    *publishworkflow.BatchState
 	bdinfoState     *processingbdflow.BDInfoState
+
+	queueRepo      *repository.PublishQueueRepository
+	publishLogRepo *repository.PublishLogRepository
+	statsRepo      *repository.StatsRepository
+
+	queueStartOnce sync.Once
+	queueStopCh    chan struct{}
+	queueDoneCh    chan struct{}
 }
 
 func NewMigrateService(repo *repository.MigrateRepository, cfg *config.Manager) *MigrateService {

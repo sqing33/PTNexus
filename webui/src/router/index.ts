@@ -27,6 +27,11 @@ const router = createRouter({
       component: () => import('../views/CrossSeedDataView.vue'),
     },
     {
+      path: '/publish-logs',
+      name: 'publish-logs',
+      component: () => import('../views/PublishLogsView.vue'),
+    },
+    {
       path: '/sites',
       name: 'sites',
       component: () => import('../views/SitesView.vue'),
@@ -59,7 +64,7 @@ const router = createRouter({
       name: 'login',
       component: () => import('../views/LoginView.vue'),
     },
-      ],
+  ],
 })
 
 // 简单路由守卫：当开启后端认证时，未携带 token 的请求会被 401 拦截

@@ -59,6 +59,10 @@ func (m *SchemaManager) EnsureSchema() error {
 		}
 	}
 
+	if err := m.migratePublishTriggerColumns(); err != nil {
+		return err
+	}
+
 	for _, index := range m.indexSpecs() {
 		if err := m.ensureIndex(index); err != nil {
 			return err
@@ -72,6 +76,60 @@ func (m *SchemaManager) EnsureSchema() error {
 	}
 
 	logx.Infof(schemaLogModule, "数据库结构校验完成 db_type=%s", m.store.DBType)
+	return nil
+}
+
+func (m *SchemaManager) migratePublishTriggerColumns() error {
+	if m == nil || m.store == nil || m.store.DB == nil {
+		return nil
+	}
+
+	type migrationSpec struct {
+		table string
+	}
+	specs := []migrationSpec{
+		{table: "publish_queue_tasks"},
+		{table: "publish_logs"},
+	}
+
+	oldColumn := "trigger"
+	newColumn := "publish_trigger"
+
+	quotedOld := oldColumn
+	switch strings.ToLower(strings.TrimSpace(m.store.DBType)) {
+	case "mysql":
+		quotedOld = "`" + oldColumn + "`"
+	case "postgresql":
+		quotedOld = `"` + oldColumn + `"`
+	default:
+		quotedOld = oldColumn
+	}
+
+	for _, spec := range specs {
+		columnSet, err := m.listColumnSet(spec.table)
+		if err != nil {
+			return err
+		}
+		_, hasOld := columnSet[oldColumn]
+		_, hasNew := columnSet[newColumn]
+		if !hasOld || !hasNew {
+			continue
+		}
+
+		sqlText := fmt.Sprintf(
+			"UPDATE %s SET %s = %s WHERE (%s IS NULL OR %s = '') AND %s IS NOT NULL AND %s <> ''",
+			spec.table,
+			newColumn,
+			quotedOld,
+			newColumn,
+			newColumn,
+			quotedOld,
+			quotedOld,
+		)
+		if err := m.store.DB.Exec(sqlText).Error; err != nil {
+			return fmt.Errorf("迁移触发字段失败 table=%s err=%w", spec.table, err)
+		}
+	}
 	return nil
 }
 
@@ -197,6 +255,52 @@ func (m *SchemaManager) createTableSQLs() []string {
 				processed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 				progress VARCHAR(20)
 			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
+			`CREATE TABLE IF NOT EXISTS publish_queue_tasks (
+				id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+				group_id VARCHAR(64) NOT NULL,
+				status VARCHAR(32) NOT NULL,
+				task_id VARCHAR(64),
+				publish_trigger VARCHAR(32) NOT NULL DEFAULT 'queue',
+				scene VARCHAR(32),
+				source_site VARCHAR(255),
+				torrent_id VARCHAR(255),
+				target_site VARCHAR(255),
+				downloader_id VARCHAR(64),
+				title TEXT,
+				subtitle TEXT,
+				payload_json LONGTEXT NOT NULL,
+				upload_data_json LONGTEXT NOT NULL,
+				context_json LONGTEXT NOT NULL,
+				attempt_count INT NOT NULL DEFAULT 0,
+				scheduled_at DATETIME NULL,
+				next_run_at DATETIME NULL,
+				started_at DATETIME NULL,
+				finished_at DATETIME NULL,
+				last_error LONGTEXT,
+				last_result LONGTEXT,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL
+			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
+			`CREATE TABLE IF NOT EXISTS publish_logs (
+				id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+				publish_trigger VARCHAR(32) NOT NULL,
+				scene VARCHAR(32),
+				queue_task_id BIGINT NULL,
+				task_id VARCHAR(64),
+				torrent_id VARCHAR(255),
+				source_site VARCHAR(255),
+				target_site VARCHAR(255),
+				downloader_id VARCHAR(64),
+				title TEXT,
+				subtitle TEXT,
+				status VARCHAR(32) NOT NULL,
+				result_url LONGTEXT,
+				logs LONGTEXT,
+				auto_add_result LONGTEXT,
+				cost_ms BIGINT NOT NULL DEFAULT 0,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL
+			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
 		}
 	case "postgresql":
 		return []string{
@@ -316,6 +420,52 @@ func (m *SchemaManager) createTableSQLs() []string {
 				downloader_add_result TEXT,
 				processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 				progress VARCHAR(20)
+			)`,
+			`CREATE TABLE IF NOT EXISTS publish_queue_tasks (
+				id BIGSERIAL PRIMARY KEY,
+				group_id VARCHAR(64) NOT NULL,
+				status VARCHAR(32) NOT NULL,
+				task_id VARCHAR(64),
+				publish_trigger VARCHAR(32) NOT NULL DEFAULT 'queue',
+				scene VARCHAR(32),
+				source_site VARCHAR(255),
+				torrent_id VARCHAR(255),
+				target_site VARCHAR(255),
+				downloader_id VARCHAR(64),
+				title TEXT,
+				subtitle TEXT,
+				payload_json TEXT NOT NULL,
+				upload_data_json TEXT NOT NULL,
+				context_json TEXT NOT NULL,
+				attempt_count INTEGER NOT NULL DEFAULT 0,
+				scheduled_at TIMESTAMP NULL,
+				next_run_at TIMESTAMP NULL,
+				started_at TIMESTAMP NULL,
+				finished_at TIMESTAMP NULL,
+				last_error TEXT,
+				last_result TEXT,
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS publish_logs (
+				id BIGSERIAL PRIMARY KEY,
+				publish_trigger VARCHAR(32) NOT NULL,
+				scene VARCHAR(32),
+				queue_task_id BIGINT NULL,
+				task_id VARCHAR(64),
+				torrent_id VARCHAR(255),
+				source_site VARCHAR(255),
+				target_site VARCHAR(255),
+				downloader_id VARCHAR(64),
+				title TEXT,
+				subtitle TEXT,
+				status VARCHAR(32) NOT NULL,
+				result_url TEXT,
+				logs TEXT,
+				auto_add_result TEXT,
+				cost_ms BIGINT NOT NULL DEFAULT 0,
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL
 			)`,
 		}
 	default:
@@ -437,6 +587,52 @@ func (m *SchemaManager) createTableSQLs() []string {
 				processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
 				progress TEXT
 			)`,
+			`CREATE TABLE IF NOT EXISTS publish_queue_tasks (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				group_id TEXT NOT NULL,
+				status TEXT NOT NULL,
+				task_id TEXT,
+				publish_trigger TEXT NOT NULL DEFAULT 'queue',
+				scene TEXT,
+				source_site TEXT,
+				torrent_id TEXT,
+				target_site TEXT,
+				downloader_id TEXT,
+				title TEXT,
+				subtitle TEXT,
+				payload_json TEXT NOT NULL,
+				upload_data_json TEXT NOT NULL,
+				context_json TEXT NOT NULL,
+				attempt_count INTEGER NOT NULL DEFAULT 0,
+				scheduled_at TEXT NULL,
+				next_run_at TEXT NULL,
+				started_at TEXT NULL,
+				finished_at TEXT NULL,
+				last_error TEXT,
+				last_result TEXT,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS publish_logs (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				publish_trigger TEXT NOT NULL,
+				scene TEXT,
+				queue_task_id INTEGER NULL,
+				task_id TEXT,
+				torrent_id TEXT,
+				source_site TEXT,
+				target_site TEXT,
+				downloader_id TEXT,
+				title TEXT,
+				subtitle TEXT,
+				status TEXT NOT NULL,
+				result_url TEXT,
+				logs TEXT,
+				auto_add_result TEXT,
+				cost_ms INTEGER NOT NULL DEFAULT 0,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
 		}
 	}
 }
@@ -553,6 +749,50 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "processed_at", definition: map[string]string{"sqlite": "TEXT DEFAULT CURRENT_TIMESTAMP", "mysql": "DATETIME DEFAULT CURRENT_TIMESTAMP", "postgresql": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"}},
 			{name: "progress", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(20)", "postgresql": "VARCHAR(20)"}},
 		},
+		"publish_queue_tasks": {
+			{name: "group_id", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(64) NOT NULL", "postgresql": "VARCHAR(64) NOT NULL"}},
+			{name: "status", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(32) NOT NULL", "postgresql": "VARCHAR(32) NOT NULL"}},
+			{name: "task_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "publish_trigger", definition: map[string]string{"sqlite": "TEXT NOT NULL DEFAULT 'queue'", "mysql": "VARCHAR(32) NOT NULL DEFAULT 'queue'", "postgresql": "VARCHAR(32) NOT NULL DEFAULT 'queue'"}},
+			{name: "scene", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(32)", "postgresql": "VARCHAR(32)"}},
+			{name: "source_site", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "torrent_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "target_site", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "downloader_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "title", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
+			{name: "subtitle", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
+			{name: "payload_json", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "LONGTEXT NOT NULL", "postgresql": "TEXT NOT NULL"}},
+			{name: "upload_data_json", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "LONGTEXT NOT NULL", "postgresql": "TEXT NOT NULL"}},
+			{name: "context_json", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "LONGTEXT NOT NULL", "postgresql": "TEXT NOT NULL"}},
+			{name: "attempt_count", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
+			{name: "scheduled_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
+			{name: "next_run_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
+			{name: "started_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
+			{name: "finished_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
+			{name: "last_error", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "last_result", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+		},
+		"publish_logs": {
+			{name: "publish_trigger", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(32) NOT NULL", "postgresql": "VARCHAR(32) NOT NULL"}},
+			{name: "scene", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(32)", "postgresql": "VARCHAR(32)"}},
+			{name: "queue_task_id", definition: map[string]string{"sqlite": "INTEGER NULL", "mysql": "BIGINT NULL", "postgresql": "BIGINT NULL"}},
+			{name: "task_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "torrent_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "source_site", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "target_site", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "downloader_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "title", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
+			{name: "subtitle", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
+			{name: "status", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(32) NOT NULL", "postgresql": "VARCHAR(32) NOT NULL"}},
+			{name: "result_url", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "logs", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "auto_add_result", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "cost_ms", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
+			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+		},
 	}
 }
 
@@ -562,6 +802,19 @@ func (m *SchemaManager) indexSpecs() []schemaIndexSpec {
 		{table: "batch_enhance_records", name: "idx_batch_records_torrent_id", columns: []string{"torrent_id"}},
 		{table: "batch_enhance_records", name: "idx_batch_records_status", columns: []string{"status"}},
 		{table: "batch_enhance_records", name: "idx_batch_records_processed_at", columns: []string{"processed_at"}},
+		{table: "publish_queue_tasks", name: "idx_publish_queue_status_next", columns: []string{"status", "next_run_at"}},
+		{table: "publish_queue_tasks", name: "idx_publish_queue_group_id", columns: []string{"group_id"}},
+		{table: "publish_queue_tasks", name: "idx_publish_queue_created_at", columns: []string{"created_at"}},
+		{table: "publish_queue_tasks", name: "idx_publish_queue_torrent_id", columns: []string{"torrent_id"}},
+		{table: "publish_queue_tasks", name: "idx_publish_queue_target_site", columns: []string{"target_site"}},
+		{table: "publish_queue_tasks", name: "idx_publish_queue_downloader_id", columns: []string{"downloader_id"}},
+
+		{table: "publish_logs", name: "idx_publish_logs_created_at", columns: []string{"created_at"}},
+		{table: "publish_logs", name: "idx_publish_logs_status", columns: []string{"status"}},
+		{table: "publish_logs", name: "idx_publish_logs_target_site", columns: []string{"target_site"}},
+		{table: "publish_logs", name: "idx_publish_logs_torrent_id", columns: []string{"torrent_id"}},
+		{table: "publish_logs", name: "idx_publish_logs_publish_trigger", columns: []string{"publish_trigger"}},
+		{table: "publish_logs", name: "idx_publish_logs_scene", columns: []string{"scene"}},
 	}
 }
 

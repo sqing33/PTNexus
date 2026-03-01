@@ -64,8 +64,13 @@ func NewApp() (*App, error) {
 	siteRepo := repository.NewSiteRepository(store)
 	torrentRepo := repository.NewTorrentRepository(store)
 	migrateRepo := repository.NewMigrateRepository(store)
+	queueRepo := repository.NewPublishQueueRepository(store)
+	publishLogRepo := repository.NewPublishLogRepository(store)
 
 	migrateService := migrationflow.NewMigrateService(migrateRepo, cfgManager)
+	migrateService.InitPublishQueue(queueRepo, statsRepo)
+	migrateService.InitPublishLogs(publishLogRepo)
+	migrateService.StartPublishQueueWorker()
 	goProxyService := service.NewGoProxyService(crossSeedService, migrateService)
 	torrentTransferService := service.NewTorrentTransferService(migrateRepo, cfgManager)
 
@@ -271,6 +276,8 @@ func registerRoutes(
 		api.POST("/utils/parse_title", migrateHandler.ParseTitle)
 		api.POST("/media/validate", migrateHandler.MediaValidate)
 		api.POST("/migrate_torrent", migrateHandler.MigrateTorrent)
+
+		api.GET("/publish_logs", migrateHandler.PublishLogs)
 	}
 
 	migrateAPI := engine.Group("/api/migrate")
@@ -284,6 +291,7 @@ func registerRoutes(
 		migrateAPI.GET("/publish_batch/status/:batch_id", migrateHandler.PublishBatchStatus)
 		migrateAPI.POST("/publish_batch/cancel/:batch_id", migrateHandler.PublishBatchCancel)
 		migrateAPI.GET("/publish_batch/stream/:batch_id", migrateHandler.PublishBatchStream)
+		migrateAPI.POST("/publish_queue/enqueue", migrateHandler.PublishQueueEnqueue)
 
 		migrateAPI.POST("/batch_fetch_seed_data", migrateHandler.BatchFetchSeedData)
 		migrateAPI.POST("/update_preview_data", migrateHandler.UpdatePreviewData)

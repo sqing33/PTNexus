@@ -24,8 +24,9 @@ const (
 	seedingLimitPath    = "/seeding-limit/check"
 	seedingLimitTimeout = 15 * time.Second
 
-	minSeedsThreshold   = 5
-	recentWindowSeconds = int64(864000)
+	minSeedsThreshold    = 5
+	recentWindowSeconds  = int64(86400)
+	ratioIgnoreThreshold = 1.2
 )
 
 var maxRecentAdditions = 15
@@ -43,6 +44,25 @@ type seedingLimitResponse struct {
 	Error       string `json:"error"`
 }
 
+// SeedingLimitStats 表示发布前限制的统计快照（用于队列/监控线程判断是否触发下一任务）。
+// 注意：该统计仅走本地检查逻辑，不会调用远端预检查服务。
+type SeedingLimitStats struct {
+	CanContinue      bool     `json:"can_continue"`
+	Message          string   `json:"message"`
+	SubnetID         string   `json:"subnet_id"`
+	Downloaders      []string `json:"downloaders"`
+	MonitoredCount   int      `json:"monitored_count"`
+	RecentCount      int      `json:"recent_count"`
+	MaxRecentAllowed int      `json:"max_recent_allowed"`
+}
+
+type seedingLimitGroupStats struct {
+	SubnetID        string
+	DownloaderNames []string
+	MonitoredCount  int
+	RecentCount     int
+}
+
 type seedingLimitDownloader struct {
 	ID       string
 	Name     string
@@ -55,17 +75,19 @@ type seedingLimitDownloader struct {
 }
 
 type qbTorrent struct {
-	Hash        string `json:"hash"`
-	State       string `json:"state"`
-	NumComplete int    `json:"num_complete"`
-	UpSpeed     int64  `json:"upspeed"`
-	AddedOn     int64  `json:"added_on"`
+	Hash        string  `json:"hash"`
+	State       string  `json:"state"`
+	NumComplete int     `json:"num_complete"`
+	UpSpeed     int64   `json:"upspeed"`
+	AddedOn     int64   `json:"added_on"`
+	Ratio       float64 `json:"ratio"`
 }
 
 type transmissionTorrent struct {
-	Status       int   `json:"status"`
-	RateUpload   int64 `json:"rateUpload"`
-	AddedDate    int64 `json:"addedDate"`
+	Status       int     `json:"status"`
+	RateUpload   int64   `json:"rateUpload"`
+	AddedDate    int64   `json:"addedDate"`
+	UploadRatio  float64 `json:"uploadRatio"`
 	TrackerStats []struct {
 		SeederCount int `json:"seederCount"`
 	} `json:"trackerStats"`
@@ -93,6 +115,74 @@ func CheckDownloaderGate(downloaderID string) (bool, string) {
 	}
 
 	return checkByLocalGuard(trimmedID)
+}
+
+// CheckDownloaderGateStats 返回指定 downloader_id 对应网段组的限制统计信息（仅本地检查）。
+// 参数/返回：downloaderID 为下载器 ID；返回统计快照与 error。
+// 失败场景：读取配置失败、解析 host 失败或下载器连接失败等会返回 error。
+// 副作用：可能直连下载器拉取做种/暂停列表用于统计。
+func CheckDownloaderGateStats(downloaderID string) (SeedingLimitStats, error) {
+	stats := SeedingLimitStats{
+		CanContinue:      true,
+		Message:          "",
+		SubnetID:         "",
+		Downloaders:      []string{},
+		MonitoredCount:   0,
+		RecentCount:      0,
+		MaxRecentAllowed: maxRecentAdditions,
+	}
+
+	trimmedID := strings.TrimSpace(downloaderID)
+	if trimmedID == "" {
+		return stats, nil
+	}
+
+	downloaders, err := loadDownloadersConfig()
+	if err != nil {
+		return SeedingLimitStats{}, err
+	}
+
+	target := findDownloaderByID(downloaders, trimmedID)
+	if target == nil {
+		stats.Message = "未找到下载器配置"
+		return stats, nil
+	}
+	if target.UseProxy {
+		stats.Message = "下载器开启代理，跳过预检查"
+		return stats, nil
+	}
+
+	subnetID, err := resolveDownloaderSubnet(*target)
+	if err != nil {
+		return SeedingLimitStats{}, err
+	}
+	stats.SubnetID = subnetID
+
+	group := make([]seedingLimitDownloader, 0, len(downloaders))
+	for _, downloader := range downloaders {
+		if !downloader.Enabled || downloader.UseProxy {
+			continue
+		}
+		downloaderSubnet, parseErr := resolveDownloaderSubnet(downloader)
+		if parseErr != nil {
+			continue
+		}
+		if downloaderSubnet == subnetID {
+			group = append(group, downloader)
+		}
+	}
+	if len(group) == 0 {
+		return stats, nil
+	}
+
+	groupStats := collectSeedingLimitGroupStats(subnetID, group)
+	canContinue, message := evaluateSeedingLimit(groupStats)
+	stats.CanContinue = canContinue
+	stats.Message = strings.TrimSpace(message)
+	stats.Downloaders = append([]string{}, groupStats.DownloaderNames...)
+	stats.MonitoredCount = groupStats.MonitoredCount
+	stats.RecentCount = groupStats.RecentCount
+	return stats, nil
 }
 
 func checkByRemoteGuard(downloaderID string) (bool, string, bool) {
@@ -246,34 +336,51 @@ func resolveDownloaderSubnet(downloader seedingLimitDownloader) (string, error) 
 }
 
 func checkSeedingLimitForGroup(subnetID string, downloaders []seedingLimitDownloader) (bool, string) {
-	totalUploading := 0
-	recentTotalCount := 0
-	downloaderNames := make([]string, 0, len(downloaders))
+	stats := collectSeedingLimitGroupStats(subnetID, downloaders)
+	canContinue, message := evaluateSeedingLimit(stats)
+	if canContinue {
+		logx.Infof(seedingLimitGuardLogModule, "本地预检查通过 subnet=%s.x monitored=%d recent=%d", subnetID, stats.MonitoredCount, stats.RecentCount)
+	}
+	return canContinue, message
+}
+
+func collectSeedingLimitGroupStats(subnetID string, downloaders []seedingLimitDownloader) seedingLimitGroupStats {
+	monitored := 0
+	recent := 0
+	names := make([]string, 0, len(downloaders))
 
 	for _, downloader := range downloaders {
 		uploadingCount, recentCount := checkDownloaderStatus(downloader)
-		totalUploading += uploadingCount
-		recentTotalCount += recentCount
+		monitored += uploadingCount
+		recent += recentCount
 		name := strings.TrimSpace(downloader.Name)
 		if name == "" {
 			name = downloader.ID
 		}
-		downloaderNames = append(downloaderNames, name)
+		names = append(names, name)
 	}
 
-	if recentTotalCount > maxRecentAdditions {
+	return seedingLimitGroupStats{
+		SubnetID:        subnetID,
+		DownloaderNames: names,
+		MonitoredCount:  monitored,
+		RecentCount:     recent,
+	}
+}
+
+func evaluateSeedingLimit(stats seedingLimitGroupStats) (bool, string) {
+	if stats.RecentCount > maxRecentAdditions {
 		message := fmt.Sprintf(
-			"网段 %s.x 内的下载器组（%s）在过去24h内添加且活跃/暂停的（做种人数>%d不计算）种子共 %d 个 (上限 %d)。已暂停发布。",
-			subnetID,
-			strings.Join(downloaderNames, ", "),
+			"网段 %s.x 内的下载器组（%s）在过去24h内添加且活跃/暂停的（做种人数>%d或分享率>%.1f不计算）种子共 %d 个 (上限 %d)。已暂停发布。",
+			stats.SubnetID,
+			strings.Join(stats.DownloaderNames, ", "),
 			minSeedsThreshold,
-			recentTotalCount,
+			ratioIgnoreThreshold,
+			stats.RecentCount,
 			maxRecentAdditions,
 		)
 		return false, message
 	}
-
-	logx.Infof(seedingLimitGuardLogModule, "本地预检查通过 subnet=%s.x monitored=%d recent=%d", subnetID, totalUploading, recentTotalCount)
 	return true, ""
 }
 
@@ -318,6 +425,9 @@ func checkQBittorrentStatus(downloader seedingLimitDownloader) (int, int) {
 		if torrent.NumComplete >= minSeedsThreshold {
 			continue
 		}
+		if torrent.Ratio > ratioIgnoreThreshold {
+			continue
+		}
 		if torrent.UpSpeed <= 0 {
 			continue
 		}
@@ -340,6 +450,9 @@ func checkQBittorrentStatus(downloader seedingLimitDownloader) (int, int) {
 			continue
 		}
 		if torrent.NumComplete >= minSeedsThreshold {
+			continue
+		}
+		if torrent.Ratio > ratioIgnoreThreshold {
 			continue
 		}
 		pausedCount++
@@ -407,7 +520,7 @@ func checkTransmissionStatus(downloader seedingLimitDownloader) (int, int) {
 	payload := map[string]any{
 		"method": "torrent-get",
 		"arguments": map[string]any{
-			"fields": []string{"status", "rateUpload", "addedDate", "trackerStats"},
+			"fields": []string{"status", "rateUpload", "addedDate", "trackerStats", "uploadRatio"},
 		},
 	}
 	payloadBytes, err := json.Marshal(payload)
@@ -436,6 +549,9 @@ func checkTransmissionStatus(downloader seedingLimitDownloader) (int, int) {
 
 	for _, torrent := range resp.Arguments.Torrents {
 		if transmissionSeeders(torrent) >= minSeedsThreshold {
+			continue
+		}
+		if torrent.UploadRatio > ratioIgnoreThreshold {
 			continue
 		}
 		isRecent := isWithinRecentWindow(torrent.AddedDate)

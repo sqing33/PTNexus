@@ -1144,10 +1144,18 @@
       <div v-if="activeStep === 2" class="button-group">
         <el-button @click="handleCancelClick" :disabled="isLoading">取消</el-button>
         <el-button
+          type="warning"
+          @click="handleEnqueue"
+          :loading="isEnqueueing"
+          :disabled="isLoading || selectedTargetSites.length === 0"
+        >
+          加入队列
+        </el-button>
+        <el-button
           type="primary"
           @click="handlePublish"
           :loading="isLoading"
-          :disabled="selectedTargetSites.length === 0"
+          :disabled="isEnqueueing || selectedTargetSites.length === 0"
         >
           立即发布
         </el-button>
@@ -1489,6 +1497,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  publishScene: {
+    type: String,
+    default: '',
+  },
 })
 
 const emit = defineEmits(['complete', 'cancel', 'close-with-refresh'])
@@ -1818,6 +1830,7 @@ const selectedTargetSites = ref<string[]>([])
 const autoAddExistingToDownloader = ref(false)
 const autoUpdateExistingTorrent = ref(false)
 const isLoading = ref(false)
+const isEnqueueing = ref(false)
 const torrentData = ref(getInitialTorrentData())
 const taskId = ref<string | null>(null)
 const finalResultsList = ref<any[]>([])
@@ -4169,6 +4182,7 @@ const handlePublishBatch = async (): Promise<boolean> => {
       auto_add_to_downloader: true,
       auto_add_existing_to_downloader: autoAddExistingToDownloader.value,
       auto_update_existing_torrent: autoUpdateExistingTorrent.value,
+      publish_scene: props.publishScene,
     })
 
     if (!startResponse.data?.success || !startResponse.data?.batch_id) {
@@ -4343,6 +4357,7 @@ const handlePublishSerial = async () => {
         auto_add_to_downloader: true, // 新增：启用自动添加
         auto_add_existing_to_downloader: autoAddExistingToDownloader.value,
         auto_update_existing_torrent: autoUpdateExistingTorrent.value,
+        publish_scene: props.publishScene,
       })
 
       const result = {
@@ -4582,6 +4597,47 @@ const handlePublish = async () => {
   const started = await handlePublishBatch()
   if (!started) {
     await handlePublishSerial()
+  }
+}
+
+const handleEnqueue = async () => {
+  if (isEnqueueing.value || isLoading.value) return
+  if (selectedTargetSites.value.length === 0) {
+    ElNotification.warning({ title: '提示', message: '请先选择要发布的目标站点。' })
+    return
+  }
+
+  isEnqueueing.value = true
+  try {
+    const response = await axios.post('/api/migrate/publish_queue/enqueue', {
+      task_id: taskId.value,
+      upload_data: {
+        ...torrentData.value,
+        save_path: torrent.value.save_path,
+      },
+      targetSites: selectedTargetSites.value,
+      sourceSite: sourceSite.value,
+      downloaderId: torrent.value.downloaderId,
+      auto_add_to_downloader: true,
+      auto_add_existing_to_downloader: autoAddExistingToDownloader.value,
+      auto_update_existing_torrent: autoUpdateExistingTorrent.value,
+      publish_scene: props.publishScene,
+    })
+
+    if (!response.data?.success || !response.data?.group_id) {
+      throw new Error(response.data?.message || '加入队列失败')
+    }
+
+    ElNotification.success({
+      title: '已加入队列',
+      message: `队列分组: ${response.data.group_id}（${response.data.count || 0} 个站点）`,
+      duration: 3000,
+    })
+    emit('cancel')
+  } catch (error: any) {
+    handleApiError(error, '加入队列失败')
+  } finally {
+    isEnqueueing.value = false
   }
 }
 

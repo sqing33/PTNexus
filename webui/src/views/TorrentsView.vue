@@ -316,6 +316,7 @@
         </template>
         <div class="cross-seed-content" v-if="selectedTorrentForMigration">
           <CrossSeedPanel
+            publish-scene="multi_site"
             @complete="handleCrossSeedComplete"
             @cancel="closeCrossSeedDialog"
             @close-with-refresh="handleCloseWithRefresh"

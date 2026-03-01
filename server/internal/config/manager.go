@@ -134,6 +134,18 @@ func defaultConfig() map[string]any {
 	return map[string]any{
 		"downloaders":            []any{},
 		"realtime_speed_enabled": true,
+		"downloader_queue": map[string]any{
+			"enabled":                         true,
+			"max_queue_size":                  1000,
+			"max_retries":                     3,
+			"max_retry_delay":                 60,
+			"max_workers":                     1,
+			"queue_monitor_interval":          30,
+			"retry_delay_base":                2,
+			"task_cleanup_hours":              24,
+			"trigger_recent_count_below":      15,
+			"trigger_upload_speed_below_mbps": 0,
+		},
 		"auth": map[string]any{
 			"username":             "admin",
 			"password_hash":        "",
