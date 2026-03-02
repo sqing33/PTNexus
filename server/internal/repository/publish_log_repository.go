@@ -13,9 +13,10 @@ const publishLogTimeLayout = "2006-01-02 15:04:05"
 type PublishLogEntry struct {
 	ID uint64 `json:"id" gorm:"column:id;primaryKey"`
 
-	Trigger     string `json:"trigger" gorm:"column:publish_trigger"`
-	Scene       string `json:"scene" gorm:"column:scene"`
-	QueueTaskID *int64 `json:"queue_task_id" gorm:"column:queue_task_id"`
+	Trigger      string `json:"trigger" gorm:"column:publish_trigger"`
+	Scene        string `json:"scene" gorm:"column:scene"`
+	QueueTaskID  *int64 `json:"queue_task_id" gorm:"column:queue_task_id"`
+	QueueGroupID string `json:"queue_group_id" gorm:"column:queue_group_id"`
 
 	TaskID     string `json:"task_id" gorm:"column:task_id"`
 	TorrentID  string `json:"torrent_id" gorm:"column:torrent_id"`
@@ -46,12 +47,13 @@ type PublishLogQuery struct {
 
 	Search string
 
-	Status     string
-	Trigger    string
-	Scene      string
-	TargetSite string
-	SourceSite string
-	TorrentID  string
+	Status       string
+	Trigger      string
+	Scene        string
+	QueueGroupID string
+	TargetSite   string
+	SourceSite   string
+	TorrentID    string
 }
 
 // PublishLogRepository 负责发种日志的写入与分页查询。
@@ -165,6 +167,7 @@ func (r *PublishLogRepository) UpsertByQueueTaskID(entry *PublishLogEntry) error
 	updates := map[string]any{
 		"publish_trigger": entry.Trigger,
 		"scene":           entry.Scene,
+		"queue_group_id":  entry.QueueGroupID,
 		"task_id":         entry.TaskID,
 		"torrent_id":      entry.TorrentID,
 		"source_site":     entry.SourceSite,
@@ -259,6 +262,9 @@ func (r *PublishLogRepository) List(query PublishLogQuery) ([]PublishLogEntry, i
 	if value := strings.TrimSpace(query.Scene); value != "" {
 		db = db.Where("scene = ?", value)
 	}
+	if value := strings.TrimSpace(query.QueueGroupID); value != "" {
+		db = db.Where("queue_group_id = ?", value)
+	}
 	if value := strings.TrimSpace(query.TargetSite); value != "" {
 		db = db.Where("target_site = ?", value)
 	}
@@ -272,13 +278,13 @@ func (r *PublishLogRepository) List(query PublishLogQuery) ([]PublishLogEntry, i
 		like := "%" + value + "%"
 		if r.store.DBType == "postgresql" {
 			db = db.Where(
-				"(title ILIKE ? OR subtitle ILIKE ? OR torrent_id ILIKE ? OR target_site ILIKE ? OR source_site ILIKE ? OR task_id ILIKE ? OR publish_trigger ILIKE ? OR scene ILIKE ?)",
-				like, like, like, like, like, like, like, like,
+				"(title ILIKE ? OR subtitle ILIKE ? OR torrent_id ILIKE ? OR target_site ILIKE ? OR source_site ILIKE ? OR task_id ILIKE ? OR publish_trigger ILIKE ? OR scene ILIKE ? OR queue_group_id ILIKE ?)",
+				like, like, like, like, like, like, like, like, like,
 			)
 		} else {
 			db = db.Where(
-				"(title LIKE ? OR subtitle LIKE ? OR torrent_id LIKE ? OR target_site LIKE ? OR source_site LIKE ? OR task_id LIKE ? OR publish_trigger LIKE ? OR scene LIKE ?)",
-				like, like, like, like, like, like, like, like,
+				"(title LIKE ? OR subtitle LIKE ? OR torrent_id LIKE ? OR target_site LIKE ? OR source_site LIKE ? OR task_id LIKE ? OR publish_trigger LIKE ? OR scene LIKE ? OR queue_group_id LIKE ?)",
+				like, like, like, like, like, like, like, like, like,
 			)
 		}
 	}

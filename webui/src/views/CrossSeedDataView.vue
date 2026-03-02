@@ -30,17 +30,6 @@
         {{ batchCrossSeedButtonText }}
       </el-button>
 
-      <!-- 停止批量转种按钮 -->
-      <el-button
-        type="danger"
-        @click="stopBatchProcess"
-        plain
-        style="margin-right: 15px"
-        :loading="isStoppingBatch"
-      >
-        停止转种
-      </el-button>
-
       <!-- 查看发种日志按钮（批量转种记录已合并到这里） -->
       <el-button type="info" @click="openPublishLogs" plain style="margin-right: 15px">
         发种日志
@@ -875,9 +864,6 @@ const retryingSeeds = ref<Set<string>>(new Set()) // 正在重试的种子ID集�
 // BDInfo自动刷新相关
 const bdinfoRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const BDINFO_REFRESH_INTERVAL = 5000 // 5秒刷新一次
-
-// 停止批量转种相关
-const isStoppingBatch = ref<boolean>(false)
 
 interface BDInfoRecord {
   seed_id: string
@@ -1735,26 +1721,36 @@ const handleBatchCrossSeed = async () => {
 
     console.log('批量转种数据:', batchData)
 
-    // 3. 通过Python代理调用Go服务的API来开始任务
-    const response = await axios.post('/api/go-api/batch-enhance', batchData)
+    // 3. 调用批量入队接口
+    const response = await axios.post('/api/migrate/publish_queue/enqueue_batch', {
+      ...batchData,
+      publish_scene: 'multi_torrent',
+    })
 
     const result = response.data
     if (result.success) {
-      const publishTrigger = String(result?.data?.publish_trigger || '').trim()
+      const publishTrigger = String(result?.publish_trigger || '').trim()
+      const groupID = String(result?.group_id || '').trim()
+      const queued = Number(result?.queued || 0)
+      const requested = Number(result?.requested || selectedRows.value.length)
       ElMessage.success(
-        `批量转种完成，成功 ${result.data.seeds_processed} 个，失败 ${result.data.seeds_failed} 个${publishTrigger ? `（${publishTrigger}）` : ''}`,
+        `${result.message || `批量加入队列完成（${queued}/${requested}）`}${publishTrigger ? `（${publishTrigger}）` : ''}`,
       )
       if (publishTrigger) {
         await router.push({
           path: '/publish-logs',
-          query: { trigger: publishTrigger, scene: 'multi_torrent' },
+          query: {
+            trigger: publishTrigger,
+            scene: 'multi_torrent',
+            ...(groupID ? { queue_group_id: groupID } : {}),
+          },
         })
       }
     } else {
-      ElMessage.error(result.error || '批量转种失败')
+      ElMessage.error(result.message || result.error || '批量入队失败')
     }
   } catch (error: any) {
-    ElMessage.error(error.message || '网络错误')
+    ElMessage.error(error.response?.data?.message || error.message || '网络错误')
   }
 }
 
@@ -2132,25 +2128,6 @@ const retryBDInfo = async (record: BDInfoRecord) => {
     ElMessage.error(error.message || '网络错误')
   } finally {
     retryingSeeds.value.delete(record.seed_id)
-  }
-}
-
-// 停止批量转种任务
-const stopBatchProcess = async () => {
-  isStoppingBatch.value = true
-  try {
-    const response = await axios.post('/api/go-api/batch-enhance/stop')
-
-    const result = response.data
-    if (result.success) {
-      ElMessage.success('批量转种已停止')
-    } else {
-      ElMessage.error(result.error || '停止批量转种失败')
-    }
-  } catch (error: any) {
-    ElMessage.error(error.message || '停止批量转种失败')
-  } finally {
-    isStoppingBatch.value = false
   }
 }
 

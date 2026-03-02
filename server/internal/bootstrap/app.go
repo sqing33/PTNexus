@@ -71,7 +71,6 @@ func NewApp() (*App, error) {
 	migrateService.InitPublishQueue(queueRepo, statsRepo)
 	migrateService.InitPublishLogs(publishLogRepo)
 	migrateService.StartPublishQueueWorker()
-	goProxyService := service.NewGoProxyService(migrateService)
 	torrentTransferService := service.NewTorrentTransferService(migrateRepo, cfgManager)
 
 	settingsService.SetIYUUTrigger(func() map[string]any {
@@ -138,7 +137,6 @@ func NewApp() (*App, error) {
 	localQueryHandler := handler.NewLocalQueryHandler(localQueryService)
 	crossSeedHandler := handler.NewCrossSeedHandler(crossSeedService)
 	migrateHandler := migratehandler.New(migrateService)
-	goProxyHandler := handler.NewGoProxyHandler(goProxyService)
 	torrentTransferHandler := handler.NewTorrentTransferHandler(torrentTransferService)
 	logsHandler := handler.NewLogsHandler(service.NewLogExportService())
 
@@ -175,7 +173,6 @@ func NewApp() (*App, error) {
 		localQueryHandler,
 		crossSeedHandler,
 		migrateHandler,
-		goProxyHandler,
 		torrentTransferHandler,
 		logsHandler,
 	)
@@ -197,7 +194,6 @@ func registerRoutes(
 	localQueryHandler *handler.LocalQueryHandler,
 	crossSeedHandler *handler.CrossSeedHandler,
 	migrateHandler *migratehandler.Handler,
-	goProxyHandler *handler.GoProxyHandler,
 	torrentTransferHandler *handler.TorrentTransferHandler,
 	logsHandler *handler.LogsHandler,
 ) {
@@ -287,6 +283,8 @@ func registerRoutes(
 		migrateAPI.POST("/publish_batch/cancel/:batch_id", migrateHandler.PublishBatchCancel)
 		migrateAPI.GET("/publish_batch/stream/:batch_id", migrateHandler.PublishBatchStream)
 		migrateAPI.POST("/publish_queue/enqueue", migrateHandler.PublishQueueEnqueue)
+		migrateAPI.POST("/publish_queue/enqueue_batch", migrateHandler.PublishQueueEnqueueBatch)
+		migrateAPI.DELETE("/publish_queue/tasks/:queue_task_id", migrateHandler.PublishQueueDeleteTask)
 
 		migrateAPI.POST("/batch_fetch_seed_data", migrateHandler.BatchFetchSeedData)
 		migrateAPI.POST("/update_preview_data", migrateHandler.UpdatePreviewData)
@@ -307,12 +305,6 @@ func registerRoutes(
 		migrateAPI.GET("/bdinfo_sse/:seed_id", migrateHandler.BDInfoSSE)
 		migrateAPI.POST("/bdinfo/progress", migrateHandler.BDInfoProgress)
 		migrateAPI.POST("/bdinfo/complete", migrateHandler.BDInfoComplete)
-	}
-
-	goAPI := engine.Group("/api/go-api")
-	{
-		goAPI.POST("/batch-enhance", goProxyHandler.BatchEnhance)
-		goAPI.POST("/batch-enhance/stop", goProxyHandler.StopBatchEnhance)
 	}
 
 	torrentTransferAPI := engine.Group("/api/torrent/transfer")

@@ -42,6 +42,14 @@
         <el-option label="队列" value="queue" />
       </el-select>
 
+      <el-input
+        v-model="queueGroupFilter"
+        placeholder="队列分组ID"
+        clearable
+        style="width: 170px; margin-right: 15px"
+        @keyup.enter="applyFilters"
+      />
+
       <el-select
         v-model="statusFilter"
         placeholder="发布状态"
@@ -54,6 +62,7 @@
         <el-option label="已过滤" value="filtered" />
         <el-option label="已存在" value="exists" />
         <el-option label="已编辑" value="edited" />
+        <el-option label="已取消" value="cancelled" />
         <el-option label="预检查限制" value="pre_check_limit" />
       </el-select>
 
@@ -85,6 +94,7 @@
     <div class="table-container">
       <el-table
         :data="rows"
+        row-key="id"
         v-loading="loading"
         border
         style="width: 100%"
@@ -139,7 +149,7 @@
           <template #default="scope">
             <div class="status-tags">
               <el-tag
-                v-if="scope.row.status !== 'queued'"
+                v-if="scope.row.status !== 'queued' && scope.row.status !== 'cancelled'"
                 :type="downloaderTagType(scope.row)"
                 size="small"
                 :style="downloaderTagStyle(scope.row)"
@@ -163,6 +173,15 @@
               >
                 打开
               </el-button>
+              <el-button
+                size="small"
+                type="danger"
+                style="margin-left: 5px"
+                :disabled="!canDeleteQueued(scope.row)"
+                @click="deleteQueuedTask(scope.row)"
+              >
+                删除
+              </el-button>
             </div>
           </template>
         </el-table-column>
@@ -174,8 +193,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import LogViewerCard from '@/components/LogViewerCard.vue'
@@ -188,6 +208,7 @@ const error = ref('')
 const torrentsViewState = useTorrentsViewState()
 const allDownloadersList = ref<any[]>([])
 const route = useRoute()
+const router = useRouter()
 
 const rows = ref<any[]>([])
 const total = ref(0)
@@ -198,11 +219,17 @@ const searchQuery = ref('')
 const statusFilter = ref('')
 const triggerFilter = ref('')
 const sceneFilter = ref('')
+const queueGroupFilter = ref('')
 const targetSiteFilter = ref('')
 
 const dialogVisible = ref(false)
 const dialogTitle = ref('日志')
 const dialogContent = ref('')
+
+const POLL_INTERVAL_MS = 3000
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let pollRefreshing = false
+let fetchSeq = 0
 
 const publishStatusTagType = (status: string) => {
   if (status === 'queued') return 'info'
@@ -210,7 +237,8 @@ const publishStatusTagType = (status: string) => {
   if (status === 'edited') return 'success'
   if (status === 'exists') return 'warning'
   if (status === 'filtered') return 'warning'
-  if (status === 'pre_check_limit') return 'warning'
+  if (status === 'pre_check_limit') return 'danger'
+  if (status === 'cancelled') return 'info'
   if (status === 'failed') return 'danger'
   return 'info'
 }
@@ -223,6 +251,7 @@ const formatPublishStatus = (status: string) => {
   if (status === 'exists') return '已存在'
   if (status === 'edited') return '已编辑'
   if (status === 'pre_check_limit') return '预检查限制'
+  if (status === 'cancelled') return '已取消'
   return status || '未知'
 }
 
@@ -312,14 +341,21 @@ const downloaderTagType = (row: any) => {
   const parsed = parseAutoAddResult(row)
   if (parsed.success) return 'info'
   if ((parsed.message || '').trim().startsWith('未执行')) return 'info'
-  return 'danger'
+  return 'info'
 }
 
 const downloaderTagStyle = (row: any) => {
   const parsed = parseAutoAddResult(row)
-  if (!parsed.success) return {}
+  const message = (parsed.message || '').trim()
+  if (message.startsWith('未执行')) return {}
 
-  const color = resolveDownloaderColor(parsed.downloaderId || '', parsed.downloaderName || '')
+  let color = ''
+  if (parsed.success) {
+    color = resolveDownloaderColor(parsed.downloaderId || '', parsed.downloaderName || '')
+  } else {
+    color = '#f56c6c'
+  }
+
   if (!color) return {}
 
   return {
@@ -339,9 +375,13 @@ const formatDownloaderStatus = (row: any) => {
   return '失败'
 }
 
-const fetchLogs = async () => {
-  loading.value = true
-  error.value = ''
+const fetchLogs = async (options: { silent?: boolean } = {}) => {
+  const silent = options.silent === true
+  const currentFetchSeq = ++fetchSeq
+  if (!silent) {
+    loading.value = true
+    error.value = ''
+  }
   try {
     const response = await axios.get('/api/publish_logs', {
       params: {
@@ -351,6 +391,7 @@ const fetchLogs = async () => {
         status: statusFilter.value,
         trigger: triggerFilter.value,
         scene: sceneFilter.value,
+        queue_group_id: queueGroupFilter.value.trim(),
         target_site: targetSiteFilter.value.trim(),
       },
     })
@@ -359,12 +400,21 @@ const fetchLogs = async () => {
       throw new Error(response.data?.message || '获取发种日志失败')
     }
 
+    if (currentFetchSeq !== fetchSeq) return
     rows.value = response.data.data || []
     total.value = response.data.total || 0
+    if (error.value) {
+      error.value = ''
+    }
   } catch (e: any) {
-    error.value = e?.message || '获取发种日志失败'
+    if (currentFetchSeq !== fetchSeq) return
+    if (!silent) {
+      error.value = e?.message || '获取发种日志失败'
+    }
   } finally {
-    loading.value = false
+    if (!silent && currentFetchSeq === fetchSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -378,8 +428,12 @@ const clearFilters = async () => {
   statusFilter.value = ''
   triggerFilter.value = ''
   sceneFilter.value = ''
+  queueGroupFilter.value = ''
   targetSiteFilter.value = ''
   currentPage.value = 1
+  if (Object.keys(route.query || {}).length > 0) {
+    await router.replace({ path: '/publish-logs', query: {} })
+  }
   await fetchLogs()
 }
 
@@ -418,6 +472,36 @@ const openResultURL = (row: any) => {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+const canDeleteQueued = (row: any) => {
+  if (!row) return false
+  const status = String(row?.status || '').trim()
+  const queueTaskID = Number(row?.queue_task_id || 0)
+  return status === 'queued' && queueTaskID > 0
+}
+
+const deleteQueuedTask = async (row: any) => {
+  if (!canDeleteQueued(row)) return
+  const queueTaskID = Number(row.queue_task_id)
+  try {
+    await ElMessageBox.confirm('确认从队列移除该待发布任务？', '删除待发布任务', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+
+    const response = await axios.delete(`/api/migrate/publish_queue/tasks/${queueTaskID}`)
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || '删除失败')
+    }
+
+    ElMessage.success(response.data?.message || '队列任务已移除')
+    await fetchLogs()
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error?.response?.data?.message || error?.message || '删除失败')
+  }
+}
+
 const readQuery = (key: string) => {
   const raw = (route.query as any)?.[key]
   if (Array.isArray(raw)) return String(raw[0] || '')
@@ -433,6 +517,7 @@ const applyRouteFilters = () => {
   const queryStatus = readQuery('status').trim()
   const querySearch = readQuery('search').trim()
   const queryTargetSite = readQuery('target_site').trim()
+  const queryQueueGroupID = readQuery('queue_group_id').trim()
 
   if (queryTrigger && triggerFilter.value !== queryTrigger) {
     triggerFilter.value = queryTrigger
@@ -454,8 +539,37 @@ const applyRouteFilters = () => {
     targetSiteFilter.value = queryTargetSite
     changed = true
   }
+  if (queryQueueGroupID && queueGroupFilter.value !== queryQueueGroupID) {
+    queueGroupFilter.value = queryQueueGroupID
+    changed = true
+  }
 
   return changed
+}
+
+const runPollRefresh = async () => {
+  if (pollRefreshing || loading.value) return
+  pollRefreshing = true
+  try {
+    await fetchLogs({ silent: true })
+  } finally {
+    pollRefreshing = false
+  }
+}
+
+const startPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+  }
+  pollTimer = setInterval(() => {
+    void runPollRefresh()
+  }, POLL_INTERVAL_MS)
+}
+
+const stopPolling = () => {
+  if (!pollTimer) return
+  clearInterval(pollTimer)
+  pollTimer = null
 }
 
 onMounted(async () => {
@@ -472,6 +586,11 @@ onMounted(async () => {
 
   await fetchLogs()
   emits('ready', fetchLogs)
+  startPolling()
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
 })
 
 watch(

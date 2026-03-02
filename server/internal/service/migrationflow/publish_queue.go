@@ -2,19 +2,28 @@ package migrationflow
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"github.com/pt-nexus/server-go/internal/platform/logx"
 	"github.com/pt-nexus/server-go/internal/repository"
 	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
+	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
 	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
 	publishguard "github.com/pt-nexus/server-go/internal/service/publish/guard"
 	publishworkflow "github.com/pt-nexus/server-go/internal/service/publish/workflow"
+	"gorm.io/gorm"
 )
 
-const publishQueueLogModule = "发布-队列"
+const (
+	publishQueueLogModule        = "发布-队列"
+	queueVideoSizeThresholdBytes = int64(1024 * 1024 * 1024)
+	queueBytesPerGB              = float64(1024 * 1024 * 1024)
+	queueAutoAddNotRunJSON       = `{"success": false, "message": "未执行"}`
+)
 
 type publishQueueConfig struct {
 	Enabled            bool
@@ -110,9 +119,9 @@ func (s *MigrateService) runPublishQueueWorker() {
 }
 
 // EnqueuePublishQueue 将“选择站点发布”步骤生成的 payload 写入发布队列，等待后台触发。
-// 参数/返回：payload 与批量发布接口一致（支持 targetSites/targetSite），必须包含 task_id 与 upload_data；返回入队结果与 HTTP 状态码。
+// 参数/返回：payload 与发布接口一致（支持 targetSites/targetSite），必须包含 task_id 与 upload_data；返回入队结果与 HTTP 状态码。
 // 失败场景：参数缺失、上下文过期、队列已满或入库失败时返回对应错误。
-// 副作用：写入 publish_queue_tasks 表。
+// 副作用：写入 publish_queue_tasks 与 publish_logs。
 func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string]any, int) {
 	if s == nil || s.queueRepo == nil || s.queueRepo.DB() == nil {
 		return map[string]any{"success": false, "message": "队列服务未初始化"}, 500
@@ -198,7 +207,7 @@ func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string
 	for key, value := range payload {
 		normalizedPayload[key] = value
 	}
-	normalizedPayload["publish_trigger"] = "queue"
+	normalizedPayload["publish_trigger"] = trigger
 	normalizedPayload["queue_group_id"] = groupID
 
 	uploadBytes, _ := json.Marshal(uploadData)
@@ -256,7 +265,6 @@ func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string
 			UpdatedAt:      nowText,
 		}
 
-		// 兼容 scheduled_at：同时设置 scheduled_at 与 next_run_at，避免不同 DB 的 NULL 排序差异。
 		if scheduledAt != nil {
 			value := scheduledAt.Format(repository.PublishQueueTimeLayout)
 			record.ScheduledAt = &value
@@ -277,43 +285,7 @@ func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string
 	if err != nil {
 		return map[string]any{"success": false, "message": "入队失败: " + err.Error()}, 500
 	}
-
-	if len(createdTasks) > 0 && s.publishLogRepo != nil {
-		for _, task := range createdTasks {
-			if task.ID <= 0 {
-				continue
-			}
-			taskID := task.ID
-			message := "等待发布"
-			if task.ScheduledAt != nil && strings.TrimSpace(*task.ScheduledAt) != "" {
-				message = "等待发布（计划时间：" + strings.TrimSpace(*task.ScheduledAt) + "）"
-			}
-
-			entry := repository.PublishLogEntry{
-				Trigger:       "queue",
-				Scene:         task.Scene,
-				QueueTaskID:   &taskID,
-				TaskID:        task.TaskID,
-				TorrentID:     task.TorrentID,
-				SourceSite:    task.SourceSite,
-				TargetSite:    task.TargetSite,
-				DownloaderID:  task.DownloaderID,
-				Title:         task.Title,
-				Subtitle:      task.Subtitle,
-				Status:        "queued",
-				ResultURL:     "",
-				Logs:          message,
-				AutoAddResult: "",
-				CostMS:        0,
-				CreatedAt:     task.CreatedAt,
-				UpdatedAt:     task.UpdatedAt,
-			}
-
-			if _, err := s.publishLogRepo.Insert(&entry); err != nil {
-				logx.Warnf(publishLogModule, "写入队列等待日志失败 queue_task_id=%d target=%s err=%v", taskID, task.TargetSite, err)
-			}
-		}
-	}
+	s.insertQueuedPublishLogs(createdTasks)
 
 	logx.Infof(publishQueueLogModule, "已入队 group_id=%s task_id=%s torrent_id=%s sites=%d", groupID, taskID, torrentID, len(queueTasks))
 	return map[string]any{
@@ -322,6 +294,366 @@ func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string
 		"group_id": groupID,
 		"count":    len(queueTasks),
 	}, 200
+}
+
+// EnqueuePublishQueueBatch 将“一站多种”批量转种请求批量写入发布队列。
+// 参数/返回：payload 需包含 target_site_name 与 seeds；返回批量入队统计（group_id/publish_trigger/requested/queued/skipped）。
+// 失败场景：参数缺失、队列未初始化/关闭、队列上限不足、入库失败时返回 4xx/5xx。
+// 副作用：写入 publish_queue_tasks 与 publish_logs。
+func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[string]any, int) {
+	if s == nil || s.queueRepo == nil || s.queueRepo.DB() == nil {
+		return map[string]any{"success": false, "message": "队列服务未初始化"}, 500
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+
+	cfg := s.resolvePublishQueueConfig()
+	if !cfg.Enabled {
+		return map[string]any{"success": false, "message": "队列功能已关闭"}, 400
+	}
+
+	targetSite := strings.TrimSpace(processingshared.ToString(payload["target_site_name"], processingshared.ToString(payload["targetSite"], processingshared.ToString(payload["target_site"], ""))))
+	if targetSite == "" {
+		return map[string]any{"success": false, "message": "缺少 target_site_name 参数"}, 400
+	}
+
+	rawSeeds, ok := payload["seeds"].([]any)
+	if !ok || len(rawSeeds) == 0 {
+		return map[string]any{"success": false, "message": "缺少 seeds 参数"}, 400
+	}
+
+	if cfg.MaxQueueSize > 0 {
+		active, err := s.queueRepo.CountActiveTasks()
+		if err != nil {
+			logx.Warnf(publishQueueLogModule, "统计队列任务失败 err=%v", err)
+		} else if active+int64(len(rawSeeds)) > cfg.MaxQueueSize {
+			return map[string]any{"success": false, "message": fmt.Sprintf("队列已满（当前 %d / 上限 %d）", active, cfg.MaxQueueSize)}, 400
+		}
+	}
+
+	publishTrigger, _, triggerErr := s.NextBatchCrossSeedTrigger()
+	if strings.TrimSpace(publishTrigger) == "" {
+		publishTrigger = batchCrossSeedTriggerPrefix + "1"
+	}
+	if triggerErr != nil {
+		logx.Warnf(publishQueueLogModule, "计算批量触发标识失败，已回退 trigger=%s err=%v", publishTrigger, triggerErr)
+	}
+
+	scene := strings.TrimSpace(processingshared.ToString(payload["publish_scene"], "multi_torrent"))
+	if scene == "" {
+		scene = "multi_torrent"
+	}
+	groupID := s.newID("queue")
+	now := time.Now()
+	nowText := now.Format(repository.PublishQueueTimeLayout)
+
+	queueTasks := make([]repository.PublishQueueTask, 0, len(rawSeeds))
+	skipped := 0
+
+	for idx, raw := range rawSeeds {
+		seed, ok := raw.(map[string]any)
+		if !ok || seed == nil {
+			skipped++
+			s.insertBatchQueueSkipLog(ExternalPublishLogInput{
+				Trigger:       publishTrigger,
+				Scene:         scene,
+				QueueGroupID:  groupID,
+				TargetSite:    targetSite,
+				Status:        "failed",
+				Logs:          "批量参数异常：seeds 项不是对象",
+				AutoAddResult: queueAutoAddNotRunJSON,
+			})
+			continue
+		}
+
+		torrentID := strings.TrimSpace(processingshared.ToString(seed["torrent_id"], ""))
+		siteName := strings.TrimSpace(processingshared.ToString(seed["site_name"], ""))
+		sourceSite := strings.TrimSpace(processingshared.ToString(seed["nickname"], siteName))
+		downloaderID := strings.TrimSpace(processingshared.ToString(seed["downloader_id"], ""))
+
+		if torrentID == "" || siteName == "" {
+			skipped++
+			s.insertBatchQueueSkipLog(ExternalPublishLogInput{
+				Trigger:       publishTrigger,
+				Scene:         scene,
+				QueueGroupID:  groupID,
+				TorrentID:     torrentID,
+				SourceSite:    sourceSite,
+				TargetSite:    targetSite,
+				DownloaderID:  downloaderID,
+				Title:         firstNonEmptyString(strings.TrimSpace(torrentID), fmt.Sprintf("seed-%d", idx+1)),
+				Status:        "failed",
+				Logs:          "缺少 torrent_id 或 site_name",
+				AutoAddResult: queueAutoAddNotRunJSON,
+			})
+			continue
+		}
+
+		lookup, err := processingpersist.LookupSeedForMigration(
+			processingpersist.DBSeedLookupInput{TorrentID: torrentID, SiteName: siteName},
+			s.repo,
+		)
+		if err != nil {
+			skipped++
+			message := "数据库读取失败: " + err.Error()
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				message = "数据库中未找到种子信息"
+			}
+			s.insertBatchQueueSkipLog(ExternalPublishLogInput{
+				Trigger:       publishTrigger,
+				Scene:         scene,
+				QueueGroupID:  groupID,
+				TorrentID:     torrentID,
+				SourceSite:    sourceSite,
+				TargetSite:    targetSite,
+				DownloaderID:  downloaderID,
+				Title:         torrentID,
+				Status:        "failed",
+				Logs:          message,
+				AutoAddResult: queueAutoAddNotRunJSON,
+			})
+			continue
+		}
+
+		uploadData := map[string]any{}
+		for key, value := range lookup.Normalized {
+			uploadData[key] = value
+		}
+
+		if strings.TrimSpace(sourceSite) == "" {
+			sourceSite = firstNonEmptyString(strings.TrimSpace(lookup.Nickname), strings.TrimSpace(lookup.SiteName), strings.TrimSpace(siteName))
+		}
+		if strings.TrimSpace(downloaderID) == "" {
+			downloaderID = firstNonEmptyString(
+				strings.TrimSpace(processingshared.ToString(uploadData["downloader_id"], "")),
+				strings.TrimSpace(lookup.DownloaderID),
+			)
+		}
+		if strings.TrimSpace(downloaderID) != "" {
+			uploadData["downloader_id"] = downloaderID
+		}
+
+		title := strings.TrimSpace(processingshared.ToString(uploadData["title"], processingshared.ToString(uploadData["name"], "")))
+		if title == "" {
+			title = strings.TrimSpace(torrentID)
+		}
+		uploadData["title"] = title
+		subtitle := strings.TrimSpace(processingshared.ToString(uploadData["subtitle"], ""))
+
+		ctxTaskID := s.newID("ctx")
+		ctx := publishworkflow.BuildContextFromDBRow(
+			ctxTaskID,
+			torrentID,
+			strings.TrimSpace(firstNonEmptyString(lookup.SiteName, siteName)),
+			strings.TrimSpace(lookup.Hash),
+			strings.TrimSpace(firstNonEmptyString(lookup.Name, title)),
+			strings.TrimSpace(processingshared.ToString(uploadData["save_path"], lookup.SavePath)),
+			downloaderID,
+			sourceSite,
+			torrentID,
+		)
+
+		taskPayload := map[string]any{
+			"task_id":                ctxTaskID,
+			"upload_data":            uploadData,
+			"targetSite":             targetSite,
+			"sourceSite":             sourceSite,
+			"downloaderId":           downloaderID,
+			"auto_add_to_downloader": true,
+			"publish_scene":          scene,
+			"publish_trigger":        publishTrigger,
+			"queue_group_id":         groupID,
+		}
+		if value, exists := payload["auto_add_existing_to_downloader"]; exists {
+			taskPayload["auto_add_existing_to_downloader"] = value
+		}
+		if value, exists := payload["auto_update_existing_torrent"]; exists {
+			taskPayload["auto_update_existing_torrent"] = value
+		}
+
+		taskPayloadBytes, _ := json.Marshal(taskPayload)
+		uploadBytes, _ := json.Marshal(uploadData)
+		ctxBytes, _ := json.Marshal(ctx)
+
+		nextRunAt := nowText
+		queueTasks = append(queueTasks, repository.PublishQueueTask{
+			GroupID:        groupID,
+			Status:         repository.PublishQueueStatusQueued,
+			TaskID:         ctxTaskID,
+			Trigger:        publishTrigger,
+			Scene:          scene,
+			TorrentID:      torrentID,
+			SourceSite:     sourceSite,
+			TargetSite:     targetSite,
+			DownloaderID:   downloaderID,
+			Title:          title,
+			Subtitle:       subtitle,
+			PayloadJSON:    string(taskPayloadBytes),
+			UploadDataJSON: string(uploadBytes),
+			ContextJSON:    string(ctxBytes),
+			AttemptCount:   0,
+			NextRunAt:      &nextRunAt,
+			ScheduledAt:    nil,
+			StartedAt:      nil,
+			FinishedAt:     nil,
+			LastError:      "",
+			LastResult:     "",
+			CreatedAt:      nowText,
+			UpdatedAt:      nowText,
+		})
+	}
+
+	if len(queueTasks) == 0 {
+		return map[string]any{
+			"success":         false,
+			"message":         "没有可入队的种子",
+			"group_id":        groupID,
+			"publish_trigger": publishTrigger,
+			"requested":       len(rawSeeds),
+			"queued":          0,
+			"skipped":         skipped,
+		}, 400
+	}
+
+	createdTasks, err := s.queueRepo.EnqueueTasks(queueTasks)
+	if err != nil {
+		return map[string]any{"success": false, "message": "入队失败: " + err.Error()}, 500
+	}
+	s.insertQueuedPublishLogs(createdTasks)
+
+	queuedCount := len(createdTasks)
+	skipped = len(rawSeeds) - queuedCount
+	message := fmt.Sprintf("已加入队列（%d/%d）", queuedCount, len(rawSeeds))
+
+	logx.Infof(publishQueueLogModule, "批量入队完成 group_id=%s trigger=%s target_site=%s requested=%d queued=%d skipped=%d", groupID, publishTrigger, targetSite, len(rawSeeds), queuedCount, skipped)
+	return map[string]any{
+		"success":         true,
+		"message":         message,
+		"group_id":        groupID,
+		"publish_trigger": publishTrigger,
+		"requested":       len(rawSeeds),
+		"queued":          queuedCount,
+		"skipped":         skipped,
+	}, 200
+}
+
+// DeleteQueuedPublishTask 将待发布的 queued 任务标记为 cancelled（供日志页“删除”操作调用）。
+// 参数/返回：queueTaskID 为队列任务主键；返回标准响应与状态码。
+// 失败场景：任务不存在返回 404；任务非 queued 返回 409；数据库更新失败返回 500。
+// 副作用：更新 publish_queue_tasks 与 publish_logs。
+func (s *MigrateService) DeleteQueuedPublishTask(queueTaskID int64) (map[string]any, int) {
+	if s == nil || s.queueRepo == nil || s.queueRepo.DB() == nil {
+		return map[string]any{"success": false, "message": "队列服务未初始化"}, 500
+	}
+	if queueTaskID <= 0 {
+		return map[string]any{"success": false, "message": "缺少有效的 queue_task_id"}, 400
+	}
+
+	task, ok, err := s.queueRepo.FindTaskByID(queueTaskID)
+	if err != nil {
+		return map[string]any{"success": false, "message": "查询队列任务失败: " + err.Error()}, 500
+	}
+	if !ok || task == nil {
+		return map[string]any{"success": false, "message": "队列任务不存在"}, 404
+	}
+	if strings.TrimSpace(task.Status) != repository.PublishQueueStatusQueued {
+		return map[string]any{"success": false, "message": "仅待发布任务支持删除"}, 409
+	}
+
+	reason := "已从队列移除"
+	if err := s.queueRepo.CancelQueuedTask(queueTaskID, reason); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrPublishQueueTaskNotFound):
+			return map[string]any{"success": false, "message": "队列任务不存在"}, 404
+		case errors.Is(err, repository.ErrPublishQueueTaskNotQueued):
+			return map[string]any{"success": false, "message": "仅待发布任务支持删除"}, 409
+		default:
+			return map[string]any{"success": false, "message": "删除队列任务失败: " + err.Error()}, 500
+		}
+	}
+
+	if s.publishLogRepo != nil {
+		if updateErr := s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(queueTaskID, repository.PublishQueueStatusCancelled, reason); updateErr != nil {
+			logx.Warnf(publishLogModule, "更新已取消日志失败 queue_task_id=%d err=%v", queueTaskID, updateErr)
+		}
+	}
+
+	logx.Infof(publishQueueLogModule, "队列任务已删除 queue_task_id=%d group_id=%s target_site=%s", queueTaskID, strings.TrimSpace(task.GroupID), strings.TrimSpace(task.TargetSite))
+	return map[string]any{"success": true, "message": "队列任务已移除"}, 200
+}
+
+func (s *MigrateService) insertQueuedPublishLogs(tasks []repository.PublishQueueTask) {
+	if s == nil || s.publishLogRepo == nil || len(tasks) == 0 {
+		return
+	}
+	for _, task := range tasks {
+		if task.ID <= 0 {
+			continue
+		}
+		taskID := task.ID
+		message := "等待发布"
+		if task.ScheduledAt != nil && strings.TrimSpace(*task.ScheduledAt) != "" {
+			message = "等待发布（计划时间：" + strings.TrimSpace(*task.ScheduledAt) + "）"
+		}
+
+		entry := repository.PublishLogEntry{
+			Trigger:       strings.TrimSpace(task.Trigger),
+			Scene:         strings.TrimSpace(task.Scene),
+			QueueTaskID:   &taskID,
+			QueueGroupID:  strings.TrimSpace(task.GroupID),
+			TaskID:        strings.TrimSpace(task.TaskID),
+			TorrentID:     strings.TrimSpace(task.TorrentID),
+			SourceSite:    strings.TrimSpace(task.SourceSite),
+			TargetSite:    strings.TrimSpace(task.TargetSite),
+			DownloaderID:  strings.TrimSpace(task.DownloaderID),
+			Title:         strings.TrimSpace(task.Title),
+			Subtitle:      strings.TrimSpace(task.Subtitle),
+			Status:        repository.PublishQueueStatusQueued,
+			ResultURL:     "",
+			Logs:          message,
+			AutoAddResult: "",
+			CostMS:        0,
+			CreatedAt:     task.CreatedAt,
+			UpdatedAt:     task.UpdatedAt,
+		}
+
+		if _, err := s.publishLogRepo.Insert(&entry); err != nil {
+			logx.Warnf(publishLogModule, "写入队列等待日志失败 queue_task_id=%d target=%s err=%v", taskID, task.TargetSite, err)
+		}
+	}
+}
+
+func (s *MigrateService) insertBatchQueueSkipLog(input ExternalPublishLogInput) {
+	if s == nil || s.publishLogRepo == nil {
+		return
+	}
+	if strings.TrimSpace(input.Status) == "" {
+		input.Status = "failed"
+	}
+	if strings.TrimSpace(input.AutoAddResult) == "" {
+		input.AutoAddResult = queueAutoAddNotRunJSON
+	}
+	if strings.TrimSpace(input.Trigger) == "" {
+		input.Trigger = "queue"
+	}
+	if strings.TrimSpace(input.Scene) == "" {
+		input.Scene = "multi_torrent"
+	}
+	if strings.TrimSpace(input.Title) == "" {
+		input.Title = strings.TrimSpace(firstNonEmptyString(input.TorrentID, "-"))
+	}
+	if err := s.InsertExternalPublishLog(input); err != nil {
+		logx.Warnf(
+			publishQueueLogModule,
+			"写入批量入队失败日志失败 trigger=%s group_id=%s torrent_id=%s target=%s err=%v",
+			input.Trigger,
+			input.QueueGroupID,
+			input.TorrentID,
+			input.TargetSite,
+			err,
+		)
+	}
 }
 
 func (s *MigrateService) drainPublishQueueOnce(cfg publishQueueConfig) {
@@ -383,9 +715,9 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	ctx := publishworkflow.Context{}
 	_ = json.Unmarshal([]byte(taskRecord.ContextJSON), &ctx)
 
-	payload["publish_trigger"] = "queue"
+	payload["publish_trigger"] = strings.TrimSpace(firstNonEmptyString(taskRecord.Trigger, "queue"))
 	payload["queue_task_id"] = taskID
-	payload["queue_group_id"] = taskRecord.GroupID
+	payload["queue_group_id"] = strings.TrimSpace(taskRecord.GroupID)
 	payload["targetSite"] = strings.TrimSpace(processingshared.ToString(payload["targetSite"], taskRecord.TargetSite))
 	payload["upload_data"] = uploadData
 
@@ -455,6 +787,22 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 		execTaskID = fmt.Sprintf("queue-%d", taskID)
 	}
 
+	preCheckPassed, preCheckMessage := s.checkQueueVideoSizePrecondition(taskRecord, payload, ctx)
+	if !preCheckPassed {
+		preCheckResult := map[string]any{
+			"success":       false,
+			"pre_check":     true,
+			"limit_reached": true,
+			"logs":          preCheckMessage,
+			"message":       preCheckMessage,
+		}
+		encodedResult, _ := json.Marshal(preCheckResult)
+		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, preCheckMessage, strings.TrimSpace(string(encodedResult)))
+		s.appendPublishLog(payload, execTaskID, torrentID, preCheckResult, 200, 0)
+		logx.Warnf(publishQueueLogModule, "队列任务预检查失败 id=%d torrent_id=%s target_site=%s reason=%s", taskID, torrentID, targetSite, preCheckMessage)
+		return
+	}
+
 	logx.Infof(publishQueueLogModule, "开始执行队列任务 id=%d torrent_id=%s target_site=%s attempt=%d", taskID, torrentID, targetSite, taskRecord.AttemptCount)
 
 	startedAt := time.Now()
@@ -503,12 +851,11 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	}
 
 	if isPreCheck && limitReached && strings.Contains(logText, "发布前预检查触发限制") {
-		nextRunAt := time.Now().Add(time.Duration(clampInt(cfg.MonitorIntervalSec, 5, 3600)) * time.Second)
-		_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, logText, resultText)
+		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, logText, resultText)
 		if s.publishLogRepo != nil {
-			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", logText)
+			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "pre_check_limit", logText)
 		}
-		logx.Infof(publishQueueLogModule, "队列任务等待限制解除 id=%d next_run_at=%s", taskID, nextRunAt.Format(time.RFC3339))
+		logx.Warnf(publishQueueLogModule, "队列任务失败（预检查限制） id=%d", taskID)
 		return
 	}
 
@@ -549,6 +896,50 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 		_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", logText)
 	}
 	logx.Warnf(publishQueueLogModule, "队列任务失败，已重试入队 id=%d attempt=%d next_run_at=%s", taskID, attempt, nextRunAt.Format(time.RFC3339))
+}
+
+func (s *MigrateService) checkQueueVideoSizePrecondition(task repository.PublishQueueTask, payload map[string]any, ctx publishworkflow.Context) (bool, string) {
+	if s == nil || s.repo == nil {
+		return false, "发布前预检查触发限制: 队列服务未初始化"
+	}
+
+	ctxCopy := ctx
+	if strings.TrimSpace(ctxCopy.TorrentID) == "" {
+		ctxCopy.TorrentID = strings.TrimSpace(firstNonEmptyString(task.TorrentID, processingshared.ToString(payload["torrent_id"], "")))
+	}
+	if strings.TrimSpace(ctxCopy.SiteName) == "" {
+		ctxCopy.SiteName = strings.TrimSpace(firstNonEmptyString(task.SourceSite, processingshared.ToString(payload["sourceSite"], "")))
+	}
+	if strings.TrimSpace(ctxCopy.SourceNickname) == "" {
+		ctxCopy.SourceNickname = strings.TrimSpace(firstNonEmptyString(task.SourceSite, ctxCopy.SiteName))
+	}
+	if strings.TrimSpace(ctxCopy.SourceDetailURL) == "" {
+		ctxCopy.SourceDetailURL = strings.TrimSpace(ctxCopy.TorrentID)
+	}
+
+	torrentPath := acquirefetch.ResolvePublishTorrentPath(s.repo, acquirefetch.ResolvePublishTorrentPathInput{
+		OriginalTorrentPath: ctxCopy.OriginalTorrentPath,
+		TorrentDir:          ctxCopy.TorrentDir,
+		SiteName:            ctxCopy.SiteName,
+		TorrentID:           ctxCopy.TorrentID,
+		SourceNickname:      ctxCopy.SourceNickname,
+		SourceDetailURL:     ctxCopy.SourceDetailURL,
+	})
+	if strings.TrimSpace(torrentPath) == "" {
+		return false, "发布前预检查触发限制: 无法获取 torrent 文件"
+	}
+
+	videoBytes, _, err := s.ExtractVideoSizeFromTorrentFile(torrentPath)
+	if err != nil {
+		return false, "发布前预检查触发限制: 视频文件大小解析失败: " + err.Error()
+	}
+	if videoBytes < queueVideoSizeThresholdBytes {
+		videoGB := float64(videoBytes) / queueBytesPerGB
+		videoGB = math.Round(videoGB*100) / 100
+		return false, fmt.Sprintf("发布前预检查触发限制: 视频文件总大小小于 1GB（%.2fGB）", videoGB)
+	}
+
+	return true, ""
 }
 
 func (s *MigrateService) resolveQueueTaskDownloaderID(task repository.PublishQueueTask, payload map[string]any, ctx publishworkflow.Context) string {
@@ -683,4 +1074,14 @@ func computeBackoffSeconds(base int, attempt int, maxDelay int) int {
 		delay = maxDelay
 	}
 	return delay
+}
+
+func firstNonEmptyString(items ...string) string {
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

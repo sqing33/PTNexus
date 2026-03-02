@@ -271,6 +271,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				publish_trigger VARCHAR(32) NOT NULL,
 				scene VARCHAR(32),
 				queue_task_id BIGINT NULL,
+				queue_group_id VARCHAR(64),
 				task_id VARCHAR(64),
 				torrent_id VARCHAR(255),
 				source_site VARCHAR(255),
@@ -422,6 +423,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				publish_trigger VARCHAR(32) NOT NULL,
 				scene VARCHAR(32),
 				queue_task_id BIGINT NULL,
+				queue_group_id VARCHAR(64),
 				task_id VARCHAR(64),
 				torrent_id VARCHAR(255),
 				source_site VARCHAR(255),
@@ -573,6 +575,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				publish_trigger TEXT NOT NULL,
 				scene TEXT,
 				queue_task_id INTEGER NULL,
+				queue_group_id TEXT,
 				task_id TEXT,
 				torrent_id TEXT,
 				source_site TEXT,
@@ -719,6 +722,7 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "publish_trigger", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(32) NOT NULL", "postgresql": "VARCHAR(32) NOT NULL"}},
 			{name: "scene", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(32)", "postgresql": "VARCHAR(32)"}},
 			{name: "queue_task_id", definition: map[string]string{"sqlite": "INTEGER NULL", "mysql": "BIGINT NULL", "postgresql": "BIGINT NULL"}},
+			{name: "queue_group_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
 			{name: "task_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
 			{name: "torrent_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
 			{name: "source_site", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
@@ -753,6 +757,7 @@ func (m *SchemaManager) indexSpecs() []schemaIndexSpec {
 		{table: "publish_logs", name: "idx_publish_logs_publish_trigger", columns: []string{"publish_trigger"}},
 		{table: "publish_logs", name: "idx_publish_logs_scene", columns: []string{"scene"}},
 		{table: "publish_logs", name: "idx_publish_logs_queue_task_id", columns: []string{"queue_task_id"}},
+		{table: "publish_logs", name: "idx_publish_logs_queue_group_id", columns: []string{"queue_group_id"}},
 	}
 }
 

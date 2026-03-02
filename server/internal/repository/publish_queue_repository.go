@@ -12,10 +12,18 @@ import (
 const PublishQueueTimeLayout = "2006-01-02 15:04:05"
 
 const (
-	PublishQueueStatusQueued  = "queued"
-	PublishQueueStatusRunning = "running"
-	PublishQueueStatusSuccess = "success"
-	PublishQueueStatusFailed  = "failed"
+	PublishQueueStatusQueued    = "queued"
+	PublishQueueStatusRunning   = "running"
+	PublishQueueStatusSuccess   = "success"
+	PublishQueueStatusFailed    = "failed"
+	PublishQueueStatusCancelled = "cancelled"
+)
+
+var (
+	// ErrPublishQueueTaskNotFound 表示队列任务不存在。
+	ErrPublishQueueTaskNotFound = errors.New("publish queue task not found")
+	// ErrPublishQueueTaskNotQueued 表示队列任务当前不是 queued 状态。
+	ErrPublishQueueTaskNotQueued = errors.New("publish queue task is not queued")
 )
 
 // PublishQueueTask 表示一条待执行的发布队列任务记录（单目标站点粒度）。
@@ -292,6 +300,68 @@ func (r *PublishQueueRepository) UpdateTaskAfterSuccess(id int64, result string)
 		}).Error
 }
 
+// FindTaskByID 按主键读取队列任务。
+// 参数/返回：id 为任务主键；返回任务、是否命中与 error。
+// 失败场景：数据库查询失败返回 error。
+// 副作用：读取 publish_queue_tasks。
+func (r *PublishQueueRepository) FindTaskByID(id int64) (*PublishQueueTask, bool, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, false, errors.New("publish queue repo is nil")
+	}
+	if id <= 0 {
+		return nil, false, nil
+	}
+
+	task := PublishQueueTask{}
+	if err := r.store.DB.Table("publish_queue_tasks").Where("id = ?", id).Limit(1).Find(&task).Error; err != nil {
+		return nil, false, err
+	}
+	if task.ID <= 0 {
+		return nil, false, nil
+	}
+	return &task, true, nil
+}
+
+// CancelQueuedTask 将 queued 状态任务取消为 cancelled，供 UI 删除待发布项使用。
+// 参数/返回：id 为任务主键；reason 为取消原因；返回 error。
+// 失败场景：任务不存在或非 queued 状态会返回对应错误；更新失败返回 error。
+// 副作用：更新 publish_queue_tasks 状态与时间字段。
+func (r *PublishQueueRepository) CancelQueuedTask(id int64, reason string) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("publish queue repo is nil")
+	}
+	if id <= 0 {
+		return ErrPublishQueueTaskNotFound
+	}
+
+	nowText := time.Now().Format(PublishQueueTimeLayout)
+	result := r.store.DB.Table("publish_queue_tasks").
+		Where("id = ? AND status = ?", id, PublishQueueStatusQueued).
+		Updates(map[string]any{
+			"status":      PublishQueueStatusCancelled,
+			"next_run_at": nil,
+			"started_at":  nil,
+			"finished_at": nowText,
+			"last_error":  strings.TrimSpace(reason),
+			"updated_at":  nowText,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+
+	exists := int64(0)
+	if err := r.store.DB.Table("publish_queue_tasks").Where("id = ?", id).Count(&exists).Error; err != nil {
+		return err
+	}
+	if exists == 0 {
+		return ErrPublishQueueTaskNotFound
+	}
+	return ErrPublishQueueTaskNotQueued
+}
+
 // CleanupFinishedTasks 清理已完成任务，避免队列表无限增长。
 // 参数/返回：olderThan 为截止时间；返回删除条数与 error。
 // 失败场景：数据库删除失败返回 error。
@@ -303,7 +373,11 @@ func (r *PublishQueueRepository) CleanupFinishedTasks(olderThan time.Time) (int6
 
 	cutoffText := olderThan.Format(PublishQueueTimeLayout)
 	result := r.store.DB.Table("publish_queue_tasks").
-		Where("status IN ? AND finished_at IS NOT NULL AND finished_at < ?", []string{PublishQueueStatusSuccess, PublishQueueStatusFailed}, cutoffText).
+		Where(
+			"status IN ? AND finished_at IS NOT NULL AND finished_at < ?",
+			[]string{PublishQueueStatusSuccess, PublishQueueStatusFailed, PublishQueueStatusCancelled},
+			cutoffText,
+		).
 		Delete(&PublishQueueTask{})
 	if result.Error != nil {
 		return 0, result.Error

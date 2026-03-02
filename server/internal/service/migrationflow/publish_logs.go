@@ -21,8 +21,9 @@ const (
 // ExternalPublishLogInput 表示“外部流程”直接写入 publish_logs 的最小字段集合。
 // 说明：用于无法走标准 Publish 工作流，但仍希望在“发种日志”页面中留痕的场景（例如：批量转种前置过滤、抓取失败等）。
 type ExternalPublishLogInput struct {
-	Trigger string
-	Scene   string
+	Trigger      string
+	Scene        string
+	QueueGroupID string
 
 	TaskID    string
 	TorrentID string
@@ -80,6 +81,7 @@ func (s *MigrateService) InsertExternalPublishLog(input ExternalPublishLogInput)
 	entry := repository.PublishLogEntry{
 		Trigger:       strings.TrimSpace(input.Trigger),
 		Scene:         scene,
+		QueueGroupID:  strings.TrimSpace(input.QueueGroupID),
 		TaskID:        strings.TrimSpace(input.TaskID),
 		TorrentID:     strings.TrimSpace(input.TorrentID),
 		SourceSite:    strings.TrimSpace(input.SourceSite),
@@ -174,6 +176,7 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 		value := int64(rawQueueID)
 		queueTaskID = &value
 	}
+	queueGroupID := strings.TrimSpace(processingshared.ToString(payload["queue_group_id"], ""))
 
 	logStatus := "failed"
 	if result != nil {
@@ -215,6 +218,7 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 		Trigger:       trigger,
 		Scene:         scene,
 		QueueTaskID:   queueTaskID,
+		QueueGroupID:  queueGroupID,
 		TaskID:        ctxTaskID,
 		TorrentID:     torrentID,
 		SourceSite:    sourceSite,
