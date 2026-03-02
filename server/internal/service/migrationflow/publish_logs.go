@@ -2,6 +2,8 @@ package migrationflow
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,7 +12,91 @@ import (
 	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
 )
 
-const publishLogModule = "发布-日志"
+const (
+	publishLogModule               = "发布-日志"
+	batchCrossSeedTriggerPrefix    = "批量转种-"
+	batchCrossSeedDefaultSceneName = "multi_torrent"
+)
+
+// ExternalPublishLogInput 表示“外部流程”直接写入 publish_logs 的最小字段集合。
+// 说明：用于无法走标准 Publish 工作流，但仍希望在“发种日志”页面中留痕的场景（例如：批量转种前置过滤、抓取失败等）。
+type ExternalPublishLogInput struct {
+	Trigger string
+	Scene   string
+
+	TaskID    string
+	TorrentID string
+
+	SourceSite   string
+	TargetSite   string
+	DownloaderID string
+
+	Title    string
+	Subtitle string
+
+	Status    string
+	ResultURL string
+	Logs      string
+
+	AutoAddResult string
+	CostMS        int64
+}
+
+// NextBatchCrossSeedTrigger 计算下一次“批量转种”的触发标识（批量转种-<序号>）。
+// 参数/返回：无参数；返回 trigger 字符串、批次序号与 error。
+// 失败场景：发种日志仓储未初始化或查询失败返回 error。
+// 副作用：读取 publish_logs。
+func (s *MigrateService) NextBatchCrossSeedTrigger() (string, int, error) {
+	if s == nil || s.publishLogRepo == nil {
+		return "", 0, errors.New("发种日志未初始化")
+	}
+
+	maxNumber, err := s.publishLogRepo.MaxNumericTriggerSuffix(batchCrossSeedTriggerPrefix)
+	if err != nil {
+		return "", 0, err
+	}
+
+	next := maxNumber + 1
+	if next < 1 {
+		next = 1
+	}
+	return fmt.Sprintf("%s%d", batchCrossSeedTriggerPrefix, next), next, nil
+}
+
+// InsertExternalPublishLog 直接插入一条发种日志记录（不经过 Publish 工作流）。
+// 参数/返回：input 为日志内容；返回 error 表示写入失败原因。
+// 失败场景：发种日志仓储未初始化、写库失败返回 error。
+// 副作用：写入 publish_logs。
+func (s *MigrateService) InsertExternalPublishLog(input ExternalPublishLogInput) error {
+	if s == nil || s.publishLogRepo == nil {
+		return errors.New("发种日志未初始化")
+	}
+
+	scene := strings.TrimSpace(input.Scene)
+	if scene == "" {
+		scene = batchCrossSeedDefaultSceneName
+	}
+
+	entry := repository.PublishLogEntry{
+		Trigger:       strings.TrimSpace(input.Trigger),
+		Scene:         scene,
+		TaskID:        strings.TrimSpace(input.TaskID),
+		TorrentID:     strings.TrimSpace(input.TorrentID),
+		SourceSite:    strings.TrimSpace(input.SourceSite),
+		TargetSite:    strings.TrimSpace(input.TargetSite),
+		DownloaderID:  strings.TrimSpace(input.DownloaderID),
+		Title:         strings.TrimSpace(input.Title),
+		Subtitle:      strings.TrimSpace(input.Subtitle),
+		Status:        strings.TrimSpace(input.Status),
+		ResultURL:     strings.TrimSpace(input.ResultURL),
+		Logs:          strings.TrimSpace(input.Logs),
+		AutoAddResult: strings.TrimSpace(input.AutoAddResult),
+		CostMS:        input.CostMS,
+	}
+
+	_, err := s.publishLogRepo.Insert(&entry)
+	return err
+}
 
 // InitPublishLogs 初始化发种日志依赖。
 // 参数/返回：repo 用于写入与查询 publish_logs；无返回值。
@@ -75,6 +161,14 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 	title := strings.TrimSpace(processingshared.ToString(uploadData["title"], ""))
 	subtitle := strings.TrimSpace(processingshared.ToString(uploadData["subtitle"], ""))
 
+	torrentID := strings.TrimSpace(ctxTorrentID)
+	if torrentID == "" {
+		torrentID = strings.TrimSpace(processingshared.ToString(payload["torrent_id"], processingshared.ToString(payload["torrentId"], "")))
+	}
+	if torrentID == "" {
+		torrentID = strings.TrimSpace(processingshared.ToString(uploadData["torrent_id"], processingshared.ToString(uploadData["torrentId"], "")))
+	}
+
 	queueTaskID := (*int64)(nil)
 	if rawQueueID := processingshared.ToFloat(payload["queue_task_id"]); rawQueueID > 0 {
 		value := int64(rawQueueID)
@@ -122,7 +216,7 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 		Scene:         scene,
 		QueueTaskID:   queueTaskID,
 		TaskID:        ctxTaskID,
-		TorrentID:     ctxTorrentID,
+		TorrentID:     torrentID,
 		SourceSite:    sourceSite,
 		TargetSite:    targetSite,
 		DownloaderID:  downloaderID,

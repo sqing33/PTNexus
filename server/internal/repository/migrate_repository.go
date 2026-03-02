@@ -367,11 +367,3 @@ func (r *MigrateRepository) ListBDInfoRecords(statusFilter string, limit int) ([
 	}
 	return rows, nil
 }
-
-func (r *MigrateRepository) DeleteBatchEnhanceRecords() (int64, error) {
-	result := r.store.DB.Exec("DELETE FROM batch_enhance_records")
-	if result.Error != nil {
-		return 0, result.Error
-	}
-	return result.RowsAffected, nil
-}

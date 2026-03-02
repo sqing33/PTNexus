@@ -12,16 +12,6 @@ type CrossSeedQueryParams struct {
 	ReviewStatus       string
 }
 
-type BatchRecordQueryParams struct {
-	Page      int
-	PageSize  int
-	Status    string
-	BatchID   string
-	Search    string
-	StartTime string
-	EndTime   string
-}
-
 type CrossSeedService struct {
 	repo *repository.CrossSeedRepository
 }

@@ -71,7 +71,7 @@ func NewApp() (*App, error) {
 	migrateService.InitPublishQueue(queueRepo, statsRepo)
 	migrateService.InitPublishLogs(publishLogRepo)
 	migrateService.StartPublishQueueWorker()
-	goProxyService := service.NewGoProxyService(crossSeedService, migrateService)
+	goProxyService := service.NewGoProxyService(migrateService)
 	torrentTransferService := service.NewTorrentTransferService(migrateRepo, cfgManager)
 
 	settingsService.SetIYUUTrigger(func() map[string]any {
@@ -268,11 +268,6 @@ func registerRoutes(
 		api.POST("/cross-seed-data/delete", crossSeedHandler.DeleteData)
 		api.DELETE("/cross-seed-data/delete", crossSeedHandler.DeleteData)
 
-		api.POST("/batch-enhance/records", crossSeedHandler.AddBatchRecord)
-		api.GET("/batch-enhance/records", crossSeedHandler.GetBatchRecords)
-		api.DELETE("/batch-enhance/records", crossSeedHandler.ClearBatchRecords)
-		api.DELETE("/batch-enhance/records/batch/:batch_id", crossSeedHandler.ClearBatchRecordsByID)
-
 		api.POST("/utils/parse_title", migrateHandler.ParseTitle)
 		api.POST("/media/validate", migrateHandler.MediaValidate)
 		api.POST("/migrate_torrent", migrateHandler.MigrateTorrent)
@@ -318,8 +313,6 @@ func registerRoutes(
 	{
 		goAPI.POST("/batch-enhance", goProxyHandler.BatchEnhance)
 		goAPI.POST("/batch-enhance/stop", goProxyHandler.StopBatchEnhance)
-		goAPI.GET("/records", goProxyHandler.Records)
-		goAPI.DELETE("/records", goProxyHandler.ClearRecords)
 	}
 
 	torrentTransferAPI := engine.Group("/api/torrent/transfer")

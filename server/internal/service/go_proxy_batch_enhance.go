@@ -8,18 +8,20 @@ import (
 	"time"
 
 	"github.com/pt-nexus/server-go/internal/platform/logx"
+	migrationflow "github.com/pt-nexus/server-go/internal/service/migrationflow"
 )
 
 const (
 	goProxyBatchLogModule = "Go增强-批量转种"
 	minVideoSizeBytes     = int64(1024 * 1024 * 1024) // 1GiB，强制开启，不允许关闭
 	bytesPerGB            = float64(1024 * 1024 * 1024)
+	batchAutoAddNotRun    = `{"success": false, "message": "未执行"}`
 )
 
 // BatchEnhance 执行批量转种增强（强制启用 torrent 视频体积过滤）。
 // 参数/返回：payload 需包含 target_site_name 与 seeds 数组；返回处理结果与 HTTP 状态码。
 // 失败场景：参数缺失或迁移服务不可用时返回错误响应。
-// 副作用：会触发种子下载、站点抓取、发布、并写入 batch_enhance_records 记录。
+// 副作用：会触发种子下载、站点抓取、发布，并写入 publish_logs（触发为“批量转种-<批次>”）。
 func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, int) {
 	targetSite := strings.TrimSpace(goProxyToString(payload["target_site_name"], ""))
 	if targetSite == "" {
@@ -40,7 +42,40 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 	defer s.finishBatchEnhance()
 
 	batchID := fmt.Sprintf("batch_%d", time.Now().UnixNano())
-	logx.Infof(goProxyBatchLogModule, "批量转种开始 batch_id=%s target_site=%s seeds=%d", batchID, targetSite, len(rawSeeds))
+	publishTrigger := "批量转种-1"
+	batchNo := 1
+	if trigger, no, err := s.migrate.NextBatchCrossSeedTrigger(); err == nil && strings.TrimSpace(trigger) != "" && no > 0 {
+		publishTrigger = strings.TrimSpace(trigger)
+		batchNo = no
+	} else if err != nil {
+		logx.Warnf(goProxyBatchLogModule, "计算批量转种批次失败，回退到默认批次 trigger=%s err=%v", publishTrigger, err)
+	}
+
+	insertExternalLog := func(input migrationflow.ExternalPublishLogInput) {
+		if strings.TrimSpace(input.Trigger) == "" {
+			input.Trigger = publishTrigger
+		}
+		if strings.TrimSpace(input.Scene) == "" {
+			input.Scene = "multi_torrent"
+		}
+		if strings.TrimSpace(input.AutoAddResult) == "" {
+			input.AutoAddResult = batchAutoAddNotRun
+		}
+
+		if err := s.migrate.InsertExternalPublishLog(input); err != nil {
+			logx.Warnf(
+				goProxyBatchLogModule,
+				"写入发种日志失败 trigger=%s torrent_id=%s source_site=%s target_site=%s err=%v",
+				input.Trigger,
+				input.TorrentID,
+				input.SourceSite,
+				input.TargetSite,
+				err,
+			)
+		}
+	}
+
+	logx.Infof(goProxyBatchLogModule, "批量转种开始 batch_id=%s trigger=%s target_site=%s seeds=%d", batchID, publishTrigger, targetSite, len(rawSeeds))
 
 	seedsSuccess := 0
 	seedsFailed := 0
@@ -67,18 +102,22 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 
 		if torrentID == "" || sourceSite == "" {
 			seedsFailed++
-			s.appendBatchRecord(goProxyBatchRecordInput{
-				BatchID:           batchID,
-				Title:             torrentID,
-				TorrentID:         torrentID,
-				SourceSite:        sourceSite,
-				TargetSite:        targetSite,
-				Status:            "failed",
-				VideoSizeGB:       0,
-				SuccessURL:        "",
-				ErrorDetail:       "缺少 torrent_id 或 site_name",
-				DownloaderAddInfo: "未执行",
-				Progress:          "0%",
+			title := strings.TrimSpace(torrentID)
+			if title == "" {
+				title = "-"
+			}
+			insertExternalLog(migrationflow.ExternalPublishLogInput{
+				Trigger:       publishTrigger,
+				Scene:         "multi_torrent",
+				TorrentID:     torrentID,
+				SourceSite:    sourceSite,
+				TargetSite:    targetSite,
+				DownloaderID:  downloaderID,
+				Title:         title,
+				Status:        "failed",
+				Logs:          "缺少 torrent_id 或 site_name",
+				AutoAddResult: batchAutoAddNotRun,
+				CostMS:        0,
 			})
 			continue
 		}
@@ -95,45 +134,39 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 		if sizeErr != nil {
 			seedsFiltered++
 			logx.Warnf(goProxyBatchLogModule, "大小过滤失败 batch_id=%s index=%d/%d torrent_id=%s source_site=%s err=%v", batchID, idx+1, len(rawSeeds), torrentID, sourceSite, sizeErr)
-			s.appendBatchRecord(goProxyBatchRecordInput{
-				BatchID:           batchID,
-				Title:             title,
-				TorrentID:         torrentID,
-				SourceSite:        sourceSite,
-				TargetSite:        targetSite,
-				Status:            "filtered",
-				VideoSizeGB:       videoGB,
-				SuccessURL:        "",
-				ErrorDetail:       "大小过滤失败: " + sizeErr.Error(),
-				DownloaderAddInfo: "未执行",
-				Progress:          "0%",
+			insertExternalLog(migrationflow.ExternalPublishLogInput{
+				Trigger:       publishTrigger,
+				Scene:         "multi_torrent",
+				TorrentID:     torrentID,
+				SourceSite:    sourceSite,
+				TargetSite:    targetSite,
+				DownloaderID:  downloaderID,
+				Title:         title,
+				Status:        "filtered",
+				Logs:          "大小过滤失败: " + sizeErr.Error(),
+				AutoAddResult: batchAutoAddNotRun,
+				CostMS:        0,
 			})
 			continue
 		}
 		if videoBytes < minVideoSizeBytes {
 			seedsFiltered++
 			logx.Infof(goProxyBatchLogModule, "大小过滤拦截 batch_id=%s index=%d/%d torrent_id=%s source_site=%s video_size_gb=%.2f", batchID, idx+1, len(rawSeeds), torrentID, sourceSite, videoGB)
-			s.appendBatchRecord(goProxyBatchRecordInput{
-				BatchID:           batchID,
-				Title:             title,
-				TorrentID:         torrentID,
-				SourceSite:        sourceSite,
-				TargetSite:        targetSite,
-				Status:            "filtered",
-				VideoSizeGB:       videoGB,
-				SuccessURL:        "",
-				ErrorDetail:       fmt.Sprintf("小于 1.0GB（%.2fGB）", videoGB),
-				DownloaderAddInfo: "未执行",
-				Progress:          "0%",
+			insertExternalLog(migrationflow.ExternalPublishLogInput{
+				Trigger:       publishTrigger,
+				Scene:         "multi_torrent",
+				TorrentID:     torrentID,
+				SourceSite:    sourceSite,
+				TargetSite:    targetSite,
+				DownloaderID:  downloaderID,
+				Title:         title,
+				Status:        "filtered",
+				Logs:          fmt.Sprintf("小于 1.0GB（%.2fGB）", videoGB),
+				AutoAddResult: batchAutoAddNotRun,
+				CostMS:        0,
 			})
 			continue
 		}
-
-		status := "failed"
-		errorDetail := ""
-		successURL := ""
-		progress := "100%"
-		downloaderResult := "未执行"
 
 		fetchResult, fetchStatus := s.migrate.FetchAndStore(map[string]any{
 			"sourceSite":   sourceSite,
@@ -143,49 +176,44 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 			"downloaderId": downloaderID,
 		})
 		if fetchStatus != 200 || !toBool(fetchResult["success"], false) {
-			errorDetail = "抓取失败: " + goProxyToString(fetchResult["message"], "未知错误")
-			progress = "0%"
 			seedsFailed++
-		} else {
-			taskID := strings.TrimSpace(goProxyToString(fetchResult["task_id"], ""))
-			publishResult, publishStatus := s.migrate.Publish(map[string]any{
-				"task_id":                taskID,
-				"targetSite":             targetSite,
-				"sourceSite":             sourceSite,
-				"upload_data":            seed,
-				"downloaderId":           downloaderID,
-				"savePath":               savePath,
-				"auto_add_to_downloader": true,
+			errorDetail := "抓取失败: " + goProxyToString(fetchResult["message"], "未知错误")
+			insertExternalLog(migrationflow.ExternalPublishLogInput{
+				Trigger:       publishTrigger,
+				Scene:         "multi_torrent",
+				TorrentID:     torrentID,
+				SourceSite:    sourceSite,
+				TargetSite:    targetSite,
+				DownloaderID:  downloaderID,
+				Title:         title,
+				Status:        "failed",
+				Logs:          errorDetail,
+				AutoAddResult: batchAutoAddNotRun,
+				CostMS:        0,
 			})
-			if publishStatus == 200 && toBool(publishResult["success"], false) {
-				status = "success"
-				successURL = strings.TrimSpace(goProxyToString(publishResult["url"], ""))
-				seedsSuccess++
-				if autoAdd, ok := publishResult["auto_add_result"].(map[string]any); ok {
-					downloaderResult = goProxyToString(autoAdd["message"], "自动添加完成")
-				} else {
-					downloaderResult = "发布完成"
-				}
-			} else {
-				errorDetail = goProxyToString(publishResult["logs"], goProxyToString(publishResult["message"], "发布失败"))
-				progress = "0%"
-				seedsFailed++
-			}
+			continue
 		}
 
-		s.appendBatchRecord(goProxyBatchRecordInput{
-			BatchID:           batchID,
-			Title:             title,
-			TorrentID:         torrentID,
-			SourceSite:        sourceSite,
-			TargetSite:        targetSite,
-			Status:            status,
-			VideoSizeGB:       videoGB,
-			SuccessURL:        successURL,
-			ErrorDetail:       errorDetail,
-			DownloaderAddInfo: downloaderResult,
-			Progress:          progress,
+		taskID := strings.TrimSpace(goProxyToString(fetchResult["task_id"], ""))
+		seed["title"] = title
+
+		publishResult, publishStatus := s.migrate.Publish(map[string]any{
+			"task_id":                taskID,
+			"targetSite":             targetSite,
+			"sourceSite":             sourceSite,
+			"torrent_id":             torrentID,
+			"upload_data":            seed,
+			"downloaderId":           downloaderID,
+			"savePath":               savePath,
+			"auto_add_to_downloader": true,
+			"publish_trigger":        publishTrigger,
+			"publish_scene":          "multi_torrent",
 		})
+		if publishStatus == 200 && toBool(publishResult["success"], false) {
+			seedsSuccess++
+		} else {
+			seedsFailed++
+		}
 	}
 
 	logx.Infof(
@@ -208,6 +236,8 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 		"success": true,
 		"data": map[string]any{
 			"batch_id":        batchID,
+			"batch_no":        batchNo,
+			"publish_trigger": publishTrigger,
 			"seeds_processed": seedsSuccess,
 			"seeds_failed":    seedsFailed + seedsFiltered,
 			"seeds_filtered":  seedsFiltered,
@@ -288,40 +318,4 @@ func (s *GoProxyService) computeSeedVideoSize(torrentID, sourceSite string) (int
 		videoGB = math.Round(videoGB*100) / 100
 	}
 	return videoBytes, videoGB, nil
-}
-
-type goProxyBatchRecordInput struct {
-	BatchID           string
-	Title             string
-	TorrentID         string
-	SourceSite        string
-	TargetSite        string
-	Status            string
-	VideoSizeGB       float64
-	SuccessURL        string
-	ErrorDetail       string
-	DownloaderAddInfo string
-	Progress          string
-}
-
-func (s *GoProxyService) appendBatchRecord(input goProxyBatchRecordInput) {
-	if s.crossSeed == nil {
-		return
-	}
-	payload := map[string]any{
-		"batch_id":              input.BatchID,
-		"title":                 input.Title,
-		"torrent_id":            input.TorrentID,
-		"source_site":           input.SourceSite,
-		"target_site":           input.TargetSite,
-		"status":                input.Status,
-		"video_size_gb":         input.VideoSizeGB,
-		"success_url":           input.SuccessURL,
-		"error_detail":          input.ErrorDetail,
-		"downloader_add_result": input.DownloaderAddInfo,
-		"progress":              input.Progress,
-	}
-	if _, code := s.crossSeed.AddBatchRecord(payload); code >= 400 {
-		logx.Warnf(goProxyBatchLogModule, "写入批量记录失败 batch_id=%s torrent_id=%s source_site=%s status=%s code=%d", input.BatchID, input.TorrentID, input.SourceSite, input.Status, code)
-	}
 }

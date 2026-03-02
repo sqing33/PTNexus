@@ -30,9 +30,25 @@
         {{ batchCrossSeedButtonText }}
       </el-button>
 
-      <!-- 查看日志按钮 -->
+      <!-- 停止批量转种按钮 -->
+      <el-button
+        type="danger"
+        @click="stopBatchProcess"
+        plain
+        style="margin-right: 15px"
+        :loading="isStoppingBatch"
+      >
+        停止转种
+      </el-button>
+
+      <!-- 查看发种日志按钮（批量转种记录已合并到这里） -->
+      <el-button type="info" @click="openPublishLogs" plain style="margin-right: 15px">
+        发种日志
+      </el-button>
+
+      <!-- 查看BDInfo记录按钮 -->
       <el-button type="info" @click="openRecordViewDialog" plain style="margin-right: 15px">
-        日志
+        BDInfo记录
       </el-button>
 
       <!-- 批量获取数据按钮 -->
@@ -417,20 +433,7 @@
           <!-- 自定义标签导航 -->
           <div class="record-tabs-header">
             <div class="record-tabs-nav">
-              <div
-                class="tab-item"
-                :class="{ active: activeRecordTab === 'cross-seed' }"
-                @click="activeRecordTab = 'cross-seed'"
-              >
-                批量转种记录
-              </div>
-              <div
-                class="tab-item"
-                :class="{ active: activeRecordTab === 'bdinfo' }"
-                @click="activeRecordTab = 'bdinfo'"
-              >
-                BDInfo获取记录
-              </div>
+              <div class="tab-item active">BDInfo获取记录</div>
             </div>
             <div class="record-close-btn">
               <el-button type="danger" circle @click="closeRecordViewDialog" plain>X</el-button>
@@ -439,179 +442,11 @@
 
           <!-- 隐藏默认头部的标签页 -->
           <el-tabs
-            v-model="activeRecordTab"
+            model-value="bdinfo"
             type="border-card"
             class="record-tabs"
             :show-header="false"
           >
-            <!-- 批量转种记录标签页 -->
-            <el-tab-pane label="批量转种记录" name="cross-seed">
-              <template #label>
-                <span>批量转种记录</span>
-              </template>
-              <div class="tab-header">
-                <div class="record-warning-text">批量转种需要等待种子文件验证，每个种子大概3s</div>
-                <div class="tab-controls">
-                  <el-button type="warning" size="small" @click="clearRecordsLocal">
-                    清空记录
-                  </el-button>
-                  <el-button
-                    type="danger"
-                    size="small"
-                    @click="stopBatchProcess"
-                    :disabled="isStoppingBatch"
-                  >
-                    {{ isStoppingBatch ? '停止中...' : '停止转种' }}
-                  </el-button>
-                  <!-- 强制自动刷新状态显示 -->
-                  <el-button type="success" size="small" disabled> 自动刷新中 </el-button>
-                </div>
-              </div>
-              <!-- 种子处理记录表格 -->
-              <div class="records-table-container" v-if="records.length > 0">
-                <el-table
-                  :data="records"
-                  style="width: 100%"
-                  size="small"
-                  v-loading="recordsLoading"
-                  element-loading-text="加载记录中..."
-                  stripe
-                >
-                  <el-table-column prop="batch_id" label="批次ID" width="80" align="center">
-                    <template #default="scope">
-                      <el-tag
-                        size="small"
-                        :type="getBatchTagType(getBatchNumber(scope.row.batch_id))"
-                        effect="dark"
-                      >
-                        {{ getBatchNumber(scope.row.batch_id) }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <!-- <el-table-column
-                prop="torrent_id"
-                label="种子ID"
-                width="65"
-                align="center"
-                show-overflow-tooltip
-              /> -->
-                  <el-table-column
-                    prop="title"
-                    label="种子标题"
-                    min-width="250"
-                    align="center"
-                    show-overflow-tooltip
-                  >
-                  </el-table-column>
-                  <el-table-column prop="source_site" label="源站点" width="80" align="center" />
-                  <el-table-column prop="target_site" label="目标站点" width="80" align="center" />
-                  <el-table-column prop="video_size_gb" label="视频大小" width="80" align="center">
-                    <template #default="scope">
-                      <span v-if="scope.row.video_size_gb">{{ scope.row.video_size_gb }}GB</span>
-                      <span v-else>-</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="status" label="状态" width="80" align="center">
-                    <template #default="scope">
-                      <el-tag :type="getRecordStatusTypeLocal(scope.row.status)" size="small">
-                        {{ getRecordStatusTextLocal(scope.row.status) }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="progress" label="进度" width="100" align="center">
-                    <template #default="scope">
-                      <div v-if="scope.row.progress" class="progress-cell">
-                        <el-progress
-                          :percentage="calculateProgress(scope.row.progress)"
-                          :color="getProgressColor(calculateProgress(scope.row.progress))"
-                          :stroke-width="8"
-                          :show-text="false"
-                          class="progress-bar"
-                        />
-                        <span class="progress-text">{{ scope.row.progress }}</span>
-                      </div>
-                      <span v-else>-</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column
-                    prop="error_detail"
-                    label="详情"
-                    width="110"
-                    align="center"
-                    show-overflow-tooltip
-                  >
-                    <template #default="scope">
-                      <span v-if="scope.row.status === 'success' && scope.row.success_url">
-                        <el-link
-                          type="primary"
-                          :href="cleanUrl(scope.row.success_url)"
-                          target="_blank"
-                          >查看详情页</el-link
-                        >
-                      </span>
-                      <span v-else-if="scope.row.error_detail">{{ scope.row.error_detail }}</span>
-                      <span v-else>-</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column
-                    prop="downloader_add_result"
-                    label="下载器状态"
-                    width="150"
-                    align="center"
-                  >
-                    <template #default="scope">
-                      <!-- 检查是否有下载器结果 -->
-                      <template v-if="scope.row.downloader_add_result">
-                        <!-- ✨ 如果是失败状态 (以'失败'开头) -->
-                        <el-tooltip
-                          v-if="
-                            getDownloaderAddStatusType(scope.row.downloader_add_result) === 'danger'
-                          "
-                          effect="dark"
-                          placement="top"
-                        >
-                          <!-- Tooltip 的内容：显示格式化后的完整错误信息 -->
-                          <template #content>
-                            {{ formatDownloaderAddResult(scope.row.downloader_add_result) }}
-                          </template>
-
-                          <!-- 表格中可见的内容：直接显示文本，不使用tag -->
-                          <span style="color: #f56c6c">错误</span>
-                        </el-tooltip>
-
-                        <!-- ✨ 如果是成功状态或其他非失败状态 -->
-                        <span
-                          v-else
-                          style="text-align: center"
-                          :style="{
-                            color: getDownloaderAddStatusColor(scope.row.downloader_add_result),
-                          }"
-                        >
-                          {{ formatDownloaderAddResult(scope.row.downloader_add_result) }}
-                        </span>
-                      </template>
-
-                      <!-- 如果没有下载器结果，显示 - -->
-                      <span v-else>-</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="processed_at" label="处理时间" width="100" align="center">
-                    <template #default="scope">
-                      <!-- ✨ 改动点：添加 div 和样式类以支持换行显示 -->
-                      <div class="mapped-cell datetime-cell">
-                        {{ formatRecordTimeLocal(scope.row.processed_at) }}
-                      </div>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </div>
-
-              <!-- 无记录时的显示 -->
-              <div v-if="records.length === 0 && !recordsLoading" class="no-records">
-                <el-empty description="暂无批量转种记录" />
-              </div>
-            </el-tab-pane>
-
             <!-- BDInfo获取记录标签页 -->
             <el-tab-pane label="BDInfo获取记录" name="bdinfo">
               <template #label>
@@ -891,6 +726,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import type { ElTree } from 'element-plus'
@@ -926,6 +762,8 @@ interface ISourceInfo {
 const emit = defineEmits<{
   (e: 'ready', refreshMethod: () => Promise<void>): void
 }>()
+
+const router = useRouter()
 
 // 在组件挂载时发送ready事件
 onMounted(() => {
@@ -1025,14 +863,8 @@ const batchFetchDialogVisible = ref<boolean>(false)
 // 删除模式相关
 const isDeleteMode = ref<boolean>(false)
 
-// 记录查看相关
+// BDInfo记录查看相关
 const recordDialogVisible = ref<boolean>(false)
-const records = ref<SeedRecord[]>([])
-const recordsLoading = ref<boolean>(false)
-const batchNumberMap = ref<Map<string, number>>(new Map()) // 批次ID到序号的映射
-
-// BDInfo记录相关
-const activeRecordTab = ref<string>('cross-seed') // 当前激活的记录标签页
 const bdinfoRecords = ref<BDInfoRecord[]>([])
 const bdinfoRecordsLoading = ref<boolean>(false)
 const bdinfoStatusFilter = ref<string>('') // BDInfo状态筛选
@@ -1040,34 +872,12 @@ const bdinfoDetailDialogVisible = ref<boolean>(false)
 const selectedBDInfoRecord = ref<BDInfoRecord | null>(null)
 const retryingSeeds = ref<Set<string>>(new Set()) // 正在重试的种子ID集合
 
-// 定时刷新相关
-const refreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
-const REFRESH_INTERVAL = 1000 // 1秒刷新一次
-const additionalRefreshCount = ref<number>(0) // 额外刷新次数计数器
-const ADDITIONAL_REFRESH_LIMIT = 3 // 完成后额外刷新3次
-
 // BDInfo自动刷新相关
 const bdinfoRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const BDINFO_REFRESH_INTERVAL = 5000 // 5秒刷新一次
 
 // 停止批量转种相关
 const isStoppingBatch = ref<boolean>(false)
-
-interface SeedRecord {
-  id: number
-  title?: string
-  batch_id: string
-  torrent_id: string
-  source_site: string
-  target_site: string
-  video_size_gb?: number
-  status: string
-  progress?: string
-  success_url?: string
-  error_detail?: string
-  downloader_add_result?: string
-  processed_at: string
-}
 
 interface BDInfoRecord {
   seed_id: string
@@ -1897,7 +1707,7 @@ const openBatchCrossSeedDialog = () => {
   batchCrossSeedDialogVisible.value = true
 }
 
-// 处理批量转种 (启动任务并开启自动刷新)
+// 处理批量转种
 const handleBatchCrossSeed = async () => {
   // 直接使用筛选中的站点
   const targetSiteName = activeFilters.value.excludeTargetSites
@@ -1925,27 +1735,25 @@ const handleBatchCrossSeed = async () => {
 
     console.log('批量转种数据:', batchData)
 
-    // 3. 立即打开记录窗口并显式地启动自动刷新
-    recordDialogVisible.value = true
-    startAutoRefresh() // 关键改动：在这里启动定时器
-
-    // 4. 通过Python代理调用Go服务的API来开始任务
+    // 3. 通过Python代理调用Go服务的API来开始任务
     const response = await axios.post('/api/go-api/batch-enhance', batchData)
 
     const result = response.data
     if (result.success) {
+      const publishTrigger = String(result?.data?.publish_trigger || '').trim()
       ElMessage.success(
-        `批量转种请求已发送，成功 ${result.data.seeds_processed} 个，失败 ${result.data.seeds_failed} 个`,
+        `批量转种完成，成功 ${result.data.seeds_processed} 个，失败 ${result.data.seeds_failed} 个${publishTrigger ? `（${publishTrigger}）` : ''}`,
       )
-      // 请求成功，让自动刷新继续运行
+      if (publishTrigger) {
+        await router.push({
+          path: '/publish-logs',
+          query: { trigger: publishTrigger, scene: 'multi_torrent' },
+        })
+      }
     } else {
-      // 如果后端返回业务错误，也停止刷新
-      stopAutoRefresh()
       ElMessage.error(result.error || '批量转种失败')
     }
   } catch (error: any) {
-    // 捕获到任何JS或网络层面的错误时，都确保停止刷新
-    stopAutoRefresh()
     ElMessage.error(error.message || '网络错误')
   }
 }
@@ -2046,32 +1854,6 @@ const handleFetchCompleted = () => {
   fetchData()
 }
 
-/**
- * 检查下载器状态是否包含"成功"或"失败"
- * @param downloaderResult 下载器添加结果字符串
- */
-const hasDownloaderFinalStatus = (downloaderResult: string | undefined): boolean => {
-  if (!downloaderResult) return false
-  // 检查字符串中是否包含"成功"或"失败"
-  return downloaderResult.includes('成功') || downloaderResult.includes('失败')
-}
-
-/**
- * 计算属性：判断是否有任务正在进行中
- * 用于决定是否显示"开启自动刷新"按钮
- * 基于下载器状态判断：如果最新记录的下载器状态没有包含"成功"或"失败"，则认为任务还在进行中
- */
-const isBatchRunning = computed(() => {
-  // 如果没有记录，则认为没有任务在运行
-  if (records.value.length === 0) return false
-
-  // 获取最新一条记录（通常是第一条）
-  const latestRecord = records.value[0]
-
-  // 如果最新记录的下载器状态没有最终状态（成功或失败），则任务仍在进行中
-  return !hasDownloaderFinalStatus(latestRecord.downloader_add_result)
-})
-
 // BDInfo相关计算属性
 const hasProcessingBDInfo = computed(() => {
   return bdinfoRecords.value.some(
@@ -2080,129 +1862,24 @@ const hasProcessingBDInfo = computed(() => {
   )
 })
 
-// 启动定时刷新 - 强制自动刷新
-const startAutoRefresh = () => {
-  // 先清除任何现有的定时器
-  stopAutoRefresh()
-
-  // 立即刷新一次
-  refreshRecords()
-
-  // 启动定时器 - 只要窗口打开就持续刷新，没有其他停止条件
-  refreshTimer.value = setInterval(async () => {
-    if (recordDialogVisible.value && activeRecordTab.value === 'cross-seed') {
-      await refreshRecords()
-    } else {
-      // 如果记录窗口已关闭或切换到其他标签页，停止定时器
-      stopAutoRefresh()
-    }
-  }, REFRESH_INTERVAL)
-}
-
-// 停止定时刷新
-const stopAutoRefresh = () => {
-  if (refreshTimer.value) {
-    clearInterval(refreshTimer.value)
-    refreshTimer.value = null
-  }
-  // 重置额外刷新计数器
-  additionalRefreshCount.value = 0
+// 打开发种日志页面（批量转种记录已合并到这里）
+const openPublishLogs = () => {
+  router.push({ path: '/publish-logs', query: { scene: 'multi_torrent' } })
 }
 
 // 打开记录查看对话框 - 强制启动自动刷新
 const openRecordViewDialog = () => {
   recordDialogVisible.value = true
-
-  // 根据当前激活的标签页加载对应的记录并强制启动自动刷新
-  if (activeRecordTab.value === 'cross-seed') {
-    refreshRecords() // 打开时加载一次记录
-    startAutoRefresh() // 强制启动自动刷新
-  } else if (activeRecordTab.value === 'bdinfo') {
-    refreshBDInfoRecords() // 打开时加载BDInfo记录
-    startBDInfoAutoRefresh() // 强制启动自动刷新
-  }
+  refreshBDInfoRecords() // 打开时加载BDInfo记录
+  startBDInfoAutoRefresh() // 强制启动自动刷新
 }
 
 // 关闭记录查看对话框
 const closeRecordViewDialog = () => {
   recordDialogVisible.value = false
-  stopAutoRefresh()
   stopBDInfoAutoRefresh()
   // 关闭时刷新主表格数据
   fetchData()
-}
-
-// 刷新记录
-const refreshRecords = async () => {
-  // ✨ CHANGE: 移除了 recordsLoading.value = true，不再显示加载动画
-  try {
-    // 清空批次映射，确保每次刷新从1开始
-    resetBatchNumberMap()
-
-    // 通过Python代理调用Go服务的记录API
-    const response = await axios.get('/api/go-api/records')
-
-    const result = response.data
-    records.value = result.records || []
-    // 移除了自动滚动到顶部的代码，以允许用户手动滚动
-  } catch (error: any) {
-    console.error('获取记录时出错:', error)
-    ElMessage.error('获取记录失败: ' + (error.message || '网络错误'))
-  }
-  // ✨ CHANGE: 移除了 finally 块中的 recordsLoading.value = false
-}
-
-// 清空记录
-const clearRecordsLocal = async () => {
-  try {
-    // 调用清空记录的API
-    const response = await axios.delete('/api/go-api/records')
-
-    records.value = []
-    resetBatchNumberMap() // 清空批次映射
-    ElMessage.success('记录已清空')
-  } catch (error) {
-    // 如果请求失败，只是清空本地显示
-    records.value = []
-    resetBatchNumberMap() // 清空批次映射
-    ElMessage.success('本地记录已清空')
-  }
-}
-
-// 获取记录状态对应的Element Plus标签类型
-const getRecordStatusTypeLocal = (status: string) => {
-  switch (status) {
-    case 'success':
-      return 'success'
-    case 'failed':
-      return 'danger'
-    case 'filtered':
-      return 'warning'
-    case 'processing':
-      return 'primary'
-    case 'pending':
-      return 'info'
-    default:
-      return 'info'
-  }
-}
-
-// 获取记录状态文本
-const getRecordStatusTextLocal = (status: string) => {
-  switch (status) {
-    case 'success':
-      return '成功'
-    case 'failed':
-      return '失败'
-    case 'filtered':
-      return '已过滤'
-    case 'processing':
-      return '获取中'
-    case 'pending':
-      return '等待中'
-    default:
-      return '未知'
-  }
 }
 
 // BDInfo相关方法
@@ -2282,7 +1959,7 @@ const refreshBDInfoRecords = async () => {
 const startBDInfoAutoRefresh = () => {
   stopBDInfoAutoRefresh()
   bdinfoRefreshTimer.value = setInterval(async () => {
-    if (recordDialogVisible.value && activeRecordTab.value === 'bdinfo') {
+    if (recordDialogVisible.value) {
       await refreshBDInfoRecords()
 
       // 即使没有获取中的任务也继续刷新，实现强制自动刷新
@@ -2458,110 +2135,6 @@ const retryBDInfo = async (record: BDInfoRecord) => {
   }
 }
 
-// 获取批次序号显示
-const getBatchNumber = (batchId: string) => {
-  if (!batchId) return '-'
-
-  // 如果还没有映射，自动生成序号
-  if (!batchNumberMap.value.has(batchId)) {
-    batchNumberMap.value.set(batchId, batchNumberMap.value.size + 1)
-  }
-
-  return batchNumberMap.value.get(batchId)
-}
-
-// 根据批次序号获取标签类型（颜色）
-const getBatchTagType = (batchNumber: number | string | undefined) => {
-  if (typeof batchNumber !== 'number') return 'info'
-  // 定义一个颜色循环列表，不包含 'danger'
-  const colors = ['success', 'primary', 'warning', 'info']
-  // 使用取模运算来循环选择颜色
-  return colors[(batchNumber - 1) % colors.length] as 'success' | 'primary' | 'warning' | 'info'
-}
-
-// 在刷新记录时重置批次映射
-const resetBatchNumberMap = () => {
-  batchNumberMap.value.clear()
-}
-
-// 获取下载器添加状态的标签类型
-const getDownloaderAddStatusType = (result: string) => {
-  if (result.startsWith('成功')) return 'success'
-  if (result.startsWith('失败')) return 'danger'
-  return 'info'
-}
-
-// 获取下载器添加状态的颜色
-const getDownloaderAddStatusColor = (result: string) => {
-  if (result.startsWith('成功')) return '#67c23a' // 绿色
-  if (result.startsWith('失败')) return '#f56c6c' // 红色
-  return '#909399' // 灰色
-}
-
-// 格式化下载器添加结果显示
-const formatDownloaderAddResult = (result: string) => {
-  if (result.startsWith('成功:')) {
-    return result.substring(3) // 移除 "成功:" 前缀
-  }
-  if (result.startsWith('失败:')) {
-    return result.substring(3) // 移除 "失败:" 前缀
-  }
-  return result
-}
-
-// 清理URL，移除&uploaded参数及其后面的内容
-const cleanUrl = (url: string) => {
-  if (!url) return url
-  const uploadedIndex = url.indexOf('&uploaded')
-  if (uploadedIndex !== -1) {
-    return url.substring(0, uploadedIndex)
-  }
-  return url
-}
-
-// 格式化记录时间
-const formatRecordTimeLocal = (timestamp: string) => {
-  try {
-    const date = new Date(timestamp)
-    if (isNaN(date.getTime())) return timestamp // 如果日期无效，返回原始字符串
-
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    const hours = String(date.getHours()).padStart(2, '0')
-    const minutes = String(date.getMinutes()).padStart(2, '0')
-    const seconds = String(date.getSeconds()).padStart(2, '0')
-
-    // ✨ 改动点：在日期和时间之间添加换行符 '\n'
-    return `${year}-${month}-${day}\n${hours}:${minutes}:${seconds}`
-  } catch {
-    return timestamp
-  }
-}
-
-// 计算进度百分比，从格式如 '2/3' 的字符串中提取
-const calculateProgress = (progressStr: string) => {
-  if (!progressStr) return 0
-
-  // 解析 '当前进度/总进度' 格式
-  const match = progressStr.match(/(\d+)\/(\d+)/)
-  if (match) {
-    const current = parseInt(match[1])
-    const total = parseInt(match[2])
-    if (total > 0) {
-      return Math.round((current / total) * 100)
-    }
-  }
-  return 0
-}
-
-// 根据进度百分比获取进度条颜色
-const getProgressColor = (percentage: number) => {
-  if (percentage < 30) return '#e6a23c' // 橙色
-  if (percentage < 70) return '#409eff' // 蓝色
-  return '#67c23a' // 绿色
-}
-
 // 停止批量转种任务
 const stopBatchProcess = async () => {
   isStoppingBatch.value = true
@@ -2571,10 +2144,6 @@ const stopBatchProcess = async () => {
     const result = response.data
     if (result.success) {
       ElMessage.success('批量转种已停止')
-      // 停止自动刷新
-      stopAutoRefresh()
-      // 最后刷新一次记录
-      await refreshRecords()
     } else {
       ElMessage.error(result.error || '停止批量转种失败')
     }
@@ -2585,29 +2154,8 @@ const stopBatchProcess = async () => {
   }
 }
 
-// 监听标签页切换 - 强制启动对应标签页的自动刷新
-watch(activeRecordTab, (newTab, oldTab) => {
-  if (newTab === 'cross-seed') {
-    // 切换到批量转种记录标签页
-    refreshRecords()
-    startAutoRefresh() // 强制启动自动刷新
-  } else if (newTab === 'bdinfo') {
-    // 切换到BDInfo记录标签页
-    refreshBDInfoRecords()
-    startBDInfoAutoRefresh() // 强制启动自动刷新
-  }
-
-  // 停止另一个标签页的自动刷新
-  if (oldTab === 'cross-seed') {
-    stopAutoRefresh()
-  } else if (oldTab === 'bdinfo') {
-    stopBDInfoAutoRefresh()
-  }
-})
-
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
-  stopAutoRefresh() // 清理定时器
   stopBDInfoAutoRefresh() // 清理BDInfo定时器
 })
 </script>
@@ -3036,14 +2584,6 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-.record-warning-text {
-  color: #f56c6c;
-  font-size: 13px;
-  font-weight: 500;
-  text-align: center;
-  flex: 1;
-}
-
 .record-view-content {
   flex: 1;
   overflow: hidden;
@@ -3052,84 +2592,12 @@ onUnmounted(() => {
   overflow-x: hidden; /* 禁止横向滚动 */
 }
 
-/* 记录表格样式 */
-.records-table-container {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px;
-  overflow-x: hidden; /* 禁止横向滚动 */
-  width: calc(100% - 5px);
-}
-
-/* 自定义滚动条样式 */
-.records-table-container::-webkit-scrollbar {
-  width: 8px;
-}
-
-.records-table-container::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 4px;
-}
-
-.records-table-container::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 4px;
-}
-
-.records-table-container::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-}
-
-/* 确保表格不会超出容器宽度 */
-.records-table-container :deep(.el-table) {
-  table-layout: fixed;
-  width: 100%;
-}
-
-.records-table-container :deep(.el-table_2_column_24) {
-  padding: 0;
-}
-
 .no-records {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-
-/* ✨ CHANGE START: Modified progress cell CSS for vertical layout */
-/* 进度单元格样式 */
-.progress-cell {
-  display: flex;
-  flex-direction: column;
-  /* 改为垂直布局 */
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  /* 设置垂直间距 */
-  height: 100%;
-  padding: 4px 0;
-  /* 增加一些内边距 */
-  box-sizing: border-box;
-}
-
-.progress-bar {
-  width: 100%;
-  /* 宽度占满容器 */
-  max-width: 50px;
-  /* 限制最大宽度，使其不过宽 */
-}
-
-.progress-text {
-  min-width: 40px;
-  text-align: center;
-  font-size: 12px;
-  color: #606266;
-  line-height: 1;
-  /* 调整行高以适应新布局 */
-}
-
-/* ✨ CHANGE END */
 
 /* 调整表格列宽 */
 :deep(.el-table__header-wrapper .el-table__header) .el-table_1_column_7 {

@@ -99,9 +99,9 @@
 | `internal/http/handler/torrents_handler.go` | 路径列表等基础种子接口 |
 | `internal/http/handler/torrents_data_handler.go` | 数据列表、刷新、IYUU |
 | `internal/http/handler/stats_handler.go` | 统计与速度图表 |
-| `internal/http/handler/cross_seed_handler.go` | Cross-seed 查询、批记录管理 |
+| `internal/http/handler/cross_seed_handler.go` | Cross-seed 查询、删除等 |
 | `internal/http/handler/local_query_handler.go` | 本地扫描、缓存、重复分析 |
-| `internal/http/handler/go_proxy_handler.go` | Go 代理增强接口 |
+| `internal/http/handler/go_proxy_handler.go` | Go 代理增强接口（批量转种增强等） |
 | `internal/http/handler/torrent_transfer_handler.go` | 种子转移流程接口 |
 | `internal/http/handler/logs_handler.go` | 日志导出 |
 | `internal/http/handler/sites_cookie_extension.go` | 浏览器插件 Cookie 同步目标与批量写入接口 |
@@ -144,7 +144,7 @@
 | `internal/service/torrent_transfer_service.go` | 种子转移服务入口（组合 `torrenttransfer/*`） |
 | `internal/service/cross_seed_service.go` | Cross-seed 服务入口 |
 | `internal/service/local_query_service.go` | 本地查询服务入口 |
-| `internal/service/go_proxy_service.go` | Go 代理服务，组合 cross-seed 与 migrate |
+| `internal/service/go_proxy_service.go` | Go 代理服务，组合 migrate |
 | `internal/service/go_proxy_batch_enhance.go` | 批量转种增强入口（强制开启视频体积过滤） |
 | `internal/service/tracker_service.go` | 下载器流量采集服务入口 |
 | `internal/service/log_export_service.go` | 日志导出服务入口 |
@@ -434,7 +434,7 @@
 
 | 目录 | 说明 |
 |---|---|
-| `internal/service/crossseed` | Cross-seed 查询与批记录管理 |
+| `internal/service/crossseed` | Cross-seed 查询与删除等 |
 | `internal/service/localquery` | 本地路径扫描、缓存、重复分析 |
 | `internal/service/settings` | 设置读写、UI 设置、迁移配置、下载器信息 |
 | `internal/service/stats` | 图表、速度、站点/分组统计 |

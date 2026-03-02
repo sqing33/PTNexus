@@ -9,20 +9,19 @@ import (
 )
 
 type GoProxyService struct {
-	crossSeed *CrossSeedService
-	migrate   *migrationflow.MigrateService
+	migrate *migrationflow.MigrateService
 
 	mu            sync.RWMutex
 	running       bool
 	stopRequested bool
 }
 
-// NewGoProxyService 创建 GoProxyService，用于承载 Go 版批量增强与记录查询能力。
-// 参数/返回：crossSeed 提供记录写入与查询；migrate 提供抓取/发布编排能力；返回可用的服务实例。
+// NewGoProxyService 创建 GoProxyService，用于承载 Go 版批量增强能力。
+// 参数/返回：migrate 提供抓取/发布编排能力；返回可用的服务实例。
 // 失败场景：不适用。
 // 副作用：无。
-func NewGoProxyService(crossSeed *CrossSeedService, migrate *migrationflow.MigrateService) *GoProxyService {
-	return &GoProxyService{crossSeed: crossSeed, migrate: migrate}
+func NewGoProxyService(migrate *migrationflow.MigrateService) *GoProxyService {
+	return &GoProxyService{migrate: migrate}
 }
 
 // StopBatchEnhance 请求停止当前批量转种任务。
@@ -37,26 +36,6 @@ func (s *GoProxyService) StopBatchEnhance() (map[string]any, int) {
 	}
 	s.stopRequested = true
 	return map[string]any{"success": true, "message": "已发送停止信号"}, 200
-}
-
-// QueryRecords 查询批量转种处理记录（支持分页与筛选）。
-// 参数/返回：params 为查询条件；返回查询结果与 HTTP 状态码。
-// 失败场景：数据库查询失败返回 500。
-// 副作用：读取数据库。
-func (s *GoProxyService) QueryRecords(params BatchRecordQueryParams) (map[string]any, int) {
-	result, err := s.crossSeed.QueryBatchRecords(params)
-	if err != nil {
-		return map[string]any{"success": false, "error": err.Error()}, 500
-	}
-	return result, 200
-}
-
-// ClearRecords 清空批量转种处理记录。
-// 参数/返回：无；返回清空结果与 HTTP 状态码。
-// 失败场景：数据库清理失败返回 500。
-// 副作用：写入数据库（删除记录）。
-func (s *GoProxyService) ClearRecords() (map[string]any, int) {
-	return s.crossSeed.ClearBatchRecords("")
 }
 
 func goProxyToString(value any, fallback string) string {

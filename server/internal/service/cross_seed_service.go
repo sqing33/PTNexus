@@ -6,7 +6,6 @@ import (
 )
 
 type CrossSeedQueryParams = crossseedpkg.CrossSeedQueryParams
-type BatchRecordQueryParams = crossseedpkg.BatchRecordQueryParams
 type CrossSeedService = crossseedpkg.CrossSeedService
 
 func NewCrossSeedService(repo *repository.CrossSeedRepository) *CrossSeedService {

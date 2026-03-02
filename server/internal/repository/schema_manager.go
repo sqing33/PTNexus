@@ -240,21 +240,6 @@ func (m *SchemaManager) createTableSQLs() []string {
 				updated_at DATETIME NOT NULL,
 				PRIMARY KEY (hash, torrent_id, site_name)
 			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
-			`CREATE TABLE IF NOT EXISTS batch_enhance_records (
-				id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-				title TEXT,
-				batch_id VARCHAR(255) NOT NULL,
-				torrent_id VARCHAR(255) NOT NULL,
-				source_site VARCHAR(255) NOT NULL,
-				target_site VARCHAR(255) NOT NULL,
-				video_size_gb DECIMAL(8,2),
-				status VARCHAR(50) NOT NULL,
-				success_url TEXT,
-				error_detail TEXT,
-				downloader_add_result TEXT,
-				processed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-				progress VARCHAR(20)
-			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
 			`CREATE TABLE IF NOT EXISTS publish_queue_tasks (
 				id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
 				group_id VARCHAR(64) NOT NULL,
@@ -405,21 +390,6 @@ func (m *SchemaManager) createTableSQLs() []string {
 				created_at TIMESTAMP NOT NULL,
 				updated_at TIMESTAMP NOT NULL,
 				PRIMARY KEY (hash, torrent_id, site_name)
-			)`,
-			`CREATE TABLE IF NOT EXISTS batch_enhance_records (
-				id BIGSERIAL PRIMARY KEY,
-				title TEXT,
-				batch_id VARCHAR(255) NOT NULL,
-				torrent_id VARCHAR(255) NOT NULL,
-				source_site VARCHAR(255) NOT NULL,
-				target_site VARCHAR(255) NOT NULL,
-				video_size_gb DECIMAL(8,2),
-				status VARCHAR(50) NOT NULL,
-				success_url TEXT,
-				error_detail TEXT,
-				downloader_add_result TEXT,
-				processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-				progress VARCHAR(20)
 			)`,
 			`CREATE TABLE IF NOT EXISTS publish_queue_tasks (
 				id BIGSERIAL PRIMARY KEY,
@@ -572,21 +542,6 @@ func (m *SchemaManager) createTableSQLs() []string {
 				updated_at TEXT NOT NULL,
 				PRIMARY KEY (hash, torrent_id, site_name)
 			)`,
-			`CREATE TABLE IF NOT EXISTS batch_enhance_records (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				title TEXT,
-				batch_id TEXT NOT NULL,
-				torrent_id TEXT NOT NULL,
-				source_site TEXT NOT NULL,
-				target_site TEXT NOT NULL,
-				video_size_gb REAL,
-				status TEXT NOT NULL,
-				success_url TEXT,
-				error_detail TEXT,
-				downloader_add_result TEXT,
-				processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
-				progress TEXT
-			)`,
 			`CREATE TABLE IF NOT EXISTS publish_queue_tasks (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				group_id TEXT NOT NULL,
@@ -735,20 +690,6 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 		},
-		"batch_enhance_records": {
-			{name: "title", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
-			{name: "batch_id", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(255) NOT NULL", "postgresql": "VARCHAR(255) NOT NULL"}},
-			{name: "torrent_id", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(255) NOT NULL", "postgresql": "VARCHAR(255) NOT NULL"}},
-			{name: "source_site", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(255) NOT NULL", "postgresql": "VARCHAR(255) NOT NULL"}},
-			{name: "target_site", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(255) NOT NULL", "postgresql": "VARCHAR(255) NOT NULL"}},
-			{name: "video_size_gb", definition: map[string]string{"sqlite": "REAL", "mysql": "DECIMAL(8,2)", "postgresql": "DECIMAL(8,2)"}},
-			{name: "status", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(50) NOT NULL", "postgresql": "VARCHAR(50) NOT NULL"}},
-			{name: "success_url", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
-			{name: "error_detail", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
-			{name: "downloader_add_result", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
-			{name: "processed_at", definition: map[string]string{"sqlite": "TEXT DEFAULT CURRENT_TIMESTAMP", "mysql": "DATETIME DEFAULT CURRENT_TIMESTAMP", "postgresql": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"}},
-			{name: "progress", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(20)", "postgresql": "VARCHAR(20)"}},
-		},
 		"publish_queue_tasks": {
 			{name: "group_id", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(64) NOT NULL", "postgresql": "VARCHAR(64) NOT NULL"}},
 			{name: "status", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(32) NOT NULL", "postgresql": "VARCHAR(32) NOT NULL"}},
@@ -798,10 +739,6 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 
 func (m *SchemaManager) indexSpecs() []schemaIndexSpec {
 	return []schemaIndexSpec{
-		{table: "batch_enhance_records", name: "idx_batch_records_batch_id", columns: []string{"batch_id"}},
-		{table: "batch_enhance_records", name: "idx_batch_records_torrent_id", columns: []string{"torrent_id"}},
-		{table: "batch_enhance_records", name: "idx_batch_records_status", columns: []string{"status"}},
-		{table: "batch_enhance_records", name: "idx_batch_records_processed_at", columns: []string{"processed_at"}},
 		{table: "publish_queue_tasks", name: "idx_publish_queue_status_next", columns: []string{"status", "next_run_at"}},
 		{table: "publish_queue_tasks", name: "idx_publish_queue_group_id", columns: []string{"group_id"}},
 		{table: "publish_queue_tasks", name: "idx_publish_queue_created_at", columns: []string{"created_at"}},

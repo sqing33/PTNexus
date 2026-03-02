@@ -12,7 +12,7 @@
     <div class="search-and-controls glass-table">
       <el-input
         v-model="searchQuery"
-        placeholder="搜索标题/副标题/种子ID/站点..."
+        placeholder="搜索标题/副标题/种子ID/站点/触发/场景..."
         clearable
         class="search-input"
         style="width: 320px; margin-right: 15px"
@@ -31,9 +31,12 @@
 
       <el-select
         v-model="triggerFilter"
-        placeholder="触发方式"
+        placeholder="触发（如：批量转种-1）"
         clearable
-        style="width: 140px; margin-right: 15px"
+        filterable
+        allow-create
+        default-first-option
+        style="width: 180px; margin-right: 15px"
       >
         <el-option label="手动" value="manual" />
         <el-option label="队列" value="queue" />
@@ -48,6 +51,7 @@
         <el-option label="待发布" value="queued" />
         <el-option label="发布成功" value="success" />
         <el-option label="发布失败" value="failed" />
+        <el-option label="已过滤" value="filtered" />
         <el-option label="已存在" value="exists" />
         <el-option label="已编辑" value="edited" />
         <el-option label="预检查限制" value="pre_check_limit" />
@@ -103,7 +107,7 @@
             {{ formatScene(scope.row.scene) }}
           </template>
         </el-table-column>
-        <el-table-column label="触发" width="90" align="center">
+        <el-table-column label="触发" width="120" align="center">
           <template #default="scope">
             {{ formatTrigger(scope.row.trigger) }}
           </template>
@@ -170,7 +174,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import LogViewerCard from '@/components/LogViewerCard.vue'
@@ -182,6 +187,7 @@ const error = ref('')
 
 const torrentsViewState = useTorrentsViewState()
 const allDownloadersList = ref<any[]>([])
+const route = useRoute()
 
 const rows = ref<any[]>([])
 const total = ref(0)
@@ -203,6 +209,7 @@ const publishStatusTagType = (status: string) => {
   if (status === 'success') return 'success'
   if (status === 'edited') return 'success'
   if (status === 'exists') return 'warning'
+  if (status === 'filtered') return 'warning'
   if (status === 'pre_check_limit') return 'warning'
   if (status === 'failed') return 'danger'
   return 'info'
@@ -212,6 +219,7 @@ const formatPublishStatus = (status: string) => {
   if (status === 'queued') return '待发布'
   if (status === 'success') return '发布成功'
   if (status === 'failed') return '发布失败'
+  if (status === 'filtered') return '已过滤'
   if (status === 'exists') return '已存在'
   if (status === 'edited') return '已编辑'
   if (status === 'pre_check_limit') return '预检查限制'
@@ -303,6 +311,7 @@ const resolveDownloaderColor = (downloaderId: string, downloaderName: string) =>
 const downloaderTagType = (row: any) => {
   const parsed = parseAutoAddResult(row)
   if (parsed.success) return 'info'
+  if ((parsed.message || '').trim().startsWith('未执行')) return 'info'
   return 'danger'
 }
 
@@ -322,6 +331,8 @@ const downloaderTagStyle = (row: any) => {
 
 const formatDownloaderStatus = (row: any) => {
   const parsed = parseAutoAddResult(row)
+  const message = (parsed.message || '').trim()
+  if (message.startsWith('未执行')) return '未执行'
   if (parsed.success) {
     return parsed.downloaderName || parsed.downloaderId || '成功'
   }
@@ -387,13 +398,15 @@ const openLogs = (row: any) => {
   dialogTitle.value = `日志 - ${row.target_site || ''}`
   const base = row.logs || ''
   const parsed = parseAutoAddResult(row)
+  const message = (parsed.message || '').trim()
   let addon = ''
-  if (parsed.success) {
+  if (message.startsWith('未执行')) {
+    addon = '\n\n--- [下载器] ---\n未执行'
+  } else if (parsed.success) {
     const name = parsed.downloaderName || parsed.downloaderId
     addon = `\n\n--- [下载器] ---\n成功${name ? `：${name}` : ''}`
   } else {
-    const reason = (parsed.message || '').trim()
-    addon = `\n\n--- [下载器] ---\n失败${reason ? `：${reason}` : ''}`
+    addon = `\n\n--- [下载器] ---\n失败${message ? `：${message}` : ''}`
   }
   dialogContent.value = `${base}${addon}`.trim()
   dialogVisible.value = true
@@ -405,6 +418,46 @@ const openResultURL = (row: any) => {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+const readQuery = (key: string) => {
+  const raw = (route.query as any)?.[key]
+  if (Array.isArray(raw)) return String(raw[0] || '')
+  if (raw === undefined || raw === null) return ''
+  return String(raw)
+}
+
+const applyRouteFilters = () => {
+  let changed = false
+
+  const queryTrigger = readQuery('trigger').trim()
+  const queryScene = readQuery('scene').trim()
+  const queryStatus = readQuery('status').trim()
+  const querySearch = readQuery('search').trim()
+  const queryTargetSite = readQuery('target_site').trim()
+
+  if (queryTrigger && triggerFilter.value !== queryTrigger) {
+    triggerFilter.value = queryTrigger
+    changed = true
+  }
+  if (queryScene && sceneFilter.value !== queryScene) {
+    sceneFilter.value = queryScene
+    changed = true
+  }
+  if (queryStatus && statusFilter.value !== queryStatus) {
+    statusFilter.value = queryStatus
+    changed = true
+  }
+  if (querySearch && searchQuery.value !== querySearch) {
+    searchQuery.value = querySearch
+    changed = true
+  }
+  if (queryTargetSite && targetSiteFilter.value !== queryTargetSite) {
+    targetSiteFilter.value = queryTargetSite
+    changed = true
+  }
+
+  return changed
+}
+
 onMounted(async () => {
   try {
     const result = await torrentsViewState.fetchDownloadersList(false)
@@ -412,9 +465,24 @@ onMounted(async () => {
   } catch {
     allDownloadersList.value = []
   }
+
+  if (applyRouteFilters()) {
+    currentPage.value = 1
+  }
+
   await fetchLogs()
   emits('ready', fetchLogs)
 })
+
+watch(
+  () => route.query,
+  async () => {
+    if (applyRouteFilters()) {
+      currentPage.value = 1
+      await fetchLogs()
+    }
+  },
+)
 </script>
 
 <style scoped>

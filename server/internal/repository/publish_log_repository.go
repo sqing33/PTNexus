@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -271,13 +272,13 @@ func (r *PublishLogRepository) List(query PublishLogQuery) ([]PublishLogEntry, i
 		like := "%" + value + "%"
 		if r.store.DBType == "postgresql" {
 			db = db.Where(
-				"(title ILIKE ? OR subtitle ILIKE ? OR torrent_id ILIKE ? OR target_site ILIKE ? OR source_site ILIKE ? OR task_id ILIKE ?)",
-				like, like, like, like, like, like,
+				"(title ILIKE ? OR subtitle ILIKE ? OR torrent_id ILIKE ? OR target_site ILIKE ? OR source_site ILIKE ? OR task_id ILIKE ? OR publish_trigger ILIKE ? OR scene ILIKE ?)",
+				like, like, like, like, like, like, like, like,
 			)
 		} else {
 			db = db.Where(
-				"(title LIKE ? OR subtitle LIKE ? OR torrent_id LIKE ? OR target_site LIKE ? OR source_site LIKE ? OR task_id LIKE ?)",
-				like, like, like, like, like, like,
+				"(title LIKE ? OR subtitle LIKE ? OR torrent_id LIKE ? OR target_site LIKE ? OR source_site LIKE ? OR task_id LIKE ? OR publish_trigger LIKE ? OR scene LIKE ?)",
+				like, like, like, like, like, like, like, like,
 			)
 		}
 	}
@@ -292,4 +293,48 @@ func (r *PublishLogRepository) List(query PublishLogQuery) ([]PublishLogEntry, i
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+// MaxNumericTriggerSuffix 计算 publish_trigger 以指定前缀开头的最大数字后缀。
+// 参数/返回：prefix 为触发前缀（例如：批量转种-）；返回最大数字（不存在则为 0）与 error。
+// 失败场景：DB 未初始化或查询失败返回 error；解析失败的触发会被忽略。
+// 副作用：读取 publish_logs。
+func (r *PublishLogRepository) MaxNumericTriggerSuffix(prefix string) (int, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return 0, errors.New("publish log repo is nil")
+	}
+
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return 0, nil
+	}
+
+	triggers := make([]string, 0)
+	if err := r.store.DB.Model(&PublishLogEntry{}).
+		Distinct("publish_trigger").
+		Where("publish_trigger LIKE ?", prefix+"%").
+		Pluck("publish_trigger", &triggers).Error; err != nil {
+		return 0, err
+	}
+
+	maxNumber := 0
+	for _, trigger := range triggers {
+		value := strings.TrimSpace(trigger)
+		if !strings.HasPrefix(value, prefix) {
+			continue
+		}
+		suffix := strings.TrimSpace(strings.TrimPrefix(value, prefix))
+		if suffix == "" {
+			continue
+		}
+		number, err := strconv.Atoi(suffix)
+		if err != nil || number <= 0 {
+			continue
+		}
+		if number > maxNumber {
+			maxNumber = number
+		}
+	}
+
+	return maxNumber, nil
 }
