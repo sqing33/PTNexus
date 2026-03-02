@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const blurayDetectLogModule = "蓝光判定"

@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/pt-nexus/server-go/internal/repository"
-	crossseedpkg "github.com/pt-nexus/server-go/internal/service/crossseed"
+	"github.com/pt-nexus/server/internal/repository"
+	crossseedpkg "github.com/pt-nexus/server/internal/service/crossseed"
 )
 
 type CrossSeedQueryParams = crossseedpkg.CrossSeedQueryParams

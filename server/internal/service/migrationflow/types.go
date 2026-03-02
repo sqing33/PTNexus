@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/repository"
-	extract "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	processingbdflow "github.com/pt-nexus/server-go/internal/service/processing/bdflow"
-	publishworkflow "github.com/pt-nexus/server-go/internal/service/publish/workflow"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/repository"
+	extract "github.com/pt-nexus/server/internal/service/acquire/extract"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	processingbdflow "github.com/pt-nexus/server/internal/service/processing/bdflow"
+	publishworkflow "github.com/pt-nexus/server/internal/service/publish/workflow"
 )
 
 type MigrateService struct {

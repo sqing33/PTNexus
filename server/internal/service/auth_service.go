@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/pt-nexus/server-go/internal/config"
+	"github.com/pt-nexus/server/internal/config"
 	"golang.org/x/crypto/bcrypt"
 )
 

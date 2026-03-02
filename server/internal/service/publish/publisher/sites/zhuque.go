@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
-	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
-	publishuploader "github.com/pt-nexus/server-go/internal/service/publish/uploader"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	publishmapping "github.com/pt-nexus/server/internal/service/publish/mapping"
+	"github.com/pt-nexus/server/internal/service/publish/publisher"
+	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
 
 const zhuquePublishLogModule = "发布-朱雀"

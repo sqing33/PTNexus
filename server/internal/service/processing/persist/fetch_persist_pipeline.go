@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingack "github.com/pt-nexus/server-go/internal/service/processing/acknowledgment"
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingack "github.com/pt-nexus/server/internal/service/processing/acknowledgment"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 )
 
 const teamAckLogModule = "迁移-官组致谢"

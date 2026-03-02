@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const tagCompletionLogModule = "迁移-标签补全"

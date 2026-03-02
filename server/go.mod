@@ -1,4 +1,4 @@
-module github.com/pt-nexus/server-go
+module github.com/pt-nexus/server
 
 go 1.23.0
 

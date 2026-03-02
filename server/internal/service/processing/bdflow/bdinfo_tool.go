@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const bdinfoToolLogModule = "BDInfo任务"
@@ -148,26 +148,26 @@ func resolveBDInfoBinaryPath() (string, error) {
 		addDir(pathJoin(baseDir, "bdinfo"))
 		addDir(pathJoin(baseDir, "bdinfo", "linux"))
 		addDir(pathJoin(baseDir, "bdinfo", "windows"))
-		addDir(pathJoin(baseDir, "server-go", "bdinfo"))
-		addDir(pathJoin(baseDir, "server-go", "bdinfo", "linux"))
-		addDir(pathJoin(baseDir, "server-go", "bdinfo", "windows"))
+		addDir(pathJoin(baseDir, "server", "bdinfo"))
+		addDir(pathJoin(baseDir, "server", "bdinfo", "linux"))
+		addDir(pathJoin(baseDir, "server", "bdinfo", "windows"))
 	}
 
 	if cwd, err := os.Getwd(); err == nil {
 		roots := []string{cwd, filepath.Dir(cwd), filepath.Dir(filepath.Dir(cwd))}
 		for _, root := range roots {
-			addDir(pathJoin(root, "server-go", "bdinfo"))
-			addDir(pathJoin(root, "server-go", "bdinfo", "linux"))
-			addDir(pathJoin(root, "server-go", "bdinfo", "windows"))
+			addDir(pathJoin(root, "server", "bdinfo"))
+			addDir(pathJoin(root, "server", "bdinfo", "linux"))
+			addDir(pathJoin(root, "server", "bdinfo", "windows"))
 			addDir(pathJoin(root, "bdinfo"))
 			addDir(pathJoin(root, "bdinfo", "linux"))
 			addDir(pathJoin(root, "bdinfo", "windows"))
 		}
 	}
 
-	addDir("/app/server-go/bdinfo")
-	addDir("/app/server-go/bdinfo/linux")
-	addDir("/app/server-go/bdinfo/windows")
+	addDir("/app/server/bdinfo")
+	addDir("/app/server/bdinfo/linux")
+	addDir("/app/server/bdinfo/windows")
 	addDir("/app/bdinfo")
 	addDir("/app/bdinfo/linux")
 	addDir("/app/bdinfo/windows")

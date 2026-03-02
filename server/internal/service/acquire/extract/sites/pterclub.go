@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	rePTerMediaInfoBlock = regexp.MustCompile(`(?is)<div[^>]*class=["'][^"']*codetop[^"']*["'][^>]*>.*?mediainfo.*?</div>\s*<div[^>]*class=["'][^"']*(?:hide|show)[^"']*["'][^>]*>(.*?)</div>`)
-	rePTerCodeMain       = regexp.MustCompile(`(?is)<div[^>]*class=["'][^"']*codemain[^"']*["'][^>]*>(.*?)</div>`)
+	rePTerMediaInfoBlock        = regexp.MustCompile(`(?is)<div[^>]*class=["'][^"']*codetop[^"']*["'][^>]*>.*?mediainfo.*?</div>\s*<div[^>]*class=["'][^"']*(?:hide|show)[^"']*["'][^>]*>(.*?)</div>`)
+	rePTerCodeMain              = regexp.MustCompile(`(?is)<div[^>]*class=["'][^"']*codemain[^"']*["'][^>]*>(.*?)</div>`)
 	rePTerInlineMediaInfoMarker = regexp.MustCompile(`(?is)\[url=javascript:void\(0\)\]\s*mediainfo\s*-\s*.*?\[/url\]\s*`)
 	reMediaInfoGeneralHeader    = regexp.MustCompile(`(?mi)^General\s*$`)
 )

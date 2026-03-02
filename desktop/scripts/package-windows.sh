@@ -44,7 +44,7 @@ VERSIONED_INSTALLER="$BIN_DIR/pt-nexus-${VERSION_SAFE}-amd64-installer.exe"
 
 if [[ -f "$DEFAULT_INSTALLER" ]]; then
   mv -f "$DEFAULT_INSTALLER" "$VERSIONED_INSTALLER"
-  echo "[desktop-go] versioned installer: $VERSIONED_INSTALLER"
+  echo "[desktop] versioned installer: $VERSIONED_INSTALLER"
 else
-  echo "[desktop-go] warning: installer not found at $DEFAULT_INSTALLER" >&2
+  echo "[desktop] warning: installer not found at $DEFAULT_INSTALLER" >&2
 fi

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 // ResolveAndExtractForBDInfoInput 定义 BDInfo/MediaInfo 提取阶段的输入参数。

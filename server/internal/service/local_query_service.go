@@ -1,9 +1,9 @@
 package service
 
 import (
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/repository"
-	localquerysvc "github.com/pt-nexus/server-go/internal/service/localquery"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/repository"
+	localquerysvc "github.com/pt-nexus/server/internal/service/localquery"
 )
 
 type LocalQueryService = localquerysvc.Service

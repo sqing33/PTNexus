@@ -3,7 +3,7 @@ package tagging
 import (
 	"strings"
 
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 // RecomputeStandardTags 根据当前种子文本信息重新计算标准化 tags，并给出可选的类型修正（仅动画判定）。

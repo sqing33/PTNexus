@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/service/downloaderclient"
+	"github.com/pt-nexus/server/internal/service/downloaderclient"
 )
 
 // CompletionStatus 表示完结判定结果。

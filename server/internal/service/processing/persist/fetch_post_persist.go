@@ -3,7 +3,7 @@ package persist
 import (
 	"strings"
 
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 )
 
 // FetchPostPersistRepo 定义抓取入库后收敛所需的最小仓储接口。

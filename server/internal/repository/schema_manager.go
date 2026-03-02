@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const schemaLogModule = "数据库初始化"

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const settingsUpdateModule = "设置-保存配置"

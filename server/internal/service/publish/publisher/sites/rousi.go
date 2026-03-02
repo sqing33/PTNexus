@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/config"
-	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
-	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
+	"github.com/pt-nexus/server/internal/config"
+	publishmapping "github.com/pt-nexus/server/internal/service/publish/mapping"
+	"github.com/pt-nexus/server/internal/service/publish/publisher"
 )
 
 var (

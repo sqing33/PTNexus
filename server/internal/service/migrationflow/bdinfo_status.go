@@ -4,8 +4,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingbdflow "github.com/pt-nexus/server-go/internal/service/processing/bdflow"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingbdflow "github.com/pt-nexus/server/internal/service/processing/bdflow"
 	"gorm.io/gorm"
 )
 

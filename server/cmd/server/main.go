@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
-	"github.com/pt-nexus/server-go/internal/bootstrap"
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/bootstrap"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 // main 是服务启动入口，负责加载环境变量、初始化日志、创建并运行 HTTP 服务。
@@ -64,13 +64,13 @@ func loadEnvFiles() []string {
 	}
 	root, found := detectServerGoRoot(cwd)
 	if !found {
-		messages = append(messages, fmt.Sprintf("未检测到 server-go 根目录（cwd=%s），将仅使用系统环境变量", cwd))
+		messages = append(messages, fmt.Sprintf("未检测到 server 根目录（cwd=%s），将仅使用系统环境变量", cwd))
 		return messages
 	}
 
 	envPath := filepath.Join(root, ".env")
 	if _, err := os.Stat(envPath); err != nil {
-		messages = append(messages, fmt.Sprintf("未检测到 server-go/.env 文件（path=%s cwd=%s），将仅使用系统环境变量", envPath, cwd))
+		messages = append(messages, fmt.Sprintf("未检测到 server/.env 文件（path=%s cwd=%s），将仅使用系统环境变量", envPath, cwd))
 		return messages
 	}
 	if err := godotenv.Load(envPath); err != nil {
@@ -103,13 +103,13 @@ func ensureDefaultLogDir() {
 	_ = os.Setenv("PTNEXUS_LOG_DIR", filepath.Join(root, "data", "logs"))
 }
 
-// detectServerGoRoot 从起始目录向上定位 server-go 根目录，兼容在仓库根或子目录启动服务。
+// detectServerGoRoot 从起始目录向上定位 server 根目录，兼容在仓库根或子目录启动服务。
 func detectServerGoRoot(start string) (string, bool) {
 	dir := start
 	for i := 0; i < 10; i++ {
 		candidates := []string{
 			dir,
-			filepath.Join(dir, "server-go"),
+			filepath.Join(dir, "server"),
 		}
 		for _, candidate := range candidates {
 			if looksLikeServerGoRoot(candidate) {
@@ -126,7 +126,7 @@ func detectServerGoRoot(start string) (string, bool) {
 	return "", false
 }
 
-// looksLikeServerGoRoot 判断目录是否符合 server-go 根目录结构。
+// looksLikeServerGoRoot 判断目录是否符合 server 根目录结构。
 func looksLikeServerGoRoot(dir string) bool {
 	if strings.TrimSpace(dir) == "" {
 		return false

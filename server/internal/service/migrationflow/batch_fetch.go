@@ -1,8 +1,8 @@
 package migrationflow
 
 import (
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 func (s *MigrateService) StartBatchFetch(torrentNames []string, sourcePriority []string) (map[string]any, int) {

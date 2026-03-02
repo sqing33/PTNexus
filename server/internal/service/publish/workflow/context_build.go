@@ -3,7 +3,7 @@ package workflow
 import (
 	"path/filepath"
 
-	"github.com/pt-nexus/server-go/internal/config"
+	"github.com/pt-nexus/server/internal/config"
 )
 
 // BuildContextFromDBRow 根据数据库命中记录构造迁移上下文。

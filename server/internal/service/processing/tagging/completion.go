@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 // extractRawTagsFromTitleComponents 从标题拆解组件中提取可用于映射的原始标签（不带 tag. 前缀）。

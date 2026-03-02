@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 	xhtml "golang.org/x/net/html"
 )
 

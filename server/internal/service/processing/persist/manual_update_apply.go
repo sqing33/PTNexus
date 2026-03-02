@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingack "github.com/pt-nexus/server-go/internal/service/processing/acknowledgment"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingack "github.com/pt-nexus/server/internal/service/processing/acknowledgment"
 )
 
 // ManualUpdateRepo 定义手工参数回写所需仓储接口。

@@ -3,7 +3,7 @@ package downloader
 import (
 	"strings"
 
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 // DownloaderInfoRepo 定义查询下载器信息所需的最小仓储接口。

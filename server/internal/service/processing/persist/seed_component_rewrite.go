@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
-	processingtitle "github.com/pt-nexus/server-go/internal/service/processing/title"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
+	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
 
 const seedComponentRewriteLogModule = "媒体信息刷新"

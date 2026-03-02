@@ -3,8 +3,8 @@ package migrationflow
 import (
 	"time"
 
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingtagging "github.com/pt-nexus/server-go/internal/service/processing/tagging"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingtagging "github.com/pt-nexus/server/internal/service/processing/tagging"
 )
 
 // recomputeAndPersistTags 统一执行标签重算并回写。

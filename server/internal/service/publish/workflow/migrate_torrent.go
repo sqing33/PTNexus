@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 // OneStepMigrateDeps 定义一步式迁移执行依赖。

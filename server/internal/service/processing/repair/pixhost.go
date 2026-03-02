@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const maxPosterBytes = 25 * 1024 * 1024

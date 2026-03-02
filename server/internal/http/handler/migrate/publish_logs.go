@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pt-nexus/server-go/internal/repository"
+	"github.com/pt-nexus/server/internal/repository"
 )
 
 // PublishLogs 分页查询发种日志（供前端“发种日志”页面使用）。

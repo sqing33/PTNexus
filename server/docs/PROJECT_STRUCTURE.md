@@ -1,11 +1,11 @@
-# server-go 项目结构与功能说明（当前版本）
+# server 项目结构与功能说明（当前版本）
 
 > 更新时间：2026-02-15  
 > 说明：本文档按当前仓库真实代码结构整理，重点反映迁移链路已重构为 `acquire -> processing -> publish` 三阶段模型。
 
 ## 1. 项目概览
 
-`server-go` 是 PT Nexus 的 Go 后端实现，采用分层结构：
+`server` 是 PT Nexus 的 Go 后端实现，采用分层结构：
 
 - HTTP 层：`internal/http/handler` + `internal/http/middleware`
 - 业务层：`internal/service`
@@ -24,15 +24,15 @@
 
 | 路径 | 说明 |
 |---|---|
-| `server-go/go.mod` / `server-go/go.sum` | Go 模块与依赖声明 |
-| `server-go/.env` | 本地环境变量 |
-| `server-go/sites_data.json` | 站点基础元数据（同步入库来源之一） |
-| `server-go/cmd/server/main.go` | 程序入口（加载环境、初始化日志、启动 Gin） |
-| `server-go/configs/*.yaml` | 站点配置与映射规则（含 `global_mappings.yaml`） |
-| `server-go/bdinfo/` | BDInfo 工具文件（Linux/Windows） |
-| `server-go/data/` | 运行时配置、日志、数据库、临时文件 |
-| `server-go/docs/` | 文档目录（含注释日志规范与本文件） |
-| `server-go/internal/` | 核心业务代码目录 |
+| `server/go.mod` / `server/go.sum` | Go 模块与依赖声明 |
+| `server/.env` | 本地环境变量 |
+| `server/sites_data.json` | 站点基础元数据（同步入库来源之一） |
+| `server/cmd/server/main.go` | 程序入口（加载环境、初始化日志、启动 Gin） |
+| `server/configs/*.yaml` | 站点配置与映射规则（含 `global_mappings.yaml`） |
+| `server/bdinfo/` | BDInfo 工具文件（Linux/Windows） |
+| `server/data/` | 运行时配置、日志、数据库、临时文件 |
+| `server/docs/` | 文档目录（含注释日志规范与本文件） |
+| `server/internal/` | 核心业务代码目录 |
 
 ---
 

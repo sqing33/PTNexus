@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const proxyEpisodeCountLogModule = "盒子代理-集数统计"

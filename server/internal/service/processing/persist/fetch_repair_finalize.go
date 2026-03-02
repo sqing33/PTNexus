@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 )
 
 // FetchRepairFinalizeInput 定义“抓取修复 + 草稿收敛”组合流程输入。

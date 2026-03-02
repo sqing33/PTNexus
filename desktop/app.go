@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/pt-nexus/server-go/desktop-go/internal/desktopapp"
-	"github.com/pt-nexus/server-go/desktop-go/internal/tray"
+	"github.com/pt-nexus/server/desktop/internal/desktopapp"
+	"github.com/pt-nexus/server/desktop/internal/tray"
 )
 
 // App struct

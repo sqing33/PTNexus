@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/config"
+	"github.com/pt-nexus/server/internal/config"
 	"gopkg.in/yaml.v3"
 )
 

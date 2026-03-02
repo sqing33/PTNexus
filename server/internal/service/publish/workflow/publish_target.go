@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	publishpublisher "github.com/pt-nexus/server-go/internal/service/publish/publisher"
-	publishengine "github.com/pt-nexus/server-go/internal/service/publish/publisher/engine"
-	publishuploader "github.com/pt-nexus/server-go/internal/service/publish/uploader"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	publishpublisher "github.com/pt-nexus/server/internal/service/publish/publisher"
+	publishengine "github.com/pt-nexus/server/internal/service/publish/publisher/engine"
+	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
 
 // PublishTorrentToTarget 将种子文件发布到目标站点，并返回发布 URL 与日志文案。

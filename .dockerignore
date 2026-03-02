@@ -22,8 +22,8 @@ venv/
 # Node modules
 webui/node_modules
 webui/dist
-webui-go/node_modules
-webui-go/dist
+webui/node_modules
+webui/dist
 
 # Backend specific
 server/.env

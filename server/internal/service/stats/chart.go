@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/repository"
+	"github.com/pt-nexus/server/internal/repository"
 )
 
 func (s *Service) GetChartData(rangeKey string) (map[string]any, error) {

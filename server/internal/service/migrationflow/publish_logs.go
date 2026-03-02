@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	"github.com/pt-nexus/server-go/internal/repository"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/repository"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 const (

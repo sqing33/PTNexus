@@ -1,10 +1,10 @@
-# desktop-go
+# desktop
 
-`desktop-go` 是 PT Nexus 的桌面壳工程（Wails 官方骨架）。
+`desktop` 是 PT Nexus 的桌面壳工程（Wails 官方骨架）。
 
 ## 当前阶段
 
-当前仅执行第一部分：只修改 `desktop-go/`，不改 `server-go/`、`webui-go/`、`updater/`。
+当前仅执行第一部分：只修改 `desktop/`，不改 `server/`、`webui/`、`updater/`。
 
 当前已完成：
 
@@ -14,9 +14,9 @@
 
 当前未执行（后续第二部分）：
 
-1. 挂接 `server-go` 到 `/api/*`。
+1. 挂接 `server` 到 `/api/*`。
 2. 挂接 `updater` 到 `/update/*`。
-3. 接入 `webui-go` 生产构建产物并实现桌面轮询分支。
+3. 接入 `webui` 生产构建产物并实现桌面轮询分支。
 
 ## 执行顺序
 
@@ -29,14 +29,14 @@
 开发：
 
 ```bash
-cd desktop-go
+cd desktop
 wails dev
 ```
 
 构建：
 
 ```bash
-cd desktop-go
+cd desktop
 wails build
 ```
 

@@ -1,9 +1,9 @@
 package service
 
 import (
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/repository"
-	trackersvc "github.com/pt-nexus/server-go/internal/service/tracker"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/repository"
+	trackersvc "github.com/pt-nexus/server/internal/service/tracker"
 )
 
 type TrackerService = trackersvc.Service

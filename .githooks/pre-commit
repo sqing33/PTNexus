@@ -44,6 +44,18 @@ handle_error() {
     exit 1
 }
 
+require_command() {
+    local cmd="$1"
+    local hint="${2:-}"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo -e "${RED}❌ 缺少依赖命令: ${cmd}${NC}"
+        if [ -n "$hint" ]; then
+            echo -e "${RED}   安装建议: ${hint}${NC}"
+        fi
+        exit 1
+    fi
+}
+
 echo "🔨 [pre-commit] 开始智能检测与构建流程..."
 
 # 仓库根目录（兼容包含空格的路径）
@@ -57,6 +69,11 @@ if [ -z "$STAGED_FILES" ]; then
     echo -e "${GREEN}ℹ️  没有文件被暂存，跳过构建。${NC}"
     exit 0
 fi
+
+# --- 0. 强制检查 Go 服务双架构构建依赖（缺失即中止提交） ---
+require_command go "请先安装 Go 工具链。"
+require_command gcc "Debian/Ubuntu: sudo apt-get install -y gcc"
+require_command aarch64-linux-gnu-gcc "Debian/Ubuntu: sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross"
 
 # 定义一个标志，用于判断是否执行了任何构建
 BUILDS_TRIGGERED=false
@@ -84,25 +101,16 @@ else
     echo -e "${CYAN}⏭️  'updater' 目录无变更，跳过构建。${NC}"
 fi
 
-# --- 3. 检测并构建 Go batch ---
-if echo "$STAGED_FILES" | grep -q "^batch/"; then
+# --- 3. 检测并构建 Go server ---
+if echo "$STAGED_FILES" | grep -q "^server/"; then
     BUILDS_TRIGGERED=true
-    echo -e "${YELLOW}📦 检测到 'batch' 目录有变更，开始构建...${NC}"
-    (
-        cd batch || exit 1
-        echo -e "${CYAN}   - 构建 linux/amd64 -> batch-x86${NC}"
-        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o batch-x86 batch.go || exit 1
-
-        echo -e "${CYAN}   - 构建 linux/arm64 -> batch-arm${NC}"
-        CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o batch-arm batch.go || exit 1
-
-        # 兼容历史路径：保留 batch/batch（默认使用 x86 版本）
-        cp -f batch-x86 batch || exit 1
-    ) || handle_error "Go batch (x86/arm) 构建失败"
-    echo -e "${GREEN}✓ Go batch 构建成功。正在暂存产物...${NC}"
-    git add batch/batch batch/batch-x86 batch/batch-arm
+    echo -e "${YELLOW}📦 检测到 'server' 目录有变更，开始构建双架构二进制...${NC}"
+    [ -x ./build-server.sh ] || chmod +x ./build-server.sh
+    ./build-server.sh || handle_error "Go server 双架构构建失败"
+    echo -e "${GREEN}✓ Go server 构建成功。正在暂存产物...${NC}"
+    git add server/server-amd64 server/server-arm64
 else
-    echo -e "${CYAN}⏭️  'batch' 目录无变更，跳过构建。${NC}"
+    echo -e "${CYAN}⏭️  'server' 目录无变更，跳过构建。${NC}"
 fi
 
 # --- 4. 检测并构建 Go proxy ---

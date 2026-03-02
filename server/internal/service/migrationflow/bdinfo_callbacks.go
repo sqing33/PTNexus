@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingbdflow "github.com/pt-nexus/server-go/internal/service/processing/bdflow"
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingbdflow "github.com/pt-nexus/server/internal/service/processing/bdflow"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 func (s *MigrateService) BDInfoProgressCallback(payload map[string]any) (map[string]any, int) {

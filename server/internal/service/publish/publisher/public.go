@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
-	publishuploader "github.com/pt-nexus/server-go/internal/service/publish/uploader"
+	publishmapping "github.com/pt-nexus/server/internal/service/publish/mapping"
+	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
 
 // PublishPublic 执行公共发布器（NexusPHP 等表单 takeupload.php/upload.php）发布流程。

@@ -3,7 +3,7 @@ package persist
 import (
 	"strings"
 
-	processingtitle "github.com/pt-nexus/server-go/internal/service/processing/title"
+	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
 
 // BuildUpdatedPreviewData 规范化前端更新后的预览数据结构。

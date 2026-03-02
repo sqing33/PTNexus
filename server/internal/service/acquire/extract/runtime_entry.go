@@ -1,7 +1,7 @@
 package extract
 
 import (
-	sites "github.com/pt-nexus/server-go/internal/service/acquire/extract/sites"
+	sites "github.com/pt-nexus/server/internal/service/acquire/extract/sites"
 )
 
 // ReviewExtractResult 表示“提取器输出 -> ReviewExtractedData”的桥接结果。

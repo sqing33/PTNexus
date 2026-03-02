@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 // FinalizeFetchedSeedInput 定义抓取阶段草稿收敛为可入库记录所需的输入。

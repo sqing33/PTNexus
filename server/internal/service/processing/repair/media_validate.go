@@ -3,8 +3,8 @@ package repair
 import (
 	"strings"
 
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingtagging "github.com/pt-nexus/server-go/internal/service/processing/tagging"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingtagging "github.com/pt-nexus/server/internal/service/processing/tagging"
 )
 
 const screenshotValidateLogModule = "媒体校验-截图"

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	"github.com/pt-nexus/server-go/internal/service/downloaderclient"
-	processingbdflow "github.com/pt-nexus/server-go/internal/service/processing/bdflow"
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/service/downloaderclient"
+	processingbdflow "github.com/pt-nexus/server/internal/service/processing/bdflow"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 const bdinfoTaskLogModule = "BDInfo任务"

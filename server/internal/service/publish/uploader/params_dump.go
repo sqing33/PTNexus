@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const publishParamsDumpLogModule = "发布-参数落盘"

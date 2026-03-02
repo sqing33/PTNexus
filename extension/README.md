@@ -1,6 +1,6 @@
 # PT Nexus Cookie Sync Extension
 
-This folder contains a Chrome/Edge MV3 extension that syncs browser cookies to the `server-go` backend.
+This folder contains a Chrome/Edge MV3 extension that syncs browser cookies to the `server` backend.
 
 ## Backend APIs used
 

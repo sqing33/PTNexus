@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const proxyBDInfoLogModule = "盒子代理-BDInfo"

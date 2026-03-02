@@ -4,8 +4,8 @@ import (
 	"regexp"
 	"strings"
 
-	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
-	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
+	publishmapping "github.com/pt-nexus/server/internal/service/publish/mapping"
+	"github.com/pt-nexus/server/internal/service/publish/publisher"
 )
 
 var rePTLGSImgTag = regexp.MustCompile(`(?i)\[/?img\]`)

@@ -19,8 +19,8 @@ type RuntimePaths struct {
 func ResolveRuntimePaths() RuntimePaths {
 	isDev := os.Getenv("DEV_ENV") == "true"
 
-	defaultBaseDir := "/app/server-go"
-	defaultDataDir := "/app/server-go/data"
+	defaultBaseDir := "/app/server"
+	defaultDataDir := "/app/server/data"
 	if isDev {
 		defaultBaseDir = detectDevBaseDir()
 		defaultDataDir = filepath.Join(defaultBaseDir, "data")
@@ -53,7 +53,7 @@ func detectDevBaseDir() string {
 	tryDirs := func(dir string) string {
 		candidates := []string{
 			dir,
-			filepath.Join(dir, "server-go"),
+			filepath.Join(dir, "server"),
 		}
 		for _, candidate := range candidates {
 			if looksLikeServerGoRoot(candidate) {

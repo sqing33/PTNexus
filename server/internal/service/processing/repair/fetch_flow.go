@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 )
 
 const (

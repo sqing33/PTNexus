@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 // BuildResult 表示标题组件构建结果。

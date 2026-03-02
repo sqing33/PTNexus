@@ -1,14 +1,14 @@
 # 阶段 1: 构建 Vue 前端（Go 版本）
-FROM node:20-alpine AS webui-go-builder
+FROM node:20-alpine AS webui-builder
 
-WORKDIR /app/webui-go
+WORKDIR /app/webui
 
 RUN corepack enable
 
-COPY ./webui-go/package.json ./
+COPY ./webui/package.json ./
 RUN pnpm install --no-frozen-lockfile
 
-COPY ./webui-go ./
+COPY ./webui ./
 RUN pnpm run build
 
 
@@ -24,26 +24,26 @@ COPY ./updater/updater.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/updater updater.go
 
 
-# 阶段 3: 构建 Go 后端（server-go）
-# 注意：server-go 使用 sqlite（mattn/go-sqlite3），需要开启 CGO。
-FROM golang:1.23-bookworm AS server-go-builder
+# 阶段 3: 构建 Go 后端（server）
+# 注意：server 使用 sqlite（mattn/go-sqlite3），需要开启 CGO。
+FROM golang:1.23-bookworm AS server-builder
 
-WORKDIR /src/server-go
+WORKDIR /src/server
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc g++ libc6-dev && \
     rm -rf /var/lib/apt/lists/*
 
-COPY ./server-go/go.mod ./server-go/go.sum ./
+COPY ./server/go.mod ./server/go.sum ./
 RUN go mod download
 
-COPY ./server-go/cmd ./cmd
-COPY ./server-go/internal ./internal
+COPY ./server/cmd ./cmd
+COPY ./server/internal ./internal
 
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /out/server-go ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /out/server ./cmd/server
 
 
-# 阶段 4: 最终运行环境（与 Python 原版镜像一致：updater 作为入口，反代到 server-go）
+# 阶段 4: 最终运行环境（与 Python 原版镜像一致：updater 作为入口，反代到 server）
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -55,8 +55,8 @@ ENV NO_PROXY="localhost,127.0.0.1,::1"
 # 禁用 updater 的定时自动更新（Go 版容器避免被 Python 版 mappings 覆盖）
 ENV SCHEDULE_ENABLED="false"
 
-# server-go 运行目录与数据目录（对齐 updater/batch 使用的 /app/data）
-ENV PTNEXUS_BASE_DIR="/app/server-go"
+# server 运行目录与数据目录（对齐 updater/batch 使用的 /app/data）
+ENV PTNEXUS_BASE_DIR="/app/server"
 ENV PTNEXUS_DATA_DIR="/app/data"
 
 RUN apt-get update && \
@@ -71,19 +71,19 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Go 版后端文件 ---
-RUN mkdir -p /app/server-go
-COPY --from=server-go-builder /out/server-go /app/server-go/server-go
-RUN chmod +x /app/server-go/server-go
+RUN mkdir -p /app/server
+COPY --from=server-builder /out/server /app/server/server
+RUN chmod +x /app/server/server
 
-# 配置与站点数据（server-go 默认从 baseDir 下读取）
-COPY ./server-go/configs /app/server-go/configs
-COPY ./server-go/sites_data.json /app/server-go/sites_data.json
+# 配置与站点数据（server 默认从 baseDir 下读取）
+COPY ./server/configs /app/server/configs
+COPY ./server/sites_data.json /app/server/sites_data.json
 
-# --- Go 版前端产物：放入 server-go 的静态目录 ---
-COPY --from=webui-go-builder /app/webui-go/dist /app/server-go/dist
+# --- Go 版前端产物：放入 server 的静态目录 ---
+COPY --from=webui-builder /app/webui/dist /app/server/dist
 
 # --- BDInfo（仅复制 Linux 工具，避免打入 Windows 版本）---
-COPY ./server-go/bdinfo/linux/ /app/bdinfo/
+COPY ./server/bdinfo/linux/ /app/bdinfo/
 RUN chmod +x /app/bdinfo/BDInfo /app/bdinfo/BDInfoDataSubstractor
 
 # --- updater ---
@@ -94,8 +94,8 @@ RUN chmod +x /app/updater
 COPY ./CHANGELOG.json /app/CHANGELOG.json
 
 # Supervisor + 启动脚本（Go 版）
-COPY ./supervisord-go.conf /app/supervisord.conf
-COPY ./start-services-go.sh /app/start-services.sh
+COPY ./supervisord.conf /app/supervisord.conf
+COPY ./start-services.sh /app/start-services.sh
 RUN chmod +x /app/start-services.sh
 
 # 创建数据目录，用于持久化存储（对齐原版镜像路径）

@@ -1,6 +1,6 @@
 package migrate
 
-import migrationflow "github.com/pt-nexus/server-go/internal/service/migrationflow"
+import migrationflow "github.com/pt-nexus/server/internal/service/migrationflow"
 
 type Handler struct {
 	service *migrationflow.MigrateService

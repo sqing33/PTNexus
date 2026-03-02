@@ -3,7 +3,7 @@ package main
 import (
 	"embed"
 
-	"github.com/pt-nexus/server-go/desktop-go/internal/desktopapp"
+	"github.com/pt-nexus/server/desktop/internal/desktopapp"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"

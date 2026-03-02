@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/bootstrap"
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/bootstrap"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 // RouteTargets 描述桌面路由分流要挂接的目标处理器。
@@ -28,7 +28,7 @@ type RouteTargets struct {
 var desktopLogInitOnce sync.Once
 
 // NewRouteMux 创建桌面分流入口：
-// 1) /api/* -> APIHandler（当前接 server-go）
+// 1) /api/* -> APIHandler（当前接 server）
 // 2) /update/* -> UpdateHandler（后续接 updater）
 // 3) 其他路径交给 Wails 静态资源处理器
 func NewRouteMux(targets RouteTargets) http.Handler {
@@ -54,7 +54,7 @@ func NewRouteMux(targets RouteTargets) http.Handler {
 	})
 }
 
-// NewServerGoAPIHandler 初始化 server-go 并返回 API 处理器。
+// NewServerGoAPIHandler 初始化 server 并返回 API 处理器。
 // 若初始化失败，返回错误占位 handler，避免桌面进程整体启动失败。
 func NewServerGoAPIHandler() http.Handler {
 	ensureDesktopRuntimeEnv()
@@ -63,7 +63,7 @@ func NewServerGoAPIHandler() http.Handler {
 	app, err := bootstrap.NewApp()
 	if err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			writeJSONError(w, http.StatusServiceUnavailable, "server-go bootstrap failed: "+err.Error())
+			writeJSONError(w, http.StatusServiceUnavailable, "server bootstrap failed: "+err.Error())
 		})
 	}
 	return app.Engine
@@ -187,7 +187,7 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 	})
 }
 
-// ensureDesktopRuntimeEnv 为桌面模式注入默认运行路径，避免 server-go 回退到 /app。
+// ensureDesktopRuntimeEnv 为桌面模式注入默认运行路径，避免 server 回退到 /app。
 func ensureDesktopRuntimeEnv() {
 	configRoot, err := os.UserConfigDir()
 	if err != nil || strings.TrimSpace(configRoot) == "" {
@@ -272,7 +272,7 @@ func EnsureDatabaseConfigFile() {
 	_ = os.WriteFile(path, []byte(template), 0o644)
 }
 
-// initDesktopLogging 初始化 server-go 的文件日志，确保桌面版可追溯启动期临时密码。
+// initDesktopLogging 初始化 server 的文件日志，确保桌面版可追溯启动期临时密码。
 func initDesktopLogging() {
 	desktopLogInitOnce.Do(func() {
 		if err := logx.InitFromEnv(); err != nil {

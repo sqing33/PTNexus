@@ -4,9 +4,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 // ParseTitleEntryInput 定义标题解析接口流程输入。

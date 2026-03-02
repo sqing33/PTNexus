@@ -3,7 +3,7 @@ package workflow
 import (
 	"time"
 
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
 )
 
 // ManagedBatchInput 定义带状态管理的批量发布执行输入。

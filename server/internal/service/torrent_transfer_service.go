@@ -1,9 +1,9 @@
 package service
 
 import (
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/repository"
-	torrenttransferpkg "github.com/pt-nexus/server-go/internal/service/torrenttransfer"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/repository"
+	torrenttransferpkg "github.com/pt-nexus/server/internal/service/torrenttransfer"
 )
 
 type TorrentTransferService = torrenttransferpkg.TorrentTransferService

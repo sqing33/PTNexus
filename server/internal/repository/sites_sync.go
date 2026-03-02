@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 	"gorm.io/gorm"
 )
 

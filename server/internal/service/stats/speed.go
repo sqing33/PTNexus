@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/repository"
+	"github.com/pt-nexus/server/internal/repository"
 )
 
 func (s *Service) GetSpeedData() (map[string]any, error) {

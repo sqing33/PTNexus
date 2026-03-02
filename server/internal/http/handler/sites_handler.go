@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pt-nexus/server-go/internal/repository"
+	"github.com/pt-nexus/server/internal/repository"
 )
 
 type SitesHandler struct {

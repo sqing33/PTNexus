@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/pt-nexus/server-go/internal/config"
-	settingspkg "github.com/pt-nexus/server-go/internal/service/settings"
+	"github.com/pt-nexus/server/internal/config"
+	settingspkg "github.com/pt-nexus/server/internal/service/settings"
 )
 
 const (

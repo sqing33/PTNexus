@@ -4,8 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/repository"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/repository"
 )
 
 type TorrentsDataParams struct {

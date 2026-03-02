@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	migrationflow "github.com/pt-nexus/server-go/internal/service/migrationflow"
+	migrationflow "github.com/pt-nexus/server/internal/service/migrationflow"
 )
 
 type GoProxyService struct {

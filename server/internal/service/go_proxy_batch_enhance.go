@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	migrationflow "github.com/pt-nexus/server-go/internal/service/migrationflow"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	migrationflow "github.com/pt-nexus/server/internal/service/migrationflow"
 )
 
 const (

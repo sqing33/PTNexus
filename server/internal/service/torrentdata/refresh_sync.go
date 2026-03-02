@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	"github.com/pt-nexus/server-go/internal/repository"
-	"github.com/pt-nexus/server-go/internal/service/downloaderclient"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/repository"
+	"github.com/pt-nexus/server/internal/service/downloaderclient"
 )
 
 const refreshLogModule = "种子刷新"

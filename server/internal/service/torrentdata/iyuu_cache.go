@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/config"
+	"github.com/pt-nexus/server/internal/config"
 )
 
 type iyuuSiteCacheFile struct {

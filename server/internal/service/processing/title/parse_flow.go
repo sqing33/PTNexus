@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 // ErrEmptyTitle 表示标题为空。

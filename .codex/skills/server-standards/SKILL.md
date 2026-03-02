@@ -1,13 +1,13 @@
 ---
-name: server-go-standards
-description: server-go 修改强制工作流与规范（先读结构文档定位；新文件按分层落目录；业务日志用 logx；导出函数/Handler/Service/Repo 写中文注释；交付自检清单）。
+name: server-standards
+description: server 修改强制工作流与规范（先读结构文档定位；新文件按分层落目录；业务日志用 logx；导出函数/Handler/Service/Repo 写中文注释；交付自检清单）。
 ---
 
-# PT Nexus Go 后端注释、日志与目录分层规范（server-go-standards）
+# PT Nexus Go 后端注释、日志与目录分层规范（server-standards）
 
 ## 1. 目标
 
-本 Skill 用于所有涉及 `server-go/` 的问题定位与代码修改，确保：
+本 Skill 用于所有涉及 `server/` 的问题定位与代码修改，确保：
 
 - 每个函数都能快速看懂用途与边界。
 - 运行日志在控制台与文件中都可追踪，便于定位与复现。
@@ -16,14 +16,14 @@ description: server-go 修改强制工作流与规范（先读结构文档定位
 
 ## 2. 触发范围（何时必须启用）
 
-满足任一条件即视为 `server-go` 任务，强制按本 Skill 执行：
+满足任一条件即视为 `server` 任务，强制按本 Skill 执行：
 
-1. 需求中出现 `server-go/` 路径或明确提到 Go 后端
-2. 对话过程中探索/打开/计划修改到任意 `server-go/**` 文件
+1. 需求中出现 `server/` 路径或明确提到 Go 后端
+2. 对话过程中探索/打开/计划修改到任意 `server/**` 文件
 
 ## 3. 强制工作流（先结构，后定位）
 
-1. 先打开并检索 `server-go/docs/PROJECT_STRUCTURE.md`，用业务关键词定位到对应分层与目录
+1. 先打开并检索 `server/docs/PROJECT_STRUCTURE.md`，用业务关键词定位到对应分层与目录
 2. 明确“应该在哪一层改”（handler / migrationflow / acquire / processing / publish / repository）
 3. 再开始在代码中搜索与打开文件（避免全仓库盲搜导致跨层实现）
 
@@ -55,19 +55,19 @@ description: server-go 修改强制工作流与规范（先读结构文档定位
 
 | 分层 | 目录 |
 |---|---|
-| HTTP Handler | `server-go/internal/http/handler/**` |
-| 编排入口（只做编排） | `server-go/internal/service/migrationflow/**` |
-| 获取与提取 | `server-go/internal/service/acquire/**` |
-| 修复/校验/标准化/入库 | `server-go/internal/service/processing/**` |
-| 发布/映射/上传/下载器 | `server-go/internal/service/publish/**` |
-| 数据读写 | `server-go/internal/repository/**` |
+| HTTP Handler | `server/internal/http/handler/**` |
+| 编排入口（只做编排） | `server/internal/service/migrationflow/**` |
+| 获取与提取 | `server/internal/service/acquire/**` |
+| 修复/校验/标准化/入库 | `server/internal/service/processing/**` |
+| 发布/映射/上传/下载器 | `server/internal/service/publish/**` |
+| 数据读写 | `server/internal/repository/**` |
 
 ### 5.2 提取器目录约束（硬性约束）
 
 必须保持“公共提取器 + 站点特殊提取器”模式：
 
-- 公共提取器：`server-go/internal/service/acquire/extractors/public.go`（及同目录下公共引擎文件）
-- 站点特殊提取器：`server-go/internal/service/acquire/extractors/sites/`
+- 公共提取器：`server/internal/service/acquire/extractors/public.go`（及同目录下公共引擎文件）
+- 站点特殊提取器：`server/internal/service/acquire/extractors/sites/`
 
 站点特殊提取器必须满足：
 
@@ -77,8 +77,8 @@ description: server-go 修改强制工作流与规范（先读结构文档定位
 
 新增特殊站点时，必须同时更新：
 
-- `server-go/internal/service/acquire/extractors/site_adapters.go`（注册/适配）
-- `server-go/docs/PROJECT_STRUCTURE.md`（结构文档同步）
+- `server/internal/service/acquire/extractors/site_adapters.go`（注册/适配）
+- `server/docs/PROJECT_STRUCTURE.md`（结构文档同步）
 
 “抖音”默认站点 code 为 `douyin`，因此默认文件名为 `douyin.go`；若仓库实际站点 code 不同，以实际为准。
 
@@ -103,7 +103,7 @@ description: server-go 修改强制工作流与规范（先读结构文档定位
 
 ### 5.5 变更落地要求（硬性约束）
 
-- 涉及目录结构或职责边界变动时，必须同步更新：`server-go/docs/PROJECT_STRUCTURE.md`。
+- 涉及目录结构或职责边界变动时，必须同步更新：`server/docs/PROJECT_STRUCTURE.md`。
 - 新模块/新分层引入前必须自检：分层职责、跨层反向依赖、桥接/兼容层是否应清理。
 
 ## 6. 函数注释规范（全中文）
@@ -135,7 +135,7 @@ description: server-go 修改强制工作流与规范（先读结构文档定位
 
 ### 7.1 统一日志入口（必须）
 
-必须使用 `server-go/internal/platform/logx` 提供的接口：
+必须使用 `server/internal/platform/logx` 提供的接口：
 
 - `logx.Debugf(module, format, args...)`
 - `logx.Infof(module, format, args...)`
@@ -149,7 +149,7 @@ description: server-go 修改强制工作流与规范（先读结构文档定位
 ### 7.2 示例（完整示例）
 
 ```go
-import "github.com/pt-nexus/server-go/internal/platform/logx"
+import "github.com/pt-nexus/server/internal/platform/logx"
 
 const module = "媒体校验-PTGen"
 
@@ -182,20 +182,20 @@ logx.Errorf(module, "流程终止 requestID=%s flowID=%s reason=%s", requestID, 
 
 ### 8.1 必须项（每次交付必须逐条确认）
 
-1. 已先查阅 `server-go/docs/PROJECT_STRUCTURE.md` 并据此定位分层/目录
+1. 已先查阅 `server/docs/PROJECT_STRUCTURE.md` 并据此定位分层/目录
 2. 新增/修改文件落在正确目录，且依赖方向未被破坏
 3. 新增导出函数/Handler/Service/Repository/异步入口/关键工具函数已按 4 点模板补全中文注释
 4. 未出现注释禁止项（无效注释/将来可能/中英混杂）
 5. 业务日志仅使用 `logx`，模块名为固定中文，等级使用合理
 6. 日志未输出敏感信息（密码/完整 Token/Cookie/隐私原文）
-7. 若新增站点特殊提取器：已更新 `server-go/internal/service/acquire/extractors/site_adapters.go` 与 `server-go/docs/PROJECT_STRUCTURE.md`
-8. **测试验证**：修改完成后必须先跑测试再交付；至少执行一次 `cd server-go && go test ./...`（如有明确影响范围，可补充更聚焦的包级测试命令，但不可跳过全量测试）
-9. **测试文件清理（自动执行）**：为保持 `server-go/` 代码库整洁，功能修改验证通过后（`go test ./...` 通过），必须自动清理 `server-go/` 下所有 `*_test.go` 测试文件。
+7. 若新增站点特殊提取器：已更新 `server/internal/service/acquire/extractors/site_adapters.go` 与 `server/docs/PROJECT_STRUCTURE.md`
+8. **测试验证**：修改完成后必须先跑测试再交付；至少执行一次 `cd server && go test ./...`（如有明确影响范围，可补充更聚焦的包级测试命令，但不可跳过全量测试）
+9. **测试文件清理（自动执行）**：为保持 `server/` 代码库整洁，功能修改验证通过后（`go test ./...` 通过），必须自动清理 `server/` 下所有 `*_test.go` 测试文件。
 
    - 预览将被删除的文件：
-     - `find server-go -type f -name '*_test.go' -print`
+     - `find server -type f -name '*_test.go' -print`
    - 一键删除（建议在仓库根目录执行）：
-     - `find server-go -type f -name '*_test.go' -print -delete`
+     - `find server -type f -name '*_test.go' -print -delete`
 
 ### 8.2 建议项（尽量做到）
 

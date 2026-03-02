@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	"github.com/pt-nexus/server-go/internal/service/downloaderclient"
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
-	publishguard "github.com/pt-nexus/server-go/internal/service/publish/guard"
-	publishuploader "github.com/pt-nexus/server-go/internal/service/publish/uploader"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	"github.com/pt-nexus/server/internal/service/downloaderclient"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
+	publishguard "github.com/pt-nexus/server/internal/service/publish/guard"
+	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 	"gorm.io/gorm"
 )
 

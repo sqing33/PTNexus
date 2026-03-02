@@ -3,9 +3,9 @@ package migrationflow
 import (
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 const updateDBSeedLogModule = "迁移-种子更新"

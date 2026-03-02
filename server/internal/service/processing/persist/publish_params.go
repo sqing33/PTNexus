@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 )
 
 // ComposeSeedID 组装种子唯一标识。

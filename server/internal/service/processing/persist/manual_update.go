@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingtagging "github.com/pt-nexus/server-go/internal/service/processing/tagging"
-	processingtitle "github.com/pt-nexus/server-go/internal/service/processing/title"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingtagging "github.com/pt-nexus/server/internal/service/processing/tagging"
+	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
 
 // BuildManualUpdateInput 表示转种面板手工编辑回写时的输入参数。

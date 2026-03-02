@@ -105,7 +105,7 @@ func Init(cfg Config) error {
 func loadConfigFromEnv() Config {
 	return Config{
 		LogDir:     envOrDefault("PTNEXUS_LOG_DIR", "./data/logs"),
-		LogFile:    envOrDefault("PTNEXUS_LOG_FILE", "ptnexus-go.log"),
+		LogFile:    envOrDefault("PTNEXUS_LOG_FILE", "ptnexus.log"),
 		Level:      envOrDefault("PTNEXUS_LOG_LEVEL", "info"),
 		MaxSizeMB:  envIntOrDefault("PTNEXUS_LOG_MAX_SIZE_MB", 20),
 		MaxBackups: envIntOrDefault("PTNEXUS_LOG_MAX_BACKUPS", 10),
@@ -127,7 +127,7 @@ func normalizeConfig(cfg Config) (Config, error) {
 
 	logFile := strings.TrimSpace(cfg.LogFile)
 	if logFile == "" {
-		logFile = "ptnexus-go.log"
+		logFile = "ptnexus.log"
 	}
 	if strings.Contains(logFile, string(filepath.Separator)) {
 		logFile = filepath.Base(logFile)

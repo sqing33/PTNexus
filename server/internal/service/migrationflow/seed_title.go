@@ -4,8 +4,8 @@ import (
 	"errors"
 	"strings"
 
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 	"gorm.io/gorm"
 )
 

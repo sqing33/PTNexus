@@ -11,15 +11,15 @@
 
 - 本项目同时维护两套实现，互相独立：
   - **Python 原版**：后端 `server/` + 前端 `webui/`。
-  - **Go 版本**：后端 `server-go/` + 前端 `webui-go/`。
+  - **Go 版本**：后端 `server/` + 前端 `webui/`。
 - 版本选择默认规则：
-  - 当需求未明确指定实现版本时，默认按 **Go 版本**（`server-go/` + `webui-go/`）进行修改。
+  - 当需求未明确指定实现版本时，默认按 **Go 版本**（`server/` + `webui/`）进行修改。
   - Go 版本是由 Python 原版重构而来的新实现，应作为默认开发目标。
   - 仅当需求明确指定 Python 原版，或明确涉及 `server/`、`webui/` 路径时，才在 Python 版本中改动。
 - 开发与修改必须按版本分隔进行：
-  - 不要在 `server-go/` 中直接调用/依赖 `server/`（Python）里已有的函数或实现。
-  - 若 Go 版本需要与 Python 原版相同的功能，必须在 `server-go/` 内实现等价逻辑（允许保持相同的接口语义/协议，但实现代码必须在 Go 侧独立存在）。
-- 修改 Go 后端（`server-go/`）时遵循 `.claude/skills/server-go-standards/SKILL.md` 中的规范。
+  - 不要在 `server/` 中直接调用/依赖 `server/`（Python）里已有的函数或实现。
+  - 若 Go 版本需要与 Python 原版相同的功能，必须在 `server/` 内实现等价逻辑（允许保持相同的接口语义/协议，但实现代码必须在 Go 侧独立存在）。
+- 修改 Go 后端（`server/`）时遵循 `.claude/skills/server-standards/SKILL.md` 中的规范。
 
 ## 构建、测试与开发命令
 

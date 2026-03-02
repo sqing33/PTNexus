@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
-	publishworkflow "github.com/pt-nexus/server-go/internal/service/publish/workflow"
-	settingspkg "github.com/pt-nexus/server-go/internal/service/settings"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
+	publishworkflow "github.com/pt-nexus/server/internal/service/publish/workflow"
+	settingspkg "github.com/pt-nexus/server/internal/service/settings"
 )
 
 func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {

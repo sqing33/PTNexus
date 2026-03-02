@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	extract "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	extract "github.com/pt-nexus/server/internal/service/acquire/extract"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 )
 
 const iyuuPlaceholderLogModule = "迁移-IYUU占位回写"

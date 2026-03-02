@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/repository"
+	"github.com/pt-nexus/server/internal/repository"
 )
 
 func collectUniqueStrings(records []repository.TorrentRecord, selector func(repository.TorrentRecord) string) []string {

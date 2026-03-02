@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	"github.com/pt-nexus/server-go/internal/service/downloaderclient"
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/service/downloaderclient"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 const screenshotTotalCount = 5

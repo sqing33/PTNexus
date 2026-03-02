@@ -1,9 +1,9 @@
 package handler
 
 import (
-	settingshandler "github.com/pt-nexus/server-go/internal/http/handler/settings"
-	"github.com/pt-nexus/server-go/internal/repository"
-	"github.com/pt-nexus/server-go/internal/service"
+	settingshandler "github.com/pt-nexus/server/internal/http/handler/settings"
+	"github.com/pt-nexus/server/internal/repository"
+	"github.com/pt-nexus/server/internal/service"
 )
 
 type SettingsHandler = settingshandler.Handler

@@ -3,7 +3,7 @@ package extract
 import (
 	"errors"
 
-	sites "github.com/pt-nexus/server-go/internal/service/acquire/extract/sites"
+	sites "github.com/pt-nexus/server/internal/service/acquire/extract/sites"
 )
 
 // RuntimeFactory 用于为 sites 包构造运行期依赖（函数注入）。

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 )
 
 var defaultTitleComponentKeys = []string{

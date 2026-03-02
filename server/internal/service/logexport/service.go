@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const (
@@ -74,7 +74,7 @@ func New() *ExportService {
 		primaryFile = strings.TrimSpace(os.Getenv("PTNEXUS_LOG_FILE"))
 	}
 	if primaryFile == "" {
-		primaryFile = "ptnexus-go.log"
+		primaryFile = "ptnexus.log"
 	}
 
 	maxMB := 200

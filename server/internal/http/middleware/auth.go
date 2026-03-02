@@ -12,7 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/pt-nexus/server-go/internal/service"
+	"github.com/pt-nexus/server/internal/service"
 )
 
 // JWTGuard 对 /api 路由进行身份校验，并保留必要的白名单放行逻辑。

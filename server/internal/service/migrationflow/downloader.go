@@ -1,7 +1,7 @@
 package migrationflow
 
 import (
-	publishdownloader "github.com/pt-nexus/server-go/internal/service/publish/downloader"
+	publishdownloader "github.com/pt-nexus/server/internal/service/publish/downloader"
 )
 
 func (s *MigrateService) GetDownloaderInfo(payload map[string]any) (map[string]any, int) {

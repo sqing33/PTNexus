@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingtitle "github.com/pt-nexus/server-go/internal/service/processing/title"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
 
 // NormalizeSeedRow 对 seed_parameters 行数据做统一归一化，便于后续发布映射与前端回显。

@@ -1,7 +1,7 @@
 package migrationflow
 
 import (
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 )
 
 // ExtractVideoSizeFromTorrentFile 解析 torrent 文件并统计视频文件总体积。

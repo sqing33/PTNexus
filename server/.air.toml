@@ -2,9 +2,9 @@ root = "."
 tmp_dir = "/tmp/ptnexus-air"
 
 [build]
-cmd = "go build -o /tmp/ptnexus-server-go.air ./cmd/server"
-bin = "/tmp/ptnexus-server-go.air"
-full_bin = "/tmp/ptnexus-server-go.air"
+cmd = "go build -o /tmp/ptnexus-server.air ./cmd/server"
+bin = "/tmp/ptnexus-server.air"
+full_bin = "/tmp/ptnexus-server.air"
 include_ext = ["go", "yaml", "yml", "json"]
 exclude_dir = ["data", "docs", "tmp", ".git", "bdinfo"]
 exclude_regex = ["_test\\.go"]

@@ -3,10 +3,10 @@ package persist
 import (
 	"time"
 
-	extract "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
-	processingtitle "github.com/pt-nexus/server-go/internal/service/processing/title"
+	extract "github.com/pt-nexus/server/internal/service/acquire/extract"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
+	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
 
 // FetchAndStoreEntryRepo 定义 FetchAndStore 编排流程所需仓储接口。

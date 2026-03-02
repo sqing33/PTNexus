@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 var (

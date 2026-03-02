@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 // BDInfoFlowRepo 定义 BDInfo 执行流程需要的最小仓储接口。

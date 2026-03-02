@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pt-nexus/server-go/internal/config"
+	"github.com/pt-nexus/server/internal/config"
 	"gopkg.in/yaml.v3"
 )
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/service/downloaderclient"
+	"github.com/pt-nexus/server/internal/service/downloaderclient"
 )
 
 func (s *TorrentTransferService) Pause(payload map[string]any) (map[string]any, int) {

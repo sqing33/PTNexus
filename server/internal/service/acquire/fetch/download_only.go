@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 // DownloadTorrentOnly 仅下载种子文件并返回路径、详情页与可选元信息。

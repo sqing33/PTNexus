@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-command dev runner (server-go + updater + optional webui dev server).
+# One-command dev runner (server + updater + optional webui dev server).
 #
 # Default usage:
-#   cd server-go && ./dev-run.sh
+#   cd server && ./dev-run.sh
 #
 # Commands:
 #   ./dev-run.sh up        # start, then tail logs (default)
@@ -13,7 +13,7 @@ set -euo pipefail
 #
 # Tunables (env):
 #   SERVER_PORT=5275 UPDATER_PORT=5274 BATCH_PORT=5276 WEBUI_PORT=5173
-#   WEBUI=1 WEBUI_DIR=/home/sqing/Codes/PTNexus/webui-go
+#   WEBUI=1 WEBUI_DIR=/home/sqing/Codes/PTNexus/webui
 #   UPLOAD_TEST_MODE=true  # 跳过真实发布，模拟成功响应（仅用于调试）
 #   CURL_CONNECT_TIMEOUT=1 CURL_MAX_TIME=2 TCP_PROBE_TIMEOUT=1
 
@@ -26,19 +26,19 @@ BATCH_PORT="${BATCH_PORT:-5276}"
 
 WEBUI="${WEBUI:-1}"
 WEBUI_PORT="${WEBUI_PORT:-5173}"
-WEBUI_DIR="${WEBUI_DIR:-/home/sqing/Codes/PTNexus/webui-go}"
+WEBUI_DIR="${WEBUI_DIR:-/home/sqing/Codes/PTNexus/webui}"
 
 AIR_CONFIG_FILE="$SERVERGO_DIR/.air.toml"
 
-LEGACY_SERVER_BIN="${LEGACY_SERVER_BIN:-/tmp/ptnexus-server-go.dev}"
-SERVER_AIR_BIN="${SERVER_AIR_BIN:-/tmp/ptnexus-server-go.air}"
+LEGACY_SERVER_BIN="${LEGACY_SERVER_BIN:-/tmp/ptnexus-server.dev}"
+SERVER_AIR_BIN="${SERVER_AIR_BIN:-/tmp/ptnexus-server.air}"
 UPDATER_BIN="${UPDATER_BIN:-/tmp/ptnexus-updater.dev}"
 
-SERVER_PIDFILE="${SERVER_PIDFILE:-/tmp/ptnexus-server-go.${SERVER_PORT}.pid}"
+SERVER_PIDFILE="${SERVER_PIDFILE:-/tmp/ptnexus-server.${SERVER_PORT}.pid}"
 UPDATER_PIDFILE="${UPDATER_PIDFILE:-/tmp/ptnexus-updater.${UPDATER_PORT}.pid}"
 WEBUI_PIDFILE="${WEBUI_PIDFILE:-/tmp/ptnexus-webui.${WEBUI_PORT}.pid}"
 
-SERVER_LOG="${SERVER_LOG:-/tmp/ptnexus-server-go.${SERVER_PORT}.log}"
+SERVER_LOG="${SERVER_LOG:-/tmp/ptnexus-server.${SERVER_PORT}.log}"
 UPDATER_LOG="${UPDATER_LOG:-/tmp/ptnexus-updater.${UPDATER_PORT}.log}"
 WEBUI_LOG="${WEBUI_LOG:-/tmp/ptnexus-webui.${WEBUI_PORT}.log}"
 
@@ -86,7 +86,7 @@ stop_known_conflicts() {
   # Make "one command" deterministic: don't accidentally keep talking to an old checkout.
   #
   # This only kills processes that look like:
-  # - PT Nexus server-go (dev bin / air / go run ./cmd/server) bound to :SERVER_PORT
+  # - PT Nexus server (dev bin / air / go run ./cmd/server) bound to :SERVER_PORT
   # - PT Nexus updater (./updater) bound to :UPDATER_PORT
   # - PT Nexus webui (vite/pnpm dev) bound to :WEBUI_PORT
 
@@ -94,11 +94,11 @@ stop_known_conflicts() {
 
   # Previous runs of this script (exact dev binaries).
   for pid in $(pgrep -f "$LEGACY_SERVER_BIN" 2>/dev/null || true); do
-    echo "kill conflict: server-go (legacy dev bin) pid=${pid}"
+    echo "kill conflict: server (legacy dev bin) pid=${pid}"
     kill -TERM "$pid" 2>/dev/null || true
   done
   for pid in $(pgrep -f "$SERVER_AIR_BIN" 2>/dev/null || true); do
-    echo "kill conflict: server-go (air bin) pid=${pid}"
+    echo "kill conflict: server (air bin) pid=${pid}"
     kill -TERM "$pid" 2>/dev/null || true
   done
   for pid in $(pgrep -f "$UPDATER_BIN" 2>/dev/null || true); do
@@ -110,7 +110,7 @@ stop_known_conflicts() {
     cwd="$(get_cwd "$pid")"
     cmd="$(get_cmdline "$pid")"
     if [[ "$cmd" == *"go run ./cmd/server"* && "$cwd" == *"PT Nexus/server"* ]]; then
-      echo "kill conflict: server-go (docker-dev) pid=${pid}"
+      echo "kill conflict: server (docker-dev) pid=${pid}"
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done
@@ -127,7 +127,7 @@ stop_known_conflicts() {
     cwd="$(get_cwd "$pid")"
     cmd="$(get_cmdline "$pid")"
     if [[ "$cwd" == "$SERVERGO_DIR" && "$cmd" == *".air.toml"* ]]; then
-      echo "kill conflict: server-go (air) pid=${pid}"
+      echo "kill conflict: server (air) pid=${pid}"
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done
@@ -226,7 +226,7 @@ resolve_air_cmd() {
 }
 
 build_binaries() {
-  echo "build: server-go managed by air (skip prebuild)"
+  echo "build: server managed by air (skip prebuild)"
   echo "build: updater -> $UPDATER_BIN"
   (cd "$REPO_ROOT/updater" && go build -o "$UPDATER_BIN" ./updater.go)
 }
@@ -242,7 +242,7 @@ start_server_go() {
     exit 1
   fi
 
-  echo "start: server-go :${SERVER_PORT} (hot reload: air, log: $SERVER_LOG)"
+  echo "start: server :${SERVER_PORT} (hot reload: air, log: $SERVER_LOG)"
   rm -f "$SERVER_LOG" 2>/dev/null || true
 
   (cd "$SERVERGO_DIR" && nohup env \
@@ -254,7 +254,7 @@ start_server_go() {
     >"$SERVER_LOG" 2>&1 </dev/null & echo $! >"$SERVER_PIDFILE")
 
   if ! wait_http_ok "http://127.0.0.1:${SERVER_PORT}/health" 12; then
-    echo "server-go failed to become healthy; last logs:" >&2
+    echo "server failed to become healthy; last logs:" >&2
     tail -n 120 "$SERVER_LOG" >&2 || true
     exit 1
   fi
@@ -306,7 +306,7 @@ print_ready() {
     echo "  webui:     http://127.0.0.1:${WEBUI_PORT}"
   fi
   echo "  updater:   http://127.0.0.1:${UPDATER_PORT}"
-  echo "  server-go: http://127.0.0.1:${SERVER_PORT}"
+  echo "  server: http://127.0.0.1:${SERVER_PORT}"
   echo "  cookie API: http://127.0.0.1:${UPDATER_PORT}/api/sites/cookie_sync_targets"
 }
 
@@ -322,7 +322,7 @@ esac
 if [[ "$ACTION" == "down" ]]; then
   stop_pidfile "$WEBUI_PIDFILE" "webui"
   stop_pidfile "$UPDATER_PIDFILE" "updater"
-  stop_pidfile "$SERVER_PIDFILE" "server-go"
+  stop_pidfile "$SERVER_PIDFILE" "server"
   exit 0
 fi
 
@@ -332,11 +332,11 @@ if [[ "$ACTION" == "status" ]]; then
     curl_http_ok "http://127.0.0.1:${WEBUI_PORT}/" && echo "webui: up" || echo "webui: down"
   fi
   curl_http_ok "http://127.0.0.1:${UPDATER_PORT}/health" && echo "updater: up" || echo "updater: down"
-  curl_http_ok "http://127.0.0.1:${SERVER_PORT}/health" && echo "server-go: up" || echo "server-go: down"
+  curl_http_ok "http://127.0.0.1:${SERVER_PORT}/health" && echo "server: up" || echo "server: down"
   exit 0
 fi
 
-ensure_port_free_or_fail "http://127.0.0.1:${SERVER_PORT}/health" "server-go" "$SERVER_PORT"
+ensure_port_free_or_fail "http://127.0.0.1:${SERVER_PORT}/health" "server" "$SERVER_PORT"
 ensure_port_free_or_fail "http://127.0.0.1:${UPDATER_PORT}/health" "updater" "$UPDATER_PORT"
 if [[ "$WEBUI" != "0" ]]; then
   ensure_port_free_or_fail "http://127.0.0.1:${WEBUI_PORT}/" "webui" "$WEBUI_PORT"

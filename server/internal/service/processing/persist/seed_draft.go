@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"strings"
 
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
-	processingtagging "github.com/pt-nexus/server-go/internal/service/processing/tagging"
-	processingtitle "github.com/pt-nexus/server-go/internal/service/processing/title"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
+	processingtagging "github.com/pt-nexus/server/internal/service/processing/tagging"
+	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
 
 // SeedDraft 表示“种子参数”在抓取/修复/纠偏过程中逐步补全的领域实体草稿。

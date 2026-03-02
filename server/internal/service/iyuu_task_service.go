@@ -1,6 +1,6 @@
 package service
 
-import torrentdatapkg "github.com/pt-nexus/server-go/internal/service/torrentdata"
+import torrentdatapkg "github.com/pt-nexus/server/internal/service/torrentdata"
 
 type IYUUTaskService = torrentdatapkg.IYUUTaskService
 

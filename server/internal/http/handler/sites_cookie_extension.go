@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pt-nexus/server-go/internal/http/middleware"
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/http/middleware"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const siteCookieSyncLogModule = "浏览器插件-Cookie同步"

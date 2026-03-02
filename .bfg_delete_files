@@ -15,7 +15,7 @@ public.yml
 # Go 版本
 batch.go
 build-beta.yml
-build-go.yml
-Dockerfile.go
-supervisord-go.conf
-start-services-go.sh
+build.yml
+Dockerfile
+supervisord.conf
+start-services.sh

@@ -4,11 +4,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
-	publishworkflow "github.com/pt-nexus/server-go/internal/service/publish/workflow"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
+	publishworkflow "github.com/pt-nexus/server/internal/service/publish/workflow"
 )
 
 const (

@@ -1,6 +1,6 @@
 package migrationflow
 
-import "github.com/pt-nexus/server-go/internal/service/reversemapping"
+import "github.com/pt-nexus/server/internal/service/reversemapping"
 
 func (s *MigrateService) reverseMappings() map[string]any {
 	if s == nil || s.cfg == nil {

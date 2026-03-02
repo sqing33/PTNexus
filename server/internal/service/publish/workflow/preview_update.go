@@ -3,8 +3,8 @@ package workflow
 import (
 	"strings"
 
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 // PreviewUpdateDeps 定义预览更新流程依赖。

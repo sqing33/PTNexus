@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	extract "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingmedia "github.com/pt-nexus/server-go/internal/service/processing/media"
+	extract "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 func runeLen(text string) int {

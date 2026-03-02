@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 type ffprobeSubtitleStreams struct {

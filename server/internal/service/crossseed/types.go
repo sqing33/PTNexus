@@ -1,6 +1,6 @@
 package crossseed
 
-import "github.com/pt-nexus/server-go/internal/repository"
+import "github.com/pt-nexus/server/internal/repository"
 
 type CrossSeedQueryParams struct {
 	Page               int

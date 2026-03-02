@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	parser "github.com/pt-nexus/server-go/internal/service/acquire/extract"
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 )
 
 // FetchFinalizeFlowInput 定义抓取后“修复+入库+收敛日志”流程输入。

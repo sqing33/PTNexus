@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	"github.com/pt-nexus/server-go/internal/repository"
-	"github.com/pt-nexus/server-go/internal/service/downloaderclient"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/repository"
+	"github.com/pt-nexus/server/internal/service/downloaderclient"
 )
 
 const (

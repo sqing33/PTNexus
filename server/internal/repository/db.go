@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/config"
 	"github.com/glebarez/sqlite"
+	"github.com/pt-nexus/server/internal/config"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

@@ -3,10 +3,10 @@ package migrationflow
 import (
 	"strings"
 
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
-	publishworkflow "github.com/pt-nexus/server-go/internal/service/publish/workflow"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
+	publishworkflow "github.com/pt-nexus/server/internal/service/publish/workflow"
 )
 
 func (s *MigrateService) DownloadTorrentOnly(payload map[string]any) (map[string]any, int) {

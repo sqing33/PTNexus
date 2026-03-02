@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	publishmapping "github.com/pt-nexus/server-go/internal/service/publish/mapping"
-	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	publishmapping "github.com/pt-nexus/server/internal/service/publish/mapping"
+	"github.com/pt-nexus/server/internal/service/publish/publisher"
 )
 
 const hdfansPublishMappingLogModule = "发布-HDFans"

@@ -3,8 +3,8 @@ package persist
 import (
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	processingtagging "github.com/pt-nexus/server-go/internal/service/processing/tagging"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	processingtagging "github.com/pt-nexus/server/internal/service/processing/tagging"
 )
 
 // FetchFinalizeLoggingInput 定义抓取最终收敛日志输出参数。

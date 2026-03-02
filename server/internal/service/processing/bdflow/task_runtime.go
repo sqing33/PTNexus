@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	"github.com/pt-nexus/server-go/internal/service/downloaderclient"
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/service/downloaderclient"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
 )
 
 // RunTaskInput 定义 BDInfo 任务执行输入。

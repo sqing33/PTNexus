@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/repository"
+	"github.com/pt-nexus/server/internal/repository"
 )
 
 func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any, error) {

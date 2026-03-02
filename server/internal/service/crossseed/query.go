@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/service/reversemapping"
+	"github.com/pt-nexus/server/internal/service/reversemapping"
 )
 
 var inactiveTorrentStates = []string{"未做种", "已暂停", "已停止", "错误", "等待", "队列"}

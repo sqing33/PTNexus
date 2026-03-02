@@ -4,9 +4,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 )
 
 // FetchAndStoreOutcomeInput 定义抓取入口执行后的收口输入。

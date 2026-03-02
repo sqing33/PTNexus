@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
 )
 
 // BDInfoCallbackRepo 定义 BDInfo 回调落库所需的最小仓储接口。

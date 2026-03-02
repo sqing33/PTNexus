@@ -3,7 +3,7 @@ package extract
 import (
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
 const routeLogModule = "迁移-参数提取"

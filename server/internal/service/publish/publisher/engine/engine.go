@@ -3,8 +3,8 @@ package engine
 import (
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/service/publish/publisher"
-	publishsites "github.com/pt-nexus/server-go/internal/service/publish/publisher/sites"
+	"github.com/pt-nexus/server/internal/service/publish/publisher"
+	publishsites "github.com/pt-nexus/server/internal/service/publish/publisher/sites"
 )
 
 // Publish 按站点 code 路由到公共发布器或对应站点的特殊发布器。

@@ -11,14 +11,14 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/http/handler"
-	migratehandler "github.com/pt-nexus/server-go/internal/http/handler/migrate"
-	"github.com/pt-nexus/server-go/internal/http/middleware"
-	"github.com/pt-nexus/server-go/internal/platform/logx"
-	"github.com/pt-nexus/server-go/internal/repository"
-	"github.com/pt-nexus/server-go/internal/service"
-	migrationflow "github.com/pt-nexus/server-go/internal/service/migrationflow"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/http/handler"
+	migratehandler "github.com/pt-nexus/server/internal/http/handler/migrate"
+	"github.com/pt-nexus/server/internal/http/middleware"
+	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/repository"
+	"github.com/pt-nexus/server/internal/service"
+	migrationflow "github.com/pt-nexus/server/internal/service/migrationflow"
 )
 
 // App 封装 Gin 引擎实例，供主程序启动 HTTP 服务。

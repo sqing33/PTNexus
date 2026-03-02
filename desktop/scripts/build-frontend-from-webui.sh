@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DESKTOP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$DESKTOP_ROOT/.." && pwd)"
-WEBUI_ROOT="$REPO_ROOT/webui-go"
+WEBUI_ROOT="$REPO_ROOT/webui"
 WEBUI_DIST="$WEBUI_ROOT/dist"
 TARGET_DIST="$DESKTOP_ROOT/frontend/dist"
 SOURCE_ICON="$WEBUI_ROOT/public/favicon.ico"
@@ -18,30 +18,30 @@ if ! command -v pnpm >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[desktop-go] building frontend from: $WEBUI_ROOT"
+echo "[desktop] building frontend from: $WEBUI_ROOT"
 cd "$WEBUI_ROOT"
 pnpm run build
 
-echo "[desktop-go] syncing dist to: $TARGET_DIST"
+echo "[desktop] syncing dist to: $TARGET_DIST"
 mkdir -p "$TARGET_DIST"
 rsync -a --delete "$WEBUI_DIST/" "$TARGET_DIST/"
 
 if [[ -f "$SOURCE_ICON" ]]; then
-  echo "[desktop-go] syncing icon: $SOURCE_ICON -> $TARGET_ICON"
+  echo "[desktop] syncing icon: $SOURCE_ICON -> $TARGET_ICON"
   cp "$SOURCE_ICON" "$TARGET_ICON"
 else
-  echo "[desktop-go] warning: icon not found at $SOURCE_ICON" >&2
+  echo "[desktop] warning: icon not found at $SOURCE_ICON" >&2
 fi
 
 if [[ -f "$UPDATER_ROOT/updater.go" ]]; then
-  echo "[desktop-go] building updater sidecar: $UPDATER_EXE"
+  echo "[desktop] building updater sidecar: $UPDATER_EXE"
   mkdir -p "$UPDATER_OUT_DIR"
   (
     cd "$UPDATER_ROOT"
     GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o "$UPDATER_EXE" updater.go
   )
 else
-  echo "[desktop-go] warning: updater.go not found at $UPDATER_ROOT/updater.go" >&2
+  echo "[desktop] warning: updater.go not found at $UPDATER_ROOT/updater.go" >&2
 fi
 
-echo "[desktop-go] frontend sync completed"
+echo "[desktop] frontend sync completed"

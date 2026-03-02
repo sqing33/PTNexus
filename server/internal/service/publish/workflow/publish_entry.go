@@ -5,10 +5,10 @@ import (
 	neturl "net/url"
 	"strings"
 
-	acquirefetch "github.com/pt-nexus/server-go/internal/service/acquire/fetch"
-	publishchecker "github.com/pt-nexus/server-go/internal/service/publish/checker"
-	publishguard "github.com/pt-nexus/server-go/internal/service/publish/guard"
-	publishuploader "github.com/pt-nexus/server-go/internal/service/publish/uploader"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	publishchecker "github.com/pt-nexus/server/internal/service/publish/checker"
+	publishguard "github.com/pt-nexus/server/internal/service/publish/guard"
+	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
 
 // PublishExecutionInput 定义单站发布执行输入。

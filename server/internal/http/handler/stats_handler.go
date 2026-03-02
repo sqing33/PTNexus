@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pt-nexus/server-go/internal/service"
+	"github.com/pt-nexus/server/internal/service"
 )
 
 type StatsHandler struct {

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pt-nexus/server-go/internal/repository"
+	"github.com/pt-nexus/server/internal/repository"
 )
 
 func (s *TorrentDataService) applyFilters(data []map[string]any, params TorrentsDataParams, siteConfigMap map[string]repository.SiteConfig) []map[string]any {

@@ -1,9 +1,9 @@
 package service
 
 import (
-	"github.com/pt-nexus/server-go/internal/config"
-	"github.com/pt-nexus/server-go/internal/repository"
-	torrentdatapkg "github.com/pt-nexus/server-go/internal/service/torrentdata"
+	"github.com/pt-nexus/server/internal/config"
+	"github.com/pt-nexus/server/internal/repository"
+	torrentdatapkg "github.com/pt-nexus/server/internal/service/torrentdata"
 )
 
 type TorrentsDataParams = torrentdatapkg.TorrentsDataParams

@@ -3,10 +3,10 @@ package migrationflow
 import (
 	"strings"
 
-	processingpersist "github.com/pt-nexus/server-go/internal/service/processing/persist"
-	processingrepair "github.com/pt-nexus/server-go/internal/service/processing/repair"
-	processingshared "github.com/pt-nexus/server-go/internal/service/processing/shared"
-	processingtitle "github.com/pt-nexus/server-go/internal/service/processing/title"
+	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
+	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
 
 func (s *MigrateService) ParseTitle(title string, mediainfo string, requestID string) (map[string]any, int) {
