@@ -2,14 +2,28 @@ package uploader
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	neturl "net/url"
+	"regexp"
 	"strings"
 	"time"
 )
+
+const (
+	uploadRequestTimeout       = 180 * time.Second
+	uploadTLSHandshakeTimeout  = 45 * time.Second
+	uploadNetworkRetryAttempts = 3
+	uploadResponseSummaryLimit = 600
+)
+
+var reHTMLTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 
 // TryUploadTorrent 执行单次上传尝试，支持重定向 Location 与响应正文解析详情页链接。
 // 参数/返回：uploadURL/baseURL/cookie/fileField 为站点上传所需信息；torrentFile 为种子字节；formFields 为表单字段；
@@ -19,6 +33,7 @@ import (
 func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile []byte, fileName string, formFields map[string]string) (string, bool, string, error) {
 	detailLines := []string{
 		fmt.Sprintf("正在上传种子文件..."),
+		fmt.Sprintf("上传端点: %s (文件字段: %s)", strings.TrimSpace(uploadURL), strings.TrimSpace(fileField)),
 	}
 	buildDetail := func() string {
 		return strings.Join(detailLines, "\n")
@@ -32,10 +47,10 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 		}
 		_ = writer.WriteField(key, value)
 	}
-	part, err := writer.CreateFormFile(fileField, fileName)
-	if err != nil {
-		detailLines = append(detailLines, fmt.Sprintf("构建上传表单失败: %v", err))
-		return "", false, buildDetail(), err
+	part, createFileErr := writer.CreateFormFile(fileField, fileName)
+	if createFileErr != nil {
+		detailLines = append(detailLines, fmt.Sprintf("构建上传表单失败: %v", createFileErr))
+		return "", false, buildDetail(), createFileErr
 	}
 	if _, err := part.Write(torrentFile); err != nil {
 		detailLines = append(detailLines, fmt.Sprintf("写入种子内容失败: %v", err))
@@ -46,25 +61,39 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 		return "", false, buildDetail(), err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, uploadURL, body)
-	if err != nil {
-		detailLines = append(detailLines, fmt.Sprintf("创建 HTTP 请求失败: %v", err))
-		return "", false, buildDetail(), err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.Header.Set("Cookie", cookie)
-	req.Header.Set("Referer", strings.TrimRight(baseURL, "/")+"/upload.php")
+	contentType := writer.FormDataContentType()
+	payloadBytes := append([]byte(nil), body.Bytes()...)
 
-	client := &http.Client{
-		Timeout: 120 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+	client := newUploadHTTPClient()
+	resp := (*http.Response)(nil)
+	var err error
+	for attempt := 1; attempt <= uploadNetworkRetryAttempts; attempt++ {
+		requestBody := bytes.NewReader(payloadBytes)
+		req, buildErr := http.NewRequest(http.MethodPost, uploadURL, requestBody)
+		if buildErr != nil {
+			detailLines = append(detailLines, fmt.Sprintf("创建 HTTP 请求失败: %v", buildErr))
+			return "", false, buildDetail(), buildErr
+		}
+		req.Header.Set("Content-Type", contentType)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+		req.Header.Set("Cookie", cookie)
+		req.Header.Set("Referer", strings.TrimRight(baseURL, "/")+"/upload.php")
+
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+
+		detailLines = append(detailLines, fmt.Sprintf("请求失败 (第 %d/%d 次): %v", attempt, uploadNetworkRetryAttempts, err))
+		if !ShouldRetryUploadNetworkError(err) || attempt >= uploadNetworkRetryAttempts {
+			return "", false, buildDetail(), err
+		}
+
+		backoff := time.Duration(attempt) * 2 * time.Second
+		detailLines = append(detailLines, fmt.Sprintf("检测到网络波动，%.0f 秒后重试...", backoff.Seconds()))
+		time.Sleep(backoff)
 	}
-	resp, err := client.Do(req)
 	if err != nil {
-		detailLines = append(detailLines, fmt.Sprintf("请求失败: %v", err))
 		return "", false, buildDetail(), err
 	}
 	defer resp.Body.Close()
@@ -103,6 +132,11 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 			detailLines = append(detailLines, "尝试结论: 目标站点提示种子已存在，但未返回详情链接，按已存在处理")
 			return "", true, buildDetail(), nil
 		}
+		if looksLikeUploadFormPage(bodyText) {
+			err = fmt.Errorf("站点返回上传表单页面，可能是字段缺失、校验未通过或会话状态异常")
+			detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+			return "", isExisting, buildDetail(), err
+		}
 	}
 
 	if responseDetail == "" {
@@ -111,6 +145,44 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 	err = fmt.Errorf("HTTP %d 上传失败: %s", resp.StatusCode, responseDetail)
 	detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
 	return "", isExisting, buildDetail(), err
+}
+
+// ShouldRetryUploadNetworkError 判断上传请求错误是否属于可重试的网络异常。
+// 参数/返回：err 为请求返回错误；当错误可能由瞬时网络抖动导致时返回 true。
+// 失败场景：无失败场景，未知错误按不可重试处理。
+// 副作用：无。
+func ShouldRetryUploadNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	lower := strings.ToLower(strings.TrimSpace(err.Error()))
+	for _, keyword := range []string{
+		"tls handshake timeout",
+		"i/o timeout",
+		"context deadline exceeded",
+		"timeout awaiting response headers",
+		"connection reset by peer",
+		"connection refused",
+		"unexpected eof",
+		"temporary failure",
+		"no route to host",
+	} {
+		if strings.Contains(lower, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeExistingTorrent(text string) bool {
@@ -130,7 +202,75 @@ func summarizeResponseBody(text string) string {
 	if trimmed == "" {
 		return ""
 	}
-	return strings.Join(strings.Fields(trimmed), " ")
+	normalized := strings.Join(strings.Fields(trimmed), " ")
+	title := extractUploadHTMLTitle(trimmed)
+	if looksLikeUploadFormPage(trimmed) {
+		return truncateLogText(fmt.Sprintf("返回上传表单页面 (title=%s): %s", title, normalized), uploadResponseSummaryLimit)
+	}
+	if looksLikeHTMLResponse(trimmed) {
+		if title != "" {
+			return truncateLogText(fmt.Sprintf("返回 HTML 页面 (title=%s): %s", title, normalized), uploadResponseSummaryLimit)
+		}
+		return truncateLogText("返回 HTML 页面: "+normalized, uploadResponseSummaryLimit)
+	}
+	return truncateLogText(normalized, uploadResponseSummaryLimit)
+}
+
+func newUploadHTTPClient() *http.Client {
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   uploadTLSHandshakeTimeout,
+		ExpectContinueTimeout: 1 * time.Second,
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+	return &http.Client{
+		Timeout:   uploadRequestTimeout,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+func looksLikeUploadFormPage(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	if !strings.Contains(lower, "<form") {
+		return false
+	}
+	if strings.Contains(lower, "action=\"takeupload.php\"") || strings.Contains(lower, "action='takeupload.php'") {
+		return true
+	}
+	return strings.Contains(lower, "name=\"upload\"") || strings.Contains(lower, "发布 - powered by nexusphp")
+}
+
+func looksLikeHTMLResponse(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.HasPrefix(lower, "<!doctype html") || strings.Contains(lower, "<html")
+}
+
+func extractUploadHTMLTitle(text string) string {
+	match := reHTMLTitle.FindStringSubmatch(text)
+	if len(match) < 2 {
+		return ""
+	}
+	return truncateLogText(strings.Join(strings.Fields(strings.TrimSpace(match[1])), " "), 120)
+}
+
+func truncateLogText(text string, maxLen int) string {
+	if maxLen <= 0 || len(text) <= maxLen {
+		return text
+	}
+	if maxLen <= 3 {
+		return text[:maxLen]
+	}
+	return text[:maxLen-3] + "..."
 }
 
 func hasExistingFlagInLocation(location string) bool {

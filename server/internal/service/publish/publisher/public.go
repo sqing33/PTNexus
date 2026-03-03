@@ -139,8 +139,8 @@ func PublishPublic(input PublishInput) (PublishResult, error) {
 		fileField string
 	}
 	attemptTargets := make([]uploadAttemptTarget, 0, len(uploadURLs)*len(fileFields))
-	for _, fileField := range fileFields {
-		for _, uploadURL := range uploadURLs {
+	for _, uploadURL := range uploadURLs {
+		for _, fileField := range fileFields {
 			attemptTargets = append(attemptTargets, uploadAttemptTarget{uploadURL: uploadURL, fileField: fileField})
 		}
 	}
@@ -150,14 +150,12 @@ func PublishPublic(input PublishInput) (PublishResult, error) {
 
 	lastErr := error(nil)
 	existing := false
-	maxRetryCount := 1
-	totalAttempts := maxRetryCount + 1
-	if totalAttempts > len(attemptTargets) {
-		totalAttempts = len(attemptTargets)
-	}
+	totalAttempts := len(attemptTargets)
+	takeUploadURL := uploadURLs[0]
 
 	for attemptIndex := 0; attemptIndex < totalAttempts; attemptIndex++ {
 		target := attemptTargets[attemptIndex]
+		appendLog(fmt.Sprintf("上传尝试 %d/%d: %s (文件字段: %s)", attemptIndex+1, totalAttempts, target.uploadURL, target.fileField))
 		publishURL, attemptExisting, attemptDetail, attemptErr := publishuploader.TryUploadTorrent(
 			target.uploadURL,
 			baseURL,
@@ -181,6 +179,13 @@ func PublishPublic(input PublishInput) (PublishResult, error) {
 		// 站点已明确提示“种子已存在”时不再重试，避免后续尝试把错误覆盖为冗长 HTML 页面。
 		if attemptExisting {
 			break
+		}
+		if publishuploader.ShouldRetryUploadNetworkError(attemptErr) && target.uploadURL == takeUploadURL {
+			nextIndex := attemptIndex + 1
+			if nextIndex >= totalAttempts || attemptTargets[nextIndex].uploadURL != takeUploadURL {
+				appendLog("网络异常持续发生，已停止切换到 upload.php，保留原始网络错误")
+				break
+			}
 		}
 	}
 
