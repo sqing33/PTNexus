@@ -47,6 +47,7 @@ func FetchMovieInfo(mediaType, contentName, subtitle string, sourceInfo map[stri
 		Douban: NormalizeExternalLink(toStringAny(sourceInfo["douban_link"], ""), reDoubanLink),
 		TMDb:   NormalizeExternalLink(toStringAny(sourceInfo["tmdb_link"], ""), reTMDbLink),
 	}
+	tmdbBackfillAttempted := false
 
 	if result.Douban == "" && result.IMDb != "" {
 		if douban, imdb := queryByIMDb(result.IMDb); douban != "" || imdb != "" {
@@ -80,6 +81,10 @@ func FetchMovieInfo(mediaType, contentName, subtitle string, sourceInfo map[stri
 			}
 		}
 	}
+	result.TMDb = firstNonEmpty(
+		result.TMDb,
+		backfillTMDbByIMDbIfNeeded(result.TMDb, result.IMDb, &tmdbBackfillAttempted, movieInfoLogModule, "初始外链互补后"),
+	)
 
 	format, formatIMDb, formatDouban, formatTMDb, errMsg := fetchPTGenFormat(result, csptToken)
 	if errMsg == "" && strings.TrimSpace(format) != "" {
@@ -87,13 +92,17 @@ func FetchMovieInfo(mediaType, contentName, subtitle string, sourceInfo map[stri
 		result.IMDb = firstNonEmpty(imdb, result.IMDb)
 		result.Douban = firstNonEmpty(douban, result.Douban)
 		result.TMDb = firstNonEmpty(tmdb, result.TMDb)
+		result.TMDb = firstNonEmpty(
+			result.TMDb,
+			backfillTMDbByIMDbIfNeeded(result.TMDb, result.IMDb, &tmdbBackfillAttempted, movieInfoLogModule, "PTGen解析后"),
+		)
 		if mediaType == "poster" && strings.TrimSpace(poster) != "" {
 			result.Poster = poster
 			logFetchMovieInfoResult(mediaType, "ptgen", result, "PTGen格式返回海报")
 			return result, ""
 		}
 		if mediaType == "intro" && strings.TrimSpace(intro) != "" {
-			result.Intro = intro
+			result.Intro = ensureTMDbLinkLineForPTGenIntro(intro, result.TMDb)
 			logFetchMovieInfoResult(mediaType, "ptgen", result, "PTGen格式返回简介")
 			return result, ""
 		}
@@ -109,6 +118,10 @@ func FetchMovieInfo(mediaType, contentName, subtitle string, sourceInfo map[stri
 			if result.TMDb == "" {
 				result.TMDb = NormalizeExternalLink(reTMDbInFormat.FindString(doubanHTML), reTMDbLink)
 			}
+			result.TMDb = firstNonEmpty(
+				result.TMDb,
+				backfillTMDbByIMDbIfNeeded(result.TMDb, result.IMDb, &tmdbBackfillAttempted, movieInfoLogModule, "豆瓣页面解析后"),
+			)
 			posterURLs := extractPosterURLs(doubanHTML, result.Douban)
 			summary := extractDoubanSummary(doubanHTML)
 			if mediaType == "poster" && len(posterURLs) > 0 {
@@ -127,9 +140,10 @@ func FetchMovieInfo(mediaType, contentName, subtitle string, sourceInfo map[stri
 	}
 
 	if needsTMDbFallback(mediaType, result) {
-		if result.TMDb == "" && result.IMDb != "" {
-			result.TMDb = imdbToTMDb(result.IMDb)
-		}
+		result.TMDb = firstNonEmpty(
+			result.TMDb,
+			backfillTMDbByIMDbIfNeeded(result.TMDb, result.IMDb, &tmdbBackfillAttempted, movieInfoLogModule, "TMDb内容兜底前"),
+		)
 		if result.TMDb != "" {
 			tmdbPoster, tmdbOverview, tmdbIMDb := fetchTMDbDetails(result.TMDb)
 			if result.IMDb == "" && tmdbIMDb != "" {
@@ -552,6 +566,50 @@ func needsTMDbFallback(mediaType string, result MovieInfoResult) bool {
 	return false
 }
 
+func backfillTMDbByIMDbIfNeeded(currentTMDb, imdb string, attempted *bool, logModule, stage string) string {
+	if strings.TrimSpace(currentTMDb) != "" {
+		return strings.TrimSpace(currentTMDb)
+	}
+	if attempted != nil && *attempted {
+		return ""
+	}
+	normalizedIMDb := NormalizeExternalLink(imdb, reIMDbLink)
+	if normalizedIMDb == "" {
+		return ""
+	}
+	if attempted != nil {
+		*attempted = true
+	}
+	module := strings.TrimSpace(logModule)
+	if module == "" {
+		module = movieInfoLogModule
+	}
+	logx.Infof(
+		module,
+		"开始尝试补全TMDb链接 stage=%s imdb=%s",
+		stage,
+		CompactLogText(normalizedIMDb, 120),
+	)
+	resolvedTMDb := NormalizeExternalLink(imdbToTMDb(normalizedIMDb), reTMDbLink)
+	if resolvedTMDb == "" {
+		logx.Warnf(
+			module,
+			"TMDb链接补全未命中 stage=%s imdb=%s",
+			stage,
+			CompactLogText(normalizedIMDb, 120),
+		)
+		return ""
+	}
+	logx.Infof(
+		module,
+		"TMDb链接补全命中 stage=%s imdb=%s tmdb=%s",
+		stage,
+		CompactLogText(normalizedIMDb, 120),
+		CompactLogText(resolvedTMDb, 120),
+	)
+	return resolvedTMDb
+}
+
 func imdbToTMDb(imdbLink string) string {
 	imdbID := extractIMDbID(imdbLink)
 	if imdbID == "" {
@@ -761,6 +819,80 @@ func BuildIntroText(contentName, subtitle, summary string, sourceLinks []string)
 		sections = append(sections, "", strings.Join(sourceLinks, "\n"))
 	}
 	return strings.TrimSpace(strings.Join(sections, "\n"))
+}
+
+func ensureTMDbLinkLineForPTGenIntro(introText, tmdbLink string) string {
+	trimmedIntro := strings.TrimSpace(introText)
+	normalizedTMDb := NormalizeExternalLink(tmdbLink, reTMDbLink)
+	if trimmedIntro == "" || normalizedTMDb == "" {
+		return trimmedIntro
+	}
+	if reTMDbInFormat.FindString(trimmedIntro) != "" {
+		return trimmedIntro
+	}
+	compactIntro := strings.ToLower(strings.ReplaceAll(trimmedIntro, " ", ""))
+	if strings.Contains(compactIntro, "tmdb链接") {
+		return trimmedIntro
+	}
+	lines := strings.Split(trimmedIntro, "\n")
+	insertAt := -1
+	hasIMDbOrDoubanLink := false
+	for idx, line := range lines {
+		compactLine := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(line), " ", ""))
+		if strings.Contains(compactLine, "豆瓣链接") || strings.Contains(compactLine, "imdb链接") {
+			hasIMDbOrDoubanLink = true
+			insertAt = idx
+		}
+	}
+	if !hasIMDbOrDoubanLink {
+		return trimmedIntro
+	}
+	prefix := detectIntroFieldPrefix(lines, insertAt)
+	insertLine := prefix + "TMDB链接  " + normalizedTMDb
+	if insertAt < 0 {
+		lines = append(lines, insertLine)
+		return strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+
+	expanded := make([]string, 0, len(lines)+1)
+	expanded = append(expanded, lines[:insertAt+1]...)
+	expanded = append(expanded, insertLine)
+	expanded = append(expanded, lines[insertAt+1:]...)
+	return strings.TrimSpace(strings.Join(expanded, "\n"))
+}
+
+func detectIntroFieldPrefix(lines []string, preferredIndex int) string {
+	detectFromLine := func(line string) string {
+		trimmed := strings.TrimSpace(line)
+		for _, symbol := range []string{"◎", "❁"} {
+			if strings.HasPrefix(trimmed, symbol) {
+				return symbol
+			}
+		}
+		return ""
+	}
+
+	if preferredIndex >= 0 && preferredIndex < len(lines) {
+		if symbol := detectFromLine(lines[preferredIndex]); symbol != "" {
+			return symbol
+		}
+	}
+
+	for _, line := range lines {
+		compactLine := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(line), " ", ""))
+		if strings.Contains(compactLine, "豆瓣链接") || strings.Contains(compactLine, "imdb链接") {
+			if symbol := detectFromLine(line); symbol != "" {
+				return symbol
+			}
+		}
+	}
+
+	for _, line := range lines {
+		if symbol := detectFromLine(line); symbol != "" {
+			return symbol
+		}
+	}
+	return "◎"
 }
 
 func pickFirstString(source map[string]any, keys ...string) string {

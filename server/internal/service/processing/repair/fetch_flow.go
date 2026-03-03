@@ -204,6 +204,20 @@ func RunParallelFetchRepairs(input ParallelFetchRepairInput, deps FetchRepairDep
 	merged.IMDbLink = firstNonEmpty(merged.IMDbLink, strings.TrimSpace(posterResult.IMDbLink), strings.TrimSpace(introResult.IMDbLink))
 	merged.DoubanLink = firstNonEmpty(merged.DoubanLink, strings.TrimSpace(posterResult.DoubanLink), strings.TrimSpace(introResult.DoubanLink))
 	merged.TMDbLink = firstNonEmpty(merged.TMDbLink, strings.TrimSpace(posterResult.TMDbLink), strings.TrimSpace(introResult.TMDbLink))
+	tmdbBackfillAttempted := false
+	merged.TMDbLink = firstNonEmpty(
+		merged.TMDbLink,
+		backfillTMDbByIMDbIfNeeded(
+			merged.TMDbLink,
+			merged.IMDbLink,
+			&tmdbBackfillAttempted,
+			fetchRepairLogModule,
+			"并发修复汇总后",
+		),
+	)
+	if strings.TrimSpace(merged.ReviewData.Body) != "" {
+		merged.ReviewData.Body = ensureTMDbLinkLineForPTGenIntro(merged.ReviewData.Body, merged.TMDbLink)
+	}
 
 	logx.Infof(
 		fetchRepairLogModule,

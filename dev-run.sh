@@ -4,7 +4,7 @@ set -euo pipefail
 # One-command dev runner (server + updater + optional webui dev server).
 #
 # Default usage:
-#   cd server && ./dev-run.sh
+#   ./dev-run.sh
 #
 # Commands:
 #   ./dev-run.sh up        # start, then tail logs (default)
@@ -13,12 +13,13 @@ set -euo pipefail
 #
 # Tunables (env):
 #   SERVER_PORT=5275 UPDATER_PORT=5274 BATCH_PORT=5276 WEBUI_PORT=5173
-#   WEBUI=1 WEBUI_DIR=/home/sqing/Codes/PTNexus/webui
+#   WEBUI=1 WEBUI_DIR=./webui
+#   AUTO_INSTALL_DEPS=1    # 缺失依赖时自动安装（前端 pnpm / 后端 go mod / air）
 #   UPLOAD_TEST_MODE=true  # 跳过真实发布，模拟成功响应（仅用于调试）
 #   CURL_CONNECT_TIMEOUT=1 CURL_MAX_TIME=2 TCP_PROBE_TIMEOUT=1
 
-SERVERGO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SERVERGO_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVERGO_DIR="${SERVERGO_DIR:-$REPO_ROOT/server}"
 
 SERVER_PORT="${SERVER_PORT:-5275}"
 UPDATER_PORT="${UPDATER_PORT:-5274}"
@@ -26,7 +27,8 @@ BATCH_PORT="${BATCH_PORT:-5276}"
 
 WEBUI="${WEBUI:-1}"
 WEBUI_PORT="${WEBUI_PORT:-5173}"
-WEBUI_DIR="${WEBUI_DIR:-/home/sqing/Codes/PTNexus/webui}"
+WEBUI_DIR="${WEBUI_DIR:-$REPO_ROOT/webui}"
+AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 
 AIR_CONFIG_FILE="$SERVERGO_DIR/.air.toml"
 
@@ -45,6 +47,51 @@ WEBUI_LOG="${WEBUI_LOG:-/tmp/ptnexus-webui.${WEBUI_PORT}.log}"
 CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-1}"
 CURL_MAX_TIME="${CURL_MAX_TIME:-2}"
 TCP_PROBE_TIMEOUT="${TCP_PROBE_TIMEOUT:-1}"
+
+ensure_backend_deps() {
+  [[ "$AUTO_INSTALL_DEPS" != "0" ]] || return 0
+
+  if ! command -v go >/dev/null 2>&1; then
+    echo "go not found. install go first, or set AUTO_INSTALL_DEPS=0 to skip dep install" >&2
+    exit 1
+  fi
+
+  echo "deps: server go modules (go mod download)"
+  (cd "$SERVERGO_DIR" && go mod download)
+
+  echo "deps: updater go modules (go mod download)"
+  (cd "$REPO_ROOT/updater" && go mod download)
+}
+
+ensure_webui_deps() {
+  [[ "$WEBUI" != "0" ]] || return 0
+
+  if [[ ! -d "$WEBUI_DIR" ]]; then
+    echo "webui dir missing: $WEBUI_DIR (set WEBUI_DIR=... or WEBUI=0)" >&2
+    exit 1
+  fi
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "pnpm not found. install pnpm first, or disable webui with WEBUI=0" >&2
+    exit 1
+  fi
+  if [[ -x "$WEBUI_DIR/node_modules/.bin/vite" ]]; then
+    return 0
+  fi
+
+  if [[ "$AUTO_INSTALL_DEPS" == "0" ]]; then
+    echo "webui deps missing: $WEBUI_DIR/node_modules/.bin/vite not found" >&2
+    echo "run: cd \"$WEBUI_DIR\" && pnpm install" >&2
+    exit 1
+  fi
+
+  echo "deps: webui missing, running pnpm install (dir: $WEBUI_DIR)"
+  (cd "$WEBUI_DIR" && pnpm install)
+
+  if [[ ! -x "$WEBUI_DIR/node_modules/.bin/vite" ]]; then
+    echo "webui deps install failed: $WEBUI_DIR/node_modules/.bin/vite still missing" >&2
+    exit 1
+  fi
+}
 
 get_cmdline() {
   local pid="$1"
@@ -222,10 +269,28 @@ resolve_air_cmd() {
     return 0
   fi
 
+  if [[ "$AUTO_INSTALL_DEPS" != "0" ]]; then
+    echo "deps: air missing, running go install github.com/air-verse/air@latest" >&2
+    if go install github.com/air-verse/air@latest >/dev/null 2>&1; then
+      if command -v air >/dev/null 2>&1; then
+        command -v air
+        return 0
+      fi
+      gopath_bin="$(go env GOPATH 2>/dev/null || true)/bin/air"
+      if [[ -x "$gopath_bin" ]]; then
+        echo "$gopath_bin"
+        return 0
+      fi
+    else
+      echo "failed to install air automatically" >&2
+    fi
+  fi
+
   return 1
 }
 
 build_binaries() {
+  ensure_backend_deps
   echo "build: server managed by air (skip prebuild)"
   echo "build: updater -> $UPDATER_BIN"
   (cd "$REPO_ROOT/updater" && go build -o "$UPDATER_BIN" ./updater.go)
@@ -279,14 +344,7 @@ start_updater() {
 
 start_webui() {
   [[ "$WEBUI" != "0" ]] || return 0
-  if [[ ! -d "$WEBUI_DIR" ]]; then
-    echo "webui dir missing: $WEBUI_DIR (set WEBUI_DIR=... or WEBUI=0)" >&2
-    exit 1
-  fi
-  if ! command -v pnpm >/dev/null 2>&1; then
-    echo "pnpm not found. install pnpm first, or disable webui with WEBUI=0" >&2
-    exit 1
-  fi
+  ensure_webui_deps
 
   echo "start: webui dev :${WEBUI_PORT} (dir: $WEBUI_DIR log: $WEBUI_LOG)"
   rm -f "$WEBUI_LOG" 2>/dev/null || true
