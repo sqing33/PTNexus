@@ -2,6 +2,8 @@ const CONFIG_KEY = "ptnexus_cookie_sync_config";
 const TOKEN_KEY = "ptnexus_cookie_sync_token";
 const SYNC_REPORT_KEY = "ptnexus_cookie_sync_last_report";
 const TOKEN_SAFE_WINDOW_MS = 60 * 1000;
+const API_BASE_URL_FALLBACK_MAP = new Map();
+let hasShownApiFallbackNotice = false;
 
 const els = {
   apiBaseUrl: null,
@@ -37,11 +39,19 @@ async function onSync() {
 
   try {
     const config = readConfigFromForm({ requirePassword: false });
+    const originalApiBaseUrl = config.apiBaseUrl;
     await persistConfig(config);
+    refreshConfigApiBaseUrl(config);
 
     await ensureApiOriginPermission(config.apiBaseUrl);
     const targets = await callWithAuthRetry(config, (token) => fetchCookieSyncTargets(config.apiBaseUrl, token));
-    setStatus("登录测试通过，准备同步...", "info");
+    refreshConfigApiBaseUrl(config);
+    const switchedApiBaseUrl = config.apiBaseUrl !== originalApiBaseUrl;
+    if (switchedApiBaseUrl) {
+      setStatus(`已自动切换为 HTTP：${config.apiBaseUrl}，登录测试通过，准备同步...`, "warning");
+    } else {
+      setStatus("登录测试通过，准备同步...", "info");
+    }
     if (!targets.length) {
       const report = {
         generated_at: new Date().toISOString(),
@@ -206,9 +216,10 @@ async function ensureToken(config, { forceLogin }) {
 }
 
 async function loginAndStoreToken(config) {
-  await ensureApiOriginPermission(config.apiBaseUrl);
+  const apiBaseUrl = refreshConfigApiBaseUrl(config);
+  await ensureApiOriginPermission(apiBaseUrl);
 
-  const data = await requestJSON(config.apiBaseUrl, "/api/auth/login", {
+  const data = await requestJSON(apiBaseUrl, "/api/auth/login", {
     method: "POST",
     payload: {
       username: config.username,
@@ -224,7 +235,7 @@ async function loginAndStoreToken(config) {
   const tokenRecord = {
     token: data.token,
     expiresAt,
-    apiBaseUrl: config.apiBaseUrl,
+    apiBaseUrl: refreshConfigApiBaseUrl(config),
     username: config.username,
   };
   await storageSet({ [TOKEN_KEY]: tokenRecord });
@@ -251,20 +262,25 @@ async function postCookieSyncBatch(apiBaseUrl, token, payload) {
 }
 
 async function ensureApiOriginPermission(apiBaseUrl) {
-  const pattern = `${new URL(apiBaseUrl).origin}/*`;
-  const hasPermission = await permissionsContains([pattern]);
+  const patterns = buildApiOriginPatterns(apiBaseUrl);
+  if (!patterns.length) {
+    return;
+  }
+  const hasPermission = await permissionsContains(patterns);
   if (hasPermission) {
     return;
   }
-  const granted = await permissionsRequest([pattern]);
+  const granted = await permissionsRequest(patterns);
   if (!granted) {
-    throw new Error(`未授权后端地址访问权限：${pattern}`);
+    throw new Error(`未授权后端地址访问权限：${patterns.join(" / ")}`);
   }
 }
 
 async function ensureOriginsPermission(apiBaseUrl, targets) {
   const origins = new Set();
-  origins.add(`${new URL(apiBaseUrl).origin}/*`);
+  for (const pattern of buildApiOriginPatterns(apiBaseUrl)) {
+    origins.add(pattern);
+  }
 
   for (const target of targets) {
     const domains = Array.isArray(target.domains) ? target.domains : [];
@@ -384,6 +400,31 @@ function extractRootDomain(domain) {
 }
 
 async function requestJSON(apiBaseUrl, path, options) {
+  const primaryApiBaseUrl = getEffectiveApiBaseUrl(apiBaseUrl);
+  try {
+    return await requestJSONOnce(primaryApiBaseUrl, path, options);
+  } catch (primaryError) {
+    if (!shouldFallbackToHTTP(primaryApiBaseUrl, primaryError)) {
+      throw primaryError;
+    }
+
+    const fallbackApiBaseUrl = toHttpFallbackOrigin(primaryApiBaseUrl);
+    if (!fallbackApiBaseUrl || fallbackApiBaseUrl === primaryApiBaseUrl) {
+      throw createProtocolMismatchError(primaryError, null, primaryApiBaseUrl);
+    }
+
+    try {
+      const data = await requestJSONOnce(fallbackApiBaseUrl, path, options);
+      await persistApiBaseUrlFallback(primaryApiBaseUrl, fallbackApiBaseUrl);
+      showApiFallbackNotice(fallbackApiBaseUrl);
+      return data;
+    } catch (fallbackError) {
+      throw createProtocolMismatchError(primaryError, fallbackError, primaryApiBaseUrl);
+    }
+  }
+}
+
+async function requestJSONOnce(apiBaseUrl, path, options) {
   const method = options.method || "GET";
   const headers = {};
   if (options.token) {
@@ -425,7 +466,7 @@ function normalizeApiBaseUrl(raw) {
   if (!trimmed) {
     return "";
   }
-  const value = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const value = /^https?:\/\//i.test(trimmed) ? trimmed : `${inferDefaultScheme(trimmed)}://${trimmed}`;
   try {
     const parsed = new URL(value);
     return parsed.origin;
@@ -460,7 +501,10 @@ function isTokenRecordUsable(tokenRecord, config) {
   if (toSafeString(tokenRecord.token) === "") {
     return false;
   }
-  if (toSafeString(tokenRecord.apiBaseUrl) !== config.apiBaseUrl) {
+  const tokenApiBaseUrl = toSafeString(tokenRecord.apiBaseUrl);
+  const configApiBaseUrl = toSafeString(config.apiBaseUrl);
+  const expectedApiBaseUrl = getEffectiveApiBaseUrl(configApiBaseUrl);
+  if (tokenApiBaseUrl !== expectedApiBaseUrl && tokenApiBaseUrl !== configApiBaseUrl) {
     return false;
   }
   if (toSafeString(tokenRecord.username) !== config.username) {
@@ -484,6 +528,193 @@ function isUsableDomain(domain) {
     return true;
   }
   return domain.includes(".");
+}
+
+function refreshConfigApiBaseUrl(config) {
+  if (!config || typeof config !== "object") {
+    return "";
+  }
+  const effectiveApiBaseUrl = getEffectiveApiBaseUrl(config.apiBaseUrl);
+  if (effectiveApiBaseUrl && effectiveApiBaseUrl !== config.apiBaseUrl) {
+    config.apiBaseUrl = effectiveApiBaseUrl;
+  }
+  return toSafeString(config.apiBaseUrl);
+}
+
+function getEffectiveApiBaseUrl(apiBaseUrl) {
+  const normalized = toSafeString(apiBaseUrl);
+  if (!normalized) {
+    return "";
+  }
+  return API_BASE_URL_FALLBACK_MAP.get(normalized) || normalized;
+}
+
+function buildApiOriginPatterns(apiBaseUrl) {
+  try {
+    const parsed = new URL(getEffectiveApiBaseUrl(apiBaseUrl) || apiBaseUrl);
+    return [`https://${parsed.host}/*`, `http://${parsed.host}/*`];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function inferDefaultScheme(raw) {
+  const value = toSafeString(raw);
+  if (!value) {
+    return "https";
+  }
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`);
+    return isPrivateOrLocalHost(parsed.hostname) ? "http" : "https";
+  } catch (_error) {
+    return "https";
+  }
+}
+
+function isPrivateOrLocalHost(hostname) {
+  const host = toSafeString(hostname).toLowerCase();
+  if (!host) {
+    return false;
+  }
+  if (host === "localhost" || host === "::1" || host.endsWith(".local")) {
+    return true;
+  }
+
+  const ipv4 = parseIPv4(host);
+  if (ipv4) {
+    const [first, second] = ipv4;
+    if (first === 10 || first === 127) return true;
+    if (first === 192 && second === 168) return true;
+    if (first === 172 && second >= 16 && second <= 31) return true;
+    if (first === 169 && second === 254) return true;
+    if (first === 100 && second >= 64 && second <= 127) return true;
+  }
+
+  const unwrapped = host.replace(/^\[/, "").replace(/\]$/, "");
+  if (unwrapped === "::1" || unwrapped.startsWith("fe80:")) {
+    return true;
+  }
+  if (unwrapped.startsWith("fc") || unwrapped.startsWith("fd")) {
+    return true;
+  }
+  return false;
+}
+
+function parseIPv4(hostname) {
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+    return null;
+  }
+  const numbers = hostname.split(".").map((part) => Number(part));
+  if (numbers.some((num) => !Number.isInteger(num) || num < 0 || num > 255)) {
+    return null;
+  }
+  return numbers;
+}
+
+function shouldFallbackToHTTP(apiBaseUrl, error) {
+  if (!/^https:\/\//i.test(toSafeString(apiBaseUrl))) {
+    return false;
+  }
+  return !hasHttpStatus(error);
+}
+
+function hasHttpStatus(error) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const status = Number(error.status);
+  return Number.isFinite(status) && status > 0;
+}
+
+function toHttpFallbackOrigin(apiBaseUrl) {
+  try {
+    const parsed = new URL(apiBaseUrl);
+    if (parsed.protocol !== "https:") {
+      return "";
+    }
+    return `http://${parsed.host}`;
+  } catch (_error) {
+    return "";
+  }
+}
+
+function createProtocolMismatchError(primaryError, fallbackError, apiBaseUrl) {
+  const messages = [];
+  const primaryMessage = toSafeString(primaryError?.message);
+  if (primaryMessage) {
+    messages.push(primaryMessage);
+  }
+  const fallbackMessage = toSafeString(fallbackError?.message);
+  if (fallbackMessage) {
+    messages.push(`HTTP 回退失败：${fallbackMessage}`);
+  }
+  const httpHint = buildHTTPHint(apiBaseUrl);
+  messages.push(`检测到 HTTPS 连接异常，请确认后端协议；updater 默认使用 HTTP（如 ${httpHint}）。`);
+
+  const error = new Error(messages.join("；"));
+  if (hasHttpStatus(fallbackError)) {
+    error.status = fallbackError.status;
+    error.data = fallbackError.data;
+  } else if (hasHttpStatus(primaryError)) {
+    error.status = primaryError.status;
+    error.data = primaryError.data;
+  }
+  return error;
+}
+
+function buildHTTPHint(apiBaseUrl) {
+  try {
+    const parsed = new URL(apiBaseUrl);
+    return `http://${parsed.host}`;
+  } catch (_error) {
+    return "http://<你的服务器IP>:5274";
+  }
+}
+
+async function persistApiBaseUrlFallback(fromApiBaseUrl, toApiBaseUrl) {
+  const from = toSafeString(fromApiBaseUrl);
+  const to = toSafeString(toApiBaseUrl);
+  if (!from || !to || from === to) {
+    return;
+  }
+
+  API_BASE_URL_FALLBACK_MAP.set(from, to);
+  API_BASE_URL_FALLBACK_MAP.set(to, to);
+
+  try {
+    const data = await storageGet([CONFIG_KEY, TOKEN_KEY]);
+    const updates = {};
+
+    const config = data[CONFIG_KEY];
+    if (config && typeof config === "object" && toSafeString(config.apiBaseUrl) === from) {
+      updates[CONFIG_KEY] = {
+        ...config,
+        apiBaseUrl: to,
+      };
+    }
+
+    const tokenRecord = data[TOKEN_KEY];
+    if (tokenRecord && typeof tokenRecord === "object" && toSafeString(tokenRecord.apiBaseUrl) === from) {
+      updates[TOKEN_KEY] = {
+        ...tokenRecord,
+        apiBaseUrl: to,
+      };
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await storageSet(updates);
+    }
+  } catch (_error) {
+    // 存储失败不影响本次同步流程
+  }
+}
+
+function showApiFallbackNotice(fallbackApiBaseUrl) {
+  if (hasShownApiFallbackNotice || !toSafeString(fallbackApiBaseUrl)) {
+    return;
+  }
+  hasShownApiFallbackNotice = true;
+  setStatus(`检测到 HTTPS 不可用，已自动切换为 HTTP：${fallbackApiBaseUrl}`, "warning");
 }
 
 function setBusy(busy) {

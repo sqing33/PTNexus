@@ -17,7 +17,9 @@ This folder contains a Chrome/Edge MV3 extension that syncs browser cookies to t
 
 ## Usage
 
-1. Fill API base URL (for example `https://your-host:8080`).
+1. Fill API base URL:
+   - updater direct access on LAN/local machine: `http://<your-host>:5274`
+   - HTTPS reverse proxy deployment: `https://<your-domain>`
 2. Fill PT Nexus username and password.
 3. Click `Login Test`.
 4. Click `Sync Cookies`.
@@ -28,3 +30,4 @@ This folder contains a Chrome/Edge MV3 extension that syncs browser cookies to t
 - The extension reads cookies only from the current browser profile.
 - Cookie values are not printed in logs/results, only sync status is shown.
 - Password is stored only if `Remember password locally` is checked.
+- If `ERR_SSL_PROTOCOL_ERROR` appears, your updater is likely HTTP-only. The extension now auto-falls back to `http://` and saves the corrected API base URL.
