@@ -720,6 +720,7 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	payload["queue_group_id"] = strings.TrimSpace(taskRecord.GroupID)
 	payload["targetSite"] = strings.TrimSpace(processingshared.ToString(payload["targetSite"], taskRecord.TargetSite))
 	payload["upload_data"] = uploadData
+	payload = s.normalizePublishPayloadWithCrossSeedDefaults(payload)
 
 	downloaderID := s.resolveQueueTaskDownloaderID(taskRecord, payload, ctx)
 	if strings.TrimSpace(downloaderID) != "" {
