@@ -700,9 +700,24 @@ const savePathMappings = async () => {
   white-space: nowrap;
 }
 
+.realtime-switch-container {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+}
+
 .switch-form-item {
-  margin-bottom: 0;
-  margin-left: 8px;
+  margin: 0 0 0 8px;
+}
+
+.switch-form-item :deep(.el-form-item__label),
+.switch-form-item :deep(.el-form-item__content) {
+  display: flex;
+  align-items: center;
+}
+
+.switch-form-item :deep(.el-form-item__label) {
+  line-height: normal;
 }
 
 /* 路径映射对话框样式 */

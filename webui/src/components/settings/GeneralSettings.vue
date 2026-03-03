@@ -12,8 +12,8 @@
               <User />
             </el-icon>
             <h3>账户信息</h3>
-            <el-tag type="danger" v-if="mustChange" size="small" effect="dark">
-              <el-icon style="vertical-align: middle; margin-right: 4px">
+            <el-tag class="temp-password-tag" type="danger" v-if="mustChange" size="small" effect="dark">
+              <el-icon class="temp-password-tag-icon">
                 <Warning />
               </el-icon>
               临时密码-请立即修改
@@ -1717,6 +1717,17 @@ onMounted(() => {
   font-weight: 500;
   margin: 0;
   color: var(--el-text-color-primary);
+}
+
+.temp-password-tag {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.temp-password-tag-icon {
+  margin-right: 4px;
 }
 
 .header-icon {
