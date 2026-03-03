@@ -32,7 +32,7 @@ const (
 var maxRecentAdditions = 15
 
 func init() {
-	if os.Getenv("DEV_ENV") == "true" {
+	if os.Getenv("VIP") == "true" {
 		maxRecentAdditions = 999
 	}
 }

@@ -79,7 +79,6 @@ $apt_cmd install -y --no-install-recommends \
   mpv \
   mediainfo \
   fonts-noto-cjk \
-  git \
   libicu-dev \
   ca-certificates
 $apt_cmd clean || true

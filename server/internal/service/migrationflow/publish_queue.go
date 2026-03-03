@@ -191,6 +191,12 @@ func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string
 
 	title := strings.TrimSpace(processingshared.ToString(uploadData["title"], ""))
 	if title == "" {
+		title = strings.TrimSpace(processingshared.ToString(uploadData["original_main_title"], ""))
+	}
+	if title == "" {
+		title = strings.TrimSpace(processingshared.ToString(uploadData["name"], ""))
+	}
+	if title == "" {
 		title = strings.TrimSpace(ctx.Name)
 	}
 	subtitle := strings.TrimSpace(processingshared.ToString(uploadData["subtitle"], ""))

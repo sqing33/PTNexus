@@ -61,6 +61,16 @@ echo "🔨 [pre-commit] 开始智能检测与构建流程..."
 # 仓库根目录（兼容包含空格的路径）
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
+# --- 0. 校验 skills 单源布局 ---
+SKILLS_LAYOUT_SCRIPT="$REPO_ROOT/scripts/ensure-skills-layout.sh"
+if [ ! -x "$SKILLS_LAYOUT_SCRIPT" ]; then
+    echo -e "${RED}❌ 缺少或不可执行脚本: ${SKILLS_LAYOUT_SCRIPT}${NC}"
+    echo -e "${RED}   请先运行: bash scripts/dev/setup-hooks.sh${NC}"
+    exit 1
+fi
+
+"$SKILLS_LAYOUT_SCRIPT" --strict || exit 1
+
 # 获取所有已暂存的文件列表
 STAGED_FILES=$(git diff --cached --name-only)
 
@@ -70,7 +80,7 @@ if [ -z "$STAGED_FILES" ]; then
     exit 0
 fi
 
-# --- 0. 强制检查 Go 服务双架构构建依赖（缺失即中止提交） ---
+# --- 1. 强制检查 Go 服务双架构构建依赖（缺失即中止提交） ---
 require_command go "请先安装 Go 工具链。"
 require_command gcc "Debian/Ubuntu: sudo apt-get install -y gcc"
 require_command aarch64-linux-gnu-gcc "Debian/Ubuntu: sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross"

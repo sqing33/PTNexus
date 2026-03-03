@@ -1,3 +1,0 @@
-interface:
-  display_name: "Worktree Lite"
-  short_description: "Create worktree, review changes, ask before merge, and format commit titles"

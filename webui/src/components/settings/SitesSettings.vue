@@ -309,7 +309,17 @@
             class="form-tip"
             style="color: #409eff; font-weight: bold"
           >
-            肉丝的passkey在个人用户-设置-passkey
+            获取肉丝passkey-
+            <el-button
+              type="primary"
+              size="small"
+              tag="a"
+              href="https://rousi.pro/account?tab=passkey"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              跳转
+            </el-button>
           </div>
         </el-form-item>
         <el-form-item label="上传限速 (MB/s)" prop="speed_limit">
