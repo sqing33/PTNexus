@@ -63,16 +63,41 @@ const close = () => {
   emit('close')
 }
 
+const copyToClipboard = async (text: string): Promise<boolean> => {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Clipboard API 失败时，继续尝试回退方案
+    }
+  }
+
+  try {
+    const textArea = document.createElement('textarea')
+    textArea.value = text
+    textArea.style.position = 'fixed'
+    textArea.style.left = '-9999px'
+    textArea.style.top = '-9999px'
+    document.body.appendChild(textArea)
+    textArea.focus()
+    textArea.select()
+    const success = document.execCommand('copy')
+    document.body.removeChild(textArea)
+    return success
+  } catch {
+    return false
+  }
+}
+
 const handleCopy = async () => {
   const text = String(props.content || '').trim()
   if (!text) return ElMessage.warning('无内容可复制')
-  if (!navigator.clipboard?.writeText) return ElMessage.error('当前环境不支持复制')
-  try {
-    await navigator.clipboard.writeText(text)
+  const success = await copyToClipboard(text)
+  if (success) {
     ElMessage.success('已复制到剪贴板')
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : '复制失败'
-    ElMessage.error(message)
+  } else {
+    ElMessage.error('复制失败，请手动复制')
   }
 }
 
@@ -156,6 +181,10 @@ onBeforeUnmount(() => {
 .log-viewer__card :deep(.el-card__body) {
   overflow-y: auto;
   flex: 1;
+}
+
+.log-viewer__card :deep(.el-card__header) {
+  padding: 10px;
 }
 
 .log-viewer__pre {
