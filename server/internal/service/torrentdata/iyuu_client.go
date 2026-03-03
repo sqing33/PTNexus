@@ -21,6 +21,7 @@ import (
 const (
 	iyuuAPIBase       = "https://2025.iyuu.cn"
 	iyuuClientVersion = "8.2.0"
+	iyuuRequestTimeout = 120 * time.Second
 )
 
 const iyuuLogModule = "IYUU查询"
@@ -48,7 +49,7 @@ type iyuuClient struct {
 // 副作用：无（仅初始化内存对象）。
 func newIYUUClient() *iyuuClient {
 	return &iyuuClient{
-		httpClient:     &http.Client{Timeout: 25 * time.Second},
+		httpClient:     &http.Client{Timeout: iyuuRequestTimeout},
 		baseURL:        iyuuAPIBase,
 		rateLimitDelay: 5 * time.Second,
 	}
