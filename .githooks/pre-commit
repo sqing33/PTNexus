@@ -61,15 +61,13 @@ echo "🔨 [pre-commit] 开始智能检测与构建流程..."
 # 仓库根目录（兼容包含空格的路径）
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
-# --- 0. 校验 skills 单源布局 ---
-SKILLS_LAYOUT_SCRIPT="$REPO_ROOT/scripts/ensure-skills-layout.sh"
-if [ ! -x "$SKILLS_LAYOUT_SCRIPT" ]; then
-    echo -e "${RED}❌ 缺少或不可执行脚本: ${SKILLS_LAYOUT_SCRIPT}${NC}"
-    echo -e "${RED}   请先运行: bash scripts/dev/setup-hooks.sh${NC}"
-    exit 1
+# --- 0. 提交前自动执行 link-path（确保 skills 链接路径就绪） ---
+LINK_PATH_SCRIPT="$REPO_ROOT/scripts/link-path.sh"
+if [ ! -x "$LINK_PATH_SCRIPT" ]; then
+    handle_error "缺少或不可执行脚本: $LINK_PATH_SCRIPT"
 fi
-
-"$SKILLS_LAYOUT_SCRIPT" --strict || exit 1
+echo -e "${CYAN}🔗 执行 link-path：$LINK_PATH_SCRIPT${NC}"
+bash "$LINK_PATH_SCRIPT" || handle_error "link-path 执行失败"
 
 # 获取所有已暂存的文件列表
 STAGED_FILES=$(git diff --cached --name-only)
@@ -111,8 +109,8 @@ fi
 if echo "$STAGED_FILES" | grep -q "^server/"; then
     BUILDS_TRIGGERED=true
     echo -e "${YELLOW}📦 检测到 'server' 目录有变更，开始构建双架构二进制...${NC}"
-    [ -x ./build-server.sh ] || chmod +x ./build-server.sh
-    ./build-server.sh || handle_error "Go server 双架构构建失败"
+    [ -x "$REPO_ROOT/scripts/build-server.sh" ] || chmod +x "$REPO_ROOT/scripts/build-server.sh"
+    "$REPO_ROOT/scripts/build-server.sh" || handle_error "Go server 双架构构建失败"
     echo -e "${GREEN}✓ Go server 构建成功。正在暂存产物...${NC}"
     git add server/server-amd64 server/server-arm64
 else

@@ -76,13 +76,6 @@ fi
 TARGET_ABS="$(realpath "$TARGET")"
 LINK_ABS="$(realpath -m "$LINK_PATH")"
 
-if [ "$TARGET_ABS" = "$LINK_ABS" ]; then
-  echo "[link-path] error: target and link path are the same: $TARGET_ABS" >&2
-  exit 1
-fi
-
-mkdir -p "$(dirname "$LINK_PATH")"
-
 if [ -L "$LINK_PATH" ]; then
   CURRENT_TARGET="$(realpath "$LINK_PATH" || true)"
   if [ "$CURRENT_TARGET" = "$TARGET_ABS" ]; then
@@ -91,6 +84,13 @@ if [ -L "$LINK_PATH" ]; then
     exit 0
   fi
 fi
+
+if [ "$TARGET_ABS" = "$LINK_ABS" ]; then
+  echo "[link-path] error: target and link path are the same: $TARGET_ABS" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$LINK_PATH")"
 
 if [ -e "$LINK_PATH" ] || [ -L "$LINK_PATH" ]; then
   if [ "$FORCE" = true ]; then

@@ -2,24 +2,12 @@
 
 ## 项目结构与模块组织
 
-- `server/`：Flask API 与核心逻辑；路由在 `server/api/`，服务在 `server/core/`，辅助工具在 `server/utils/`。
+- `server/`：Go API 与核心逻辑（入口在 `server/cmd/server`，其余按目录职责分层）。
 - `webui/`：Vue 3 + TypeScript 前端；页面在 `webui/src/views/`，通用组件在 `webui/src/components/`，Pinia Store 在 `webui/src/stores/`。
 - `batch/`、`updater/`、`proxy/`：Go 服务；构建后的二进制分别位于 `batch/batch`、`updater/updater`、`proxy/pt-nexus-box-proxy`。
 - `server/configs/`：站点 YAML 映射；`server/data/`：运行时数据；`wiki/`：文档。
 
-## 多版本说明（Python 原版 / Go 版本）
-
-- 本项目同时维护两套实现，互相独立：
-  - **Python 原版**：后端 `server/` + 前端 `webui/`。
-  - **Go 版本**：后端 `server/` + 前端 `webui/`。
-- 版本选择默认规则：
-  - 当需求未明确指定实现版本时，默认按 **Go 版本**（`server/` + `webui/`）进行修改。
-  - Go 版本是由 Python 原版重构而来的新实现，应作为默认开发目标。
-  - 仅当需求明确指定 Python 原版，或明确涉及 `server/`、`webui/` 路径时，才在 Python 版本中改动。
-- 开发与修改必须按版本分隔进行：
-  - 不要在 `server/` 中直接调用/依赖 `server/`（Python）里已有的函数或实现。
-  - 若 Go 版本需要与 Python 原版相同的功能，必须在 `server/` 内实现等价逻辑（允许保持相同的接口语义/协议，但实现代码必须在 Go 侧独立存在）。
-- 修改 Go 后端（`server/`）时遵循 `.codex/skills/server-standards/SKILL.md` 中的规范。
+- 修改 Go 后端（`server/`）时遵循 `server-standards` skill 中的规范。
 
 ## 构建、测试与开发命令
 
@@ -32,14 +20,11 @@ pnpm run dev        # 本地 UI 在 5173
 pnpm run build      # 输出到 webui/dist
 ```
 
-后端（Python 3.12/uv）：
+后端（Go）：
 
 ```bash
 cd server
-uv sync
-. .venv/bin/activate
-uv pip install -r requirements.txt
-uv run app.py
+go run ./cmd/server
 ```
 
 Go 服务（版本见各自 `go.mod`）：
@@ -54,14 +39,13 @@ Go 服务（版本见各自 `go.mod`）：
 
 ## 编码风格与命名约定
 
-- Python：4 空格缩进，模块与函数使用 snake_case；import 分组保持整洁。
 - Vue/TS：2 空格缩进；组件使用 `PascalCase.vue`，页面以 `*View.vue` 结尾。
 - Go：遵循标准 `gofmt` 格式化。
 - Lint/format：`pnpm run lint`（oxlint + eslint）与 `pnpm run format`（prettier）。
 
 ## 测试指南
 
-- 后端冒烟测试：`cd server && uv run python test_functionality.py`。
+- 后端基础检查：`cd server && go test ./...`。
 - 前端检查：`pnpm run type-check` 与 `pnpm run lint`。
 - 当前没有完整单测体系；涉及解析或上传逻辑时建议补充有针对性的测试。
 
@@ -72,15 +56,13 @@ Go 服务（版本见各自 `go.mod`）：
 
 ## Skills 同步约定
 
-- `.codex/skills/` 是唯一真实目录；仅在该路径下新增/修改 skills。
-- `.claude/skills` 必须是符号链接，目标固定为 `../.codex/skills`（Linux/WSL）。
-- 初始化或修复 hooks：`bash scripts/dev/setup-hooks.sh`（会设置 `core.hooksPath=.githooks`）。
-- 手动校验布局：`bash scripts/ensure-skills-layout.sh --strict`。
-- 自动修复安全场景：`bash scripts/ensure-skills-layout.sh --fix`。
+- `AGENTS.md` 是主说明文件，`CLAUDE.md` 必须是指向 `AGENTS.md` 的软链接。
+- skills 路径允许使用 `.codex/skills` 或 `.claude/skills`，工具应自动发现并解析对应 skill。
+- 需要修复 skills 软链接时，执行：`bash scripts/link-path.sh`。
 
 ## 通知约定（强制）
 
-- 任何会话只要发生代码写入/修改，必须使用 `.codex/skills/wsl-win-notify/SKILL.md` 的通知能力。
+- 任何会话只要发生代码写入/修改，必须使用 `wsl-win-notify` skill 的通知能力。
 - 至少在以下节点触发 Windows 原生通知：需要人工选择前、遇到阻塞错误时、任务完成并可交付时。
 - 若用户明确要求“修改后提醒我 / 人工介入时通知 / 完成通知 / notify me when done”，必须全程按该 skill 执行通知。
 
@@ -88,7 +70,8 @@ Go 服务（版本见各自 `go.mod`）：
 
 - ✅ 分支 / Worktree 策略（用于每次会话的代码修改，使用 `worktree-lite` skill）：
   - 只要任务需要对仓库代码进行**写入/修改**（新增/改动/删除受 Git 跟踪的文件），默认将 base repo 视为只读；状态变更操作在独立 worktree 内执行。
-  - 写入前创建新 worktree（Bash 路由）：`bash ".codex/skills/worktree-lite/scripts/worktree-lite.sh" init --topic "<问题摘要>"`。
+  - 写入前创建新 worktree：使用 `worktree-lite` skill 执行 `init --topic "<问题摘要>"`。
+    - 不要在说明里硬编码 `.codex/skills` 或 `.claude/skills` 绝对路径，默认由工具自动查找对应 skill。
     - worktree 默认创建在 `.worktree-lite/<YYMMDD>-<summary>-<HEX4>/`，对应分支 `worktree-lite/<YYMMDD>-<summary>-<HEX4>`；`summary` 由问题摘要自动归一化生成。
   - 不要手动用 `git switch -c ...` 创建会话分支；由 `worktree-lite init` 统一创建分支与 worktree。
   - 修改完成后先执行 `review` 输出变更摘要，先让用户审查。

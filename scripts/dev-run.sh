@@ -4,12 +4,12 @@ set -euo pipefail
 # One-command dev runner (server + updater + optional webui dev server).
 #
 # Default usage:
-#   ./dev-run.sh
+#   ./scripts/dev-run.sh
 #
 # Commands:
-#   ./dev-run.sh up        # start, then tail logs (default)
-#   ./dev-run.sh down      # stop started services
-#   ./dev-run.sh status    # show pids + basic health checks
+#   ./scripts/dev-run.sh up        # start, then tail logs (default)
+#   ./scripts/dev-run.sh down      # stop started services
+#   ./scripts/dev-run.sh status    # show pids + basic health checks
 #
 # Tunables (env):
 #   SERVER_PORT=5275 UPDATER_PORT=5274 BATCH_PORT=5276 WEBUI_PORT=5173
@@ -18,7 +18,7 @@ set -euo pipefail
 #   UPLOAD_TEST_MODE=true  # 跳过真实发布，模拟成功响应（仅用于调试）
 #   CURL_CONNECT_TIMEOUT=1 CURL_MAX_TIME=2 TCP_PROBE_TIMEOUT=1
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVERGO_DIR="${SERVERGO_DIR:-$REPO_ROOT/server}"
 
 SERVER_PORT="${SERVER_PORT:-5275}"
