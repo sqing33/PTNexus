@@ -229,6 +229,8 @@ func registerRoutes(
 		api.POST("/ui_settings", settingsHandler.SaveUISettings)
 		api.GET("/ui_settings/cross_seed", settingsHandler.GetCrossSeedUISettings)
 		api.POST("/ui_settings/cross_seed", settingsHandler.SaveCrossSeedUISettings)
+		api.GET("/ui_settings/publish_logs", settingsHandler.GetPublishLogsUISettings)
+		api.POST("/ui_settings/publish_logs", settingsHandler.SavePublishLogsUISettings)
 		api.GET("/upload_settings", settingsHandler.GetUploadSettings)
 		api.POST("/upload_settings", settingsHandler.SaveUploadSettings)
 		api.GET("/iyuu/settings", settingsHandler.GetIYUUSettings)

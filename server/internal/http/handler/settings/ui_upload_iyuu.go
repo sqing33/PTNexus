@@ -49,6 +49,31 @@ func (h *Handler) SaveCrossSeedUISettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Cross Seed UI 设置已成功保存。"})
 }
 
+// GetPublishLogsUISettings 返回发布日志页面的 UI 设置。
+// 参数/返回：无参数；HTTP 200 返回配置对象。
+// 失败场景：无，配置缺失时由 service 返回默认值。
+// 副作用：无。
+func (h *Handler) GetPublishLogsUISettings(c *gin.Context) {
+	c.JSON(http.StatusOK, h.settings.GetPublishLogsUIViewSettings())
+}
+
+// SavePublishLogsUISettings 保存发布日志页面的 UI 设置。
+// 参数/返回：请求体为设置对象；成功返回 success=true。
+// 失败场景：请求体解析失败返回 400；配置保存失败返回 500。
+// 副作用：写入配置文件。
+func (h *Handler) SavePublishLogsUISettings(c *gin.Context) {
+	payload := map[string]any{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求体格式错误"})
+		return
+	}
+	if err := h.settings.SavePublishLogsUIViewSettings(payload); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "无法保存发布日志 UI 设置。"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "发布日志 UI 设置已成功保存。"})
+}
+
 func (h *Handler) GetUploadSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, h.settings.GetUploadSettings())
 }

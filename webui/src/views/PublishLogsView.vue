@@ -261,6 +261,53 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 let pollRefreshing = false
 let fetchSeq = 0
 
+const readStringSetting = (value: unknown) => {
+  if (typeof value === 'string') return value
+  if (value === undefined || value === null) return ''
+  return String(value)
+}
+
+const buildUiSettings = () => ({
+  page_size: pageSize.value,
+  search_query: searchQuery.value,
+  active_filters: {
+    status: statusFilter.value,
+    trigger: triggerFilter.value,
+    scene: sceneFilter.value,
+    queue_group_id: queueGroupFilter.value,
+    target_site: targetSiteFilter.value,
+  },
+})
+
+const loadUiSettings = async () => {
+  try {
+    const response = await axios.get('/api/ui_settings/publish_logs')
+    const settings = response.data
+    const loadedPageSize = Number(settings?.page_size)
+    pageSize.value = Number.isFinite(loadedPageSize) && loadedPageSize > 0 ? loadedPageSize : 20
+    searchQuery.value = readStringSetting(settings?.search_query)
+
+    const activeFilters = settings?.active_filters
+    if (isRecord(activeFilters)) {
+      statusFilter.value = readStringSetting(activeFilters.status)
+      triggerFilter.value = readStringSetting(activeFilters.trigger)
+      sceneFilter.value = readStringSetting(activeFilters.scene)
+      queueGroupFilter.value = readStringSetting(activeFilters.queue_group_id)
+      targetSiteFilter.value = readStringSetting(activeFilters.target_site)
+    }
+  } catch (e) {
+    console.error('加载发布日志 UI 设置时出错:', e)
+  }
+}
+
+const saveUiSettings = async () => {
+  try {
+    await axios.post('/api/ui_settings/publish_logs', buildUiSettings())
+  } catch (e) {
+    console.error('无法保存发布日志 UI 设置:', e)
+  }
+}
+
 const publishStatusTagType = (status: string) => {
   if (status === 'queued') return 'info'
   if (status === 'success') return 'success'
@@ -473,6 +520,7 @@ const fetchLogs = async (options: { silent?: boolean } = {}) => {
 const applyFilters = async () => {
   currentPage.value = 1
   await fetchLogs()
+  void saveUiSettings()
 }
 
 const clearFilters = async () => {
@@ -487,12 +535,14 @@ const clearFilters = async () => {
     await router.replace({ path: '/publish-logs', query: {} })
   }
   await fetchLogs()
+  void saveUiSettings()
 }
 
 const handleSizeChange = async (size: number) => {
   pageSize.value = size
   currentPage.value = 1
   await fetchLogs()
+  void saveUiSettings()
 }
 
 const handleCurrentChange = async (page: number) => {
@@ -640,11 +690,18 @@ onMounted(async () => {
     allDownloadersList.value = []
   }
 
+  await loadUiSettings()
+
+  let routeFiltersApplied = false
   if (applyRouteFilters()) {
     currentPage.value = 1
+    routeFiltersApplied = true
   }
 
   await fetchLogs()
+  if (routeFiltersApplied) {
+    void saveUiSettings()
+  }
   emits('ready', fetchLogs)
   startPolling()
 })
@@ -659,6 +716,7 @@ watch(
     if (applyRouteFilters()) {
       currentPage.value = 1
       await fetchLogs()
+      void saveUiSettings()
     }
   },
 )

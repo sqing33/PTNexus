@@ -76,6 +76,44 @@ func (s *SettingsService) SaveCrossSeedUIViewSettings(newSettings map[string]any
 	return s.cfg.Save(cfg)
 }
 
+// GetPublishLogsUIViewSettings 返回发布日志页面的 UI 设置。
+// 参数/返回：无参数；返回包含 page_size、search_query 与 active_filters 的设置对象。
+// 失败场景：配置缺失或结构异常时返回默认值。
+// 副作用：无副作用，仅从内存配置读取。
+func (s *SettingsService) GetPublishLogsUIViewSettings() map[string]any {
+	defaults := map[string]any{
+		"page_size":    20,
+		"search_query": "",
+		"active_filters": map[string]any{
+			"status":         "",
+			"trigger":        "",
+			"scene":          "",
+			"queue_group_id": "",
+			"target_site":    "",
+		},
+	}
+	cfg := s.cfg.Get()
+	ui, ok := cfg["ui_settings"].(map[string]any)
+	if ok {
+		if view, ok := ui["publish_logs_view"].(map[string]any); ok {
+			return view
+		}
+	}
+	return defaults
+}
+
+// SavePublishLogsUIViewSettings 保存发布日志页面的 UI 设置。
+// 参数/返回：newSettings 为前端提交的设置对象；返回错误用于表示保存失败。
+// 失败场景：配置写入失败时返回错误。
+// 副作用：写入配置文件并持久化。
+func (s *SettingsService) SavePublishLogsUIViewSettings(newSettings map[string]any) error {
+	cfg := s.cfg.Get()
+	ui := ensureMap(cfg, "ui_settings")
+	ui["publish_logs_view"] = newSettings
+	cfg["ui_settings"] = ui
+	return s.cfg.Save(cfg)
+}
+
 func (s *SettingsService) GetUploadSettings() map[string]any {
 	defaults := map[string]any{"anonymous_upload": true}
 	cfg := s.cfg.Get()

@@ -193,6 +193,17 @@ func defaultConfig() map[string]any {
 					"isDeleted": "",
 				},
 			},
+			"publish_logs_view": map[string]any{
+				"page_size":    20,
+				"search_query": "",
+				"active_filters": map[string]any{
+					"status":         "",
+					"trigger":        "",
+					"scene":          "",
+					"queue_group_id": "",
+					"target_site":    "",
+				},
+			},
 		},
 		"iyuu_settings": map[string]any{
 			"path_filter_enabled": false,
