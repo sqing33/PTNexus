@@ -610,7 +610,7 @@ func (s *MigrateService) insertQueuedPublishLogs(tasks []repository.PublishQueue
 			QueueGroupID:  strings.TrimSpace(task.GroupID),
 			TaskID:        strings.TrimSpace(task.TaskID),
 			TorrentID:     strings.TrimSpace(task.TorrentID),
-			SourceSite:    strings.TrimSpace(task.SourceSite),
+			SourceSite:    s.normalizePublishLogSourceSite(task.SourceSite),
 			TargetSite:    strings.TrimSpace(task.TargetSite),
 			DownloaderID:  strings.TrimSpace(task.DownloaderID),
 			Title:         strings.TrimSpace(task.Title),

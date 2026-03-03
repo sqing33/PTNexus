@@ -84,7 +84,7 @@ func (s *MigrateService) InsertExternalPublishLog(input ExternalPublishLogInput)
 		QueueGroupID:  strings.TrimSpace(input.QueueGroupID),
 		TaskID:        strings.TrimSpace(input.TaskID),
 		TorrentID:     strings.TrimSpace(input.TorrentID),
-		SourceSite:    strings.TrimSpace(input.SourceSite),
+		SourceSite:    s.normalizePublishLogSourceSite(input.SourceSite),
 		TargetSite:    strings.TrimSpace(input.TargetSite),
 		DownloaderID:  strings.TrimSpace(input.DownloaderID),
 		Title:         strings.TrimSpace(input.Title),
@@ -153,7 +153,7 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 	scene := strings.TrimSpace(processingshared.ToString(payload["publish_scene"], ""))
 
 	targetSite := strings.TrimSpace(processingshared.ToString(payload["targetSite"], ""))
-	sourceSite := strings.TrimSpace(processingshared.ToString(payload["sourceSite"], processingshared.ToString(payload["source_site"], "")))
+	sourceSite := s.normalizePublishLogSourceSite(processingshared.ToString(payload["sourceSite"], processingshared.ToString(payload["source_site"], "")))
 	downloaderID := strings.TrimSpace(processingshared.ToString(payload["downloaderId"], processingshared.ToString(payload["downloader_id"], "")))
 
 	uploadData, _ := payload["upload_data"].(map[string]any)
@@ -260,4 +260,25 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 	if _, err := s.publishLogRepo.Insert(&entry); err != nil {
 		logx.Warnf(publishLogModule, "写入发种日志失败 trigger=%s scene=%s target=%s err=%v", trigger, scene, targetSite, err)
 	}
+}
+
+func (s *MigrateService) normalizePublishLogSourceSite(value string) string {
+	sourceSite := strings.TrimSpace(value)
+	if sourceSite == "" {
+		return ""
+	}
+	if s == nil || s.repo == nil {
+		return sourceSite
+	}
+
+	siteInfo, err := s.repo.GetSiteByName(sourceSite)
+	if err != nil || siteInfo == nil {
+		return sourceSite
+	}
+
+	nickname := strings.TrimSpace(processingshared.ToString(siteInfo["nickname"], ""))
+	if nickname == "" {
+		return sourceSite
+	}
+	return nickname
 }
