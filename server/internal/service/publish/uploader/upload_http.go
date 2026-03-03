@@ -14,7 +14,7 @@ import (
 // TryUploadTorrent 执行单次上传尝试，支持重定向 Location 与响应正文解析详情页链接。
 // 参数/返回：uploadURL/baseURL/cookie/fileField 为站点上传所需信息；torrentFile 为种子字节；formFields 为表单字段；
 // 返回发布详情页 URL、是否疑似“种子已存在”、本次尝试日志，以及错误。
-// 失败场景：HTTP 请求失败、未能解析发布链接、服务端返回错误等。
+// 失败场景：HTTP 请求失败、服务端返回错误等；若站点仅提示“种子已存在”但未返回详情页，将按已存在成功处理。
 // 副作用：发起 HTTP 请求并读取响应正文。
 func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile []byte, fileName string, formFields map[string]string) (string, bool, string, error) {
 	detailLines := []string{
@@ -100,9 +100,8 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 				detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
 				return publishURL, true, buildDetail(), nil
 			}
-			err = fmt.Errorf("目标站点提示种子已存在，但未返回详情链接")
-			detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
-			return "", true, buildDetail(), err
+			detailLines = append(detailLines, "尝试结论: 目标站点提示种子已存在，但未返回详情链接，按已存在处理")
+			return "", true, buildDetail(), nil
 		}
 	}
 
