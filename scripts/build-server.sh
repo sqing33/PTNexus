@@ -31,7 +31,8 @@ require_cmd() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVER_DIR="${SCRIPT_DIR}/server"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SERVER_DIR="${REPO_ROOT}/server"
 
 if [ ! -d "$SERVER_DIR" ]; then
   log_err "未找到 server 目录: ${SERVER_DIR}"
