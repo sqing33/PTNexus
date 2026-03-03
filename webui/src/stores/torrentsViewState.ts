@@ -1,13 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import axios from 'axios'
+import type { Downloader } from '@/types'
 
-interface Downloader {
-  id: string
-  name: string
-  enabled?: boolean
-  color?: string
-}
+type SortOrder = 'ascending' | 'descending' | null
 
 interface SiteStatus {
   name: string
@@ -21,7 +17,7 @@ interface SiteStatus {
 interface UiSettings {
   page_size?: number
   sort_prop?: string
-  sort_order?: string | null
+  sort_order?: SortOrder
   name_search?: string
   active_filters?: {
     paths: string[]

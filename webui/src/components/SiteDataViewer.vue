@@ -223,7 +223,7 @@ interface Props {
   torrent?: Torrent | null
 }
 
-const props = defineProps<Props>()
+defineProps<Props>()
 
 // Define emits
 const emit = defineEmits<{
@@ -242,6 +242,14 @@ const selectedSite = ref<string | null>(null)
 
 // Selected downloader (single selection)
 const selectedDownloader = ref<string | null>(null)
+
+type TransferSuggestion = {
+  name: string
+  sites: string
+  size: number
+  save_path: string
+  [key: string]: unknown
+}
 
 // 计算排序后的站点列表（按做种人数从高到低）
 const sortedSites = computed(() => {
@@ -443,13 +451,20 @@ const performTransfer = async () => {
       }),
     })
 
-    const prepareResult = await prepareResponse.json()
+    const prepareResult = (await prepareResponse.json()) as {
+      success?: boolean
+      message?: string
+      suggestion_count?: number
+      suggestions?: TransferSuggestion[]
+      found_count?: number
+      [key: string]: unknown
+    }
 
     if (!prepareResult.success) {
       // 如果有相似种子建议，显示给用户
       if (prepareResult.suggestions && prepareResult.suggestions.length > 0) {
         const suggestionList = prepareResult.suggestions
-          .map((torrent: any, index: number) => {
+          .map((torrent: TransferSuggestion, index: number) => {
             return `${index + 1}. ${torrent.name}\n   站点: ${torrent.sites}\n   大小: ${(torrent.size / 1024 ** 3).toFixed(2)} GB\n   路径: ${torrent.save_path}`
           })
           .join('\n\n')
@@ -465,7 +480,7 @@ const performTransfer = async () => {
           const similarTorrent = prepareResult.suggestions[0]
 
           // 更新当前种子信息为相似种子的信息
-          if (torrentInfo.value) {
+          if (torrentInfo.value && selectedSite.value) {
             torrentInfo.value.sites = {
               [similarTorrent.sites]: torrentInfo.value.sites[selectedSite.value] || {},
             }
@@ -524,15 +539,16 @@ const performTransfer = async () => {
     emit('refresh')
 
     // 成功后保持状态，等待用户手动关闭
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('转移过程中发生错误:', error)
-    alert(`转移过程中发生错误: ${error?.message || '未知错误'}`)
+    const message = error instanceof Error ? error.message : '未知错误'
+    alert(`转移过程中发生错误: ${message}`)
     resetProgress()
   }
 }
 
 // Retry transfer with similar torrent
-const retryTransferWithSimilarTorrent = async (similarTorrent: any) => {
+const retryTransferWithSimilarTorrent = async (similarTorrent: TransferSuggestion) => {
   if (!selectedDownloader.value || !torrentInfo.value) {
     return
   }
@@ -592,9 +608,10 @@ const retryTransferWithSimilarTorrent = async (similarTorrent: any) => {
     emit('refresh')
 
     // 成功后保持状态，等待用户手动关闭
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('重试转移过程中发生错误:', error)
-    alert(`重试转移过程中发生错误: ${error?.message || '未知错误'}`)
+    const message = error instanceof Error ? error.message : '未知错误'
+    alert(`重试转移过程中发生错误: ${message}`)
     resetProgress()
   }
 }

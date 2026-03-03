@@ -70,8 +70,9 @@ const handleCopy = async () => {
   try {
     await navigator.clipboard.writeText(text)
     ElMessage.success('已复制到剪贴板')
-  } catch (e: any) {
-    ElMessage.error(e?.message || '复制失败')
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : '复制失败'
+    ElMessage.error(message)
   }
 }
 
@@ -167,4 +168,3 @@ onBeforeUnmount(() => {
   color: #606266;
 }
 </style>
-

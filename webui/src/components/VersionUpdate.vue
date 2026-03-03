@@ -177,10 +177,29 @@ const updateInfo = reactive({
       enabled: false,
       timezone: 'Asia/Shanghai',
       time: '06:00',
-      last_run: null,
+      last_run: null as string | null,
     },
   },
 })
+
+type UpdateControlSchedule = {
+  enabled?: boolean
+  timezone?: string
+  time?: string
+  last_run?: string | null
+}
+
+type UpdateControlData = {
+  force_update?: boolean
+  disable_update?: boolean
+  schedule?: UpdateControlSchedule
+}
+
+type UpdateCheckData = {
+  remote_version?: string
+  update_control?: UpdateControlData
+  [key: string]: unknown
+}
 
 // 计算属性：判断是否为强制更新
 const isForceUpdate = computed(() => {
@@ -337,39 +356,40 @@ const loadVersionInfo = async () => {
 }
 
 // 修改：接收可选的 preLoadedData
-const showUpdateDialog = async (preLoadedData: any = null) => {
+const showUpdateDialog = async (preLoadedData: UpdateCheckData | null = null) => {
   try {
     const timestamp = new Date().getTime()
     const changelogPromise = axios.get(`/update/changelog?t=${timestamp}`)
 
-    let versionData = preLoadedData
-    if (!versionData) {
+    let versionData: UpdateCheckData = preLoadedData ?? {}
+    if (!preLoadedData) {
       const versionResponse = await axios.get(`/update/check?t=${timestamp}`)
-      versionData = versionResponse.data
+      versionData = versionResponse.data as UpdateCheckData
     }
 
     const changelogResponse = await changelogPromise
     const changelogData = changelogResponse.data
 
-    const compareResult = compareVersions(versionData.remote_version, currentVersion.value)
+    const compareResult = compareVersions(versionData.remote_version || '', currentVersion.value)
     // 如果 compareResult < 0，说明本地版本比远程新
     const isLocalNewer = compareResult < 0
 
     updateInfo.hasUpdate = compareResult > 0
     updateInfo.currentVersion = currentVersion.value
-    updateInfo.remoteVersion = versionData.remote_version
+    updateInfo.remoteVersion = versionData.remote_version || ''
     updateInfo.changelog = changelogData.changelog || []
     updateInfo.history = changelogData.history || []
 
+    const schedule = versionData.update_control?.schedule
     updateInfo.updateControl = {
       // 修复：如果本地版本比远程新，强行关闭 force_update 标志，防止UI显示错误
       force_update: isLocalNewer ? false : versionData.update_control?.force_update || false,
       disable_update: versionData.update_control?.disable_update || false,
-      schedule: versionData.update_control?.schedule || {
-        enabled: false,
-        timezone: 'Asia/Shanghai',
-        time: '06:00',
-        last_run: null,
+      schedule: {
+        enabled: schedule?.enabled ?? false,
+        timezone: schedule?.timezone ?? 'Asia/Shanghai',
+        time: schedule?.time ?? '06:00',
+        last_run: schedule?.last_run ?? null,
       },
     }
 

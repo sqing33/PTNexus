@@ -199,18 +199,48 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import LogViewerCard from '@/components/LogViewerCard.vue'
+import type { Downloader } from '@/types'
 
 const emits = defineEmits(['ready'])
+
+type PublishLogRow = {
+  id: number | string
+  created_at: string
+  updated_at: string
+  scene: string
+  trigger: string
+  source_site: string
+  target_site: string
+  torrent_id: number | string
+  title?: string | null
+  subtitle?: string | null
+  status: string
+  result_url?: string | null
+  queue_task_id?: number | string | null
+  logs?: string | null
+  auto_add_result?: string | null
+  [key: string]: unknown
+}
+
+type ParsedAutoAddResult = {
+  success: boolean
+  message: string
+  downloaderName: string
+  downloaderId: string
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
 
 const loading = ref(false)
 const error = ref('')
 
 const torrentsViewState = useTorrentsViewState()
-const allDownloadersList = ref<any[]>([])
+const allDownloadersList = ref<Downloader[]>([])
 const route = useRoute()
 const router = useRouter()
 
-const rows = ref<any[]>([])
+const rows = ref<PublishLogRow[]>([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -292,19 +322,23 @@ const formatDateTimeTwoLines = (raw: string) => {
   return trimmed
 }
 
-const parseAutoAddResult = (row: any) => {
-  const raw = (row?.auto_add_result || '').trim()
-  if (!raw) return { success: false, message: '' }
+const parseAutoAddResult = (row: PublishLogRow | null | undefined): ParsedAutoAddResult => {
+  const raw = String(row?.auto_add_result || '').trim()
+  if (!raw) return { success: false, message: '', downloaderName: '', downloaderId: '' }
   try {
-    const parsed = JSON.parse(raw)
+    const parsed = JSON.parse(raw) as unknown
+    if (!isRecord(parsed)) {
+      return { success: false, message: raw, downloaderName: '', downloaderId: '' }
+    }
     return {
-      success: parsed?.success === true,
-      message: String(parsed?.message || ''),
-      downloaderName: String(parsed?.downloader_name || ''),
-      downloaderId: String(parsed?.downloader_id || ''),
+      success: parsed.success === true,
+      message: typeof parsed.message === 'string' ? parsed.message : String(parsed.message || ''),
+      downloaderName:
+        typeof parsed.downloader_name === 'string' ? parsed.downloader_name : String(parsed.downloader_name || ''),
+      downloaderId: typeof parsed.downloader_id === 'string' ? parsed.downloader_id : String(parsed.downloader_id || ''),
     }
   } catch {
-    return { success: false, message: raw }
+    return { success: false, message: raw, downloaderName: '', downloaderId: '' }
   }
 }
 
@@ -326,7 +360,7 @@ const deriveDownloaderColor = (seed: string) => {
 const resolveDownloaderColor = (downloaderId: string, downloaderName: string) => {
   const id = (downloaderId || '').trim()
   if (id) {
-    const item = allDownloadersList.value.find((d) => String(d?.id || '').trim() === id)
+    const item = allDownloadersList.value.find((d) => d.id === id)
     const configured = String(item?.color || '').trim()
     if (configured) return configured
     return deriveDownloaderColor(id)
@@ -337,17 +371,19 @@ const resolveDownloaderColor = (downloaderId: string, downloaderName: string) =>
   return ''
 }
 
-const downloaderTagType = (row: any) => {
+const downloaderTagType = (row: PublishLogRow) => {
   const parsed = parseAutoAddResult(row)
   if (parsed.success) return 'info'
   if ((parsed.message || '').trim().startsWith('未执行')) return 'info'
   return 'info'
 }
 
-const downloaderTagStyle = (row: any) => {
+type DownloaderTagStyle = Record<string, string>
+
+const downloaderTagStyle = (row: PublishLogRow): DownloaderTagStyle => {
   const parsed = parseAutoAddResult(row)
   const message = (parsed.message || '').trim()
-  if (message.startsWith('未执行')) return {}
+  if (message.startsWith('未执行')) return {} as DownloaderTagStyle
 
   let color = ''
   if (parsed.success) {
@@ -356,16 +392,16 @@ const downloaderTagStyle = (row: any) => {
     color = '#f56c6c'
   }
 
-  if (!color) return {}
+  if (!color) return {} as DownloaderTagStyle
 
   return {
     '--el-tag-bg-color': color,
     '--el-tag-border-color': color,
     '--el-tag-text-color': '#ffffff',
-  } as any
+  }
 }
 
-const formatDownloaderStatus = (row: any) => {
+const formatDownloaderStatus = (row: PublishLogRow) => {
   const parsed = parseAutoAddResult(row)
   const message = (parsed.message || '').trim()
   if (message.startsWith('未执行')) return '未执行'
@@ -401,15 +437,22 @@ const fetchLogs = async (options: { silent?: boolean } = {}) => {
     }
 
     if (currentFetchSeq !== fetchSeq) return
-    rows.value = response.data.data || []
-    total.value = response.data.total || 0
+    rows.value = Array.isArray(response.data.data) ? (response.data.data as PublishLogRow[]) : []
+    total.value = Number(response.data.total || 0)
     if (error.value) {
       error.value = ''
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (currentFetchSeq !== fetchSeq) return
     if (!silent) {
-      error.value = e?.message || '获取发种日志失败'
+      const message = axios.isAxiosError(e)
+        ? ((e.response?.data as { message?: string; error?: string } | undefined)?.message ||
+          (e.response?.data as { error?: string } | undefined)?.error ||
+          e.message)
+        : e instanceof Error
+          ? e.message
+          : '获取发种日志失败'
+      error.value = message
     }
   } finally {
     if (!silent && currentFetchSeq === fetchSeq) {
@@ -448,7 +491,7 @@ const handleCurrentChange = async (page: number) => {
   await fetchLogs()
 }
 
-const openLogs = (row: any) => {
+const openLogs = (row: PublishLogRow) => {
   dialogTitle.value = `日志 - ${row.target_site || ''}`
   const base = row.logs || ''
   const parsed = parseAutoAddResult(row)
@@ -466,20 +509,19 @@ const openLogs = (row: any) => {
   dialogVisible.value = true
 }
 
-const openResultURL = (row: any) => {
+const openResultURL = (row: PublishLogRow) => {
   const url = String(row?.result_url || '').trim()
   if (!url) return
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-const canDeleteQueued = (row: any) => {
-  if (!row) return false
+const canDeleteQueued = (row: PublishLogRow) => {
   const status = String(row?.status || '').trim()
   const queueTaskID = Number(row?.queue_task_id || 0)
   return status === 'queued' && queueTaskID > 0
 }
 
-const deleteQueuedTask = async (row: any) => {
+const deleteQueuedTask = async (row: PublishLogRow) => {
   if (!canDeleteQueued(row)) return
   const queueTaskID = Number(row.queue_task_id)
   try {
@@ -496,14 +538,21 @@ const deleteQueuedTask = async (row: any) => {
 
     ElMessage.success(response.data?.message || '队列任务已移除')
     await fetchLogs()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error === 'cancel' || error === 'close') return
-    ElMessage.error(error?.response?.data?.message || error?.message || '删除失败')
+    const message = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (error.response?.data as { error?: string } | undefined)?.error ||
+        error.message)
+      : error instanceof Error
+        ? error.message
+        : '删除失败'
+    ElMessage.error(message)
   }
 }
 
 const readQuery = (key: string) => {
-  const raw = (route.query as any)?.[key]
+  const raw = route.query[key]
   if (Array.isArray(raw)) return String(raw[0] || '')
   if (raw === undefined || raw === null) return ''
   return String(raw)

@@ -354,27 +354,84 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Edit, Refresh, Search } from '@element-plus/icons-vue'
 
+type SiteConfig = {
+  id: number | string | null
+  site: string
+  nickname: string
+  base_url?: string
+  special_tracker_domain?: string
+  group?: string
+  cookie?: string
+  passkey?: string
+  speed_limit?: number | null
+  ratio_threshold?: number | null
+  seed_speed_limit?: number | null
+  has_cookie?: boolean
+  has_passkey?: boolean
+  [key: string]: unknown
+}
+
+type SiteStatus = {
+  site: string
+  is_source?: boolean
+  is_target?: boolean
+  [key: string]: unknown
+}
+
+type CookieCloudForm = {
+  url: string
+  key: string
+  e2e_password: string
+}
+
+type SortOrder = 'ascending' | 'descending' | null
+
+type SortState = {
+  prop: string
+  order: SortOrder
+}
+
+type PaginationState = {
+  currentPage: number
+  pageSize: number
+  total: number
+}
+
+type SiteForm = {
+  id: number | string | null
+  site: string
+  nickname: string
+  base_url: string
+  special_tracker_domain: string
+  group: string
+  cookie: string
+  passkey: string
+  speed_limit: number
+  ratio_threshold: number
+  seed_speed_limit: number
+}
+
 // --- 状态管理 ---
 const isSaving = ref(false) // 用于站点编辑对话框的保存按钮
 
 // --- 站点管理状态 ---
-const sitesList = ref([]) // 存储从后端获取的原始列表
-const existingSitesSet = ref(new Set()) // 存储“有此站点”的标识集合（复用后端 active 规则）
-const sitesStatusList = ref([]) // 存储源/目标站点状态信息
+const sitesList = ref<SiteConfig[]>([]) // 存储从后端获取的原始列表
+const existingSitesSet = ref<Set<string>>(new Set()) // 存储“有此站点”的标识集合（复用后端 active 规则）
+const sitesStatusList = ref<SiteStatus[]>([]) // 存储源/目标站点状态信息
 const isSitesLoading = ref(false)
 const isCookieActionLoading = ref(false) // [新增] 用于新的"同步Cookie"按钮的加载状态
-const cookieCloudForm = ref({ url: '', key: '', e2e_password: '' })
+const cookieCloudForm = ref<CookieCloudForm>({ url: '', key: '', e2e_password: '' })
 const searchQuery = ref('')
 const siteFilter = ref('existing_supported')
 
 // --- 排序状态 ---
-const sortState = ref({
+const sortState = ref<SortState>({
   prop: 'support_role',
   order: 'ascending',
 })
@@ -385,7 +442,7 @@ const defaultSort = computed(() => ({
 }))
 
 // --- 分页状态 ---
-const pagination = ref({
+const pagination = ref<PaginationState>({
   currentPage: 1,
   pageSize: 30,
   total: 0,
@@ -393,8 +450,8 @@ const pagination = ref({
 
 // --- 对话框状态 ---
 const dialogVisible = ref(false)
-const siteFormRef = ref(null)
-const siteForm = ref({
+const siteFormRef = ref<unknown>(null)
+const siteForm = ref<SiteForm>({
   id: null,
   site: '',
   nickname: '',
@@ -413,7 +470,7 @@ const API_BASE_URL = '/api'
 // --- 计算属性 ---
 
 const sitesStatusMap = computed(() => {
-  const map = new Map()
+  const map = new Map<string, SiteStatus>()
   for (const status of sitesStatusList.value || []) {
     if (status && status.site) {
       map.set(String(status.site), status)
@@ -422,12 +479,12 @@ const sitesStatusMap = computed(() => {
   return map
 })
 
-const getSiteStatus = (site) => {
+const getSiteStatus = (site: SiteConfig) => {
   if (!site?.site) return null
   return sitesStatusMap.value.get(String(site.site)) || null
 }
 
-const getSiteRole = (site) => {
+const getSiteRole = (site: SiteConfig): 'none' | 'both' | 'source' | 'target' => {
   const status = getSiteStatus(site)
   if (!status) return 'none'
   if (status.is_source && status.is_target) return 'both'
@@ -436,7 +493,7 @@ const getSiteRole = (site) => {
   return 'none'
 }
 
-const isSiteConfigComplete = (site) => {
+const isSiteConfigComplete = (site: SiteConfig) => {
   const hasCookie = Boolean(site?.has_cookie)
   const hasPasskey = Boolean(site?.has_passkey)
   // 与 Passkey 列展示规则保持一致：大多数站点自动获取，仅少数站点需要手动配置
@@ -450,12 +507,12 @@ const shouldHighlightIncompleteConfig = computed(() =>
   ['existing_supported', 'supported'].includes(siteFilter.value),
 )
 
-const normalizeString = (value) =>
+const normalizeString = (value: unknown) =>
   String(value ?? '')
     .trim()
     .toLowerCase()
 
-const compareStrings = (a, b) => {
+const compareStrings = (a: unknown, b: unknown) => {
   const aText = normalizeString(a)
   const bText = normalizeString(b)
   if (!aText && !bText) return 0
@@ -464,7 +521,7 @@ const compareStrings = (a, b) => {
   return aText.localeCompare(bText, 'zh-CN', { numeric: true, sensitivity: 'base' })
 }
 
-const compareNullableNumbers = (a, b) => {
+const compareNullableNumbers = (a: unknown, b: unknown) => {
   const aNull = a === null || a === undefined
   const bNull = b === null || b === undefined
   const aNumber = aNull ? NaN : Number(a)
@@ -477,7 +534,7 @@ const compareNullableNumbers = (a, b) => {
   return aNumber - bNumber
 }
 
-const getSupportRank = (site) => {
+const getSupportRank = (site: SiteConfig) => {
   const role = getSiteRole(site)
   if (role === 'both') return 0
   if (role === 'source') return 1
@@ -485,18 +542,18 @@ const getSupportRank = (site) => {
   return 3
 }
 
-const getCookieSortKey = (site) => {
+const getCookieSortKey = (site: SiteConfig) => {
   if (site?.site === 'rousi') return 2 // 无需配置，放在已配置之后
   return site?.has_cookie ? 1 : 0
 }
 
-const getPasskeySortKey = (site) => {
+const getPasskeySortKey = (site: SiteConfig) => {
   const needsPasskey = ['hddolby', 'm-team', 'hdtime', 'rousi'].includes(site?.site)
   if (!needsPasskey) return 2 // 自动获取，放在已配置之后
   return site?.has_passkey ? 1 : 0
 }
 
-const compareByProp = (a, b, prop) => {
+const compareByProp = (a: SiteConfig, b: SiteConfig, prop: string) => {
   switch (prop) {
     case 'nickname':
       return compareStrings(a?.nickname, b?.nickname)
@@ -523,7 +580,7 @@ const compareByProp = (a, b, prop) => {
   }
 }
 
-const applySortOrder = (compareResult, order) => {
+const applySortOrder = (compareResult: number, order: SortOrder) => {
   if (!order) return 0
   return order === 'descending' ? -compareResult : compareResult
 }
@@ -590,19 +647,25 @@ const sortedSites = computed(() => {
 
 // 3. 再根据分页信息对排序后的结果进行切片
 const paginatedSites = computed(() => {
-  pagination.value.total = sortedSites.value.length
-
   const start = (pagination.value.currentPage - 1) * pagination.value.pageSize
   const end = start + pagination.value.pageSize
   return sortedSites.value.slice(start, end)
 })
+
+watch(
+  () => sortedSites.value.length,
+  (total) => {
+    pagination.value.total = total
+  },
+  { immediate: true },
+)
 
 // 监听搜索词变化，如果变化则返回第一页
 watch(searchQuery, () => {
   pagination.value.currentPage = 1
 })
 
-const handleSortChange = ({ prop, order }) => {
+const handleSortChange = ({ prop, order }: { prop?: string; order?: SortOrder }) => {
   sortState.value = {
     prop: prop || 'support_role',
     order: order || 'ascending',
@@ -625,7 +688,7 @@ const fetchCookieCloudSettings = async () => {
       cookieCloudForm.value.key = response.data.cookiecloud.key || ''
       cookieCloudForm.value.e2e_password = ''
     }
-  } catch (error) {
+  } catch {
     ElMessage.error('加载CookieCloud配置失败！')
   }
 }
@@ -640,10 +703,16 @@ const fetchSites = async () => {
       axios.get(`${API_BASE_URL}/sites/status`),
     ])
 
-    sitesList.value = allSitesResponse.data
-    existingSitesSet.value = new Set((existingSitesResponse.data || []).map((s) => s.site))
-    sitesStatusList.value = sitesStatusResponse.data
-  } catch (error) {
+    sitesList.value = Array.isArray(allSitesResponse.data) ? (allSitesResponse.data as SiteConfig[]) : []
+    existingSitesSet.value = new Set(
+      (Array.isArray(existingSitesResponse.data) ? existingSitesResponse.data : [])
+        .map((site) => String((site as Record<string, unknown>)?.site || '').trim())
+        .filter(Boolean),
+    )
+    sitesStatusList.value = Array.isArray(sitesStatusResponse.data)
+      ? (sitesStatusResponse.data as SiteStatus[])
+      : []
+  } catch {
     ElMessage.error('获取站点列表失败！')
   } finally {
     isSitesLoading.value = false
@@ -655,10 +724,26 @@ const handleFilterChange = () => {
   pagination.value.currentPage = 1
 }
 
-const getRowClassName = ({ row }) => {
+const getRowClassName = ({ row }: { row: SiteConfig }) => {
   if (!shouldHighlightIncompleteConfig.value) return ''
   return isSiteConfigComplete(row) ? '' : 'row-config-incomplete'
 }
+
+const normalizeSiteForm = (site: SiteConfig): SiteForm => ({
+  id: site.id ?? null,
+  site: String(site.site || ''),
+  nickname: String(site.nickname || ''),
+  base_url: String(site.base_url || ''),
+  special_tracker_domain: String(site.special_tracker_domain || ''),
+  group: String(site.group || ''),
+  cookie: String(site.cookie || ''),
+  passkey: String(site.passkey || ''),
+  speed_limit: typeof site.speed_limit === 'number' ? site.speed_limit : Number(site.speed_limit) || 0,
+  ratio_threshold:
+    typeof site.ratio_threshold === 'number' ? site.ratio_threshold : Number(site.ratio_threshold) || 3.0,
+  seed_speed_limit:
+    typeof site.seed_speed_limit === 'number' ? site.seed_speed_limit : Number(site.seed_speed_limit) || 5,
+})
 
 // [新增] 合并后的保存与同步功能
 const handleSaveAndSync = async () => {
@@ -689,44 +774,31 @@ const handleSaveAndSync = async () => {
     } else {
       ElMessage.error(syncResponse.data.message || '同步失败，但配置已保存。')
     }
-  } catch (error) {
-    const errorMessage = error.response?.data?.message || '操作失败，请检查网络或后端服务。'
+  } catch (error: unknown) {
+    const errorMessage = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string } | undefined)?.message || error.message)
+      : error instanceof Error
+        ? error.message
+        : '操作失败，请检查网络或后端服务。'
     ElMessage.error(errorMessage)
   } finally {
     isCookieActionLoading.value = false
   }
 }
 
-const handleOpenDialog = (site) => {
-  // 统一使用MB/s单位
-  const siteData = JSON.parse(JSON.stringify(site))
-  if (siteData.ratio_threshold === undefined || siteData.ratio_threshold === null) {
-    siteData.ratio_threshold = 3.0
-  }
-  if (siteData.seed_speed_limit === undefined || siteData.seed_speed_limit === null) {
-    siteData.seed_speed_limit = 5
-  }
-  siteForm.value = siteData
+const handleOpenDialog = (site: SiteConfig) => {
+  siteForm.value = normalizeSiteForm(site)
   dialogVisible.value = true
 }
 
 const handleSave = async () => {
   isSaving.value = true
   try {
-    // 统一使用MB/s单位
-    const siteData = JSON.parse(JSON.stringify(siteForm.value))
-
-    // 自动过滤掉cookie最后的换行符
-    if (siteData.cookie) {
-      siteData.cookie = siteData.cookie.trim()
-    }
-
-    if (siteData.ratio_threshold === '' || siteData.ratio_threshold === 0) {
-      siteData.ratio_threshold = 3.0
-    }
-
-    if (siteData.seed_speed_limit === '') {
-      siteData.seed_speed_limit = 5
+    const siteData: SiteForm = {
+      ...siteForm.value,
+      cookie: siteForm.value.cookie ? siteForm.value.cookie.trim() : '',
+      ratio_threshold: siteForm.value.ratio_threshold || 3.0,
+      seed_speed_limit: siteForm.value.seed_speed_limit || 5,
     }
 
     const response = await axios.post(`${API_BASE_URL}/sites/update`, siteData)
@@ -738,15 +810,19 @@ const handleSave = async () => {
     } else {
       ElMessage.error(response.data.message || '操作失败！')
     }
-  } catch (error) {
-    const msg = error.response?.data?.message || '请求失败，请检查网络或后端服务。'
+  } catch (error: unknown) {
+    const msg = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string } | undefined)?.message || error.message)
+      : error instanceof Error
+        ? error.message
+        : '请求失败，请检查网络或后端服务。'
     ElMessage.error(msg)
   } finally {
     isSaving.value = false
   }
 }
 
-const handleDelete = (site) => {
+const handleDelete = (site: SiteConfig) => {
   ElMessageBox.confirm('', '警告', {
     confirmButtonText: '确定删除',
     cancelButtonText: '取消',
@@ -763,8 +839,12 @@ const handleDelete = (site) => {
         } else {
           ElMessage.error(response.data.message || '删除失败！')
         }
-      } catch (error) {
-        const msg = error.response?.data?.message || '删除请求失败。'
+      } catch (error: unknown) {
+        const msg = axios.isAxiosError(error)
+          ? ((error.response?.data as { message?: string } | undefined)?.message || error.message)
+          : error instanceof Error
+            ? error.message
+            : '删除请求失败。'
         ElMessage.error(msg)
       }
     })

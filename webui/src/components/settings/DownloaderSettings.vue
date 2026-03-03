@@ -252,21 +252,53 @@
   </el-dialog>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Select, Link, FolderOpened, Refresh } from '@element-plus/icons-vue'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 
-const settings = ref({
+type ConnectionTestStatus = 'success' | 'error'
+
+type PathMapping = {
+  remote: string
+  local: string
+}
+
+type DownloaderConfig = {
+  id: string
+  enabled: boolean
+  name: string
+  type: string
+  host: string
+  username: string
+  password: string
+  use_proxy: boolean
+  proxy_port: number
+  color: string
+  path_mappings: PathMapping[]
+  enable_ratio_limiter: boolean
+  [key: string]: unknown
+}
+
+type SettingsState = {
+  downloaders: DownloaderConfig[]
+  realtime_speed_enabled: boolean
+  [key: string]: unknown
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+const settings = ref<SettingsState>({
   downloaders: [],
   realtime_speed_enabled: true,
 })
 const isLoading = ref(true)
 const isSaving = ref(false)
-const testingConnectionId = ref(null)
-const connectionTestResults = ref({})
+const testingConnectionId = ref<string | null>(null)
+const connectionTestResults = ref<Record<string, ConnectionTestStatus | undefined>>({})
 const API_BASE_URL = '/api'
 const torrentsViewState = useTorrentsViewState()
 
@@ -285,9 +317,9 @@ const predefinedDownloaderColors = [
   '#55EFC4',
 ]
 
-const clampInt = (value, min, max) => Math.min(max, Math.max(min, value))
+const clampInt = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
-const hslToHex = (h, s, l) => {
+const hslToHex = (h: number, s: number, l: number) => {
   const sat = clampInt(Number(s), 0, 100) / 100
   const lig = clampInt(Number(l), 0, 100) / 100
 
@@ -306,11 +338,11 @@ const hslToHex = (h, s, l) => {
   else if (hp >= 5 && hp < 6) [r1, g1, b1] = [c, 0, x]
 
   const m = lig - c / 2
-  const toHex = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
+  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
   return `#${toHex(r1)}${toHex(g1)}${toHex(b1)}`
 }
 
-const deriveDownloaderColor = (seed) => {
+const deriveDownloaderColor = (seed: unknown) => {
   const value = String(seed || '').trim()
   if (!value) return predefinedDownloaderColors[0]
   let hash = 0
@@ -330,7 +362,9 @@ const randomDownloaderColor = () => {
   return hslToHex(hue, 72, 45)
 }
 
-const downloaderNameTagStyle = (downloader) => {
+const downloaderNameTagStyle = (
+  downloader: { color?: string | null } | null | undefined,
+): Record<string, string> => {
   const color = String(downloader?.color || '').trim()
   if (!color) return {}
   return {
@@ -342,8 +376,8 @@ const downloaderNameTagStyle = (downloader) => {
 
 // 路径映射相关状态
 const pathMappingDialogVisible = ref(false)
-const currentDownloader = ref(null)
-const currentPathMappings = ref([])
+const currentDownloader = ref<DownloaderConfig | null>(null)
+const currentPathMappings = ref<PathMapping[]>([])
 
 onMounted(() => {
   fetchSettings()
@@ -352,24 +386,49 @@ onMounted(() => {
 const fetchSettings = async () => {
   isLoading.value = true
   try {
-    const response = await axios.get(`${API_BASE_URL}/settings`)
-    if (response.data) {
-      if (!response.data.downloaders) response.data.downloaders = []
-      if (typeof response.data.realtime_speed_enabled !== 'boolean')
-        response.data.realtime_speed_enabled = true
-      response.data.downloaders.forEach((d) => {
-        if (!d.id) d.id = `client_${Date.now()}_${Math.random()}`
-        if (typeof d.use_proxy !== 'boolean') d.use_proxy = false
-        if (!d.proxy_port) d.proxy_port = 9090
-        if (!d.color) d.color = deriveDownloaderColor(String(d.id || ''))
-        // 初始化 path_mappings 字段
-        if (!d.path_mappings || !Array.isArray(d.path_mappings)) {
-          d.path_mappings = []
-        }
-        // 初始化出种限速开关（默认关闭）
-        if (typeof d.enable_ratio_limiter !== 'boolean') d.enable_ratio_limiter = false
-      })
-      settings.value = response.data
+    const response = await axios.get<Record<string, unknown>>(`${API_BASE_URL}/settings`)
+    const raw = isRecord(response.data) ? response.data : {}
+    const rawDownloaders = Array.isArray(raw.downloaders) ? raw.downloaders : []
+
+    const downloaders = rawDownloaders.map((item) => {
+      const record = isRecord(item) ? item : {}
+      const id = String(record.id || `client_${Date.now()}_${Math.random()}`)
+      const pathMappings = Array.isArray(record.path_mappings)
+        ? record.path_mappings
+            .map((mapping) => {
+              if (!isRecord(mapping)) return null
+              return {
+                remote: typeof mapping.remote === 'string' ? mapping.remote : '',
+                local: typeof mapping.local === 'string' ? mapping.local : '',
+              }
+            })
+            .filter((mapping): mapping is PathMapping => Boolean(mapping))
+        : []
+
+      return {
+        ...record,
+        id,
+        enabled: typeof record.enabled === 'boolean' ? record.enabled : true,
+        name: typeof record.name === 'string' ? record.name : '新下载器',
+        type: typeof record.type === 'string' ? record.type : 'qbittorrent',
+        host: typeof record.host === 'string' ? record.host : '',
+        username: typeof record.username === 'string' ? record.username : '',
+        password: typeof record.password === 'string' ? record.password : '',
+        use_proxy: typeof record.use_proxy === 'boolean' ? record.use_proxy : false,
+        proxy_port:
+          typeof record.proxy_port === 'number' ? record.proxy_port : Number(record.proxy_port) || 9090,
+        color: typeof record.color === 'string' && record.color.trim() ? record.color : deriveDownloaderColor(id),
+        path_mappings: pathMappings,
+        enable_ratio_limiter:
+          typeof record.enable_ratio_limiter === 'boolean' ? record.enable_ratio_limiter : false,
+      } satisfies DownloaderConfig
+    })
+
+    settings.value = {
+      ...raw,
+      downloaders,
+      realtime_speed_enabled:
+        typeof raw.realtime_speed_enabled === 'boolean' ? raw.realtime_speed_enabled : true,
     }
   } catch (error) {
     ElMessage.error('加载设置失败！')
@@ -414,7 +473,7 @@ const addDownloader = () => {
   })
 }
 
-const confirmDeleteDownloader = (downloaderId) => {
+const confirmDeleteDownloader = (downloaderId: string) => {
   ElMessageBox.confirm('您确定要删除这个下载器配置吗？此操作不可撤销。', '警告', {
     confirmButtonText: '确定删除',
     cancelButtonText: '取消',
@@ -430,27 +489,27 @@ const confirmDeleteDownloader = (downloaderId) => {
     .catch(() => {})
 }
 
-const deleteDownloader = (downloaderId) => {
+const deleteDownloader = (downloaderId: string) => {
   settings.value.downloaders = settings.value.downloaders.filter((d) => d.id !== downloaderId)
 }
 
-const resetConnectionStatus = (downloaderId) => {
+const resetConnectionStatus = (downloaderId: string) => {
   if (connectionTestResults.value[downloaderId]) {
     delete connectionTestResults.value[downloaderId]
   }
 }
 
-const testConnection = async (downloader) => {
+const testConnection = async (downloader: DownloaderConfig) => {
   resetConnectionStatus(downloader.id)
   testingConnectionId.value = downloader.id
   try {
     const response = await axios.post(`${API_BASE_URL}/test_connection`, downloader)
-    const result = response.data
+    const result = response.data as { success?: boolean; message?: string }
     if (result.success) {
-      ElMessage.success(result.message)
+      ElMessage.success(result.message || '连接成功')
       connectionTestResults.value[downloader.id] = 'success'
     } else {
-      ElMessage.error(result.message)
+      ElMessage.error(result.message || '连接失败')
       connectionTestResults.value[downloader.id] = 'error'
     }
   } catch (error) {
@@ -463,14 +522,17 @@ const testConnection = async (downloader) => {
 }
 
 // 路径映射相关函数
-const openPathMappingDialog = (downloader) => {
+const openPathMappingDialog = (downloader: DownloaderConfig) => {
   currentDownloader.value = downloader
   // 初始化路径映射数据，如果不存在则创建空数组
   if (!downloader.path_mappings || !Array.isArray(downloader.path_mappings)) {
     downloader.path_mappings = []
   }
-  // 深拷贝映射数据，避免直接修改
-  currentPathMappings.value = JSON.parse(JSON.stringify(downloader.path_mappings))
+  // 拷贝映射数据，避免直接修改
+  currentPathMappings.value = downloader.path_mappings.map((mapping) => ({
+    remote: mapping.remote,
+    local: mapping.local,
+  }))
   pathMappingDialogVisible.value = true
 }
 
@@ -481,7 +543,7 @@ const addPathMapping = () => {
   })
 }
 
-const deletePathMapping = (index) => {
+const deletePathMapping = (index: number) => {
   currentPathMappings.value.splice(index, 1)
 }
 
@@ -491,6 +553,10 @@ const savePathMappings = async () => {
     (mapping) => mapping.remote.trim() !== '' && mapping.local.trim() !== '',
   )
   // 更新当前下载器的路径映射
+  if (!currentDownloader.value) {
+    ElMessage.error('未选择要保存的下载器')
+    return
+  }
   currentDownloader.value.path_mappings = validMappings
 
   // 立即保存到配置文件
@@ -700,24 +766,9 @@ const savePathMappings = async () => {
   white-space: nowrap;
 }
 
-.realtime-switch-container {
-  display: flex;
-  align-items: center;
-  min-height: 40px;
-}
-
 .switch-form-item {
-  margin: 0 0 0 8px;
-}
-
-.switch-form-item :deep(.el-form-item__label),
-.switch-form-item :deep(.el-form-item__content) {
-  display: flex;
-  align-items: center;
-}
-
-.switch-form-item :deep(.el-form-item__label) {
-  line-height: normal;
+  margin-bottom: 0;
+  margin-left: 8px;
 }
 
 /* 路径映射对话框样式 */

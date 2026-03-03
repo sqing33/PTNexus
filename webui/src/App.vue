@@ -258,8 +258,13 @@ const handleGlobalRefresh = async () => {
     }
 
     ElMessage.success('数据已刷新！')
-  } catch (e: any) {
-    ElMessage.error(e?.message || '数据更新失败')
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string } | undefined)?.message || error.message)
+      : error instanceof Error
+        ? error.message
+        : '数据更新失败'
+    ElMessage.error(message || '数据更新失败')
   } finally {
     isRefreshing.value = false
   }
@@ -315,7 +320,7 @@ const parseFileName = (contentDisposition?: string) => {
     }
   }
 
-  const normalMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i)
+  const normalMatch = contentDisposition.match(/filename="?([^";]+)"?/i)
   if (normalMatch?.[1]) {
     return normalMatch[1]
   }
@@ -323,31 +328,48 @@ const parseFileName = (contentDisposition?: string) => {
 }
 
 // resolveExportErrorMessage 兼容 blob/json 文本，提取后端返回的中文错误原因。
-const resolveExportErrorMessage = async (error: any) => {
-  if (error?.response?.data instanceof Blob) {
-    try {
-      const text = await error.response.data.text()
-      if (!text) {
-        return '未知错误'
-      }
+const resolveExportErrorMessage = async (error: unknown) => {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data
+
+    if (data instanceof Blob) {
       try {
-        const payload = JSON.parse(text)
-        if (payload?.message) {
-          return payload.message
+        const text = await data.text()
+        if (!text) return '未知错误'
+        try {
+          const payload: unknown = JSON.parse(text)
+          if (
+            typeof payload === 'object' &&
+            payload !== null &&
+            'message' in payload &&
+            typeof payload.message === 'string' &&
+            payload.message.trim()
+          ) {
+            return payload.message
+          }
+        } catch {
+          return text
         }
-      } catch {
         return text
+      } catch {
+        return '无法读取错误详情'
       }
-      return text
-    } catch {
-      return '无法读取错误详情'
     }
+
+    if (
+      typeof data === 'object' &&
+      data !== null &&
+      'message' in data &&
+      typeof data.message === 'string' &&
+      data.message.trim()
+    ) {
+      return data.message
+    }
+
+    return error.message || '未知错误'
   }
 
-  if (error?.response?.data?.message) {
-    return error.response.data.message
-  }
-  if (error?.message) {
+  if (error instanceof Error && error.message.trim()) {
     return error.message
   }
   return '未知错误'
@@ -384,8 +406,11 @@ const updateBackground = (url: string) => {
 }
 
 // 监听背景更新事件
-const handleBackgroundUpdate = (event: any) => {
-  const { backgroundUrl: newUrl } = event.detail
+type BackgroundUpdateDetail = { backgroundUrl: string }
+const handleBackgroundUpdate = (event: Event) => {
+  const customEvent = event as CustomEvent<BackgroundUpdateDetail>
+  const newUrl = customEvent.detail?.backgroundUrl
+  if (typeof newUrl !== 'string') return
   backgroundUrl.value = newUrl
   updateBackground(newUrl)
 }

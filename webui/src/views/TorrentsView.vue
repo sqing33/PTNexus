@@ -24,7 +24,7 @@
       @row-click="handleRowClick"
       @expand-change="handleExpandChange"
       @sort-change="handleSortChange"
-      :default-sort="currentSort"
+      :default-sort="defaultSortForTable"
       empty-text="无数据或当前筛选条件下无结果"
       class="glass-table"
     >
@@ -587,7 +587,7 @@
               <el-tag
                 v-for="site in allSourceSitesStatus.filter((s) => cachedSites.includes(s.name))"
                 :key="site.name"
-                :type="getSiteTagType(site, isSourceSiteSelectable(site.name))"
+                :type="getSiteTagType(site)"
                 :class="{
                   'is-selectable': isSourceSiteSelectable(site.name),
                   'cached-site-tag': true,
@@ -616,7 +616,7 @@
               <el-tag
                 v-for="site in allSourceSitesStatus.filter((s) => !cachedSites.includes(s.name))"
                 :key="site.name"
-                :type="getSiteTagType(site, isSourceSiteSelectable(site.name))"
+                :type="getSiteTagType(site)"
                 :class="{ 'is-selectable': isSourceSiteSelectable(site.name) }"
                 :style="
                   (!site.has_cookie && site.name !== '肉丝') ||
@@ -741,7 +741,7 @@ import SiteDataViewer from '../components/SiteDataViewer.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
 import { useSiteDataStore } from '@/stores/siteData'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
-import type { ISourceInfo, Torrent, SiteData } from '@/types'
+import type { ISourceInfo, Torrent, SiteData, Downloader } from '@/types'
 
 const emits = defineEmits(['ready'])
 
@@ -771,12 +771,8 @@ interface PathNode {
   label: string
   children?: PathNode[]
 }
-interface Downloader {
-  id: string
-  name: string
-  enabled?: boolean
-  color?: string
-}
+
+type SourceSiteOption = { siteName: string } & SiteData
 
 // const router = useRouter();
 
@@ -835,7 +831,14 @@ const SAVE_PATH_MIN_COLUMN_WIDTH = 90
 const SAVE_PATH_DISPLAY_MAX_LENGTH = 30
 
 const nameSearch = ref<string>('')
-const currentSort = ref<Sort>({ prop: 'name', order: 'ascending' })
+type SortOrder = 'ascending' | 'descending' | null
+type SortState = { prop: string; order: SortOrder }
+const currentSort = ref<SortState>({ prop: 'name', order: 'ascending' })
+const defaultSortForTable = computed<Sort | undefined>(() => {
+  const order = currentSort.value.order
+  if (order === null) return undefined
+  return { prop: currentSort.value.prop, order }
+})
 
 const activeFilters = reactive<ActiveFilters>({
   paths: [],
@@ -886,7 +889,27 @@ const allSourceSitesStatus = ref<SiteStatus[]>([])
 const iyuuBatchQueryLoading = ref<boolean>(false)
 const iyuuBatchDialogVisible = ref<boolean>(false)
 const iyuuBatchTaskId = ref<string | null>(null)
-const iyuuBatchTask = ref<any | null>(null)
+type IyuuBatchTaskStats = {
+  total_found?: number
+  new_records?: number
+  updated_records?: number
+  [key: string]: unknown
+}
+
+type IyuuBatchTask = {
+  task_id?: string
+  isRunning?: boolean
+  success?: boolean
+  total?: number
+  processed?: number
+  created_at?: string
+  finished_at?: string
+  message?: string
+  stats?: IyuuBatchTaskStats
+  [key: string]: unknown
+}
+
+const iyuuBatchTask = ref<IyuuBatchTask | null>(null)
 const iyuuBatchRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const iyuuBatchNotified = ref<boolean>(false)
 const IYUU_BATCH_MAX_GROUPS = 200
@@ -901,8 +924,6 @@ const siteDataStore = useSiteDataStore()
 const crossSeedDialogVisible = computed(() => !!crossSeedStore.taskId)
 // 从 store 获取选中的种子信息
 const selectedTorrentForMigration = computed(() => crossSeedStore.workingParams as Torrent | null)
-// 从 store 获取源站点名称
-const selectedSourceSite = computed(() => crossSeedStore.sourceInfo?.name || '')
 
 // 站点操作弹窗相关
 const siteOperationDialogVisible = ref<boolean>(false)
@@ -992,18 +1013,6 @@ const hasActiveFilters = computed(() => {
   )
 })
 
-// 计算在当前模式下可选的站点（排除已在另一种模式下选择的站点）
-const availableSiteOptions = computed(() => {
-  const allSites = filteredSiteOptions.value
-  if (siteFilterMode.value === 'exist') {
-    // 在"存在于"模式下，排除已在"不存在于"中选择的站点
-    return allSites.filter((site) => !tempFilters.notExistSiteNames.includes(site))
-  } else {
-    // 在"不存在于"模式下，排除已在"存在于"中选择的站点
-    return allSites.filter((site) => !tempFilters.existSiteNames.includes(site))
-  }
-})
-
 // 检查特定站点在当前模式下是否可用
 const isSiteAvailable = (site: string) => {
   if (siteFilterMode.value === 'exist') {
@@ -1044,8 +1053,9 @@ const saveUiSettings = async () => {
     const settingsToSave = buildCurrentUiSettings()
     syncUiSettingsCache()
     await axios.post('/api/ui_settings', settingsToSave)
-  } catch (e: any) {
-    console.error('无法保存UI设置:', e.message)
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error('无法保存UI设置:', message)
   }
 }
 
@@ -1054,10 +1064,16 @@ const loadUiSettings = async (forceRefresh = false) => {
   try {
     const settings = await torrentsViewState.fetchUiSettings(forceRefresh)
     pageSize.value = settings.page_size ?? 50
+    const order =
+      settings.sort_order === null
+        ? null
+        : settings.sort_order === 'ascending' || settings.sort_order === 'descending'
+          ? settings.sort_order
+          : 'ascending'
     currentSort.value = {
       prop: settings.sort_prop || 'name',
       // --- [修改] 正确处理 null (取消排序) 状态 ---
-      order: 'sort_order' in settings ? settings.sort_order : 'ascending',
+      order,
     }
     nameSearch.value = settings.name_search ?? ''
     if (settings.active_filters) {
@@ -1072,14 +1088,14 @@ const loadUiSettings = async (forceRefresh = false) => {
       // 兼容旧的数据结构
       // 注意：TypeScript类型检查会报错，因为这些属性已不存在于接口定义中
       // 但在运行时可能仍然存在旧数据，所以需要处理
-      const filters: any = activeFilters
-      if (filters.siteExistence) {
+      const legacyFilters = activeFilters as unknown as Record<string, unknown>
+      if (legacyFilters.siteExistence) {
         // 旧的siteExistence字段不再使用
-        delete filters.siteExistence
+        delete legacyFilters.siteExistence
       }
-      if (filters.siteNames) {
+      if (legacyFilters.siteNames) {
         // 旧的siteNames字段不再使用
-        delete filters.siteNames
+        delete legacyFilters.siteNames
       }
     }
     syncUiSettingsCache()
@@ -1127,8 +1143,8 @@ const fetchDownloadersList = async (forceRefresh = false) => {
     const result = await torrentsViewState.fetchDownloadersList(forceRefresh)
     downloadersList.value = result.downloadersList
     allDownloadersList.value = result.allDownloadersList
-  } catch (e: any) {
-    error.value = e.message
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -1136,8 +1152,8 @@ const fetchDownloadersList = async (forceRefresh = false) => {
 const fetchAllSitesStatus = async (forceRefresh = false) => {
   try {
     allSourceSitesStatus.value = await torrentsViewState.fetchSitesStatus(forceRefresh)
-  } catch (e: any) {
-    error.value = (e as Error).message
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -1173,8 +1189,8 @@ const fetchDataWithoutLoadingControl = async () => {
     activeFilters.paths = result.active_path_filters
 
     pathTreeData.value = buildPathTree(result.unique_paths)
-  } catch (e: any) {
-    error.value = e.message
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -1216,7 +1232,8 @@ const startCrossSeed = async (row: Torrent) => {
 }
 
 // 打开站点数据查看器
-const openSiteDataViewer = (row: Torrent) => {
+const openSiteDataViewer = (row: Torrent | null) => {
+  if (!row) return
   siteDataStore.openDialog(row, allDownloadersList.value)
 }
 
@@ -1250,12 +1267,7 @@ const queryCachedSites = async (row: Torrent) => {
   }
 }
 
-// 检查站点是否已缓存
-const isSiteCached = (siteName: string): boolean => {
-  return cachedSites.value.includes(siteName)
-}
-
-const confirmSourceSiteAndProceed = async (sourceSite: any) => {
+const confirmSourceSiteAndProceed = async (sourceSite: SourceSiteOption | null) => {
   const row = selectedTorrentForMigration.value
   if (!row || !sourceSite) {
     ElMessage.error('发生内部错误：未找到选中的种子或站点信息。')
@@ -1285,7 +1297,7 @@ const confirmSourceSiteAndProceed = async (sourceSite: any) => {
   }
 
   // 3. 如果有链接，执行原有的获取ID和转种的逻辑
-  let torrentId = null
+  let torrentId = ''
   const idMatch = siteDetails?.comment?.match(/id=(\d+)/)
   if (idMatch && idMatch[1]) {
     torrentId = idMatch[1]
@@ -1296,12 +1308,6 @@ const confirmSourceSiteAndProceed = async (sourceSite: any) => {
       `无法从源站点 ${siteName} 的详情页链接中提取种子ID。请尝试使用IYUU查询更新链接。`,
     )
     return // 留在弹窗中，让用户重试或使用IYUU
-  }
-
-  // 后续逻辑保持不变
-  if (siteDetails) {
-    // @ts-ignore
-    siteDetails.torrentId = torrentId
   }
 
   const sourceSiteIdentifier =
@@ -1397,7 +1403,7 @@ const setSiteNotExist = async () => {
   }
 
   try {
-    const response = await axios.post('/api/sites/set_not_exist', {
+    await axios.post('/api/sites/set_not_exist', {
       torrent_name: selectedTorrentName.value,
       site_name: selectedSite.value.name,
     })
@@ -1406,9 +1412,16 @@ const setSiteNotExist = async () => {
     siteOperationDialogVisible.value = false
     // 重新加载数据以反映更改
     fetchData()
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('设置站点状态时出错:', error)
-    ElMessage.error(error.response?.data?.error || '设置站点状态时发生错误')
+    const message = axios.isAxiosError(error)
+      ? ((error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+        (error.response?.data as { error?: string; message?: string } | undefined)?.message ||
+        error.message)
+      : error instanceof Error
+        ? error.message
+        : '设置站点状态时发生错误'
+    ElMessage.error(message)
   }
 }
 
@@ -1475,8 +1488,15 @@ const refreshIyuuBatchProgress = async () => {
     } else {
       ElMessage.error(response.data?.message || '获取IYUU批量查询进度失败')
     }
-  } catch (error: any) {
-    ElMessage.error(error.response?.data?.message || '获取IYUU批量查询进度时发生网络错误')
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (error.response?.data as { error?: string } | undefined)?.error ||
+        error.message)
+      : error instanceof Error
+        ? error.message
+        : '获取IYUU批量查询进度时发生网络错误'
+    ElMessage.error(message)
   }
 }
 
@@ -1538,19 +1558,21 @@ const triggerIYUUQueryForFiltered = async () => {
     const listResult = listResp.data
     if (listResult.error) throw new Error(listResult.error)
 
-    const candidates = (listResult.data || [])
+    type IyuuBatchCandidate = { name: string; size: number; save_path: string }
+    const listData = Array.isArray(listResult.data) ? (listResult.data as Torrent[]) : []
+    const candidates = listData
       .slice(0, IYUU_BATCH_MAX_GROUPS)
-      .map((t: any) => ({
+      .map((t): IyuuBatchCandidate => ({
         name: t.name,
         size: t.size,
         save_path: t.save_path,
       }))
-      .filter((t: any) => t.name && t.size)
+      .filter((t) => t.name && t.size)
 
     // 确保包含当前正在处理的种子（避免筛选结果过大时不在前 200 里）
     if (anchorRow && anchorRow.name && anchorRow.size) {
       const hasAnchor = candidates.some(
-        (t: any) => t.name === anchorRow.name && t.size === anchorRow.size,
+        (t) => t.name === anchorRow.name && t.size === anchorRow.size,
       )
       if (!hasAnchor) {
         const anchorItem = {
@@ -1591,9 +1613,16 @@ const triggerIYUUQueryForFiltered = async () => {
     iyuuBatchNotified.value = false
     iyuuBatchDialogVisible.value = true
     startIyuuBatchPolling()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('触发筛选结果 IYUU 批量查询时出错:', error)
-    ElMessage.error(error.response?.data?.message || error.message || '触发IYUU批量查询失败')
+    const message = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (error.response?.data as { error?: string } | undefined)?.error ||
+        error.message)
+      : error instanceof Error
+        ? error.message
+        : '触发IYUU批量查询失败'
+    ElMessage.error(message)
   } finally {
     iyuuBatchQueryLoading.value = false
   }
@@ -1616,7 +1645,7 @@ const handleCurrentChange = (val: number) => {
   syncUiSettingsCache()
   fetchDataWithSpinner()
 }
-const handleSortChange = (sort: Sort) => {
+const handleSortChange = (sort: { prop: string; order: SortOrder }) => {
   currentSort.value = sort
   currentPage.value = 1
   syncUiSettingsCache()
@@ -1745,14 +1774,16 @@ const formatBytes = (b: number | null): string => {
   const i = Math.floor(Math.log(b) / Math.log(1024))
   return `${(b / Math.pow(1024, i)).toFixed(2)} ${s[i]}`
 }
-const hasLink = (siteData: SiteData, siteName: string): boolean => {
+const hasLink = (siteData?: SiteData | null, siteName?: string | null): boolean => {
+  if (!siteData || !siteName) return false
   const { comment } = siteData
   return !!(
     comment &&
     (comment.startsWith('http') || (/^\d+$/.test(comment) && site_link_rules.value[siteName]))
   )
 }
-const getLink = (siteData: SiteData, siteName: string): string | null => {
+const getLink = (siteData?: SiteData | null, siteName?: string | null): string | null => {
+  if (!siteData || !siteName) return null
   const { comment } = siteData
   if (comment.startsWith('http')) {
     // 过滤掉 &existed=1 参数
@@ -1798,18 +1829,19 @@ const deriveDownloaderColor = (seed: string) => {
   return `hsl(${hue} ${saturation}% ${lightness}%)`
 }
 
-const getDownloaderTagStyle = (downloaderId: string | null) => {
-  if (!downloaderId) return {}
+type DownloaderTagStyle = Record<string, string>
+
+const getDownloaderTagStyle = (downloaderId: string | null): DownloaderTagStyle => {
+  if (!downloaderId) return {} as DownloaderTagStyle
   const downloader = allDownloadersList.value.find((d) => d.id === downloaderId)
-  const rawColor = (downloader as any)?.color
-  const configured = typeof rawColor === 'string' ? rawColor.trim() : ''
+  const configured = typeof downloader?.color === 'string' ? downloader.color.trim() : ''
   const color = configured || deriveDownloaderColor(downloaderId)
-  if (!color) return {}
+  if (!color) return {} as DownloaderTagStyle
   return {
     '--el-tag-bg-color': color,
     '--el-tag-border-color': color,
     '--el-tag-text-color': '#ffffff',
-  } as any
+  }
 }
 
 const getDownloaderTagType = (downloaderId: string | null) => {
@@ -1853,8 +1885,8 @@ const shortenPath = (path: string, maxLength: number = 50) => {
   return `${start}...${end}`
 }
 
-// 根据站点配置和可选性返回标签类型
-const getSiteTagType = (site: SiteStatus, isSelectable: boolean) => {
+// 根据站点配置返回标签类型
+const getSiteTagType = (site: SiteStatus) => {
   // 检查站点是否存在于当前种子中
   const existsInTorrent = !!(
     selectedTorrentForMigration.value && selectedTorrentForMigration.value.sites[site.name]

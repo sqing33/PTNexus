@@ -85,8 +85,14 @@ const onSubmit = async () => {
     } else {
       ElMessage.error(res.data?.message || '登录失败')
     }
-  } catch (e: any) {
-    const msg = e?.response?.data?.message || '登录失败'
+  } catch (error: unknown) {
+    const msg = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string } | undefined)?.message ||
+        error.message ||
+        '登录失败')
+      : error instanceof Error
+        ? error.message || '登录失败'
+        : '登录失败'
     ElMessage.error(msg)
   } finally {
     loading.value = false

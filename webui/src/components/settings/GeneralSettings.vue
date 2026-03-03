@@ -12,8 +12,8 @@
               <User />
             </el-icon>
             <h3>账户信息</h3>
-            <el-tag class="temp-password-tag" type="danger" v-if="mustChange" size="small" effect="dark">
-              <el-icon class="temp-password-tag-icon">
+            <el-tag type="danger" v-if="mustChange" size="small" effect="dark">
+              <el-icon style="vertical-align: middle; margin-right: 4px">
                 <Warning />
               </el-icon>
               临时密码-请立即修改
@@ -863,17 +863,26 @@ import {
   Key,
   Warning,
   Setting,
-  Connection,
   Document,
   InfoFilled,
   Picture,
   Link,
   View,
   Hide,
-  Folder,
   FolderOpened,
   Collection,
 } from '@element-plus/icons-vue'
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { message?: string; error?: string } | undefined
+    return data?.message || data?.error || error.message || fallback
+  }
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
+}
 
 // 用户设置相关
 const loading = ref(false)
@@ -894,8 +903,6 @@ const availablePaths = ref<string[]>([])
 const loadingPaths = ref(false)
 const pathSelectorVisible = ref(false)
 const tempSelectedPaths = ref<string[]>([])
-const pathTreeRef = ref()
-const pathTreeData = ref<any[]>([])
 
 // 路径树节点接口
 interface PathNode {
@@ -903,6 +910,14 @@ interface PathNode {
   label: string
   children?: PathNode[]
 }
+
+type PathTreeRef = {
+  getCheckedNodes: () => PathNode[]
+  setCheckedKeys: (keys: string[]) => void
+}
+
+const pathTreeRef = ref<PathTreeRef | null>(null)
+const pathTreeData = ref<PathNode[]>([])
 
 // IYUU日志接口
 interface IYUULog {
@@ -1002,6 +1017,10 @@ interface DesktopAppBridge {
   GetDatabaseConfigFilePath?: () => Promise<string>
 }
 
+type DesktopRuntimeWindow = Window & {
+  go?: { main?: { App?: DesktopAppBridge } }
+}
+
 // 上传设置相关
 const savingUpload = ref(false)
 const uploadForm = reactive({
@@ -1024,11 +1043,11 @@ const openCsptPtgenPage = () => {
 }
 
 const getDesktopAppBridge = (): DesktopAppBridge | null => {
-  const bridge = (window as any)?.go?.main?.App
+  const bridge = (window as DesktopRuntimeWindow).go?.main?.App
   if (!bridge) {
     return null
   }
-  return bridge as DesktopAppBridge
+  return bridge
 }
 
 const initDesktopRuntime = async () => {
@@ -1068,7 +1087,6 @@ const openDatabaseConfigFile = async () => {
 }
 
 // 标签设置相关
-const savingTags = ref(false)
 const tagsForm = reactive({
   category: {
     enabled: true,
@@ -1108,35 +1126,6 @@ const removeCustomTag = (index: number) => {
   autoSaveTagsSettings()
 }
 
-// 保存标签设置
-const saveTagsSettings = async () => {
-  savingTags.value = true
-  try {
-    // 保存标签配置
-    const tagsConfig = {
-      enabled: tagsForm.enabled,
-      site_tags: tagsForm.site_tags,
-      content_tags: {
-        enabled: true,
-        sources: ['mediainfo', 'title', 'description'],
-      },
-      custom_tags: tagsForm.custom_tags,
-      merge_rules: tagsForm.merge_rules,
-    }
-
-    await axios.post('/api/config/tags', tagsConfig)
-    ElMessage.success('标签设置已保存！')
-
-    // 刷新配置以确保 UI 显示最新状态
-    await fetchSettings()
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.message || '保存失败。'
-    ElMessage.error(errorMessage)
-  } finally {
-    savingTags.value = false
-  }
-}
-
 // 自动保存标签设置
 const autoSaveTagsSettings = async () => {
   try {
@@ -1150,8 +1139,8 @@ const autoSaveTagsSettings = async () => {
     const response = await axios.post('/api/config/tags', tagsConfig)
     console.log('保存结果:', response.data)
     // 不显示成功消息，避免频繁提示
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.message || '保存失败。'
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error, '保存失败。')
     console.error('保存失败:', errorMessage)
     ElMessage.error(errorMessage)
   }
@@ -1176,8 +1165,8 @@ const autoSaveCrossSeedSettings = async () => {
 
     await axios.post('/api/settings/cross_seed', crossSeedSettings)
     // 不显示成功消息，避免频繁提示
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.error || '保存失败。'
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error, '保存失败。')
     ElMessage.error(errorMessage)
   } finally {
     savingCrossSeed.value = false
@@ -1191,7 +1180,7 @@ const fetchPublishConcurrencyInfo = async () => {
     if (res.data?.success) {
       publishConcurrencyInfo.value = res.data
     }
-  } catch (e) {
+  } catch {
     // ignore: 仅用于展示，不影响主流程
   } finally {
     loadingPublishConcurrencyInfo.value = false
@@ -1294,14 +1283,9 @@ const fetchSettings = async () => {
     if (iyuuForm.path_filter_enabled) {
       await refreshPaths()
     }
-  } catch (error) {
+  } catch {
     ElMessage.error('无法加载设置。')
   }
-}
-
-// 保存用户设置
-const resetForm = () => {
-  form.value = { old_password: '', username: currentUsername.value, password: '' }
 }
 
 // 构建路径树
@@ -1348,8 +1332,8 @@ const refreshPaths = async () => {
       availablePaths.value = []
       pathTreeData.value = []
     }
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.error || '获取路径列表失败'
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error, '获取路径列表失败')
     ElMessage.error(errorMessage)
     availablePaths.value = []
     pathTreeData.value = []
@@ -1394,8 +1378,8 @@ const saveIyuuSettings = async () => {
     }
 
     ElMessage.success('IYUU 设置已保存！')
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.error || '保存失败。'
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error, '保存失败。')
     ElMessage.error(errorMessage)
   } finally {
     savingIyuu.value = false
@@ -1416,8 +1400,8 @@ const triggerIyuuQuery = async () => {
 
     // 自动打开日志弹窗，方便观察批量查询进度
     void showIyuuLogs()
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.message || '触发查询失败。'
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error, '触发查询失败。')
     ElMessage.error(errorMessage)
   }
 }
@@ -1435,8 +1419,8 @@ const showIyuuLogs = async () => {
       ElMessage.error(response.data.message || '获取日志失败')
       iyuuLogs.value = []
     }
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.message || '获取日志失败'
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error, '获取日志失败')
     ElMessage.error(errorMessage)
     iyuuLogs.value = []
   } finally {
@@ -1465,7 +1449,13 @@ const onSubmit = async () => {
   }
   loading.value = true
   try {
-    const payload: any = { old_password: form.value.old_password }
+    type ChangePasswordPayload = {
+      old_password: string
+      username?: string
+      password?: string
+    }
+
+    const payload: ChangePasswordPayload = { old_password: form.value.old_password }
     if (form.value.username) payload.username = form.value.username
     if (form.value.password) payload.password = form.value.password
     const res = await axios.post('/api/auth/change_password', payload)
@@ -1476,36 +1466,10 @@ const onSubmit = async () => {
     } else {
       ElMessage.error(res.data?.message || '保存失败')
     }
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || '保存失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '保存失败'))
   } finally {
     loading.value = false
-  }
-}
-
-// 保存转种设置
-const saveCrossSeedSettings = async () => {
-  savingCrossSeed.value = true
-  try {
-    // 保存转种设置
-    const crossSeedSettings = {
-      image_hoster: settingsForm.image_hoster,
-      agsv_email: settingsForm.agsv_email,
-      agsv_password: settingsForm.agsv_password,
-      default_downloader: settingsForm.default_downloader,
-      auto_add_existing_to_downloader: settingsForm.auto_add_existing_to_downloader,
-      publish_batch_concurrency_mode: settingsForm.publish_batch_concurrency_mode,
-      publish_batch_concurrency_manual: settingsForm.publish_batch_concurrency_manual,
-      cspt_ptgen_token: uploadForm.cspt_ptgen_token,
-    }
-
-    await axios.post('/api/settings/cross_seed', crossSeedSettings)
-    ElMessage.success('转种设置已保存！')
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.error || '保存失败。'
-    ElMessage.error(errorMessage)
-  } finally {
-    savingCrossSeed.value = false
   }
 }
 
@@ -1527,8 +1491,8 @@ const saveBackgroundSettings = async () => {
         detail: { backgroundUrl: backgroundForm.background_url },
       }),
     )
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.error || '保存失败。'
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error, '保存失败。')
     ElMessage.error(errorMessage)
   } finally {
     savingBackground.value = false
@@ -1561,8 +1525,8 @@ const saveUploadSettings = async () => {
     await axios.post('/api/settings/cross_seed', crossSeedSettings)
 
     ElMessage.success('上传设置已保存！')
-  } catch (error: any) {
-    const errorMessage = error.response?.data?.error || '保存失败。'
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error, '保存失败。')
     ElMessage.error(errorMessage)
   } finally {
     savingUpload.value = false
@@ -1582,8 +1546,8 @@ const getSelectedLeafPaths = (): string[] => {
 
   const checkedNodes = pathTreeRef.value.getCheckedNodes()
   return checkedNodes
-    .filter((node: any) => !node.children || node.children.length === 0)
-    .map((node: any) => node.path)
+    .filter((node) => !node.children || node.children.length === 0)
+    .map((node) => node.path)
 }
 
 // 处理路径树选择变化
@@ -1613,11 +1577,11 @@ const selectAllPaths = () => {
   if (pathTreeRef.value) {
     // 只选择叶子节点（完整路径）
     const leafPaths: string[] = []
-    const traverse = (nodes: any[]) => {
+    const traverse = (nodes: PathNode[]) => {
       nodes.forEach((node) => {
         if (!node.children || node.children.length === 0) {
           leafPaths.push(node.path)
-        } else {
+        } else if (node.children && node.children.length > 0) {
           traverse(node.children)
         }
       })
@@ -1717,17 +1681,6 @@ onMounted(() => {
   font-weight: 500;
   margin: 0;
   color: var(--el-text-color-primary);
-}
-
-.temp-password-tag {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.temp-password-tag-icon {
-  margin-right: 4px;
 }
 
 .header-icon {

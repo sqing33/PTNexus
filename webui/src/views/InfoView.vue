@@ -149,33 +149,17 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import * as echarts from 'echarts'
+import type {
+  EChartsOption,
+  EChartsType,
+  TooltipComponentFormatterCallbackParams,
+  TooltipComponentPositionCallbackParams,
+} from 'echarts'
 import axios from 'axios'
 import { ElMessage, ElTooltip } from 'element-plus'
-
-// --- Refs and State ---
-const speedChart = ref(null)
-const trafficChart = ref(null)
-let speedChartInstance = null
-let trafficChartInstance = null
-let speedUpdateTimer = null
-let isMouseOverChart = false
-let lastTooltipDataIndex = null
-
-const speedDisplayMode = ref('last_1_min')
-const trafficDisplayMode = ref('today')
-
-const speedChartVisibilityMode = ref('all')
-const trafficChartVisibilityMode = ref('all')
-
-const speedChartDownloaders = ref([])
-const speedChartLegendItems = ref([])
-const trafficChartLegendItems = ref([])
-
-const isRealtimeSpeedEnabled = ref(true)
-const areSettingsLoading = ref(true)
 
 const displayModeTextMap = {
   last_1_min: '近1分钟',
@@ -187,7 +171,87 @@ const displayModeTextMap = {
   last_month: '上月',
   this_year: '今年',
   all: '全部',
+} as const
+
+type SpeedDisplayMode = Exclude<keyof typeof displayModeTextMap, 'this_year'>
+type TrafficDisplayMode = Exclude<keyof typeof displayModeTextMap, 'last_1_min'>
+type VisibilityMode = 'all' | 'upload' | 'download'
+
+type DownloaderMeta = { id: string; name: string }
+type SpeedLegendArrow = '↑' | '↓'
+
+type SpeedLegendItem = {
+  fullName: string
+  baseName: string
+  arrow: SpeedLegendArrow
+  speed: string
+  color: string
+  disabled: boolean
 }
+
+type TrafficLegendItem = {
+  name: string
+  color: string
+  disabled: boolean
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+const getLegendSelectedMap = (chartInstance: EChartsType | null): Record<string, boolean> => {
+  const option = chartInstance?.getOption() as unknown
+  if (!isRecord(option)) return {}
+
+  const legendOption = option.legend
+  const legend = Array.isArray(legendOption) ? legendOption[0] : legendOption
+  if (!isRecord(legend)) return {}
+
+  const selectedValue = legend.selected
+  if (!isRecord(selectedValue)) return {}
+
+  const selected: Record<string, boolean> = {}
+  for (const [key, value] of Object.entries(selectedValue)) {
+    if (typeof value === 'boolean') {
+      selected[key] = value
+    }
+  }
+  return selected
+}
+
+const getLegendData = (chartInstance: EChartsType | null): string[] => {
+  const option = chartInstance?.getOption() as unknown
+  if (!isRecord(option)) return []
+
+  const legendOption = option.legend
+  const legend = Array.isArray(legendOption) ? legendOption[0] : legendOption
+  if (!isRecord(legend)) return []
+
+  const dataValue = legend.data
+  if (!Array.isArray(dataValue)) return []
+  return dataValue.filter((item): item is string => typeof item === 'string')
+}
+
+// --- Refs and State ---
+const speedChart = ref<HTMLElement | null>(null)
+const trafficChart = ref<HTMLElement | null>(null)
+let speedChartInstance: EChartsType | null = null
+let trafficChartInstance: EChartsType | null = null
+let speedUpdateTimer: ReturnType<typeof setInterval> | null = null
+let isMouseOverChart = false
+let lastTooltipDataIndex: number | null = null
+
+const speedDisplayMode = ref<SpeedDisplayMode>('last_1_min')
+const trafficDisplayMode = ref<TrafficDisplayMode>('today')
+
+const speedChartVisibilityMode = ref<VisibilityMode>('all')
+const trafficChartVisibilityMode = ref<VisibilityMode>('all')
+
+const speedChartDownloaders = ref<DownloaderMeta[]>([])
+const speedChartLegendItems = ref<SpeedLegendItem[]>([])
+const trafficChartLegendItems = ref<TrafficLegendItem[]>([])
+
+const isRealtimeSpeedEnabled = ref(true)
+const areSettingsLoading = ref(true)
 
 const speedDisplayModeButtonText = computed(() => `(${displayModeTextMap[speedDisplayMode.value]})`)
 const trafficDisplayModeButtonText = computed(
@@ -195,14 +259,15 @@ const trafficDisplayModeButtonText = computed(
 )
 
 // --- Helper Functions ---
-const formatBytes = (b) => {
-  if (b === null || b === undefined || isNaN(b) || b < 0) return '0 B'
-  if (b === 0) return '0 B'
+const formatBytes = (bytes: unknown) => {
+  const value = typeof bytes === 'number' ? bytes : Number(bytes)
+  if (!Number.isFinite(value) || value < 0) return '0 B'
+  if (value === 0) return '0 B'
   const s = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  const i = Math.floor(Math.log(b) / Math.log(1024))
-  return `${parseFloat((b / Math.pow(1024, i)).toFixed(2))} ${s[i]}`
+  const i = Math.floor(Math.log(value) / Math.log(1024))
+  return `${parseFloat((value / Math.pow(1024, i)).toFixed(2))} ${s[i]}`
 }
-const formatSpeed = (speed) => formatBytes(speed) + '/s'
+const formatSpeed = (speed: unknown) => `${formatBytes(speed)}/s`
 
 const MOBILE_BREAKPOINT = 768
 const isMobileViewport = () => window.innerWidth <= MOBILE_BREAKPOINT
@@ -210,7 +275,7 @@ const getTooltipTriggerOn = () => (isMobileViewport() ? 'click' : 'mousemove|cli
 const SPEED_MOBILE_VISIBLE_POINTS = 12
 const TRAFFIC_MOBILE_VISIBLE_POINTS = 7
 
-const getChartGrid = (chartType) => {
+const getChartGrid = (chartType: 'speed' | 'traffic') => {
   const isMobile = isMobileViewport()
   if (chartType === 'speed') {
     return isMobile
@@ -223,12 +288,12 @@ const getChartGrid = (chartType) => {
     : { top: 80, left: '3%', right: '4%', bottom: '3%', containLabel: true }
 }
 
-const getYAxisLabel = (formatter) => ({
+const getYAxisLabel = (formatter: (value: number) => string) => ({
   formatter,
   margin: isMobileViewport() ? 2 : 8,
 })
 
-const getInsideDataZoom = (labelCount, visiblePoints) => {
+const getInsideDataZoom = (labelCount: number, visiblePoints: number) => {
   const baseOptions = {
     type: 'inside',
     xAxisIndex: 0,
@@ -247,7 +312,11 @@ const getInsideDataZoom = (labelCount, visiblePoints) => {
   return [{ ...baseOptions, start: 0, end: 100 }]
 }
 
-const applyChartDataZoom = (chartInstance, labelCount, visiblePoints) => {
+const applyChartDataZoom = (
+  chartInstance: EChartsType | null,
+  labelCount: number,
+  visiblePoints: number,
+) => {
   if (!chartInstance) return
 
   if (isMobileViewport()) {
@@ -268,8 +337,11 @@ const applyChartDataZoom = (chartInstance, labelCount, visiblePoints) => {
   )
 }
 
-const getLabelCountByChart = (chartInstance) => {
-  const labels = chartInstance?.getOption()?.xAxis?.[0]?.data
+const getLabelCountByChart = (chartInstance: EChartsType | null) => {
+  const option = chartInstance?.getOption() as EChartsOption | undefined
+  const xAxisOption = option?.xAxis
+  const axis = Array.isArray(xAxisOption) ? xAxisOption[0] : xAxisOption
+  const labels = (axis as { data?: unknown } | undefined)?.data
   return Array.isArray(labels) ? labels.length : 0
 }
 
@@ -300,10 +372,10 @@ const syncChartViewportOptions = () => {
 // --- App Settings Fetching ---
 const fetchAppSettings = async () => {
   try {
-    const { data } = await axios.get('/api/settings')
-    isRealtimeSpeedEnabled.value = data.realtime_speed_enabled
-  } catch (error) {
-    console.error('获取应用设置失败:', error)
+    const { data } = await axios.get<{ realtime_speed_enabled?: boolean }>('/api/settings')
+    isRealtimeSpeedEnabled.value = data.realtime_speed_enabled !== false
+  } catch (caught: unknown) {
+    console.error('获取应用设置失败:', caught)
     ElMessage.error('获取应用设置失败，部分功能可能不正常。')
     isRealtimeSpeedEnabled.value = true
   }
@@ -317,8 +389,13 @@ const initSpeedChart = () => {
       tooltip: {
         trigger: 'axis',
         triggerOn: getTooltipTriggerOn(),
-        position: function (point, params, dom, rect, size) {
-          const chartWidth = size.viewSize[0]
+        position: (
+          point: [number, number],
+          _params: TooltipComponentPositionCallbackParams,
+          _el: HTMLDivElement | null,
+          _rect: unknown,
+          size: { contentSize: [number, number]; viewSize: [number, number] },
+        ) => {
           const tooltipWidth = size.contentSize[0]
           let newX = point[0] - tooltipWidth - 10
           if (newX < 0) {
@@ -326,24 +403,40 @@ const initSpeedChart = () => {
           }
           return [newX, point[1] - 20]
         },
-        formatter: (params) => {
-          if (!params || params.length === 0) return ''
+        formatter: (params: TooltipComponentFormatterCallbackParams) => {
+          const list = Array.isArray(params) ? params : [params]
+          if (list.length === 0) return ''
           const downloadersMap = new Map(speedChartDownloaders.value.map((d) => [d.id, d.name]))
-          let tooltipContent = `${params[0].axisValueLabel}<br/>`
-          const dataByDownloaderId = {}
-          params.forEach((param) => {
-            const series = speedChartInstance.getOption().series[param.seriesIndex]
-            const seriesName = series.name
+          const axisValueLabel = String((list[0] as { axisValueLabel?: unknown }).axisValueLabel ?? '')
+          let tooltipContent = `${axisValueLabel}<br/>`
+
+          type TooltipSeriesEntry = { value: unknown; color: string }
+          type TooltipByDownloader = Record<string, { 上传?: TooltipSeriesEntry; 下载?: TooltipSeriesEntry }>
+          const dataByDownloaderId: TooltipByDownloader = {}
+
+          list.forEach((param) => {
+            const seriesName = String((param as { seriesName?: unknown }).seriesName ?? '')
             const isUpload = seriesName.includes('↑')
             const arrowIndex = isUpload ? seriesName.indexOf('↑') : seriesName.indexOf('↓')
             const baseName = seriesName.substring(0, seriesName.lastIndexOf(' ', arrowIndex)).trim()
             const downloader = speedChartDownloaders.value.find((d) => d.name === baseName)
             if (!downloader) return
             if (!dataByDownloaderId[downloader.id]) dataByDownloaderId[downloader.id] = {}
+            const color =
+              typeof (param as { color?: unknown }).color === 'string'
+                ? ((param as { color?: unknown }).color as string)
+                : String((param as { color?: unknown }).color ?? '')
+
             if (isUpload) {
-              dataByDownloaderId[downloader.id]['上传'] = { value: param.value, color: param.color }
+              dataByDownloaderId[downloader.id]['上传'] = {
+                value: (param as { value?: unknown }).value,
+                color,
+              }
             } else {
-              dataByDownloaderId[downloader.id]['下载'] = { value: param.value, color: param.color }
+              dataByDownloaderId[downloader.id]['下载'] = {
+                value: (param as { value?: unknown }).value,
+                color,
+              }
             }
           })
           for (const id in dataByDownloaderId) {
@@ -365,11 +458,14 @@ const initSpeedChart = () => {
       legend: { show: false },
     })
     applyChartDataZoom(speedChartInstance, 0, SPEED_MOBILE_VISIBLE_POINTS)
-    speedChartInstance.on('legendselectchanged', (params) => {
-      const selected = params.selected
+    speedChartInstance.on('legendselectchanged', (params: unknown) => {
+      const selected =
+        isRecord(params) && isRecord(params.selected)
+          ? (params.selected as Record<string, boolean>)
+          : {}
       speedChartLegendItems.value = speedChartLegendItems.value.map((item) => ({
         ...item,
-        disabled: !selected[item.fullName],
+        disabled: selected[item.fullName] === false,
       }))
     })
     speedChartInstance.on('mouseover', () => (isMouseOverChart = true))
@@ -377,8 +473,10 @@ const initSpeedChart = () => {
       isMouseOverChart = false
       lastTooltipDataIndex = null
     })
-    speedChartInstance.on('mousemove', (params) => {
-      if (params.dataIndex !== undefined) lastTooltipDataIndex = params.dataIndex
+    speedChartInstance.on('mousemove', (params: unknown) => {
+      if (isRecord(params) && typeof params.dataIndex === 'number') {
+        lastTooltipDataIndex = params.dataIndex
+      }
     })
   }
 }
@@ -391,28 +489,33 @@ const initTrafficChart = () => {
         trigger: 'axis',
         triggerOn: getTooltipTriggerOn(),
         axisPointer: { type: 'shadow' },
-        formatter: (params) => {
-          if (!params || params.length === 0) return ''
-          let content = `${params[0].axisValueLabel}<br/>`
+        formatter: (params: TooltipComponentFormatterCallbackParams) => {
+          const list = Array.isArray(params) ? params : [params]
+          if (list.length === 0) return ''
+          const axisValueLabel = String((list[0] as { axisValueLabel?: unknown }).axisValueLabel ?? '')
+          let content = `${axisValueLabel}<br/>`
 
-          const dataByDownloaderName = {}
+          type TrafficSeriesEntry = { value: unknown; marker: string }
+          type TrafficByDownloaderName = Record<string, { 上传?: TrafficSeriesEntry; 下载?: TrafficSeriesEntry }>
+          const dataByDownloaderName: TrafficByDownloaderName = {}
 
-          params.forEach((param) => {
-            const baseName = param.seriesName.split(' - ')[0]
+          list.forEach((param) => {
+            const seriesName = String((param as { seriesName?: unknown }).seriesName ?? '')
+            const baseName = seriesName.split(' - ')[0]
 
             if (!dataByDownloaderName[baseName]) {
               dataByDownloaderName[baseName] = {}
             }
 
-            if (param.seriesName.includes('上传量')) {
+            if (seriesName.includes('上传量')) {
               dataByDownloaderName[baseName]['上传'] = {
-                value: param.value,
-                marker: param.marker,
+                value: (param as { value?: unknown }).value,
+                marker: String((param as { marker?: unknown }).marker ?? ''),
               }
-            } else if (param.seriesName.includes('下载量')) {
+            } else if (seriesName.includes('下载量')) {
               dataByDownloaderName[baseName]['下载'] = {
-                value: param.value,
-                marker: param.marker,
+                value: (param as { value?: unknown }).value,
+                marker: String((param as { marker?: unknown }).marker ?? ''),
               }
             }
           })
@@ -436,8 +539,11 @@ const initTrafficChart = () => {
     })
     applyChartDataZoom(trafficChartInstance, 0, TRAFFIC_MOBILE_VISIBLE_POINTS)
 
-    trafficChartInstance.on('legendselectchanged', (params) => {
-      const selected = params.selected
+    trafficChartInstance.on('legendselectchanged', (params: unknown) => {
+      const selected =
+        isRecord(params) && isRecord(params.selected)
+          ? (params.selected as Record<string, boolean>)
+          : {}
       trafficChartLegendItems.value = trafficChartLegendItems.value.map((item) => ({
         ...item,
         disabled: selected[item.name] === false,
@@ -447,26 +553,85 @@ const initTrafficChart = () => {
 }
 
 // --- Data Fetching ---
-const fetchSpeedData = async (mode, isPeriodicUpdate = false) => {
+type SpeedApiSpeedEntry = { ul_speed?: number; dl_speed?: number }
+type SpeedApiDataPoint = { speeds: Record<string, SpeedApiSpeedEntry | undefined> }
+type SpeedApiResponse = {
+  labels: string[]
+  datasets: SpeedApiDataPoint[]
+  downloaders: DownloaderMeta[]
+}
+
+type TrafficApiDatasetEntry = { uploaded: number[]; downloaded: number[] }
+type TrafficApiResponse = {
+  labels: string[]
+  datasets: Record<string, TrafficApiDatasetEntry | undefined>
+  downloaders: DownloaderMeta[]
+}
+
+type SpeedLineSeriesOption = {
+  name: string
+  type: 'line'
+  smooth: boolean
+  showSymbol: boolean
+  data: number[]
+  color: string
+}
+
+type TrafficBarSeriesOption = {
+  name: string
+  type: 'bar'
+  stack: 'upload' | 'download'
+  emphasis: { focus: 'series' }
+  data: number[]
+  color: string
+}
+
+type TrafficLabelFormatterParam = { dataIndex: number }
+
+type TrafficLabelSeriesOption = {
+  name: string
+  type: 'bar'
+  stack: 'upload' | 'download'
+  data: number[]
+  itemStyle: { borderColor: string; color: string }
+  emphasis: { itemStyle: { borderColor: string; color: string } }
+  tooltip: { show: boolean }
+  label: {
+    show: boolean
+    position: 'top'
+    formatter: (p: TrafficLabelFormatterParam) => string
+    color: string
+    fontSize: number
+    fontWeight: 'normal'
+  }
+}
+
+type TrafficSeriesOption = TrafficBarSeriesOption | TrafficLabelSeriesOption
+
+const fetchSpeedData = async (mode: SpeedDisplayMode, isPeriodicUpdate: boolean = false) => {
   if (!speedChartInstance) return
   if (!isPeriodicUpdate) speedChartInstance.showLoading()
   try {
     const endpoint = mode === 'last_1_min' ? '/api/recent_speed_data' : '/api/speed_chart_data'
     const params = mode === 'last_1_min' ? { seconds: 60 } : { range: mode }
-    const { data } = await axios.get(endpoint, { params })
-    speedChartDownloaders.value = data.downloaders || []
-    const series = []
-    const newLegendItems = []
+    const { data } = await axios.get<SpeedApiResponse>(endpoint, { params })
+
+    speedChartDownloaders.value = Array.isArray(data.downloaders) ? data.downloaders : []
+    const series: SpeedLineSeriesOption[] = []
+    const newLegendItems: SpeedLegendItem[] = []
     const uploadColors = ['#F56C6C', '#E6A23C', '#D98A6F', '#FAB6B6', '#F7D0A3']
     const downloadColors = ['#409EFF', '#67C23A', '#8A2BE2', '#A0CFFF', '#B3E19D']
     const lastDataPoint = data.datasets.length > 0 ? data.datasets[data.datasets.length - 1] : null
 
-    const allUploadData = []
-    const allDownloadData = []
+    const allUploadData: number[] = []
+    const allDownloadData: number[] = []
 
     speedChartDownloaders.value.forEach((downloader, index) => {
-      const currentSpeeds = lastDataPoint?.speeds?.[downloader.id] || { ul_speed: 0, dl_speed: 0 }
-      const ulSpeedText = formatSpeed(currentSpeeds.ul_speed || 0)
+      const currentSpeeds = lastDataPoint?.speeds?.[downloader.id]
+      const ulSpeed = typeof currentSpeeds?.ul_speed === 'number' ? currentSpeeds.ul_speed : 0
+      const dlSpeed = typeof currentSpeeds?.dl_speed === 'number' ? currentSpeeds.dl_speed : 0
+
+      const ulSpeedText = formatSpeed(ulSpeed)
       const uploadLegendFullName = `${downloader.name} ↑ ${ulSpeedText}`
       newLegendItems.push({
         fullName: uploadLegendFullName,
@@ -477,8 +642,10 @@ const fetchSpeedData = async (mode, isPeriodicUpdate = false) => {
         disabled: false,
       })
 
-      const uploadData = data.datasets.map((d) => d.speeds[downloader.id]?.ul_speed || 0);
-      allUploadData.push(...uploadData);
+      const uploadData = data.datasets.map(
+        (point) => point.speeds[downloader.id]?.ul_speed ?? 0,
+      )
+      allUploadData.push(...uploadData)
 
       series.push({
         name: uploadLegendFullName,
@@ -489,7 +656,7 @@ const fetchSpeedData = async (mode, isPeriodicUpdate = false) => {
         color: uploadColors[index % uploadColors.length],
       })
 
-      const dlSpeedText = formatSpeed(currentSpeeds.dl_speed || 0)
+      const dlSpeedText = formatSpeed(dlSpeed)
       const downloadLegendFullName = `${downloader.name} ↓ ${dlSpeedText}`
       newLegendItems.push({
         fullName: downloadLegendFullName,
@@ -500,8 +667,10 @@ const fetchSpeedData = async (mode, isPeriodicUpdate = false) => {
         disabled: false,
       })
 
-      const downloadData = data.datasets.map((d) => d.speeds[downloader.id]?.dl_speed || 0);
-      allDownloadData.push(...downloadData);
+      const downloadData = data.datasets.map(
+        (point) => point.speeds[downloader.id]?.dl_speed ?? 0,
+      )
+      allDownloadData.push(...downloadData)
 
       series.push({
         name: downloadLegendFullName,
@@ -513,23 +682,24 @@ const fetchSpeedData = async (mode, isPeriodicUpdate = false) => {
       })
     })
 
-    let yAxisMax = null;
+    const maxOf = (values: number[]) => (values.length ? Math.max(...values) : 0)
+    const uploadMax = maxOf(allUploadData)
+    const downloadMax = maxOf(allDownloadData)
 
-    if (speedChartVisibilityMode.value === 'upload') {
-      yAxisMax = Math.max(...allUploadData);
-    } else if (speedChartVisibilityMode.value === 'download') {
-      yAxisMax = Math.max(...allDownloadData);
-    } else {
-      yAxisMax = Math.max(...allUploadData, ...allDownloadData);
+    let yAxisMax =
+      speedChartVisibilityMode.value === 'upload'
+        ? uploadMax
+        : speedChartVisibilityMode.value === 'download'
+          ? downloadMax
+          : Math.max(uploadMax, downloadMax)
+
+    if (yAxisMax <= 0) {
+      yAxisMax = 1024
     }
 
-    if (yAxisMax === 0) {
-      yAxisMax = 1024;
-    }
+    yAxisMax *= 1.2
 
-    yAxisMax = yAxisMax * 1.2;
-
-    const oldSelectedState = speedChartLegendItems.value.reduce((acc, item) => {
+    const oldSelectedState = speedChartLegendItems.value.reduce<Record<string, boolean>>((acc, item) => {
       if (item.disabled) acc[`${item.baseName} ${item.arrow}`] = true
       return acc
     }, {})
@@ -537,9 +707,10 @@ const fetchSpeedData = async (mode, isPeriodicUpdate = false) => {
       if (oldSelectedState[`${item.baseName} ${item.arrow}`]) item.disabled = true
     })
     speedChartLegendItems.value = newLegendItems
-    const currentSelected = speedChartInstance.getOption().legend?.[0]?.selected || {}
+
+    const currentSelected = getLegendSelectedMap(speedChartInstance)
     newLegendItems.forEach((item) => {
-      currentSelected[item.fullName] = !item.disabled
+      currentSelected[item.fullName] = item.disabled !== true
     })
 
     speedChartInstance.setOption({
@@ -547,7 +718,7 @@ const fetchSpeedData = async (mode, isPeriodicUpdate = false) => {
       yAxis: {
         type: 'value',
         axisLabel: getYAxisLabel((value) => formatSpeed(value)),
-        max: yAxisMax
+        max: yAxisMax,
       },
       series: series,
       grid: getChartGrid('speed'),
@@ -573,29 +744,29 @@ const fetchSpeedData = async (mode, isPeriodicUpdate = false) => {
         dataIndex: lastTooltipDataIndex,
       })
     }
-  } catch (error) {
-    console.error('获取速率数据失败:', error)
+  } catch (caught: unknown) {
+    console.error('获取速率数据失败:', caught)
   } finally {
     if (!isPeriodicUpdate) speedChartInstance.hideLoading()
   }
 }
 
-const fetchTrafficData = async (range) => {
+const fetchTrafficData = async (range: TrafficDisplayMode) => {
   if (!trafficChartInstance) return
   trafficChartInstance.showLoading()
   try {
-    const { data } = await axios.get('/api/chart_data', { params: { range } })
+    const { data } = await axios.get<TrafficApiResponse>('/api/chart_data', { params: { range } })
 
     const { labels, datasets, downloaders } = data
-    const series = []
-    const legendData = []
-    const newTrafficLegendItems = []
+    const series: TrafficSeriesOption[] = []
+    const legendData: string[] = []
+    const newTrafficLegendItems: TrafficLegendItem[] = []
     const uploadColors = ['#F56C6C', '#E6A23C', '#D98A6F', '#FAB6B6', '#F7D0A3']
     const downloadColors = ['#409EFF', '#67C23A', '#8A2BE2', '#A0CFFF', '#B3E19D']
 
     // 1. [保持不变] 创建用于存储每项总和的数组
-    const uploadTotals = new Array(labels.length).fill(0)
-    const downloadTotals = new Array(labels.length).fill(0)
+    const uploadTotals = Array.from({ length: labels.length }, () => 0)
+    const downloadTotals = Array.from({ length: labels.length }, () => 0)
 
     // 2. [保持不变] 遍历下载器，创建真实的柱状图系列，并累计总和
     downloaders.forEach((downloader, index) => {
@@ -656,7 +827,7 @@ const fetchTrafficData = async (range) => {
       name: '上传总量标签', // 给予一个不重复的名字
       type: 'bar',
       stack: 'upload', // 和上传系列在同一个stack
-      data: new Array(labels.length).fill(0), // **关键：数据必须是0，因为它只占位，不增加高度**
+      data: Array.from({ length: labels.length }, () => 0), // **关键：数据必须是0，因为它只占位，不增加高度**
       itemStyle: {
         borderColor: 'transparent',
         color: 'transparent'
@@ -673,9 +844,9 @@ const fetchTrafficData = async (range) => {
       label: {
         show: true,
         position: 'top', // 显示在堆叠柱的顶部
-        formatter: (p) => {
+        formatter: (p: TrafficLabelFormatterParam) => {
           // **关键：从预先计算好的 totals 数组中根据索引获取值**
-          const total = uploadTotals[p.dataIndex]
+          const total = uploadTotals[p.dataIndex] ?? 0
           return total > 0 ? formatBytes(total) : '' // 仅当总和大于0时显示标签
         },
         color: '#333',
@@ -689,7 +860,7 @@ const fetchTrafficData = async (range) => {
       name: '下载总量标签', // 给予一个不重复的名字
       type: 'bar',
       stack: 'download', // 和下载系列在同一个stack
-      data: new Array(labels.length).fill(0), // **关键：数据必须是0**
+      data: Array.from({ length: labels.length }, () => 0), // **关键：数据必须是0**
       itemStyle: {
         borderColor: 'transparent',
         color: 'transparent'
@@ -706,9 +877,9 @@ const fetchTrafficData = async (range) => {
       label: {
         show: true,
         position: 'top',
-        formatter: (p) => {
+        formatter: (p: TrafficLabelFormatterParam) => {
           // **关键：从预先计算好的 totals 数组中根据索引获取值**
-          const total = downloadTotals[p.dataIndex]
+          const total = downloadTotals[p.dataIndex] ?? 0
           return total > 0 ? formatBytes(total) : ''
         },
         color: '#333',
@@ -717,7 +888,7 @@ const fetchTrafficData = async (range) => {
       }
     })
 
-    const currentSelected = trafficChartInstance.getOption().legend?.[0]?.selected || {}
+    const currentSelected = getLegendSelectedMap(trafficChartInstance)
     legendData.forEach((name) => {
       if (typeof currentSelected[name] !== 'boolean') {
         currentSelected[name] = true
@@ -745,8 +916,8 @@ const fetchTrafficData = async (range) => {
     nextTick(() => {
       trafficChartInstance?.resize()
     })
-  } catch (error) {
-    console.error('获取数据量数据失败:', error)
+  } catch (caught: unknown) {
+    console.error('获取数据量数据失败:', caught)
   } finally {
     trafficChartInstance.hideLoading()
   }
@@ -754,7 +925,7 @@ const fetchTrafficData = async (range) => {
 
 
 // --- Event Handlers ---
-const changeSpeedMode = (mode) => {
+const changeSpeedMode = (mode: SpeedDisplayMode) => {
   if (speedUpdateTimer) {
     clearInterval(speedUpdateTimer)
     speedUpdateTimer = null
@@ -768,30 +939,30 @@ const changeSpeedMode = (mode) => {
     }, 1000)
   }
 }
-const changeTrafficMode = (range) => {
+const changeTrafficMode = (range: TrafficDisplayMode) => {
   trafficDisplayMode.value = range
   fetchTrafficData(range)
 }
-const toggleSeries = (name) => {
+const toggleSeries = (name: string) => {
   if (speedChartInstance) {
-    speedChartInstance.dispatchAction({ type: 'legendToggleSelect', name: name })
+    speedChartInstance.dispatchAction({ type: 'legendToggleSelect', name })
   }
 }
 
-const toggleTrafficSeries = (name) => {
+const toggleTrafficSeries = (name: string) => {
   if (!trafficChartInstance) return
   trafficChartInstance.dispatchAction({ type: 'legendToggleSelect', name })
-  const selected = trafficChartInstance.getOption().legend?.[0]?.selected || {}
+  const selected = getLegendSelectedMap(trafficChartInstance)
   trafficChartLegendItems.value = trafficChartLegendItems.value.map((item) => ({
     ...item,
     disabled: selected[item.name] === false,
   }))
 }
 
-const changeSpeedVisibility = (mode, isInternalCall = false) => {
+const changeSpeedVisibility = (mode: VisibilityMode, isInternalCall = false) => {
   if (!isInternalCall) speedChartVisibilityMode.value = mode
   if (!speedChartInstance || !speedChartLegendItems.value.length) return
-  const selected = {}
+  const selected: Record<string, boolean> = {}
   speedChartLegendItems.value.forEach((item) => {
     if (mode === 'all') selected[item.fullName] = true
     else if (mode === 'upload') selected[item.fullName] = item.arrow === '↑'
@@ -799,17 +970,15 @@ const changeSpeedVisibility = (mode, isInternalCall = false) => {
   })
   speedChartInstance.setOption({ legend: { selected: selected } })
 }
-const changeTrafficVisibility = (mode, isInternalCall = false) => {
+const changeTrafficVisibility = (mode: VisibilityMode, isInternalCall = false) => {
   if (!isInternalCall) trafficChartVisibilityMode.value = mode
   if (!trafficChartInstance) return
 
-  const option = trafficChartInstance.getOption()
-  if (!option || !option.legend || !option.legend[0] || !option.legend[0].data) return
+  const legendData = getLegendData(trafficChartInstance)
+  if (!legendData.length) return
+  const selected: Record<string, boolean> = {}
 
-  const legendData = option.legend[0].data
-  const selected = {}
-
-  legendData.forEach(name => {
+  legendData.forEach((name) => {
     if (mode === 'all') {
       selected[name] = true
     } else if (mode === 'upload') {
@@ -901,22 +1070,17 @@ onUnmounted(() => {
 .chart-body {
   flex: 1;
   width: 100%;
-  height: 100%;
   min-height: 0;
 }
 
 .chart-scroll-container {
   flex: 1;
-  min-height: 0;
   width: 100%;
   overflow: hidden;
-  display: flex;
 }
 
 .chart-body-inner {
-  flex: 1;
   width: 100%;
-  min-height: 0;
 }
 
 .chart-header {

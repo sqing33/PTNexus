@@ -46,7 +46,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     typeof input === 'string' || input instanceof URL ? url : new Request(input, finalInit)
 
   const resp = await originalFetch(
-    finalInput as any,
+    finalInput,
     typeof input === 'string' || input instanceof URL ? finalInit : undefined,
   )
   if (resp.status === 401 && !url.startsWith('/api/auth/')) {

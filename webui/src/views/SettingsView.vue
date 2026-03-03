@@ -30,7 +30,7 @@
   </el-container>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Download, Setting, Tickets } from '@element-plus/icons-vue'

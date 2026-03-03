@@ -417,6 +417,14 @@ const emit = defineEmits<{
   (e: 'fetch-completed'): void // 新增：批量获取完成事件
 }>()
 
+const getErrorMessage = (error: unknown): string => {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { message?: string } | undefined
+    return data?.message || error.message
+  }
+  return error instanceof Error ? error.message : String(error)
+}
+
 interface PathNode {
   path: string
   label: string
@@ -452,6 +460,21 @@ interface SiteStatus {
   is_target: boolean
 }
 
+interface BatchProgressResult {
+  name: string
+  status: string
+  source_site?: string
+  reason?: string
+  bdinfo_status?: string
+  mediainfo?: string
+}
+
+interface BdinfoStats {
+  processing: number
+  completed: number
+  failed: number
+}
+
 interface BatchProgress {
   total: number
   processed: number
@@ -459,12 +482,8 @@ interface BatchProgress {
   failed: number
   skipped: number
   isRunning: boolean
-  results: Array<{
-    name: string
-    status: string
-    source_site?: string
-    reason?: string
-  }>
+  results: BatchProgressResult[]
+  bdinfo_stats?: BdinfoStats
 }
 
 const tableData = ref<Torrent[]>([])
@@ -556,8 +575,8 @@ const loadSiteStatuses = async () => {
   try {
     const response = await axios.get('/api/sites/status')
     siteStatuses.value = response.data
-  } catch (e: any) {
-    console.error('加载站点状态失败:', e)
+  } catch (error: unknown) {
+    console.error('加载站点状态失败:', error)
   }
 }
 
@@ -623,7 +642,17 @@ const fetchData = async () => {
 
     if (!result.error) {
       // 转换数据格式以匹配现有的 Torrent 接口
-      tableData.value = result.data.map((item: any) => ({
+      type TorrentApiItem = {
+        name: string
+        save_path: string
+        size: number
+        progress: number
+        state: string
+        sites?: Record<string, SiteData>
+        downloader_ids?: string[]
+      }
+      const items: TorrentApiItem[] = Array.isArray(result.data) ? (result.data as TorrentApiItem[]) : []
+      tableData.value = items.map((item) => ({
         name: item.name,
         save_path: item.save_path,
         size: item.size,
@@ -642,9 +671,10 @@ const fetchData = async () => {
       error.value = result.error || '获取数据失败'
       ElMessage.error(result.error || '获取数据失败')
     }
-  } catch (e: any) {
-    error.value = e.message || '网络错误'
-    ElMessage.error(e.message || '网络错误')
+  } catch (caught: unknown) {
+    const message = getErrorMessage(caught) || '网络错误'
+    error.value = message
+    ElMessage.error(message)
   } finally {
     loading.value = false
   }
@@ -653,10 +683,10 @@ const fetchData = async () => {
 const fetchDownloadersList = async () => {
   try {
     const response = await axios.get('/api/all_downloaders')
-    const allDownloaders = response.data
-    downloadersList.value = allDownloaders.filter((d: any) => d.enabled)
-  } catch (e: any) {
-    error.value = e.message
+    const allDownloaders: Downloader[] = Array.isArray(response.data) ? (response.data as Downloader[]) : []
+    downloadersList.value = allDownloaders.filter((d) => d.enabled)
+  } catch (caught: unknown) {
+    error.value = getErrorMessage(caught)
   }
 }
 
@@ -678,8 +708,8 @@ const fetchAllPaths = async () => {
       uniquePaths.value = result.unique_paths
       pathTreeData.value = buildPathTree(uniquePaths.value)
     }
-  } catch (e: any) {
-    console.error('获取路径列表失败:', e)
+  } catch (caught: unknown) {
+    console.error('获取路径列表失败:', caught)
   }
 }
 
@@ -742,8 +772,8 @@ const saveFiltersToConfig = async () => {
       batch_fetch_filters: activeFilters.value,
       batch_fetch_name_search: nameSearch.value,
     })
-  } catch (e: any) {
-    console.error('保存筛选条件失败:', e)
+  } catch (error: unknown) {
+    console.error('保存筛选条件失败:', error)
   }
 }
 
@@ -764,8 +794,8 @@ const loadFiltersFromConfig = async () => {
     if (result.success && result.name_search !== undefined) {
       nameSearch.value = result.name_search
     }
-  } catch (e: any) {
-    console.error('加载筛选条件失败:', e)
+  } catch (error: unknown) {
+    console.error('加载筛选条件失败:', error)
   }
 }
 
@@ -853,8 +883,8 @@ const loadPrioritySettings = async () => {
     })
 
     sourceSitesOrder.value = orderedSites
-  } catch (e: any) {
-    ElMessage.error(e.message || '加载配置失败')
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error) || '加载配置失败')
   } finally {
     priorityLoading.value = false
   }
@@ -879,8 +909,8 @@ const savePrioritySettings = async () => {
     } else {
       throw new Error(response.data.message || '保存失败')
     }
-  } catch (e: any) {
-    ElMessage.error(e.message || '保存配置失败')
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error) || '保存配置失败')
   } finally {
     prioritySaving.value = false
   }
@@ -935,10 +965,8 @@ const startBatchFetch = async () => {
       // 处理业务逻辑错误，显示服务器返回的错误信息
       ElMessage.error(result.message || '批量获取任务启动失败')
     }
-  } catch (error: any) {
-    // 处理网络错误或其他异常，axios错误可能包含响应信息
-    const errorMessage = error.response?.data?.message || error.message || '网络错误'
-    ElMessage.error(errorMessage)
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error) || '网络错误')
   }
 }
 
@@ -1020,7 +1048,7 @@ const refreshProgress = async () => {
     } else {
       ElMessage.error(result.message || '获取进度失败')
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取进度时出错:', error)
   }
 }
