@@ -371,6 +371,12 @@ const resolveDownloaderColor = (downloaderId: string, downloaderName: string) =>
   return ''
 }
 
+const isWaitingDownloaderStatus = (row: PublishLogRow, message: string) =>
+  row.status === 'queued' || message.startsWith('等待发布')
+
+const isSkippedDownloaderStatus = (row: PublishLogRow, message: string) =>
+  row.status === 'cancelled' || message.startsWith('未执行')
+
 const downloaderTagType = (row: PublishLogRow) => {
   const parsed = parseAutoAddResult(row)
   if (parsed.success) return 'info'
@@ -383,7 +389,9 @@ type DownloaderTagStyle = Record<string, string>
 const downloaderTagStyle = (row: PublishLogRow): DownloaderTagStyle => {
   const parsed = parseAutoAddResult(row)
   const message = (parsed.message || '').trim()
-  if (message.startsWith('未执行')) return {} as DownloaderTagStyle
+  if (isWaitingDownloaderStatus(row, message) || isSkippedDownloaderStatus(row, message)) {
+    return {} as DownloaderTagStyle
+  }
 
   let color = ''
   if (parsed.success) {
@@ -404,7 +412,8 @@ const downloaderTagStyle = (row: PublishLogRow): DownloaderTagStyle => {
 const formatDownloaderStatus = (row: PublishLogRow) => {
   const parsed = parseAutoAddResult(row)
   const message = (parsed.message || '').trim()
-  if (message.startsWith('未执行')) return '未执行'
+  if (isWaitingDownloaderStatus(row, message)) return message || '等待发布'
+  if (isSkippedDownloaderStatus(row, message)) return '未执行'
   if (parsed.success) {
     return parsed.downloaderName || parsed.downloaderId || '成功'
   }
@@ -497,7 +506,9 @@ const openLogs = (row: PublishLogRow) => {
   const parsed = parseAutoAddResult(row)
   const message = (parsed.message || '').trim()
   let addon = ''
-  if (message.startsWith('未执行')) {
+  if (isWaitingDownloaderStatus(row, message)) {
+    addon = `\n\n--- [下载器] ---\n${message || '等待发布'}`
+  } else if (isSkippedDownloaderStatus(row, message)) {
     addon = '\n\n--- [下载器] ---\n未执行'
   } else if (parsed.success) {
     const name = parsed.downloaderName || parsed.downloaderId
