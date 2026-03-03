@@ -78,16 +78,12 @@ require_command aarch64-linux-gnu-gcc "Debian/Ubuntu: sudo apt-get install -y gc
 # 定义一个标志，用于判断是否执行了任何构建
 BUILDS_TRIGGERED=false
 
-# --- 1. 检测并构建 Vue 前端项目 (webui) ---
-# 使用 grep -q 来安静地检查 STAGED_FILES 变量中是否包含以 "webui/" 开头的行
+# --- 1. 检测 webui 变更（仅提示，不再自动构建 dist） ---
+# 说明：webui/dist 改为忽略并从提交历史剔除，此处不再触发前端构建。
 if echo "$STAGED_FILES" | grep -q "^webui/"; then
-    BUILDS_TRIGGERED=true
-    echo -e "${YELLOW}📦 检测到 'webui' 目录有变更，开始构建...${NC}"
-    (cd webui && bun install --silent && bun run build) || handle_error "Vue 前端构建失败"
-    echo -e "${GREEN}✓ Vue 前端构建成功。正在暂存产物...${NC}"
-    git add webui/dist/
+    echo -e "${YELLOW}ℹ️  检测到 'webui' 目录有变更：已禁用 pre-commit 自动构建 dist。${NC}"
 else
-    echo -e "${CYAN}⏭️  'webui' 目录无变更，跳过构建。${NC}"
+    echo -e "${CYAN}⏭️  'webui' 目录无变更。${NC}"
 fi
 
 # --- 2. 检测并构建 Go updater ---

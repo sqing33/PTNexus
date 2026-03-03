@@ -2,3 +2,4 @@
 /data/
 .parafork/
 .worktree-lite/
+/webui/dist/
