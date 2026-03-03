@@ -3049,6 +3049,58 @@ const processDbData = (dataRes: any, tId: string) => {
   isLoading.value = false
 }
 
+const autoExtractExternalLinksFromIntroBody = () => {
+  const introBody = String(torrentData.value?.intro?.body || '').trim()
+  if (!introBody) return
+
+  const shouldExtractIMDb = !torrentData.value.imdb_link
+  const shouldExtractDouban = !torrentData.value.douban_link
+  const shouldExtractTMDb = !torrentData.value.tmdb_link
+  if (!shouldExtractIMDb && !shouldExtractDouban && !shouldExtractTMDb) return
+
+  let imdbExtracted = false
+  let doubanExtracted = false
+  let tmdbExtracted = false
+
+  if (shouldExtractIMDb) {
+    const imdbRegex = /(https?:\/\/(?:www\.)?imdb\.com\/title\/tt\d+\/?)/
+    const imdbMatch = introBody.match(imdbRegex)
+    if (imdbMatch && imdbMatch[1]) {
+      torrentData.value.imdb_link = imdbMatch[1].trim()
+      imdbExtracted = true
+    }
+  }
+
+  if (shouldExtractDouban) {
+    const doubanRegex = /(https?:\/\/movie\.douban\.com\/subject\/\d+\/?)/
+    const doubanMatch = introBody.match(doubanRegex)
+    if (doubanMatch && doubanMatch[1]) {
+      torrentData.value.douban_link = doubanMatch[1].trim()
+      doubanExtracted = true
+    }
+  }
+
+  if (shouldExtractTMDb) {
+    const tmdbRegex = /(https?:\/\/(?:www\.)?themoviedb\.org\/[a-zA-Z]+\/\d+\/?)/
+    const tmdbMatch = introBody.match(tmdbRegex)
+    if (tmdbMatch && tmdbMatch[1]) {
+      torrentData.value.tmdb_link = tmdbMatch[1].trim()
+      tmdbExtracted = true
+    }
+  }
+
+  if (imdbExtracted || doubanExtracted || tmdbExtracted) {
+    const messages: string[] = []
+    if (imdbExtracted) messages.push('IMDb链接')
+    if (doubanExtracted) messages.push('豆瓣链接')
+    if (tmdbExtracted) messages.push('TMDb链接')
+    ElNotification.info({
+      title: '自动填充',
+      message: `已从简介正文中自动提取并填充 ${messages.join(' 和 ')}。`,
+    })
+  }
+}
+
 const fetchSitesStatus = async () => {
   try {
     const response = await axios.get('/api/sites/status')
@@ -3372,39 +3424,7 @@ const fetchTorrentInfo = async () => {
       // 检查 BDInfo 进度状态（从数据库读取，使用默认重试设置）
       checkAndStartBDInfoProgress(compositeSeedId, false)
 
-      // 自动提取链接的逻辑保持不变
-      if (
-        (!torrentData.value.imdb_link || !torrentData.value.douban_link) &&
-        torrentData.value.intro.body
-      ) {
-        let imdbExtracted = false
-        let doubanExtracted = false
-        if (!torrentData.value.imdb_link) {
-          const imdbRegex = /(https?:\/\/www\.imdb\.com\/title\/tt\d+)/
-          const imdbMatch = torrentData.value.intro.body.match(imdbRegex)
-          if (imdbMatch && imdbMatch[1]) {
-            torrentData.value.imdb_link = imdbMatch[1]
-            imdbExtracted = true
-          }
-        }
-        if (!torrentData.value.douban_link) {
-          const doubanRegex = /(https:\/\/movie\.douban\.com\/subject\/\d+)/
-          const doubanMatch = torrentData.value.intro.body.match(doubanRegex)
-          if (doubanMatch && doubanMatch[1]) {
-            torrentData.value.douban_link = doubanMatch[1]
-            doubanExtracted = true
-          }
-        }
-        if (imdbExtracted || doubanExtracted) {
-          const messages = []
-          if (imdbExtracted) messages.push('IMDb链接')
-          if (doubanExtracted) messages.push('豆瓣链接')
-          ElNotification.info({
-            title: '自动填充',
-            message: `已从简介正文中自动提取并填充 ${messages.join(' 和 ')}。`,
-          })
-        }
-      }
+      autoExtractExternalLinksFromIntroBody()
 
       activeStep.value = 0
       // Check screenshot validity after loading data
@@ -3598,39 +3618,7 @@ const fetchTorrentInfo = async () => {
         taskId.value = storeResponse.data.task_id
         isDataFromDatabase.value = true // Mark that data was loaded from database
 
-        // 自动提取链接的逻辑保持不变
-        if (
-          (!torrentData.value.imdb_link || !torrentData.value.douban_link) &&
-          torrentData.value.intro.body
-        ) {
-          let imdbExtracted = false
-          let doubanExtracted = false
-          if (!torrentData.value.imdb_link) {
-            const imdbRegex = /(https?:\/\/www\.imdb\.com\/title\/tt\d+)/
-            const imdbMatch = torrentData.value.intro.body.match(imdbRegex)
-            if (imdbMatch && imdbMatch[1]) {
-              torrentData.value.imdb_link = imdbMatch[1]
-              imdbExtracted = true
-            }
-          }
-          if (!torrentData.value.douban_link) {
-            const doubanRegex = /(https:\/\/movie\.douban\.com\/subject\/\d+)/
-            const doubanMatch = torrentData.value.intro.body.match(doubanRegex)
-            if (doubanMatch && doubanMatch[1]) {
-              torrentData.value.douban_link = doubanMatch[1]
-              doubanExtracted = true
-            }
-          }
-          if (imdbExtracted || doubanExtracted) {
-            const messages = []
-            if (imdbExtracted) messages.push('IMDb链接')
-            if (doubanExtracted) messages.push('豆瓣链接')
-            ElNotification.info({
-              title: '自动填充',
-              message: `已从简介正文中自动提取并填充 ${messages.join(' 和 ')}。`,
-            })
-          }
-        }
+        autoExtractExternalLinksFromIntroBody()
 
         activeStep.value = 0
         // Check screenshot validity after loading data

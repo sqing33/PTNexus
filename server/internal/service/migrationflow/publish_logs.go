@@ -161,6 +161,12 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 		uploadData = map[string]any{}
 	}
 	title := strings.TrimSpace(processingshared.ToString(uploadData["title"], ""))
+	if title == "" {
+		title = strings.TrimSpace(processingshared.ToString(uploadData["original_main_title"], ""))
+	}
+	if title == "" {
+		title = strings.TrimSpace(processingshared.ToString(uploadData["name"], ""))
+	}
 	subtitle := strings.TrimSpace(processingshared.ToString(uploadData["subtitle"], ""))
 
 	torrentID := strings.TrimSpace(ctxTorrentID)
@@ -169,6 +175,9 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 	}
 	if torrentID == "" {
 		torrentID = strings.TrimSpace(processingshared.ToString(uploadData["torrent_id"], processingshared.ToString(uploadData["torrentId"], "")))
+	}
+	if title == "" {
+		title = torrentID
 	}
 
 	queueTaskID := (*int64)(nil)

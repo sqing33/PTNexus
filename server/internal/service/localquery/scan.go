@@ -3,6 +3,8 @@ package localquery
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 func (s *Service) Scan(targetPath string) (map[string]any, error) {
@@ -15,6 +17,8 @@ func (s *Service) Scan(targetPath string) (map[string]any, error) {
 	missingFiles := make([]map[string]any, 0)
 	orphanedFiles := make([]map[string]any, 0)
 	syncedIndex := map[string]*syncedItem{}
+	missingCandidates := map[string][]map[string]any{}
+	groupHasLocalExists := map[string]bool{}
 	localPaths := map[string]*localPathMeta{}
 	remoteTorrentsCount := 0
 	localItemsCount := 0
@@ -40,12 +44,13 @@ func (s *Service) Scan(targetPath string) (map[string]any, error) {
 		}
 		localPaths[localPath].Expected[torrent.Name] = struct{}{}
 
-		syncKey := remotePath + "\x00" + torrent.Name
+		syncKey := buildNameSizeGroupKey(torrent.Name, torrent.Size)
 		syncItem, exists := syncedIndex[syncKey]
 		if !exists {
 			syncItem = &syncedItem{
 				Name:            torrent.Name,
 				Path:            remotePath,
+				Size:            torrent.Size,
 				Count:           0,
 				DownloaderNames: map[string]struct{}{},
 			}
@@ -53,6 +58,9 @@ func (s *Service) Scan(targetPath string) (map[string]any, error) {
 		}
 		syncItem.Count++
 		syncItem.DownloaderNames[meta.Name] = struct{}{}
+		if syncItem.Path == "" || (remotePath != "" && remotePath < syncItem.Path) {
+			syncItem.Path = remotePath
+		}
 
 		if meta.Remote {
 			remoteTorrentsCount++
@@ -60,15 +68,51 @@ func (s *Service) Scan(targetPath string) (map[string]any, error) {
 		}
 
 		expectedPath := filepath.Join(localPath, torrent.Name)
-		if _, err := os.Stat(expectedPath); err != nil {
-			missingFiles = append(missingFiles, map[string]any{
-				"name":            torrent.Name,
-				"save_path":       remotePath,
-				"expected_path":   expectedPath,
-				"size":            torrent.Size,
-				"downloader_name": meta.Name,
-			})
+		if _, err := os.Stat(expectedPath); err == nil {
+			groupHasLocalExists[syncKey] = true
+			continue
 		}
+		missingCandidates[syncKey] = append(missingCandidates[syncKey], map[string]any{
+			"name":            torrent.Name,
+			"save_path":       remotePath,
+			"expected_path":   expectedPath,
+			"size":            torrent.Size,
+			"downloader_name": meta.Name,
+		})
+	}
+
+	for groupKey, candidates := range missingCandidates {
+		if len(candidates) == 0 || groupHasLocalExists[groupKey] {
+			continue
+		}
+		representative := candidates[0]
+		downloaderSet := map[string]struct{}{}
+		for _, candidate := range candidates {
+			name := strings.TrimSpace(stringFromAny(candidate["downloader_name"]))
+			if name != "" {
+				downloaderSet[name] = struct{}{}
+			}
+			currentPath := stringFromAny(candidate["save_path"])
+			bestPath := stringFromAny(representative["save_path"])
+			if bestPath == "" || (currentPath != "" && currentPath < bestPath) {
+				representative = candidate
+			}
+		}
+
+		downloaderNames := make([]string, 0, len(downloaderSet))
+		for name := range downloaderSet {
+			downloaderNames = append(downloaderNames, name)
+		}
+		sortStrings(downloaderNames)
+
+		missingFiles = append(missingFiles, map[string]any{
+			"name":            stringFromAny(representative["name"]),
+			"save_path":       stringFromAny(representative["save_path"]),
+			"expected_path":   stringFromAny(representative["expected_path"]),
+			"size":            representative["size"],
+			"downloader_name": strings.Join(downloaderNames, ", "),
+			"torrents_count":  len(candidates),
+		})
 	}
 
 	for localPath, meta := range localPaths {
@@ -109,6 +153,7 @@ func (s *Service) Scan(targetPath string) (map[string]any, error) {
 		syncedTorrents = append(syncedTorrents, map[string]any{
 			"name":             item.Name,
 			"path":             item.Path,
+			"size":             item.Size,
 			"torrents_count":   item.Count,
 			"downloader_names": names,
 		})
@@ -143,4 +188,8 @@ func applyRemoteToLocal(remotePath string, mappings []pathMapping) string {
 		}
 	}
 	return normalized
+}
+
+func buildNameSizeGroupKey(name string, size int64) string {
+	return strings.TrimSpace(name) + "\x00" + strconv.FormatInt(size, 10)
 }

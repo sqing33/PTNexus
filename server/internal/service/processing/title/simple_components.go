@@ -34,6 +34,7 @@ var (
 	reTechSplit     = regexp.MustCompile(`[\s\.]+`)
 	reResolutionTok = regexp.MustCompile(`(?i)\b(4320p|8k|2160p|4k|1080p|1080i|720p|480p)\b`)
 	reVCBVariant    = regexp.MustCompile(`(?i)^(.+?)-([\w\s]+&VCB-Studio)$`)
+	reBDRipToken    = regexp.MustCompile(`(?i)\bBD[-\s]?RIP\b`)
 )
 
 const sourcePlatformAlternatives = `MA|Apple\s?TV\+|ViuTV|MyTVSuper|MyTVS|DNSP|iT|NowE|MyVideo|TWN|LiTV|TVBAnywhere|DMM|iPad|TX|iQIYI|MUBI|TVB|YOUKU|NowPlay|AMZN|Amazon|Netflix|NF|DSNP|MAX|HMAX|HULU|ATVP|iTunes|friDay|USA|EUR|JPN|CEE|FRA|LINETV|PCOK|Hami|GBR|NowPlayer|CR|Crunchyroll|SEEZN|GER|CAN|CHN|Viu|WeTV|meWATCH|CATCHPLAY|AMC\+|TVING|Baha|KKTV|IQ|HKG|ITA|ESP|Disney\+|Disney`
@@ -240,7 +241,7 @@ func extractYearAndRemove(title string) (string, string) {
 
 func extractMediumPythonish(title string) string {
 	upper := strings.ToUpper(title)
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 
 	if strings.Contains(upper, "UHD") {
 		parts = append(parts, "UHD")
@@ -253,6 +254,10 @@ func extractMediumPythonish(title string) string {
 
 	if strings.Contains(upper, "REMUX") {
 		parts = append(parts, "Remux")
+	}
+
+	if reBDRipToken.MatchString(title) {
+		parts = append(parts, "BDRip")
 	}
 
 	// WEB 类媒介保持原始语义（仅当标题中明确出现 WEB-DL/WEBRIP 等）。
@@ -343,6 +348,10 @@ func extractMainTitleAndUnrecognized(titlePart string, values map[string]string)
 		found = append(found, "WEB-DL")
 	} else if strings.Contains(strings.ToUpper(titlePart), "WEBRIP") {
 		found = append(found, "WEBRip")
+	}
+	if match := strings.TrimSpace(reBDRipToken.FindString(titlePart)); match != "" {
+		// BDRip 兼容变体（BDrip/BD-Rip/BD Rip）统一从“无法识别”清理集合中移除。
+		found = append(found, match, "BDRip", "BD-Rip", "BD Rip", "BDrip")
 	}
 	if v := strings.TrimSpace(values["剧集状态"]); v != "" {
 		found = append(found, v)

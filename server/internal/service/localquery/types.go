@@ -28,6 +28,7 @@ type localPathMeta struct {
 type syncedItem struct {
 	Name            string
 	Path            string
+	Size            int64
 	Count           int
 	DownloaderNames map[string]struct{}
 }
