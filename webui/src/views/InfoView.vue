@@ -1070,17 +1070,22 @@ onUnmounted(() => {
 .chart-body {
   flex: 1;
   width: 100%;
+  height: 100%;
   min-height: 0;
 }
 
 .chart-scroll-container {
   flex: 1;
+  min-height: 0;
   width: 100%;
   overflow: hidden;
+  display: flex;
 }
 
 .chart-body-inner {
+  flex: 1;
   width: 100%;
+  min-height: 0;
 }
 
 .chart-header {

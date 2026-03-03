@@ -157,6 +157,9 @@ export interface CrossSeedPanelContext {
   handleTeamInput: (param: TitleComponent, val: string) => void
   allTagOptions: ComputedRef<TagOption[]>
   invalidTagsList: ComputedRef<string[]>
+  isRestrictedTag: (tag: string) => boolean
+  getTagType: (tag: string) => 'danger' | 'info'
+  handleTagClose: (tag: string) => void
   refreshPosters: () => Promise<void>
   isRefreshingPosters: Ref<boolean>
   posterImages: ComputedRef<string[]>

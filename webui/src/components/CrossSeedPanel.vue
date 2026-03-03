@@ -28,69 +28,10 @@
   <LogProgress
     :visible="showLogProgress"
     :taskId="logProgressTaskId"
+    :error-message="fetchFlowErrorMessage"
     @complete="handleLogProgressComplete"
-    @close="handleLogProgressClose"
+    @close="handleFetchLogProgressClose"
   />
-
-  <!-- [新增] 抓取失败详情弹窗 -->
-  <el-dialog
-    v-model="showErrorDialog"
-    title="抓取失败 - 详细日志"
-    width="800px"
-    destroy-on-close
-    append-to-body
-    class="error-log-dialog"
-  >
-    <div class="error-log-container">
-      <el-alert
-        title="获取种子信息过程中发生错误"
-        type="error"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 15px"
-      >
-        <template #default>
-          <div>请查看下方详细日志以排查问题（如 Python 堆栈信息）。</div>
-        </template>
-      </el-alert>
-
-      <el-scrollbar height="500px">
-        <div class="log-timeline">
-          <div
-            v-for="log in parsedErrorLogs"
-            :key="log.id"
-            class="log-entry"
-            :class="{ 'is-error': log.isError }"
-          >
-            <!-- 日志头部：时间与摘要 -->
-            <div class="log-entry-header">
-              <span class="log-time">{{ log.time }}</span>
-              <el-tag
-                :type="getLogLevelType(log.level)"
-                size="small"
-                effect="dark"
-                class="log-level-tag"
-              >
-                {{ log.level }}
-              </el-tag>
-              <span class="log-site" v-if="log.site">[{{ log.site }}]</span>
-              <span class="log-text">{{ log.message }}</span>
-            </div>
-
-            <!-- 日志详情（报错堆栈） -->
-            <div v-if="log.details" class="log-entry-details">
-              <pre class="code-block">{{ log.details }}</pre>
-            </div>
-          </div>
-        </div>
-      </el-scrollbar>
-    </div>
-    <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="showErrorDialog = false">关闭</el-button>
-      </span>
-    </template>
-  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -258,93 +199,6 @@ const handleApiError = (error: unknown, defaultMessage: string) => {
       ? error.message || defaultMessage
       : defaultMessage
   ElNotification.error({ title: '操作失败', message, duration: 0, showClose: true })
-}
-
-// --- [新增] 日志解析函数：将后端返回的文本日志解析为结构化数据 ---
-type ParsedLogEntry = {
-  id: number
-  site: string
-  time: string
-  level: string
-  message: string
-  details: string
-  isError: boolean
-}
-
-const parseLogText = (text: string): ParsedLogEntry[] => {
-  if (!text) return []
-
-  const lines = text.split('\n')
-  const results: ParsedLogEntry[] = []
-  let currentEntry: ParsedLogEntry | null = null
-
-  // 正则匹配日志行：[站点名] HH:mm:ss - LEVEL - 内容
-  // 参考你的日志格式: [不可说] 21:29:26 - INFO - ...
-  const logRegex = /^\[(.*?)\]\s+(\d{2}:\d{2}:\d{2})\s+-\s+([A-Z]+)\s+-\s+(.*)$/
-
-  lines.forEach((line, index) => {
-    const trimmedLine = line.trimEnd()
-    if (!trimmedLine) return
-
-    const match = trimmedLine.match(logRegex)
-
-    if (match) {
-      // 这是一个新的日志行
-      currentEntry = {
-        id: index,
-        site: match[1],
-        time: match[2],
-        level: match[3],
-        message: match[4],
-        details: '', // 用于存放后续的堆栈信息
-        isError: match[3] === 'ERROR' || match[3] === 'CRITICAL',
-      }
-      // 如果消息本身就包含 Traceback 关键字，标记为错误
-      if (currentEntry.message.includes('Traceback')) {
-        currentEntry.isError = true
-      }
-      results.push(currentEntry)
-    } else {
-      // 这不是标准的日志头（例如 Python 的 Traceback 堆栈信息）
-      if (currentEntry) {
-        // 追加到上一条日志的详情中
-        currentEntry.details += (currentEntry.details ? '\n' : '') + trimmedLine
-        // 如果包含 File "...", line ... 这种堆栈特征，强制标记上一条为错误
-        if (trimmedLine.trim().startsWith('File "')) {
-          currentEntry.isError = true
-        }
-      } else {
-        // 只有第一行就是非标准格式时才会走到这里
-        results.push({
-          id: index,
-          site: 'System',
-          time: '',
-          level: 'INFO',
-          message: trimmedLine,
-          details: '',
-          isError: false,
-        })
-      }
-    }
-  })
-
-  return results
-}
-
-// --- [新增] 获取日志等级对应的标签颜色 ---
-const getLogLevelType = (level: string) => {
-  switch (level) {
-    case 'SUCCESS':
-      return 'success'
-    case 'ERROR':
-      return 'danger'
-    case 'WARNING':
-      return 'warning'
-    case 'DEBUG':
-      return 'info'
-    default:
-      return 'primary' // INFO
-  }
 }
 
 interface SiteStatus {
@@ -750,13 +604,10 @@ const formatFileSize = (bytes: number) => {
   return `${size.toFixed(2)} ${units[unitIndex]}`
 }
 
-// --- [新增] 错误弹窗相关的状态 ---
-const showErrorDialog = ref(false)
-const parsedErrorLogs = ref<ParsedLogEntry[]>([])
-
 // 日志进度组件相关
 const showLogProgress = ref(false)
 const logProgressTaskId = ref('')
+const fetchFlowErrorMessage = ref('')
 
 // 反向映射表，用于将标准值映射到中文显示名称
 const reverseMappings = ref<ReverseMappings>({
@@ -1881,9 +1732,7 @@ const seedFlow = createSeedFlow({
   logProgressTaskId,
   showLogProgress,
 
-  parsedErrorLogs,
-  showErrorDialog,
-  parseLogText,
+  fetchFlowErrorMessage,
 
   filterExtraEmptyLines,
   normalizeIntroBodyAndMediainfo,
@@ -1896,11 +1745,11 @@ const seedFlow = createSeedFlow({
   screenshotImages,
 })
 
-  const {
-    fetchSitesStatus,
-    fetchCrossSeedSettings,
-    saveAutoAddExistingSetting,
-    saveAutoUpdateExistingTorrentSetting,
+const {
+  fetchSitesStatus,
+  fetchCrossSeedSettings,
+  saveAutoAddExistingSetting,
+  saveAutoUpdateExistingTorrentSetting,
   fetchTorrentInfo,
   handleTeamInput,
   goToPublishPreviewStep,
@@ -1908,9 +1757,9 @@ const seedFlow = createSeedFlow({
   toggleSiteSelection,
   selectAllTargetSites,
   clearAllTargetSites,
-    invalidStandardParams,
-    allTagOptions,
-  } = seedFlow
+  invalidStandardParams,
+  allTagOptions,
+} = seedFlow
 
 watch(isCurrentSeedAnimationRelated, (isAnimationRelated) => {
   if (isAnimationRelated) {
@@ -1998,6 +1847,9 @@ const {
   unrecognizedValue,
   filteredTags,
   invalidTagsList,
+  isRestrictedTag,
+  getTagType,
+  handleTagClose,
   isNextButtonDisabled,
   nextButtonTooltipContent,
   groupedResults,
@@ -2007,6 +1859,11 @@ const {
   openAllSitesInRow,
   getValidUrlsCount,
 } = publishFlow
+
+const handleFetchLogProgressClose = () => {
+  handleLogProgressClose()
+  fetchFlowErrorMessage.value = ''
+}
 
 const showCompleteButton = computed(() => props.showCompleteButton)
 
@@ -2027,6 +1884,9 @@ provide(
     handleTeamInput,
     allTagOptions,
     invalidTagsList,
+    isRestrictedTag,
+    getTagType,
+    handleTagClose,
     refreshPosters,
     isRefreshingPosters,
     posterImages,

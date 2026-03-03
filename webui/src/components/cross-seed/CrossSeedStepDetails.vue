@@ -74,7 +74,7 @@
                 <!-- [最终版本] 标准参数区域 -->
                 <div class="standard-params-section">
                   <!-- 第一行：类型、媒介、视频编码、音频编码、分辨率 -->
-                  <div class="standard-params-grid">
+                  <div class="standard-params-grid second-row">
                     <el-form-item label="类型 (type)">
                       <el-select
                         v-model="torrentData.standardized_params.type"
@@ -218,20 +218,33 @@
                       </el-select>
                     </el-form-item>
 
-                    <el-form-item label="标签 (tags)">
+                    <el-form-item class="tags-wide-item" label="标签 (tags)">
                       <el-select
                         v-model="torrentData.standardized_params.tags"
-                        placeholder="请选择标签"
+                        placeholder="请选择或输入标签"
                         multiple
-                        clearable
                         filterable
                         allow-create
                         default-first-option
+                        style="width: 100%"
                         :class="{
                           'is-invalid': invalidStandardParams.includes('tags'),
                         }"
                         data-tag-style
                       >
+                        <template #tag="{ data }">
+                          <el-tag
+                            v-for="item in data"
+                            :key="item.value"
+                            :type="getTagType(item.value)"
+                            :closable="!isRestrictedTag(item.value)"
+                            disable-transitions
+                            @close="handleTagClose(item.value)"
+                            style="margin: 2px"
+                          >
+                            <span>{{ reverseMappings.tags[item.value] || item.currentLabel }}</span>
+                          </el-tag>
+                        </template>
                         <el-option
                           v-for="option in allTagOptions"
                           :key="option.value"
@@ -245,10 +258,6 @@
                       </el-select>
                     </el-form-item>
 
-                    <!-- 占位符1：保持5列结构 -->
-                    <div class="placeholder-item"></div>
-                    <!-- 占位符2：保持5列结构 -->
-                    <div class="placeholder-item"></div>
                   </div>
                 </div>
               </div>
@@ -503,6 +512,9 @@ const {
   handleTeamInput,
   allTagOptions,
   invalidTagsList,
+  isRestrictedTag,
+  getTagType,
+  handleTagClose,
   refreshPosters,
   isRefreshingPosters,
   posterImages,

@@ -78,6 +78,11 @@
           </el-button>
         </div>
 
+        <div v-if="normalizedErrorMessage" class="error-detail-card">
+          <div class="error-detail-title">失败原因</div>
+          <pre class="error-detail-content">{{ normalizedErrorMessage }}</pre>
+        </div>
+
         <div v-if="isComplete" class="completion-message" :class="completionClass">
           <el-icon class="icon-complete">
             <CircleClose v-if="hasError" />
@@ -121,6 +126,7 @@ const autoCloseDelayMs = 1200
 const props = defineProps<{
   visible: boolean
   taskId: string
+  errorMessage?: string
 }>()
 
 const emit = defineEmits<{
@@ -176,10 +182,11 @@ const renderedDynamicSteps = computed(() => {
 const flowSteps = computed(() => [...mainSteps.value, ...renderedDynamicSteps.value])
 
 const hasCollapsedDynamicSteps = computed(() => dynamicSteps.value.length > 1)
+const normalizedErrorMessage = computed(() => String(props.errorMessage || '').trim())
 
 const hasError = computed(() => {
   const allSteps = [...mainSteps.value, ...parallelSteps.value, ...dynamicSteps.value]
-  return allSteps.some((step) => step.status === 'error')
+  return allSteps.some((step) => step.status === 'error') || normalizedErrorMessage.value.length > 0
 })
 
 const completionText = computed(() =>
@@ -680,6 +687,33 @@ onBeforeUnmount(() => {
   margin-top: 2px;
   text-align: right;
   line-height: 1;
+}
+
+.error-detail-card {
+  margin-top: 6px;
+  border: 1px solid #fecaca;
+  background: #fff5f5;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.error-detail-title {
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.error-detail-content {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #7a271a;
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: 'Consolas', 'Monaco', monospace;
 }
 
 .status-pending {

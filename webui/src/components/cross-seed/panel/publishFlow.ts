@@ -82,6 +82,9 @@ export type PublishFlowApi = {
   unrecognizedValue: WritableComputedRef<string>
   filteredTags: ComputedRef<string[]>
   invalidTagsList: ComputedRef<string[]>
+  isRestrictedTag: (tag: string) => boolean
+  getTagType: (tag: string) => 'danger' | 'info'
+  handleTagClose: (tag: string) => void
   isNextButtonDisabled: ComputedRef<boolean>
   nextButtonTooltipContent: ComputedRef<string>
   groupedResults: ComputedRef<PublishDisplayResult[][]>
@@ -858,6 +861,13 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     // 从已过滤的标签中，再次过滤出不符合新正则的标签
     return filteredTags.value.filter((tag) => !flexibleRegex.test(tag))
   })
+
+  const getTagType = (tag: string): 'danger' | 'info' => {
+    if (isRestrictedTag(tag) || invalidTagsList.value.includes(tag)) {
+      return 'danger'
+    }
+    return 'info'
+  }
   // 计算属性：为未解析的标题提供初始参数框
   const initialTitleComponents = computed<TitleComponent[]>(() => {
     // 定义常见的标题参数键
@@ -902,6 +912,22 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     const tags = torrentData.value.standardized_params.tags || []
     return tags.some((tag) => isRestrictedTag(tag))
   })
+
+  const handleTagClose = (tagToRemove: string) => {
+    if (isRestrictedTag(tagToRemove)) {
+      ElNotification.warning({
+        title: '无法删除',
+        message: '禁转/限转/分集标签不允许删除',
+        duration: 2000,
+      })
+      return
+    }
+
+    const index = torrentData.value.standardized_params.tags.indexOf(tagToRemove)
+    if (index > -1) {
+      torrentData.value.standardized_params.tags.splice(index, 1)
+    }
+  }
 
   const unrecognizedValue = computed<string>({
     // Getter: 当模板需要读取值时调用
@@ -1445,6 +1471,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     unrecognizedValue,
     filteredTags,
     invalidTagsList,
+    isRestrictedTag,
+    getTagType,
+    handleTagClose,
     isNextButtonDisabled,
     nextButtonTooltipContent,
     groupedResults,

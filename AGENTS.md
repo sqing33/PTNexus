@@ -23,13 +23,13 @@
 
 ## 构建、测试与开发命令
 
-前端（Node 20+/bun）：
+前端（Node 20+/pnpm）：
 
 ```bash
 cd webui
-bun install
-bun run dev        # 本地 UI 在 5173
-bun run build      # 输出到 webui/dist
+pnpm install
+pnpm run dev        # 本地 UI 在 5173
+pnpm run build      # 输出到 webui/dist
 ```
 
 后端（Python 3.12/uv）：
@@ -57,12 +57,12 @@ Go 服务（版本见各自 `go.mod`）：
 - Python：4 空格缩进，模块与函数使用 snake_case；import 分组保持整洁。
 - Vue/TS：2 空格缩进；组件使用 `PascalCase.vue`，页面以 `*View.vue` 结尾。
 - Go：遵循标准 `gofmt` 格式化。
-- Lint/format：`bun run lint`（oxlint + eslint）与 `bun run format`（prettier）。
+- Lint/format：`pnpm run lint`（oxlint + eslint）与 `pnpm run format`（prettier）。
 
 ## 测试指南
 
 - 后端冒烟测试：`cd server && uv run python test_functionality.py`。
-- 前端检查：`bun run type-check` 与 `bun run lint`。
+- 前端检查：`pnpm run type-check` 与 `pnpm run lint`。
 - 当前没有完整单测体系；涉及解析或上传逻辑时建议补充有针对性的测试。
 
 ## 配置与数据

@@ -14,16 +14,6 @@ import type { DownloaderListItem, WorkingTorrent } from './types'
 
 export type PanelEmit = (event: 'complete' | 'cancel' | 'close-with-refresh') => void
 
-export type ParsedLogEntry = {
-  id: number
-  site: string
-  time: string
-  level: string
-  message: string
-  details: string
-  isError: boolean
-}
-
 export type SeedFlowDeps = {
   emit: PanelEmit
   sourceSite: ComputedRef<string>
@@ -48,9 +38,7 @@ export type SeedFlowDeps = {
   logProgressTaskId: Ref<string>
   showLogProgress: Ref<boolean>
 
-  parsedErrorLogs: Ref<ParsedLogEntry[]>
-  showErrorDialog: Ref<boolean>
-  parseLogText: (text: string) => ParsedLogEntry[]
+  fetchFlowErrorMessage: Ref<string>
 
   filterExtraEmptyLines: (text: string) => string
   normalizeIntroBodyAndMediainfo: (rawBody: string, rawMediainfo: string) => {
@@ -102,9 +90,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     reverseMappings,
     logProgressTaskId,
     showLogProgress,
-    parsedErrorLogs,
-    showErrorDialog,
-    parseLogText,
+    fetchFlowErrorMessage,
     filterExtraEmptyLines,
     normalizeIntroBodyAndMediainfo,
     checkAndStartBDInfoProgress,
@@ -148,6 +134,11 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     }
 
     screenshotValid.value = allValid
+  }
+
+  const setFetchFlowError = (message: string) => {
+    fetchFlowErrorMessage.value = message.trim() || '获取种子信息时发生错误，请查看后台日志。'
+    showLogProgress.value = true
   }
 
   const getEnglishSiteName = async (chineseSiteName: string): Promise<string> => {
@@ -220,6 +211,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
   const fetchTorrentInfo = async () => {
     if (!sourceSite.value || !torrent.value) return
+    fetchFlowErrorMessage.value = ''
 
     const siteDetails = torrent.value.sites[sourceSite.value]
     // 首先检查是否有存储的种子ID
@@ -289,11 +281,8 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
             // 1. 获取错误消息
             const errorMsg = storeResponse.data.message || '从源站点抓取失败'
 
-            // 2. 解析日志内容
-            parsedErrorLogs.value = parseLogText(errorMsg)
-
-            // 3. 打开美化后的错误弹窗
-            showErrorDialog.value = true
+            // 2. 在抓取流程里展示错误
+            setFetchFlowError(errorMsg)
 
             // 4. 停止加载，但不触发取消（修复问题：避免组件销毁导致弹窗无法显示）
             isLoading.value = false
@@ -315,11 +304,8 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
             // 1. 获取错误消息
             const errorMsg = '数据抓取成功但从数据库读取失败'
 
-            // 2. 解析日志内容
-            parsedErrorLogs.value = parseLogText(errorMsg)
-
-            // 3. 打开美化后的错误弹窗
-            showErrorDialog.value = true
+            // 2. 在抓取流程里展示错误
+            setFetchFlowError(errorMsg)
 
             // 4. 停止加载，但不触发取消（修复问题：避免组件销毁导致弹窗无法显示）
             isLoading.value = false
@@ -780,11 +766,8 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           // 1. 获取错误消息
           const errorMsg = `数据抓取成功但数据库读取失败，已重试${maxDbReadAttempts}次。请检查数据库连接或稍后重试。`
 
-          // 2. 解析日志内容
-          parsedErrorLogs.value = parseLogText(errorMsg)
-
-          // 3. 打开美化后的错误弹窗
-          showErrorDialog.value = true
+          // 2. 在抓取流程里展示错误
+          setFetchFlowError(errorMsg)
 
           // 4. 停止加载，但不触发取消（修复问题：避免组件销毁导致弹窗无法显示）
           isLoading.value = false
@@ -801,11 +784,8 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           errorMsg = `${errorMessage}。可能由于数据库连接问题导致，请检查数据库状态。`
         }
 
-        // 3. 解析日志内容
-        parsedErrorLogs.value = parseLogText(errorMsg)
-
-        // 4. 打开美化后的错误弹窗
-        showErrorDialog.value = true
+        // 3. 在抓取流程里展示错误
+        setFetchFlowError(errorMsg)
 
         // 5. 停止加载，但不触发取消（修复问题：避免组件销毁导致弹窗无法显示）
         isLoading.value = false
@@ -826,23 +806,19 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       if (code === 'ECONNABORTED' || message.includes('timeout')) {
         // 1. 获取错误消息
         const msg = '抓取种子信息超时，请检查网络连接或稍后重试。'
-        parsedErrorLogs.value = parseLogText(msg)
-        showErrorDialog.value = true
+        setFetchFlowError(msg)
       } else if (status === 404) {
         // 1. 获取错误消息
         const msg = '在源站点未找到指定的种子，请检查种子ID是否正确。'
-        parsedErrorLogs.value = parseLogText(msg)
-        showErrorDialog.value = true
+        setFetchFlowError(msg)
       } else if (typeof status === 'number' && status >= 500) {
         // 1. 获取错误消息
         const msg = '后端服务器发生错误，请稍后重试或联系管理员。'
-        parsedErrorLogs.value = parseLogText(msg)
-        showErrorDialog.value = true
+        setFetchFlowError(msg)
       } else {
         // 使用原有的错误处理
         const msg = message || '获取种子信息时发生错误，请查看后台日志。'
-        parsedErrorLogs.value = parseLogText(msg)
-        showErrorDialog.value = true
+        setFetchFlowError(msg)
       }
     } finally {
       isLoading.value = false

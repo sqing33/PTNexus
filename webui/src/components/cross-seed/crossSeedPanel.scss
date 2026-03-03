@@ -367,12 +367,6 @@
   }
 }
 
-.placeholder-item {
-  opacity: 0;
-  pointer-events: none;
-  height: 1px;
-}
-
 .screenshot-container {
   display: flex;
   gap: 24px;
@@ -1707,99 +1701,5 @@
     white-space: nowrap;
     overflow-x: auto;
   }
-}
-}
-
-.error-log-dialog {
-/* --- 错误日志弹窗样式 --- */
-.error-log-container {
-  padding: 5px;
-}
-
-.log-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.log-entry {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background-color: #f8f9fa;
-  border-left: 3px solid #dcdfe6;
-  transition: all 0.2s;
-}
-
-/* 错误行高亮 */
-.log-entry.is-error {
-  background-color: #fef0f0;
-  border-left-color: #f56c6c;
-}
-
-.log-entry-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  line-height: 24px;
-  flex-wrap: wrap;
-  /* 防止小屏幕换行问题 */
-}
-
-.log-time {
-  color: #909399;
-  font-family: 'Roboto Mono', monospace;
-  font-size: 12px;
-  min-width: 60px;
-}
-
-.log-level-tag {
-  font-weight: bold;
-  font-family: sans-serif;
-  min-width: 60px;
-  text-align: center;
-}
-
-.log-site {
-  color: #606266;
-  font-weight: 600;
-}
-
-.log-text {
-  color: #303133;
-  flex: 1;
-  word-break: break-all;
-}
-
-.log-entry.is-error .log-text {
-  color: #f56c6c;
-  font-weight: 500;
-}
-
-.log-entry-details {
-  margin-top: 8px;
-  padding-left: 10px;
-}
-
-.code-block {
-  background-color: rgba(0, 0, 0, 0.05);
-  border-radius: 4px;
-  padding: 10px;
-  margin: 0;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 12px;
-  color: #333;
-  white-space: pre-wrap;
-  word-break: break-all;
-  line-height: 1.4;
-}
-
-/* 错误堆栈的文字颜色更深一点 */
-.log-entry.is-error .code-block {
-  background-color: #fff;
-  border: 1px solid #fde2e2;
-  color: #c0392b;
 }
 }
