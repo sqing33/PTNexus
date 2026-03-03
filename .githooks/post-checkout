@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+LAYOUT_SCRIPT="$REPO_ROOT/scripts/ensure-skills-layout.sh"
+
+if [ ! -x "$LAYOUT_SCRIPT" ]; then
+  echo "[post-checkout] skip: missing executable $LAYOUT_SCRIPT" >&2
+  exit 0
+fi
+
+if ! "$LAYOUT_SCRIPT" --fix; then
+  echo "[post-checkout] warning: failed to auto-fix skills layout. Run: bash scripts/ensure-skills-layout.sh --fix" >&2
+fi
+
+exit 0

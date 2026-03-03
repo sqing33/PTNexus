@@ -70,6 +70,20 @@ Go 服务（版本见各自 `go.mod`）：
 - 本地配置使用 `server/.env` 与 `server/data/config.json`；将 `DB_TYPE` 设置为 `sqlite`、`mysql` 或 `postgresql`。
 - `server/data/` 视为运行时状态；除非明确要更新夹具/样例数据，否则避免提交本地 DB 或缓存变更。
 
+## Skills 同步约定
+
+- `.codex/skills/` 是唯一真实目录；仅在该路径下新增/修改 skills。
+- `.claude/skills` 必须是符号链接，目标固定为 `../.codex/skills`（Linux/WSL）。
+- 初始化或修复 hooks：`bash scripts/dev/setup-hooks.sh`（会设置 `core.hooksPath=.githooks`）。
+- 手动校验布局：`bash scripts/ensure-skills-layout.sh --strict`。
+- 自动修复安全场景：`bash scripts/ensure-skills-layout.sh --fix`。
+
+## 通知约定（强制）
+
+- 任何会话只要发生代码写入/修改，必须使用 `.codex/skills/wsl-win-notify/SKILL.md` 的通知能力。
+- 至少在以下节点触发 Windows 原生通知：需要人工选择前、遇到阻塞错误时、任务完成并可交付时。
+- 若用户明确要求“修改后提醒我 / 人工介入时通知 / 完成通知 / notify me when done”，必须全程按该 skill 执行通知。
+
 ## 提交与 PR 指南
 
 - ✅ 分支 / Worktree 策略（用于每次会话的代码修改，使用 `worktree-lite` skill）：

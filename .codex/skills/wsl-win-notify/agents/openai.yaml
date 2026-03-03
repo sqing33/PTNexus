@@ -1,0 +1,6 @@
+interface:
+  display_name: "WSL Win Notify"
+  short_description: "Windows alerts from WSL for human-action checkpoints"
+  default_prompt: "Use $wsl-win-notify by default in coding tasks to send Windows notifications for decision, permission, blocked, and done checkpoints, even when AGENTS.md is absent."
+policy:
+  allow_implicit_invocation: true
