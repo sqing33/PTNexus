@@ -19,17 +19,17 @@ jobs:
         with:
           go-version-file: desktop/go.mod
 
-      - name: 3. 设置 Node
+      - name: 3. 设置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 4. 设置 Node（启用 pnpm 缓存）
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "pnpm"
           cache-dependency-path: webui/pnpm-lock.yaml
-
-      - name: 4. 设置 pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: 5. 安装构建依赖
         run: |

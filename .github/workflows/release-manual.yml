@@ -85,17 +85,17 @@ jobs:
           # Avoid path mismatch issues across branches/repositories.
           go-version: "1.23.x"
 
-      - name: 4. 设置 Node 与 pnpm
+      - name: 4. 设置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 5. 设置 Node（启用 pnpm 缓存）
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "pnpm"
           cache-dependency-path: webui/pnpm-lock.yaml
-
-      - name: 5. 设置 pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: 6. 安装交叉编译依赖
         run: |
