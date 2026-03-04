@@ -772,7 +772,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     }
   }
 
-  // 滚动预览区域到底部（一次点击慢速滚动到底部，让用户可以肉眼浏览内容）
+  const previewAutoScrollSpeedPxPerSecond = 1200
+
+  // 滚动预览区域到底部（线性匀速滚动，便于连续浏览）
   const scrollPreviewToBottom = () => {
     const panelContent = document.querySelector('.panel-content')
     if (!panelContent) return
@@ -780,8 +782,8 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     const remaining = scrollHeight - scrollTop - clientHeight
     if (remaining <= 5) return
 
-    // 固定滚动速度：每秒滚动 500px，时长由剩余距离决定
-    const duration = remaining / 600 * 1000
+    // 固定滚动速度：当前速度提升为 2 倍（600 -> 1200 px/s）
+    const duration = remaining / previewAutoScrollSpeedPxPerSecond * 1000
     const startTime = performance.now()
     const startScroll = panelContent.scrollTop
     const target = scrollHeight - clientHeight
@@ -789,11 +791,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime
       const progress = Math.min(elapsed / duration, 1)
-      // easeInOutCubic 缓动函数
-      const ease = progress < 0.5
-        ? 4 * progress * progress * progress
-        : 1 - Math.pow(-2 * progress + 2, 3) / 2
-      panelContent.scrollTop = startScroll + (target - startScroll) * ease
+      panelContent.scrollTop = startScroll + (target - startScroll) * progress
       if (progress < 1) {
         requestAnimationFrame(animate)
       }

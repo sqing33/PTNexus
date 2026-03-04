@@ -324,6 +324,7 @@ const handleImageErrorWithProxy = (url: string, type: 'poster' | 'screenshot', i
 const activeStep = ref(0)
 const activeTab = ref('main')
 const isScrolledToBottom = ref(false)
+const previewBrowseThreshold = 0.7
 
 // Progress tracking variables
 const publishProgress = ref<ProgressCounter>({ current: 0, total: 0 })
@@ -349,12 +350,20 @@ const debounce = <T extends (...args: unknown[]) => void>(func: T, wait: number)
   }
 }
 
-// 检查是否滚动到底部
+// 检查是否达到可继续下一步的浏览阈值
 const checkIfScrolledToBottom = debounce(() => {
   const panelContent = document.querySelector('.panel-content')
   if (panelContent) {
     const { scrollTop, scrollHeight, clientHeight } = panelContent
-    isScrolledToBottom.value = scrollTop + clientHeight >= scrollHeight - 5 // 5px的容差
+    const scrollableDistance = Math.max(scrollHeight - clientHeight, 0)
+
+    if (scrollableDistance <= 5) {
+      isScrolledToBottom.value = true
+      return
+    }
+
+    const browseProgress = scrollTop / scrollableDistance
+    isScrolledToBottom.value = browseProgress >= previewBrowseThreshold
   }
 }, 100) // 100ms防抖
 
