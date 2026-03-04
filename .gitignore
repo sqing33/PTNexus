@@ -4,3 +4,26 @@
 .worktree-lite/
 /webui/dist/
 /dist/updates/
+
+# Local env
+/server/.env
+/server/.env.*
+/server-go/.env
+/server-go/.env.*
+
+# Runtime data (private)
+/server/data/
+/server/cmd/server/data/
+/server-go/data/
+/server-go/cmd/server/data/
+
+# Runtime logs / debug artifacts
+/server/migration.log
+/server/**/debug_*.log
+/server-go/**/debug_*.log
+/data/tmp/
+
+# Local IDE/agent private settings
+/.claude/settings.local.json
+/.vscode/*
+!/.vscode/extensions.json
