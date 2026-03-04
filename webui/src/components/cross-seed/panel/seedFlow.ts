@@ -1,6 +1,6 @@
 import { computed, nextTick, type ComputedRef, type Ref } from 'vue'
-import { ElNotification } from 'element-plus'
 import axios from 'axios'
+import { ElNotification } from '@/utils/uiNotify'
 
 import type {
   ReverseMappings,
@@ -60,7 +60,7 @@ export type SeedFlowApi = {
   fetchCrossSeedSettings: () => Promise<void>
   saveAutoAddExistingSetting: () => Promise<void>
   saveAutoUpdateExistingTorrentSetting: () => Promise<void>
-  fetchTorrentInfo: () => Promise<void>
+  fetchTorrentInfo: (prefetchedDbSeedInfo?: unknown) => Promise<void>
   handleTeamInput: (param: TitleComponent, value: string) => void
   goToPublishPreviewStep: () => Promise<void>
   goToSelectSiteStep: () => Promise<void>
@@ -142,6 +142,20 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
   }
 
   const getEnglishSiteName = async (chineseSiteName: string): Promise<string> => {
+    // 优先从当前种子携带的站点信息中读取，避免重复请求 /api/sites/status。
+    const currentTorrent = torrent.value
+    const currentSiteDetails = currentTorrent?.sites?.[chineseSiteName] as
+      | { site?: unknown; site_name?: unknown }
+      | undefined
+    const directSite =
+      (typeof currentSiteDetails?.site === 'string' ? currentSiteDetails.site.trim() : '') ||
+      (typeof currentSiteDetails?.site_name === 'string'
+        ? currentSiteDetails.site_name.trim()
+        : '')
+    if (directSite) {
+      return directSite
+    }
+
     // 首先尝试从已加载的 allSitesStatus 中获取
     const siteInfo = allSitesStatus.value.find((s) => s.name === chineseSiteName)
     if (siteInfo?.site) {
@@ -209,7 +223,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     }
   }
 
-  const fetchTorrentInfo = async () => {
+  const fetchTorrentInfo = async (prefetchedDbSeedInfo?: unknown) => {
     if (!sourceSite.value || !torrent.value) return
     fetchFlowErrorMessage.value = ''
 
@@ -232,28 +246,36 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
     // 生成任务ID并显示进度组件
     const tempTaskId = `fetch_${torrentId}_${Date.now()}`
-    logProgressTaskId.value = tempTaskId
-    showLogProgress.value = true
+    if (!prefetchedDbSeedInfo) {
+      logProgressTaskId.value = tempTaskId
+      showLogProgress.value = true
+    } else {
+      showLogProgress.value = false
+    }
 
     let dbReadErrorMessage: string | null = null
     const englishSiteName = await getEnglishSiteName(sourceSite.value)
 
     // 步骤1: 尝试从数据库读取种子信息
     try {
-      console.log(
-        `尝试从数据库读取种子信息: ${torrentId} from ${sourceSite.value} (${englishSiteName})`,
-      )
-      const dbResponse = await axios.get('/api/migrate/get_db_seed_info', {
-        params: {
-          torrent_id: torrentId,
-          site_name: englishSiteName,
-          task_id: tempTaskId, // 传递task_id给后端
-        },
-        timeout: 600000, // 10分钟超时
-      })
+      if (!prefetchedDbSeedInfo) {
+        console.log(
+          `尝试从数据库读取种子信息: ${torrentId} from ${sourceSite.value} (${englishSiteName})`,
+        )
+      }
+      const dbResponse = prefetchedDbSeedInfo
+        ? ({ status: 200, data: prefetchedDbSeedInfo } as { status: number; data: any })
+        : await axios.get('/api/migrate/get_db_seed_info', {
+            params: {
+              torrent_id: torrentId,
+              site_name: englishSiteName,
+              task_id: tempTaskId, // 传递task_id给后端
+            },
+            timeout: 600000, // 10分钟超时
+          })
 
       // 检查是否需要继续抓取（202状态码）
-      if (dbResponse.status === 202 && dbResponse.data.should_fetch) {
+      if (!prefetchedDbSeedInfo && dbResponse.status === 202 && dbResponse.data.should_fetch) {
         console.log('数据库中没有缓存，继续使用同一日志流从源站点抓取...')
         // 使用返回的task_id继续抓取（不关闭日志流）
         const continuedTaskId = dbResponse.data.task_id || tempTaskId

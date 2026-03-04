@@ -25,7 +25,7 @@
 import { ref, nextTick } from 'vue'
 import axios from 'axios'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/utils/uiNotify'
 
 const route = useRoute()
 const router = useRouter()

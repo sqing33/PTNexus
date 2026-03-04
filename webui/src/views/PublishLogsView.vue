@@ -195,11 +195,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import LogViewerCard from '@/components/LogViewerCard.vue'
 import type { Downloader } from '@/types'
+import { ElMessage } from '@/utils/uiNotify'
 
 const emits = defineEmits(['ready'])
 

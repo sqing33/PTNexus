@@ -142,9 +142,9 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
 import { SuccessFilled, WarningFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
+import { ElMessage } from '@/utils/uiNotify'
 
 // 更新状态
 const isUpdating = ref(false)

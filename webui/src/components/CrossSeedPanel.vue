@@ -37,9 +37,9 @@
 <script setup lang="ts">
 // ... 你的 <script setup> 部分完全保持不变 ...
 import { ref, onMounted, onUnmounted, computed, nextTick, watch, provide } from 'vue'
-import { ElNotification } from 'element-plus'
 import axios from 'axios'
 import { useCrossSeedStore } from '@/stores/crossSeed'
+import { ElNotification } from '@/utils/uiNotify'
 import LogProgress from './LogProgress.vue'
 import LogViewerCard from './LogViewerCard.vue'
 import CrossSeedStepsHeader from './cross-seed/CrossSeedStepsHeader.vue'
@@ -220,6 +220,10 @@ const props = defineProps({
   publishScene: {
     type: String,
     default: '',
+  },
+  prefetchedDbSeedInfo: {
+    type: Object,
+    default: null,
   },
 })
 
@@ -497,9 +501,12 @@ const rebindDetailsTabsDrag = debounce(() => {
 
 // 在组件挂载时添加监听器
 onMounted(() => {
-  fetchSitesStatus()
-  fetchCrossSeedSettings()
-  fetchTorrentInfo()
+  void fetchCrossSeedSettings()
+  void (async () => {
+    // 先获取站点状态，避免 fetchTorrentInfo 内部再次触发 /api/sites/status
+    await fetchSitesStatus()
+    await fetchTorrentInfo(props.prefetchedDbSeedInfo || undefined)
+  })()
 
   // 在下一个tick添加滚动监听器，确保DOM已经渲染
   nextTick(() => {

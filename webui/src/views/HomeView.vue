@@ -111,8 +111,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElNotification } from 'element-plus'
 import axios from 'axios'
+import { ElNotification } from '@/utils/uiNotify'
 
 interface DownloaderInfo {
   name: string

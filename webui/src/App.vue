@@ -172,10 +172,10 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { Download, Link, Menu } from '@element-plus/icons-vue'
 import axios from 'axios'
 import VersionUpdate from '@/components/VersionUpdate.vue'
+import { ElMessage } from '@/utils/uiNotify'
 
 const route = useRoute()
 

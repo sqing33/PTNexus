@@ -381,6 +381,7 @@
           <CrossSeedPanel
             :show-complete-button="true"
             publish-scene="multi_torrent"
+            :prefetched-db-seed-info="prefetchedDbSeedInfo"
             @complete="handleCrossSeedComplete"
             @cancel="closeCrossSeedDialog"
           />
@@ -441,7 +442,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
 import CrossSeedPanel from '../components/CrossSeedPanel.vue'
@@ -449,6 +450,7 @@ import BatchFetchPanel from '../components/BatchFetchPanel.vue'
 import BDInfoRecordsDialog from '../components/cross-seed-data/BDInfoRecordsDialog.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
 import '@/assets/styles/glass-morphism.scss'
+import { ElMessage } from '@/utils/uiNotify'
 
 /**
  * Interface for the source site information used during cross-seeding.
@@ -1079,9 +1081,12 @@ const applyFilters = () => {
 }
 
 const crossSeedStore = useCrossSeedStore()
+const prefetchedDbSeedInfo = ref<Record<string, unknown> | undefined>(undefined)
+const uiInitializing = ref(true)
 
 // 监听搜索查询的变化，自动触发搜索
 watch(searchQuery, () => {
+  if (uiInitializing.value) return
   currentPage.value = 1
   fetchData()
   saveUiSettings()
@@ -1099,6 +1104,7 @@ const handleEdit = async (row: SeedParameter) => {
   try {
     // 重置 store
     crossSeedStore.reset()
+    prefetchedDbSeedInfo.value = undefined
 
     // 从后端API获取详细的种子参数
     const response = await axios.get(
@@ -1107,6 +1113,7 @@ const handleEdit = async (row: SeedParameter) => {
     const result = response.data
 
     if (result.success) {
+      prefetchedDbSeedInfo.value = result
       // 将获取到的数据设置到 store 中
       // 构造一个基本的 Torrent 对象结构
       const torrentData = {
@@ -1203,12 +1210,14 @@ const handleDelete = async (row: SeedParameter) => {
 
 // 关闭转种弹窗
 const closeCrossSeedDialog = () => {
+  prefetchedDbSeedInfo.value = undefined
   crossSeedStore.reset()
 }
 
 // 处理转种完成
 const handleCrossSeedComplete = () => {
   ElMessage.success('转种操作已完成！')
+  prefetchedDbSeedInfo.value = undefined
   crossSeedStore.reset()
   // 可选：刷新数据以显示最新状态
   fetchData()
@@ -1224,6 +1233,7 @@ onMounted(async () => {
   await loadUiSettings()
   // 加载检查状态筛选配置
   await loadReviewStatusFilter()
+  uiInitializing.value = false
   // 获取数据
   fetchData()
   window.addEventListener('resize', handleResize)

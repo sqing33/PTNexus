@@ -367,8 +367,9 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import axios from 'axios'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Delete, Edit, Refresh, Search } from '@element-plus/icons-vue'
+import { ElMessage } from '@/utils/uiNotify'
 
 type SiteConfig = {
   id: number | string | null

@@ -19,6 +19,7 @@ import './assets/styles/typography.scss'
 
 // 引入移动端响应式覆盖
 import './assets/styles/mobile-responsive.scss'
+import './assets/styles/status-toast.scss'
 
 // 如果需要，可以引入 ECharts
 import * as echarts from 'echarts'

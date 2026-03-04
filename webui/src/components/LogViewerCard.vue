@@ -21,8 +21,8 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Close, CopyDocument, Download } from '@element-plus/icons-vue'
+import { ElMessage } from '@/utils/uiNotify'
 
 const props = defineProps<{
   modelValue: boolean

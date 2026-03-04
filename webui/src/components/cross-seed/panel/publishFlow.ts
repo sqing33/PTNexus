@@ -1,6 +1,6 @@
 import { computed, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
-import { ElNotification } from 'element-plus'
 import axios from 'axios'
+import { ElNotification } from '@/utils/uiNotify'
 
 import type {
   LimitAlert,

@@ -732,7 +732,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, reactive, watch, nextTick, computed } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import type { TableInstance, Sort } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
@@ -742,6 +742,7 @@ import { useCrossSeedStore } from '@/stores/crossSeed'
 import { useSiteDataStore } from '@/stores/siteData'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import type { ISourceInfo, Torrent, SiteData, Downloader } from '@/types'
+import { ElMessage } from '@/utils/uiNotify'
 
 const emits = defineEmits(['ready'])
 

@@ -407,10 +407,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Setting } from '@element-plus/icons-vue'
 import axios from 'axios'
 import type { ElTree } from 'element-plus'
+import { ElMessage } from '@/utils/uiNotify'
 
 const emit = defineEmits<{
   (e: 'cancel'): void

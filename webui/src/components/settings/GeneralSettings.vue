@@ -856,7 +856,6 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, nextTick, computed } from 'vue'
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
 import {
   User,
   Lock,
@@ -872,6 +871,7 @@ import {
   FolderOpened,
   Collection,
 } from '@element-plus/icons-vue'
+import { ElMessage } from '@/utils/uiNotify'
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
   if (axios.isAxiosError(error)) {

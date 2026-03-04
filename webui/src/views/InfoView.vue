@@ -159,7 +159,8 @@ import type {
   TooltipComponentPositionCallbackParams,
 } from 'echarts'
 import axios from 'axios'
-import { ElMessage, ElTooltip } from 'element-plus'
+import { ElTooltip } from 'element-plus'
+import { ElMessage } from '@/utils/uiNotify'
 
 const displayModeTextMap = {
   last_1_min: '近1分钟',

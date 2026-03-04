@@ -270,9 +270,9 @@
 
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import axios from 'axios'
+import { ElMessage } from '@/utils/uiNotify'
 
 const visible = defineModel<boolean>({ default: false })
 const emit = defineEmits<{
