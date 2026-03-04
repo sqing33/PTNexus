@@ -156,7 +156,7 @@ services:
 
 # 更新
 
-> 通过 Docker 部署的 PT Nexus 支持更新功能，您可以在不重新下载镜像的情况下，直接从 GitHub 与 Gitee 拉取最新代码并应用更新。
+> 通过 Docker 部署的 PT Nexus 支持在线更新：updater 会读取 `UPDATE_MANIFEST.json`，下载对应平台的构建产物（artifact），完成校验后原子切换并重启服务。整个流程不依赖 git 拉取源码。
 
 > **提示：** 若使用“在线更新”把新代码同步进旧镜像，可能会出现依赖缺失（例如 `supervisord`）导致无法启动。新版启动脚本会在启动时自动检测并尝试安装缺失的系统依赖与 Python 依赖（需要容器以 root 运行且可联网）。如需关闭：
 >
