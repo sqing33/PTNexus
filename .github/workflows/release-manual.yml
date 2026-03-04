@@ -1,0 +1,127 @@
+name: 手动发布 Runtime Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: 是否作为草稿 Release 发布
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: 是否标记为预发布
+        required: false
+        default: false
+        type: boolean
+      arches:
+        description: 构建架构（空格分隔）
+        required: false
+        default: "amd64 arm64"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 2. 解析版本信息（来自 CHANGELOG.json）
+        id: meta
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open("CHANGELOG.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          history = data.get("history") or []
+          if not history:
+              raise SystemExit("CHANGELOG.json 缺少 history 数据")
+
+          latest = history[0]
+          version = str(latest.get("version", "")).strip()
+          if not version:
+              raise SystemExit("CHANGELOG.json 缺少 history[0].version")
+
+          date = str(latest.get("date", "")).strip()
+          note = str(latest.get("note", "")).strip()
+          changes = latest.get("changes") or []
+
+          lines = []
+          if date:
+              lines.append(f"发布日期：{date}")
+          if note:
+              lines.append("")
+              lines.append("> " + note.replace("\n", "\n> "))
+          if changes:
+              lines.append("")
+              lines.append("### 变更")
+              for item in changes:
+                  lines.append(f"- {item}")
+
+          body = "\n".join(lines).strip() or "自动发布。"
+
+          output = os.environ["GITHUB_OUTPUT"]
+          with open(output, "a", encoding="utf-8") as f:
+              f.write(f"version={version}\n")
+              f.write("body<<EOF\n")
+              f.write(body + "\n")
+              f.write("EOF\n")
+
+          print(f"version={version}")
+          PY
+
+      - name: 3. 设置 Go
+        uses: actions/setup-go@v5
+        with:
+          # Avoid path mismatch issues across branches/repositories.
+          go-version: "1.23.x"
+
+      - name: 4. 设置 Node 与 pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: 5. 设置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 6. 安装交叉编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - name: 7. 构建更新产物与 UPDATE_MANIFEST.json
+        env:
+          ARCHES: ${{ inputs.arches }}
+        run: |
+          bash scripts/build-update-artifacts.sh
+          VERSION="${{ steps.meta.outputs.version }}"
+          test -f "dist/updates/${VERSION}/UPDATE_MANIFEST.json"
+          ls -lh "dist/updates/${VERSION}"
+
+      - name: 8. 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.version }}
+          name: ${{ steps.meta.outputs.version }}
+          body: ${{ steps.meta.outputs.body }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/updates/${{ steps.meta.outputs.version }}/ptnexus-runtime-*.tar.gz
+            dist/updates/${{ steps.meta.outputs.version }}/UPDATE_MANIFEST.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

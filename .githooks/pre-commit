@@ -153,6 +153,68 @@ else
     echo -e "${CYAN}⏭️  'CHANGELOG.json' 无变更，跳过文档更新。${NC}"
 fi
 
+# --- 6. 检测 CHANGELOG.json 变更并生成 UPDATE_MANIFEST.json ---
+if echo "$STAGED_FILES" | grep -q "^CHANGELOG.json"; then
+    BUILDS_TRIGGERED=true
+    UPDATE_BUILD_SCRIPT="$REPO_ROOT/scripts/build-update-artifacts.sh"
+    [ -x "$UPDATE_BUILD_SCRIPT" ] || chmod +x "$UPDATE_BUILD_SCRIPT"
+
+    VERSION="$(
+    cd "$REPO_ROOT" || exit 1
+    python3 - <<'PY'
+import json
+with open('CHANGELOG.json', 'r', encoding='utf-8') as f:
+    data = json.load(f)
+print((data.get('history') or [{}])[0].get('version', '').strip())
+PY
+)"
+
+    if [ -z "$VERSION" ]; then
+        handle_error "CHANGELOG.json 缺少 history[0].version，无法生成 UPDATE_MANIFEST.json"
+    fi
+
+    echo -e "${YELLOW}📦 检测到 'CHANGELOG.json' 有变更，开始生成更新产物与 UPDATE_MANIFEST.json...${NC}"
+    echo -e "${CYAN}   - 版本: ${VERSION}${NC}"
+    echo -e "${CYAN}   - 说明: pre-commit 使用 SKIP_WEBUI_BUILD=true，发布流程请使用完整构建${NC}"
+
+    (
+        cd "$REPO_ROOT" || exit 1
+        SKIP_WEBUI_BUILD=true bash "$UPDATE_BUILD_SCRIPT"
+    ) || handle_error "生成更新产物失败（scripts/build-update-artifacts.sh）"
+
+    GENERATED_MANIFEST="$REPO_ROOT/dist/updates/${VERSION}/UPDATE_MANIFEST.json"
+    if [ ! -f "$GENERATED_MANIFEST" ]; then
+        handle_error "未找到生成的 UPDATE_MANIFEST.json: $GENERATED_MANIFEST"
+    fi
+
+    cp "$GENERATED_MANIFEST" "$REPO_ROOT/UPDATE_MANIFEST.json" || handle_error "同步 UPDATE_MANIFEST.json 失败"
+
+    # 本地提交时不写入最终 SHA256，避免与 CI 发布产物不一致。
+    (
+        cd "$REPO_ROOT" || exit 1
+        python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("UPDATE_MANIFEST.json")
+data = json.loads(path.read_text(encoding="utf-8"))
+
+latest = data.get("latest") or {}
+artifacts = latest.get("artifacts") or []
+for artifact in artifacts:
+    if isinstance(artifact, dict):
+        artifact["sha256"] = ""
+
+path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+    ) || handle_error "清空 UPDATE_MANIFEST.json 的本地 sha256 失败"
+
+    git add UPDATE_MANIFEST.json
+    echo -e "${GREEN}✓ UPDATE_MANIFEST.json 已根据 CHANGELOG 自动生成并暂存（本地 sha256 已清空，最终值由 Release 工作流生成）。${NC}"
+else
+    echo -e "${CYAN}⏭️  'CHANGELOG.json' 无变更，跳过 UPDATE_MANIFEST 生成。${NC}"
+fi
+
 # --- 最终总结 ---
 if [ "$BUILDS_TRIGGERED" = true ]; then
     echo -e "${GREEN}✓ 所有必要的构建已完成并暂存。Git 将继续创建提交...${NC}"

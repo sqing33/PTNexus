@@ -132,9 +132,15 @@
 
 当前仓库对于 **Go 二进制发布**采用 `artifact` 主链路：
 
-- 通过 `UPDATE_MANIFEST.json` 提供更新产物（压缩包）URL + sha256
+- 通过 `UPDATE_MANIFEST.json` 提供更新产物（压缩包）URL + mirror_urls + sha256
 - updater 使用 `/update/pull` 下载并校验产物，解压到 staging
 - `/update/install` 执行版本目录切换（`releases/current`）+ 健康检查，失败自动回滚
 - 容器可执行在线产物更新，不再依赖 git 拉源码
+
+元数据发布约定：
+
+- `CHANGELOG.json` 是唯一人工维护源（版本说明 + `artifact_sources`）。
+- `scripts/build-update-artifacts.sh` 从 `CHANGELOG.json` 自动生成 `UPDATE_MANIFEST.json`。
+- updater 默认并行探测 GitHub/Gitee 的元数据地址，自动选择可用源。
 
 对应 manifest 与产物内容约定见：`server/docs/UPDATE_MANIFEST_SPEC.md`。

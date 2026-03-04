@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -30,24 +31,13 @@ type ManifestLatest struct {
 }
 
 type UpdateArtifact struct {
-	OS     string `json:"os"`
-	Arch   string `json:"arch"`
-	URL    string `json:"url"`
-	SHA256 string `json:"sha256"`
-	Size   int64  `json:"size,omitempty"`
-	Format string `json:"format,omitempty"` // "tar.gz" (default) | "zip"
-}
-
-func getManifestURL() string {
-	if explicit := strings.TrimSpace(getEnv("UPDATE_MANIFEST_URL", "")); explicit != "" {
-		return explicit
-	}
-	switch getUpdateSource() {
-	case "github":
-		return "https://raw.githubusercontent.com/sqing33/PTNexus/main/UPDATE_MANIFEST.json"
-	default:
-		return "https://gitee.com/sqing33/PTNexus/raw/main/UPDATE_MANIFEST.json"
-	}
+	OS         string   `json:"os"`
+	Arch       string   `json:"arch"`
+	URL        string   `json:"url"`
+	MirrorURLs []string `json:"mirror_urls,omitempty"`
+	SHA256     string   `json:"sha256"`
+	Size       int64    `json:"size,omitempty"`
+	Format     string   `json:"format,omitempty"` // "tar.gz" (default) | "zip"
 }
 
 func newUpdateHTTPClient(timeout time.Duration) *http.Client {
@@ -67,10 +57,9 @@ func newUpdateHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: tr}
 }
 
-func fetchJSON(urlStr string, dst any) error {
-	client := newUpdateHTTPClient(15 * time.Second)
-
-	req, err := http.NewRequest(http.MethodGet, urlStr, nil)
+func fetchJSONWithContext(ctx context.Context, urlStr string, dst any, timeout time.Duration) error {
+	client := newUpdateHTTPClient(timeout)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return err
 	}
@@ -96,17 +85,18 @@ func fetchJSON(urlStr string, dst any) error {
 	return nil
 }
 
-func getRemoteManifest() (*UpdateManifest, error) {
-	base := getManifestURL()
-	// Add timestamp to bypass caches.
-	requestURL := fmt.Sprintf("%s?t=%d", base, time.Now().UnixNano())
+func fetchJSON(urlStr string, dst any) error {
+	return fetchJSONWithContext(context.Background(), urlStr, dst, 15*time.Second)
+}
 
-	var manifest UpdateManifest
-	if err := fetchJSON(requestURL, &manifest); err != nil {
-		return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败 (%s): %w", filepath.Base(base), err)
+func getRemoteManifest() (*UpdateManifest, error) {
+	manifest, source, err := fetchJSONFromCandidates[UpdateManifest](context.Background(), manifestCandidates(), 15*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败: %w", err)
 	}
 	if strings.TrimSpace(manifest.Latest.Version) == "" {
 		return nil, fmt.Errorf("UPDATE_MANIFEST.json 缺少 latest.version")
 	}
-	return &manifest, nil
+	log.Printf("获取更新清单成功，使用源: %s", source)
+	return manifest, nil
 }

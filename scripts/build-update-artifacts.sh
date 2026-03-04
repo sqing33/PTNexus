@@ -24,6 +24,45 @@ print(data.get('history', [{}])[0].get('version', 'unknown'))
 PY
 }
 
+artifact_urls() {
+  local changelog_path="$1"
+  local version="$2"
+  local filename="$3"
+  local fallback_base_url="$4"
+  python3 - "$changelog_path" "$version" "$filename" "$fallback_base_url" <<'PY'
+import json
+import sys
+
+changelog_path, version, filename, fallback_base_url = sys.argv[1:]
+with open(changelog_path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+sources = data.get("artifact_sources") or []
+urls = []
+for source in sources:
+    template = ""
+    if isinstance(source, dict):
+        template = str(source.get("url", "")).strip()
+    elif isinstance(source, str):
+        template = source.strip()
+    if not template:
+        continue
+    expanded = template.replace("{version}", version).replace("{filename}", filename)
+    if expanded:
+        urls.append(expanded)
+
+if not urls and fallback_base_url:
+    urls.append(f"{fallback_base_url.rstrip('/')}/{filename}")
+
+seen = set()
+for item in urls:
+    if not item or item in seen:
+        continue
+    seen.add(item)
+    print(item)
+PY
+}
+
 VERSION="$(json_get "${REPO_ROOT}/CHANGELOG.json" | tr -d '\r\n')"
 if [ -z "$VERSION" ] || [ "$VERSION" = "unknown" ]; then
   echo "Failed to parse version from CHANGELOG.json" >&2
@@ -110,7 +149,8 @@ PY
 }
 
 # Build bundles.
-ARTIFACT_JSON_LINES=()
+ARTIFACTS_JSONL="$(mktemp)"
+trap 'rm -f "$ARTIFACTS_JSONL"' EXIT
 
 for arch in $ARCHES; do
   bin_src="${REPO_ROOT}/server/server-${arch}"
@@ -146,12 +186,43 @@ for arch in $ARCHES; do
 
   sha="$(sha256_of "$bundle_path")"
   size="$(file_size "$bundle_path")"
-  url="${BASE_URL}/${bundle_name}"
+  mapfile -t urls < <(artifact_urls "${REPO_ROOT}/CHANGELOG.json" "${VERSION}" "${bundle_name}" "${BASE_URL}")
+  if [ ${#urls[@]} -eq 0 ]; then
+    echo "[update/build] No artifact source available for ${bundle_name}" >&2
+    exit 1
+  fi
 
-  ARTIFACT_JSON_LINES+=("    {\n      \"os\": \"${OS_NAME}\",\n      \"arch\": \"${arch}\",\n      \"url\": \"${url}\",\n      \"sha256\": \"${sha}\",\n      \"size\": ${size},\n      \"format\": \"tar.gz\"\n    }")
+  primary_url="${urls[0]}"
+  mirror_urls=("${urls[@]:1}")
+
+  python3 - "${OS_NAME}" "${arch}" "${primary_url}" "${sha}" "${size}" "${bundle_name}" "${mirror_urls[@]}" >> "$ARTIFACTS_JSONL" <<'PY'
+import json
+import sys
+
+os_name = sys.argv[1]
+arch = sys.argv[2]
+primary_url = sys.argv[3]
+sha = sys.argv[4]
+size = int(sys.argv[5])
+filename = sys.argv[6]
+mirror_urls = [item for item in sys.argv[7:] if item.strip()]
+
+entry = {
+    "os": os_name,
+    "arch": arch,
+    "url": primary_url,
+    "sha256": sha,
+    "size": size,
+    "format": "tar.gz",
+}
+if mirror_urls:
+    entry["mirror_urls"] = mirror_urls
+
+print(json.dumps(entry, ensure_ascii=False))
+PY
 done
 
-if [ ${#ARTIFACT_JSON_LINES[@]} -eq 0 ]; then
+if [ ! -s "$ARTIFACTS_JSONL" ]; then
   echo "[update/build] No artifacts built." >&2
   exit 1
 fi
@@ -159,26 +230,47 @@ fi
 # Generate UPDATE_MANIFEST.json (for publishing).
 manifest_path="${OUT_DIR}/UPDATE_MANIFEST.json"
 
-{
-  echo '{'
-  echo '  "schema": 1,'
-  echo '  "latest": {'
-  echo "    \"version\": \"${VERSION}\","
-  echo '    "artifacts": ['
+python3 - "${REPO_ROOT}/CHANGELOG.json" "${VERSION}" "$ARTIFACTS_JSONL" "$manifest_path" <<'PY'
+import json
+import sys
 
-  for i in "${!ARTIFACT_JSON_LINES[@]}"; do
-    echo -e "${ARTIFACT_JSON_LINES[$i]}" | sed 's/^/      /'
-    if [ "$i" -lt $((${#ARTIFACT_JSON_LINES[@]} - 1)) ]; then
-      echo '      ,'
-    fi
-  done
+changelog_path, version, artifacts_jsonl, manifest_path = sys.argv[1:]
+with open(changelog_path, "r", encoding="utf-8") as f:
+    changelog = json.load(f)
 
-  echo '    ]'
-  echo '  }'
-  echo '}'
-} > "$manifest_path"
+history = changelog.get("history") or [{}]
+latest_log = history[0] if history else {}
+
+artifacts = []
+with open(artifacts_jsonl, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if line:
+            artifacts.append(json.loads(line))
+
+latest = {
+    "version": version,
+    "artifacts": artifacts,
+}
+if latest_log.get("date"):
+    latest["date"] = latest_log["date"]
+if "force_update" in latest_log:
+    latest["force_update"] = bool(latest_log.get("force_update"))
+if "disable_update" in latest_log:
+    latest["disable_update"] = bool(latest_log.get("disable_update"))
+if latest_log.get("note"):
+    latest["note"] = latest_log["note"]
+
+manifest = {
+    "schema": 1,
+    "latest": latest,
+}
+
+with open(manifest_path, "w", encoding="utf-8") as f:
+    json.dump(manifest, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
 
 echo "[update/build] Done"
 echo "[update/build] Artifacts: ${OUT_DIR}"
 echo "[update/build] Manifest:  ${manifest_path}"
-

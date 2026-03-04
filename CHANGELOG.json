@@ -1,5 +1,22 @@
 {
+  "artifact_sources": [
+    {
+      "name": "github",
+      "url": "https://github.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+    },
+    {
+      "name": "gitee",
+      "url": "https://gitee.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+    }
+  ],
   "history": [
+    {
+      "version": "v4.0.0",
+      "date": "2099.13.32",
+      "changes": [
+        "宇宙坍缩了，重启了一个新的宇宙，版本号从 v4.0.0 开始计数"
+      ]
+    },
     {
       "version": "v3.6.4",
       "date": "2026.02.21",

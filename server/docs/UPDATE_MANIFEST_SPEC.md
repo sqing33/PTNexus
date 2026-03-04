@@ -13,7 +13,7 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
 说明：
 
 - 在线更新链路不依赖 git clone/pull。
-- 更新源默认支持 gitee/github raw，可通过环境变量切换。
+- updater 会并行探测 GitHub/Gitee 的元数据地址，自动选择可用源。
 
 ## 2. UPDATE_MANIFEST.json 格式
 
@@ -33,6 +33,9 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
         "os": "linux",
         "arch": "amd64",
         "url": "https://example.com/releases/v3.6.4/ptnexus-runtime-linux-amd64.tar.gz",
+        "mirror_urls": [
+          "https://mirror.example.com/releases/v3.6.4/ptnexus-runtime-linux-amd64.tar.gz"
+        ],
         "sha256": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         "size": 12345678,
         "format": "tar.gz"
@@ -45,7 +48,8 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
 字段约束：
 
 - `schema`、`latest.version`、`latest.artifacts` 必填。
-- `artifacts[*].url`、`artifacts[*].sha256` 必填（除非显式开启跳过校验）。
+- `artifacts[*].url` 与 `artifacts[*].mirror_urls` 至少要有一个可用下载地址。
+- `artifacts[*].sha256` 必填（除非显式开启跳过校验）。
 - `format` 支持 `tar.gz` 与 `zip`（默认按文件名推断）。
 
 ## 3. 产物压缩包内容约定
@@ -81,7 +85,6 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
 
 ## 5. 常用环境变量
 
-- `UPDATE_MANIFEST_URL`：覆盖 manifest 地址。
 - `UPDATE_USE_PROXY`：是否使用系统代理访问更新源。
 - `UPDATE_SKIP_VERIFY`：是否允许跳过 SHA256 校验（默认 `false`）。
 - `UPDATE_DOWNLOAD_TIMEOUT`：下载超时，默认 `20m`。
@@ -92,8 +95,9 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
 
 ## 6. 发布流程建议
 
-1. 构建前端：`cd webui && pnpm run build`
-2. 构建 server 二进制（按目标架构）。
-3. 执行 `scripts/build-update-artifacts.sh` 组装产物并生成 manifest。
-4. 上传 `dist/updates/<version>/` 下产物到 Release/对象存储。
-5. 将最终 `UPDATE_MANIFEST.json` 发布到更新源路径。
+1. 只维护 `CHANGELOG.json`：更新 `history[0]` 与顶层 `artifact_sources`。
+2. 构建前端：`cd webui && pnpm run build`。
+3. 构建 server 二进制（按目标架构）。
+4. 执行 `scripts/build-update-artifacts.sh` 自动生成产物与 `UPDATE_MANIFEST.json`。
+5. 上传 `dist/updates/<version>/` 下产物到 Release/对象存储。
+6. 将最终 `UPDATE_MANIFEST.json` 发布到 GitHub/Gitee 对应路径。

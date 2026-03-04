@@ -23,6 +23,13 @@ jobs:
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
 
+      - name: 拉取 go/python 分支引用
+        run: |
+          set -euo pipefail
+          git fetch origin \
+            +refs/heads/go:refs/remotes/origin/go \
+            +refs/heads/python:refs/remotes/origin/python
+
       - name: 安装 BFG 仓库清理工具
         run: |
           echo "📦 正在安装 BFG 仓库清理工具..."
@@ -37,6 +44,20 @@ jobs:
           cd /tmp
           git clone --mirror "${GITHUB_WORKSPACE}/.git" repo-mirror.git
           cd repo-mirror.git
+          cd /tmp/repo-mirror.git
+
+          # 补齐镜像仓库的 refs/heads/go|python（checkout 可能只拉单分支，导致源 .git 缺少 heads ref）
+          for BRANCH in go python; do
+            if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+              continue
+            fi
+            if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH}"; then
+              git update-ref "refs/heads/${BRANCH}" "refs/remotes/origin/${BRANCH}"
+              continue
+            fi
+            echo "❌ 缺少分支引用：${BRANCH}（未找到 refs/heads/${BRANCH} 或 refs/remotes/origin/${BRANCH}）"
+            exit 1
+          done
 
       - name: 使用 BFG 清理仓库历史
         run: |
@@ -90,23 +111,60 @@ jobs:
           PUBLIC_REPO_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
           PUBLIC_REPO_URL: ${{ secrets.PUBLIC_REPO_URL }}
         run: |
+          set -euo pipefail
           cd /tmp/repo-mirror.git
 
           # 自动过滤 https:// 或 http:// 前缀
           CLEAN_URL="${PUBLIC_REPO_URL}"
           CLEAN_URL="${CLEAN_URL#https://}"
           CLEAN_URL="${CLEAN_URL#http://}"
+          REMOTE_URL="https://${PUBLIC_REPO_TOKEN}@${CLEAN_URL}"
 
-          echo "🚀 正在将过滤后的内容推送到 Github 仓库..."
+          echo "🚀 正在将 DEV 仓库分支覆盖推送到 Github 仓库..."
           echo "目标地址: ${CLEAN_URL}"
 
-          # 设置仓库的远程地址
-          git remote add github https://${PUBLIC_REPO_TOKEN}@${CLEAN_URL}
+          # 重置远程，避免重试时 remote 已存在
+          git remote remove github 2>/dev/null || true
+          git remote add github "${REMOTE_URL}"
 
-          # 强制推送镜像到 Github 仓库
-          git push --mirror --force github
+          # 计划保留的分支（目标仓库只保留这些分支）
+          RETAIN_BRANCHES=(go python)
+          for BRANCH in "${RETAIN_BRANCHES[@]}"; do
+            if ! git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+              echo "❌ 缺少必需分支 ${BRANCH}（refs/heads/${BRANCH}）"
+              exit 1
+            fi
+          done
 
-          echo "✅ 成功将过滤后的内容推送到 Github 仓库"
+          # 防呆：目标默认分支必须先切到 go，否则删除 main 会被拒绝
+          DEFAULT_BRANCH="$(git ls-remote --symref "${REMOTE_URL}" HEAD | awk '/^ref:/ {sub("refs/heads/","",$2); print $2; exit}')"
+          if [ "${DEFAULT_BRANCH}" != "go" ]; then
+            echo "❌ 目标仓库默认分支为 ${DEFAULT_BRANCH}，请先改为 go 后重试"
+            exit 1
+          fi
+
+          # 覆盖同步分支，不推送 tags
+          PUSH_ARGS=()
+          for BRANCH in "${RETAIN_BRANCHES[@]}"; do
+            PUSH_ARGS+=("+refs/heads/${BRANCH}:refs/heads/${BRANCH}")
+          done
+          git push github "${PUSH_ARGS[@]}"
+
+          # 清理目标仓库其余分支，仅保留 go 与 python
+          git ls-remote --heads "${REMOTE_URL}" | awk '{print $2}' | sed 's#refs/heads/##' | while read -r BRANCH; do
+            KEEP_BRANCH=0
+            for RETAIN in "${RETAIN_BRANCHES[@]}"; do
+              if [ "${BRANCH}" = "${RETAIN}" ]; then
+                KEEP_BRANCH=1
+                break
+              fi
+            done
+            if [ "${KEEP_BRANCH}" -eq 0 ]; then
+              git push github --delete "${BRANCH}"
+            fi
+          done
+
+          echo "✅ 已完成分支覆盖同步：目标仅保留 go / python，tags 不变"
 
       - name: 清理工作
         if: always()

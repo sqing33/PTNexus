@@ -208,8 +208,16 @@ const isForceUpdate = computed(() => {
 
 const compareVersions = (v1: string, v2: string): number => {
   if (!v1 || !v2) return 0
-  const v1parts = v1.split('.').map(Number)
-  const v2parts = v2.split('.').map(Number)
+  const normalize = (value: string): number[] =>
+    value
+      .trim()
+      .replace(/^[vV]/, '')
+      .split('.')
+      .map((part) => Number.parseInt(part, 10))
+      .map((part) => (Number.isFinite(part) ? part : 0))
+
+  const v1parts = normalize(v1)
+  const v2parts = normalize(v2)
   for (let i = 0; i < Math.max(v1parts.length, v2parts.length); i++) {
     const a = v1parts[i] || 0
     const b = v2parts[i] || 0
