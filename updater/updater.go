@@ -542,7 +542,7 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	var forceUpdateFromManifest bool
 	var disableUpdateFromManifest bool
 	manifestReady := false
-	if manifest, err := getRemoteManifest(); err != nil {
+	if manifest, err := getRemoteManifest(remoteVersionFromChangelog); err != nil {
 		log.Printf("检查更新时获取更新清单失败: %v", err)
 	} else if _, err := resolveManifestArtifactForCurrentPlatform(manifest); err != nil {
 		log.Printf("检查更新时更新清单不完整，跳过产物更新入口: %v", err)

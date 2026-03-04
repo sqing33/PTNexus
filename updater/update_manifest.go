@@ -89,8 +89,26 @@ func fetchJSON(urlStr string, dst any) error {
 	return fetchJSONWithContext(context.Background(), urlStr, dst, 15*time.Second)
 }
 
-func getRemoteManifest() (*UpdateManifest, error) {
-	manifest, source, err := fetchJSONFromCandidates[UpdateManifest](context.Background(), manifestCandidates(), 15*time.Second)
+func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {
+	cleanHints := make([]string, 0, len(versionHints))
+	for _, hint := range versionHints {
+		if v := strings.TrimSpace(hint); v != "" {
+			cleanHints = append(cleanHints, v)
+		}
+	}
+
+	// 未显式提供版本提示时，尝试先从 CHANGELOG 读取最新版本，拼出 release/tag 地址。
+	if len(cleanHints) == 0 {
+		if cfg, err := getRemoteConfig(); err == nil && len(cfg.History) > 0 {
+			if v := strings.TrimSpace(cfg.History[0].Version); v != "" {
+				cleanHints = append(cleanHints, v)
+			}
+		} else if err != nil {
+			log.Printf("获取更新清单前读取远程版本失败，继续尝试默认地址: %v", err)
+		}
+	}
+
+	manifest, source, err := fetchJSONFromCandidates[UpdateManifest](context.Background(), manifestCandidates(cleanHints...), 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败: %w", err)
 	}

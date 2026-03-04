@@ -12,11 +12,13 @@ const (
 	githubChangelogURL = "https://raw.githubusercontent.com/sqing33/PTNexus/main/CHANGELOG.json"
 	giteeChangelogURL  = "https://gitee.com/sqing33/PTNexus/raw/main/CHANGELOG.json"
 	// Manifest is expected to be published as a Release asset.
-	// Keep raw URLs as backward-compatible fallbacks.
-	githubManifestReleaseURL = "https://github.com/sqing33/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
-	giteeManifestReleaseURL  = "https://gitee.com/sqing33/PTNexus/releases/download/latest/UPDATE_MANIFEST.json"
-	githubManifestRawURL     = "https://raw.githubusercontent.com/sqing33/PTNexus/main/UPDATE_MANIFEST.json"
-	giteeManifestRawURL      = "https://gitee.com/sqing33/PTNexus/raw/main/UPDATE_MANIFEST.json"
+	// Keep latest/raw URLs as backward-compatible fallbacks.
+	githubManifestReleaseURLTemplate = "https://github.com/sqing33/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
+	giteeManifestReleaseURLTemplate  = "https://gitee.com/sqing33/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
+	githubManifestReleaseLatestURL   = "https://github.com/sqing33/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
+	giteeManifestReleaseLatestURL    = "https://gitee.com/sqing33/PTNexus/releases/download/latest/UPDATE_MANIFEST.json"
+	githubManifestRawURL             = "https://raw.githubusercontent.com/sqing33/PTNexus/main/UPDATE_MANIFEST.json"
+	giteeManifestRawURL              = "https://gitee.com/sqing33/PTNexus/raw/main/UPDATE_MANIFEST.json"
 )
 
 func normalizeURLCandidates(urls ...string) []string {
@@ -42,16 +44,34 @@ func changelogCandidates() []string {
 	return normalizeURLCandidates(override, githubChangelogURL, giteeChangelogURL)
 }
 
-func manifestCandidates() []string {
+func manifestReleaseCandidatesForVersion(version string) []string {
+	clean := strings.TrimSpace(version)
+	if clean == "" {
+		return nil
+	}
+
+	escaped := url.PathEscape(clean)
+	return []string{
+		fmt.Sprintf(githubManifestReleaseURLTemplate, escaped),
+		fmt.Sprintf(giteeManifestReleaseURLTemplate, escaped),
+	}
+}
+
+func manifestCandidates(versionHints ...string) []string {
 	// Backward compatibility for existing deployments that explicitly override manifest URL.
 	override := strings.TrimSpace(getEnv("UPDATE_MANIFEST_URL", ""))
-	return normalizeURLCandidates(
-		override,
-		githubManifestReleaseURL,
-		giteeManifestReleaseURL,
+	candidates := make([]string, 0, 1+len(versionHints)*2+4)
+	candidates = append(candidates, override)
+	for _, hint := range versionHints {
+		candidates = append(candidates, manifestReleaseCandidatesForVersion(hint)...)
+	}
+	candidates = append(candidates,
+		githubManifestReleaseLatestURL,
+		giteeManifestReleaseLatestURL,
 		githubManifestRawURL,
 		giteeManifestRawURL,
 	)
+	return normalizeURLCandidates(candidates...)
 }
 
 func withNoCacheQuery(base string) string {
