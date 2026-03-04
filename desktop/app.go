@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os/exec"
 	goruntime "runtime"
 	"strings"
@@ -81,18 +82,26 @@ func (a *App) OpenDatabaseConfigFile() error {
 	desktopapp.EnsureDesktopRuntimeEnv()
 	desktopapp.EnsureDatabaseConfigFile()
 	path := desktopapp.DatabaseConfigFilePath()
+	return openWithSystemDefault(path)
+}
 
-	var cmd *exec.Cmd
-	switch goruntime.GOOS {
-	case "windows":
-		cmd = exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", path)
-	case "darwin":
-		cmd = exec.Command("open", path)
-	default:
-		cmd = exec.Command("xdg-open", path)
+// OpenExternalURL 使用系统默认浏览器打开外部链接。
+func (a *App) OpenExternalURL(rawURL string) error {
+	target := strings.TrimSpace(rawURL)
+	if target == "" {
+		return fmt.Errorf("missing url")
 	}
-	configureCommandForPlatform(cmd)
-	return cmd.Start()
+
+	parsed, err := url.ParseRequestURI(target)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("unsupported url scheme: %s", parsed.Scheme)
+	}
+
+	return openWithSystemDefault(target)
 }
 
 // DesktopRequest 通过 Wails 原生绑定代理 /api 与 /update 请求到本地 sidecar。
@@ -335,4 +344,18 @@ func (a *App) runSSE(ctx context.Context, eventName string, targetURL string) {
 			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 		}
 	}
+}
+
+func openWithSystemDefault(target string) error {
+	var cmd *exec.Cmd
+	switch goruntime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", target)
+	case "darwin":
+		cmd = exec.Command("open", target)
+	default:
+		cmd = exec.Command("xdg-open", target)
+	}
+	configureCommandForPlatform(cmd)
+	return cmd.Start()
 }

@@ -49,6 +49,64 @@ const isArrayBufferView = (value: unknown): value is ArrayBufferView => ArrayBuf
 const shouldProxyDesktopURL = (url: string): boolean =>
   url === '/health' || url.startsWith('/api') || url.startsWith('/update')
 
+const normalizeDesktopExternalURL = (rawURL: string): string | null => {
+  const target = rawURL.trim()
+  if (!target) return null
+
+  let parsedURL: URL
+  try {
+    parsedURL = new URL(target, window.location.href)
+  } catch {
+    return null
+  }
+
+  const protocol = parsedURL.protocol.toLowerCase()
+  if (protocol !== 'http:' && protocol !== 'https:') return null
+  if (parsedURL.origin === window.location.origin) return null
+  return parsedURL.toString()
+}
+
+const setupDesktopExternalNavigation = (): void => {
+  const desktopBridge = getDesktopBridge()
+  if (!desktopBridge || typeof desktopBridge.OpenExternalURL !== 'function') {
+    return
+  }
+
+  const openExternal = (rawURL: string | URL): boolean => {
+    const externalURL = normalizeDesktopExternalURL(String(rawURL))
+    if (!externalURL) return false
+
+    void desktopBridge.OpenExternalURL!(externalURL).catch((error: unknown) => {
+      console.error('[desktop] open external url failed:', error)
+    })
+    return true
+  }
+
+  const originalWindowOpen = window.open.bind(window)
+  window.open = ((url?: string | URL, target?: string, features?: string): Window | null => {
+    if (url !== undefined && url !== null && openExternal(url)) {
+      return null
+    }
+    return originalWindowOpen(url, target, features)
+  }) as typeof window.open
+
+  document.addEventListener(
+    'click',
+    (event) => {
+      const clickTarget = event.target
+      if (!(clickTarget instanceof Element)) return
+
+      const anchor = clickTarget.closest('a[href]')
+      if (!(anchor instanceof HTMLAnchorElement)) return
+      if (!openExternal(anchor.href)) return
+
+      event.preventDefault()
+      event.stopPropagation()
+    },
+    true,
+  )
+}
+
 // fetch 全局包装：为所有 /api 请求自动附加 Bearer Token，并在 401 时跳转登录
 const originalFetch = window.fetch.bind(window)
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -297,6 +355,8 @@ axios.defaults.adapter = async (config) => {
     request: null,
   }
 }
+
+setupDesktopExternalNavigation()
 
 const app = createApp(App)
 

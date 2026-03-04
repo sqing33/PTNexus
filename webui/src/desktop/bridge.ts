@@ -23,6 +23,7 @@ export interface DesktopBridge {
   DesktopRequest: (req: DesktopRequest) => Promise<DesktopResponse>
   DesktopSSESubscribe: (url: string) => Promise<DesktopSSESubscription>
   DesktopSSEUnsubscribe: (id: string) => Promise<void>
+  OpenExternalURL?: (url: string) => Promise<void>
 }
 
 export interface WailsRuntime {
