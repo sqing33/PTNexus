@@ -290,10 +290,10 @@ resolve_air_cmd() {
 }
 
 build_binaries() {
-  ensure_backend_deps
-  echo "build: server managed by air (skip prebuild)"
-  echo "build: updater -> $UPDATER_BIN"
-  (cd "$REPO_ROOT/updater" && go build -o "$UPDATER_BIN" ./updater.go)
+ ensure_backend_deps
+ echo "build: server managed by air (skip prebuild)"
+ echo "build: updater -> $UPDATER_BIN"
+ (cd "$REPO_ROOT/updater" && go build -o "$UPDATER_BIN" .)
 }
 
 start_server_go() {

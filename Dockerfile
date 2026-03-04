@@ -20,8 +20,8 @@ WORKDIR /src/updater
 COPY ./updater/go.mod ./
 RUN go mod download
 
-COPY ./updater/updater.go ./
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/updater updater.go
+COPY ./updater/*.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/updater .
 
 
 # 阶段 3: 构建 Go 后端（server）

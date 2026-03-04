@@ -33,15 +33,15 @@ else
   echo "[desktop] warning: icon not found at $SOURCE_ICON" >&2
 fi
 
-if [[ -f "$UPDATER_ROOT/updater.go" ]]; then
+if [[ -f "$UPDATER_ROOT/go.mod" ]]; then
   echo "[desktop] building updater sidecar: $UPDATER_EXE"
   mkdir -p "$UPDATER_OUT_DIR"
   (
     cd "$UPDATER_ROOT"
-    GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o "$UPDATER_EXE" updater.go
+    GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o "$UPDATER_EXE" .
   )
 else
-  echo "[desktop] warning: updater.go not found at $UPDATER_ROOT/updater.go" >&2
+  echo "[desktop] warning: updater module not found at $UPDATER_ROOT/go.mod" >&2
 fi
 
 echo "[desktop] frontend sync completed"

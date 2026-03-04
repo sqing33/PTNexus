@@ -3,3 +3,4 @@
 .parafork/
 .worktree-lite/
 /webui/dist/
+/dist/updates/

@@ -40,7 +40,7 @@ ensure_system_deps() {
 
   local missing=()
   local cmd
-  for cmd in supervisord ffmpeg mpv mediainfo git; do
+  for cmd in supervisord ffmpeg mpv mediainfo; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
 

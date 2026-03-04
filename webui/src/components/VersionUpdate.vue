@@ -418,20 +418,20 @@ const performUpdate = async () => {
     updateStatus.value = '准备更新'
 
     // 阶段1: 拉取
-    updateStatus.value = '正在连接远程仓库'
+    updateStatus.value = '正在连接更新源'
     updateProgress.value = -1
 
     // 调用后端接口执行真正的更新
     const pullResponse = await axios.post('/update/pull')
     if (!pullResponse.data.success) {
-      ElMessage.error('拉取更新失败: ' + pullResponse.data.error)
+      ElMessage.error('下载更新失败: ' + pullResponse.data.error)
       isUpdating.value = false
       updateProgress.value = 0
       return
     }
 
     updateProgress.value = 50
-    updateStatus.value = '代码拉取成功'
+    updateStatus.value = '更新包下载成功'
     await new Promise((resolve) => setTimeout(resolve, 500))
 
     // 阶段2: 安装

@@ -98,7 +98,7 @@ fi
 if echo "$STAGED_FILES" | grep -q "^updater/"; then
     BUILDS_TRIGGERED=true
     echo -e "${YELLOW}📦 检测到 'updater' 目录有变更，开始构建...${NC}"
-    (cd updater && go build -o updater updater.go) || handle_error "Go updater 构建失败"
+    (cd updater && go build -o updater .) || handle_error "Go updater 构建失败"
     echo -e "${GREEN}✓ Go updater 构建成功。正在暂存产物...${NC}"
     git add updater/updater
 else
