@@ -882,15 +882,16 @@
 }
 
 .mediainfo-pre {
-  white-space: pre;
-  word-break: normal;
-  overflow-wrap: normal;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   font-family: 'Courier New', Courier, monospace;
   font-size: 13px;
   line-height: 1.5;
   margin: 0;
   max-height: 300px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .section-content {
@@ -900,18 +901,42 @@
 }
 
 .no-wrap-textarea .el-textarea__inner {
-  white-space: pre;
-  word-break: normal;
-  overflow-wrap: normal;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
 }
 
 .no-wrap-preview-content {
-  white-space: nowrap;
-  word-break: normal;
-  overflow-wrap: normal;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
   overflow-y: hidden;
+}
+
+@media (max-width: 768px) {
+  .mediainfo-pre {
+    white-space: pre;
+    word-break: normal;
+    overflow-wrap: normal;
+    overflow: auto;
+  }
+
+  .no-wrap-textarea .el-textarea__inner {
+    white-space: pre;
+    word-break: normal;
+    overflow-wrap: normal;
+    overflow-x: auto;
+  }
+
+  .no-wrap-preview-content {
+    white-space: nowrap;
+    word-break: normal;
+    overflow-wrap: normal;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
 }
 
 /* BBCode 渲染样式 */
