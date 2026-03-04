@@ -1,4 +1,14 @@
 {
+  "artifact_sources": [
+    {
+      "name": "github",
+      "url": "https://github.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+    },
+    {
+      "name": "gitee",
+      "url": "https://gitee.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+    }
+  ],
   "history": [
     {
       "version": "v3.6.4",

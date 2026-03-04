@@ -20,8 +20,10 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,6 +32,18 @@ type PreparedUpdate struct {
 	Artifact   UpdateArtifact `json:"artifact"`
 	StagingDir string         `json:"staging_dir"`
 	PreparedAt time.Time      `json:"prepared_at"`
+}
+
+const (
+	defaultDownloadIdleTimeout = 30 * time.Second
+	maxDownloadTimeout         = 2 * time.Hour
+	minDownloadSpeedBytes      = int64(512 * 1024) // 512KiB/s
+)
+
+type artifactProbeResult struct {
+	URL     string
+	Latency time.Duration
+	Err     error
 }
 
 func sanitizePathToken(v string) string {
@@ -95,13 +109,157 @@ func resolveManifestArtifactForCurrentPlatform(manifest *UpdateManifest) (Update
 	if err != nil {
 		return UpdateArtifact{}, err
 	}
-	if strings.TrimSpace(artifact.URL) == "" {
-		return UpdateArtifact{}, errors.New("artifact.url 为空")
+	candidates := artifactDownloadCandidates(artifact)
+	if len(candidates) == 0 {
+		return UpdateArtifact{}, errors.New("artifact.url 与 mirror_urls 均为空")
 	}
 	if strings.TrimSpace(artifact.SHA256) == "" && !isTruthy(getEnv("UPDATE_SKIP_VERIFY", "false")) {
 		return UpdateArtifact{}, errors.New("artifact.sha256 为空")
 	}
+	for _, raw := range candidates {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || strings.TrimSpace(raw) == "" {
+			return UpdateArtifact{}, fmt.Errorf("artifact 下载地址无效: %q", raw)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return UpdateArtifact{}, fmt.Errorf("artifact.url scheme 不支持: %q", raw)
+		}
+	}
 	return artifact, nil
+}
+
+func artifactDownloadCandidates(artifact UpdateArtifact) []string {
+	items := make([]string, 0, 1+len(artifact.MirrorURLs))
+	items = append(items, artifact.URL)
+	items = append(items, artifact.MirrorURLs...)
+	return normalizeURLCandidates(items...)
+}
+
+func probeArtifactURL(ctx context.Context, rawURL string, timeout time.Duration) (time.Duration, error) {
+	client := newUpdateHTTPClient(timeout)
+	start := time.Now()
+
+	headCtx, headCancel := context.WithTimeout(ctx, timeout)
+	defer headCancel()
+
+	headReq, err := http.NewRequestWithContext(headCtx, http.MethodHead, rawURL, nil)
+	if err == nil {
+		resp, doErr := client.Do(headReq)
+		if doErr == nil {
+			resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				return time.Since(start), nil
+			}
+			if resp.StatusCode != http.StatusMethodNotAllowed {
+				return 0, fmt.Errorf("HEAD HTTP %d", resp.StatusCode)
+			}
+		}
+	}
+
+	getCtx, getCancel := context.WithTimeout(ctx, timeout)
+	defer getCancel()
+
+	getReq, err := http.NewRequestWithContext(getCtx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	getReq.Header.Set("Range", "bytes=0-0")
+
+	resp, err := client.Do(getReq)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusPartialContent || (resp.StatusCode >= 200 && resp.StatusCode < 400) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1))
+		return time.Since(start), nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+	return 0, fmt.Errorf("GET 探测 HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+}
+
+func rankProbeCandidates(ctx context.Context, urls []string, timeout time.Duration) ([]artifactProbeResult, error) {
+	candidates := normalizeURLCandidates(urls...)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("没有可用的产物下载地址")
+	}
+	if timeout <= 0 {
+		timeout = 6 * time.Second
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, timeout+2*time.Second)
+	defer cancel()
+
+	results := make(chan artifactProbeResult, len(candidates))
+	for _, raw := range candidates {
+		raw := raw
+		go func() {
+			latency, err := probeArtifactURL(probeCtx, raw, timeout)
+			results <- artifactProbeResult{
+				URL:     raw,
+				Latency: latency,
+				Err:     err,
+			}
+		}()
+	}
+
+	successes := make([]artifactProbeResult, 0, len(candidates))
+	failures := make([]artifactProbeResult, 0, len(candidates))
+	for i := 0; i < len(candidates); i++ {
+		result := <-results
+		if result.Err == nil {
+			successes = append(successes, result)
+		} else {
+			failures = append(failures, result)
+		}
+	}
+
+	sort.Slice(successes, func(i, j int) bool {
+		return successes[i].Latency < successes[j].Latency
+	})
+
+	for _, failed := range failures {
+		log.Printf("产物源探测失败: %s err=%v", failed.URL, failed.Err)
+	}
+
+	if len(successes) == 0 {
+		errs := make([]string, 0, len(failures))
+		for _, failed := range failures {
+			errs = append(errs, fmt.Sprintf("%s -> %v", failed.URL, failed.Err))
+		}
+		return nil, fmt.Errorf("所有产物源探测失败: %s", strings.Join(errs, "; "))
+	}
+	return successes, nil
+}
+
+func computeDownloadTimeout(base time.Duration, size int64) time.Duration {
+	if base <= 0 {
+		base = 20 * time.Minute
+	}
+	timeout := base
+	if size > 0 {
+		autoBySize := time.Duration(size/minDownloadSpeedBytes)*time.Second + 2*time.Minute
+		if autoBySize > timeout {
+			timeout = autoBySize
+		}
+	}
+	if timeout > maxDownloadTimeout {
+		timeout = maxDownloadTimeout
+	}
+	return timeout
+}
+
+func bundleFileNameFromURL(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || strings.TrimSpace(rawURL) == "" {
+		return "pt-nexus-update.bundle"
+	}
+	fileName := path.Base(u.Path)
+	if strings.TrimSpace(fileName) == "" || fileName == "/" || fileName == "." {
+		return "pt-nexus-update.bundle"
+	}
+	return fileName
 }
 
 func sha256File(path string) (string, error) {
@@ -118,7 +276,7 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func downloadWithSHA256(ctx context.Context, urlStr, dstPath, expectedSHA256 string, timeout time.Duration) (string, error) {
+func downloadWithSHA256(ctx context.Context, urlStr, dstPath, expectedSHA256 string, timeout, idleTimeout time.Duration) (string, error) {
 	expected := strings.ToLower(strings.TrimSpace(expectedSHA256))
 	if expected != "" {
 		if _, err := os.Stat(dstPath); err == nil {
@@ -134,8 +292,19 @@ func downloadWithSHA256(ctx context.Context, urlStr, dstPath, expectedSHA256 str
 	tmpPath := dstPath + ".tmp"
 	_ = os.Remove(tmpPath)
 
+	if idleTimeout <= 0 {
+		idleTimeout = defaultDownloadIdleTimeout
+	}
+
+	reqCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		reqCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
 	client := newUpdateHTTPClient(timeout)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return "", err
 	}
@@ -157,12 +326,48 @@ func downloadWithSHA256(ctx context.Context, urlStr, dstPath, expectedSHA256 str
 	defer f.Close()
 
 	var h hash.Hash = sha256.New()
-	w := io.MultiWriter(f, h)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", err
+	var lastProgress atomic.Int64
+	lastProgress.Store(time.Now().UnixNano())
+
+	progressWriter := io.MultiWriter(
+		f,
+		h,
+		progressTracker(func() {
+			lastProgress.Store(time.Now().UnixNano())
+		}),
+	)
+
+	copyDone := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(progressWriter, resp.Body)
+		copyDone <- copyErr
+	}()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case copyErr := <-copyDone:
+			if copyErr != nil {
+				_ = os.Remove(tmpPath)
+				return "", copyErr
+			}
+			goto verify
+		case <-ticker.C:
+			last := time.Unix(0, lastProgress.Load())
+			if time.Since(last) > idleTimeout {
+				cancel()
+				_ = os.Remove(tmpPath)
+				return "", fmt.Errorf("下载进度停滞超过 %s", idleTimeout)
+			}
+		case <-reqCtx.Done():
+			_ = os.Remove(tmpPath)
+			return "", fmt.Errorf("下载失败: %w", reqCtx.Err())
+		}
 	}
 
+verify:
 	got := hex.EncodeToString(h.Sum(nil))
 	if expected != "" && !strings.EqualFold(got, expected) {
 		_ = os.Remove(tmpPath)
@@ -175,6 +380,15 @@ func downloadWithSHA256(ctx context.Context, urlStr, dstPath, expectedSHA256 str
 	}
 
 	return got, nil
+}
+
+type progressTracker func()
+
+func (t progressTracker) Write(p []byte) (int, error) {
+	if len(p) > 0 {
+		t()
+	}
+	return len(p), nil
 }
 
 func safeJoin(destDir, name string) (string, error) {
@@ -337,33 +551,63 @@ func prepareUpdateBundleFromManifest(ctx context.Context, manifest *UpdateManife
 		return nil, fmt.Errorf("artifact.sha256 为空，拒绝下载（可设置 UPDATE_SKIP_VERIFY=true 跳过）")
 	}
 
-	u, err := url.Parse(strings.TrimSpace(artifact.URL))
-	if err != nil || strings.TrimSpace(artifact.URL) == "" {
-		return nil, fmt.Errorf("artifact.url 无效: %q", artifact.URL)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("artifact.url scheme 不支持: %q", artifact.URL)
+	candidates := artifactDownloadCandidates(artifact)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("未配置可用的 artifact 下载地址")
 	}
 
-	fileName := path.Base(u.Path)
-	if strings.TrimSpace(fileName) == "" || fileName == "/" || fileName == "." {
-		fileName = "pt-nexus-update.bundle"
+	for _, raw := range candidates {
+		u, parseErr := url.Parse(strings.TrimSpace(raw))
+		if parseErr != nil || strings.TrimSpace(raw) == "" {
+			return nil, fmt.Errorf("artifact.url 无效: %q", raw)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("artifact.url scheme 不支持: %q", raw)
+		}
 	}
 
 	versionToken := sanitizePathToken(remoteVersion)
-	downloadPath := filepath.Join(updateDir, "downloads", versionToken, fileName)
 	stagingDir := filepath.Join(updateDir, "staging", versionToken)
+	downloadRoot := filepath.Join(updateDir, "downloads", versionToken)
 
 	timeoutStr := getEnv("UPDATE_DOWNLOAD_TIMEOUT", "20m")
 	timeout, err := time.ParseDuration(timeoutStr)
 	if err != nil || timeout <= 0 {
 		timeout = 20 * time.Minute
 	}
+	timeout = computeDownloadTimeout(timeout, artifact.Size)
 
-	log.Printf("开始下载更新包: version=%s os=%s arch=%s url=%s", remoteVersion, artifact.OS, artifact.Arch, artifact.URL)
-	gotSHA, err := downloadWithSHA256(ctx, artifact.URL, downloadPath, artifact.SHA256, timeout)
+	probeResults, err := rankProbeCandidates(ctx, candidates, 6*time.Second)
 	if err != nil {
 		return nil, err
+	}
+	probeURLs := make([]string, 0, len(probeResults))
+	for _, probe := range probeResults {
+		probeURLs = append(probeURLs, probe.URL)
+	}
+
+	var (
+		downloadPath string
+		fileName     string
+		gotSHA       string
+		downloadErrs []string
+		chosenURL    string
+	)
+
+	for _, candidateURL := range probeURLs {
+		fileName = bundleFileNameFromURL(candidateURL)
+		downloadPath = filepath.Join(downloadRoot, fileName)
+		log.Printf("开始下载更新包: version=%s os=%s arch=%s url=%s", remoteVersion, artifact.OS, artifact.Arch, candidateURL)
+		gotSHA, err = downloadWithSHA256(ctx, candidateURL, downloadPath, artifact.SHA256, timeout, defaultDownloadIdleTimeout)
+		if err == nil {
+			chosenURL = candidateURL
+			break
+		}
+		downloadErrs = append(downloadErrs, fmt.Sprintf("%s -> %v", candidateURL, err))
+		log.Printf("更新包下载失败，准备切换下一个源: url=%s err=%v", candidateURL, err)
+	}
+	if chosenURL == "" {
+		return nil, fmt.Errorf("所有可用产物源下载失败: %s", strings.Join(downloadErrs, "; "))
 	}
 
 	// Clean and extract.
@@ -399,6 +643,7 @@ func prepareUpdateBundleFromManifest(ctx context.Context, manifest *UpdateManife
 		StagingDir: stagingDir,
 		PreparedAt: time.Now(),
 	}
+	prepared.Artifact.URL = chosenURL
 	prepared.Artifact.SHA256 = gotSHA
 
 	markerPath := filepath.Join(stagingDir, "prepared.json")

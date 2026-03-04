@@ -48,7 +48,6 @@
 | **通用**   | TZ                | 设置容器时区，确保时间与日志准确。              | Asia/Shanghai             |
 |            | http_proxy        | 设置容器代理，确保能正常访问站点与各种服务。    | http://192.168.1.100:7890 |
 |            | https_proxy       | 设置容器代理，确保能正常访问站点与各种服务。    | http://192.168.1.100:7890 |
-|            | UPDATE_SOURCE     | 选择更新源，github 或 gitee，不设置默认 gitee。 | gitee                     |
 | **数据库** | DB_TYPE           | 选择数据库类型。sqlite、mysql 或 postgres。     | sqlite                    |
 |            | MYSQL_HOST        | **(MySQL 专用)** 数据库主机地址。               | 192.168.1.100             |
 |            | MYSQL_PORT        | **(MySQL 专用)** 数据库端口。                   | 3306                      |
@@ -87,7 +86,6 @@ services:
       - TZ=Asia/Shanghai
       # - http_proxy=http://192.168.1.100:7890 # 代理服务器
       # - https_proxy=http://192.168.1.100:7890 # 代理服务器
-      - UPDATE_SOURCE=gitee # 更新源，可选: gitee 或 github，不设置默认gitee
       - DB_TYPE=sqlite
 ```
 
@@ -111,7 +109,6 @@ services:
       - TZ=Asia/Shanghai
       # - http_proxy=http://192.168.1.100:7890 # 代理服务器
       # - https_proxy=http://192.168.1.100:7890 # 代理服务器
-      - UPDATE_SOURCE=gitee # 更新源，可选: gitee 或 github，不设置默认gitee
       - DB_TYPE=mysql
       - MYSQL_HOST=192.168.1.100
       - MYSQL_PORT=3306
@@ -140,7 +137,6 @@ services:
       - TZ=Asia/Shanghai
       # - http_proxy=http://192.168.1.100:7890 # 代理服务器
       # - https_proxy=http://192.168.1.100:7890 # 代理服务器
-      - UPDATE_SOURCE=gitee # 更新源，可选: gitee 或 github，不设置默认gitee
       - DB_TYPE=postgresql
       - POSTGRES_HOST=192.168.1.100
       - POSTGRES_PORT=5433

@@ -3,20 +3,26 @@
   "latest": {
     "version": "v3.6.4",
     "date": "2026.02.21",
-    "note": "该文件用于在线更新（产物更新）清单。请在发布时填充 artifacts 的 url 与 sha256。",
+    "note": "该文件由 scripts/build-update-artifacts.sh 自动生成，请勿手动维护。",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "",
-        "sha256": "",
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v3.6.4/ptnexus-runtime-linux-amd64.tar.gz",
+        "mirror_urls": [
+          "https://gitee.com/sqing33/PTNexus/releases/download/v3.6.4/ptnexus-runtime-linux-amd64.tar.gz"
+        ],
+        "sha256": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         "format": "tar.gz"
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "",
-        "sha256": "",
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v3.6.4/ptnexus-runtime-linux-arm64.tar.gz",
+        "mirror_urls": [
+          "https://gitee.com/sqing33/PTNexus/releases/download/v3.6.4/ptnexus-runtime-linux-arm64.tar.gz"
+        ],
+        "sha256": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
         "format": "tar.gz"
       }
     ]

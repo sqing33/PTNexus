@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -134,16 +133,6 @@ func getNextScheduledTime(timeStr string) (time.Time, error) {
 		next = next.Add(24 * time.Hour)
 	}
 	return next, nil
-}
-
-// 获取更新源配置
-func getUpdateSource() string {
-	source := strings.ToLower(getEnv("UPDATE_SOURCE", "gitee"))
-	if source != "gitee" && source != "github" {
-		log.Printf("无效的 UPDATE_SOURCE 值: %s，使用默认值 gitee", source)
-		return "gitee"
-	}
-	return source
 }
 
 func getEnv(key, defaultValue string) string {
@@ -793,48 +782,12 @@ func getLocalVersion() string {
 
 // 新增辅助函数：获取远程配置结构体
 func getRemoteConfig() (*UpdateConfig, error) {
-	var baseURL string
-	switch getUpdateSource() {
-	case "github":
-		// GitHub raw链接
-		baseURL = "https://raw.githubusercontent.com/sqing33/PTNexus/main/CHANGELOG.json"
-	default:
-		// Gitee raw链接
-		baseURL = "https://gitee.com/sqing33/PTNexus/raw/main/CHANGELOG.json"
-	}
-
-	// 【修复】：添加随机时间戳参数，强制不使用缓存
-	// 这样每次请求都会被服务器视为新的请求，确保获取到最新的 disable_update 状态
-	requestURL := fmt.Sprintf("%s?t=%d", baseURL, time.Now().UnixNano())
-
-	// 创建不使用代理的 HTTP 客户端
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			Proxy: func(req *http.Request) (*url.URL, error) {
-				return nil, nil // 不使用代理
-			},
-		},
-	}
-
-	log.Printf("正在请求远程配置: %s", requestURL) // 打印请求地址方便调试
-	resp, err := client.Get(requestURL)
+	config, source, err := fetchJSONFromCandidates[UpdateConfig](context.Background(), changelogCandidates(), 10*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("获取远程配置失败: %v", err)
+		return nil, fmt.Errorf("获取远程配置失败: %w", err)
 	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读取远程配置失败: %v", err)
-	}
-
-	var config UpdateConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("解析远程配置失败: %v", err)
-	}
-
-	return &config, nil
+	log.Printf("获取更新日志成功，使用源: %s", source)
+	return config, nil
 }
 
 // 获取远程版本
@@ -874,42 +827,9 @@ func getChangelogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 根据环境变量选择更新源
-	var baseURL string
-	switch getUpdateSource() {
-	case "github":
-		baseURL = "https://raw.githubusercontent.com/sqing33/PTNexus/main/CHANGELOG.json"
-	default:
-		baseURL = "https://gitee.com/sqing33/PTNexus/raw/main/CHANGELOG.json"
-	}
-
-	log.Printf("正在从 %s 获取更新日志", getUpdateSource())
-
-	resp, err := http.Get(baseURL)
+	config, err := getRemoteConfig()
 	if err != nil {
 		log.Printf("获取远程配置失败: %v", err)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":   false,
-			"changelog": []string{},
-		})
-		return
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("读取远程配置失败: %v", err)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":   false,
-			"changelog": []string{},
-		})
-		return
-	}
-
-	var config UpdateConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		log.Printf("解析远程配置失败: %v", err)
-		log.Printf("尝试解析的数据: %s", string(data))
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":   false,
 			"changelog": []string{},
@@ -998,7 +918,7 @@ func proxyToBatchEnhancer(w http.ResponseWriter, r *http.Request) {
 func main() {
 	log.Println("PT Nexus 更新器启动...")
 	log.Println("监听端口:", updaterPort)
-	log.Printf("配置的更新源: %s", getUpdateSource())
+	log.Printf("更新源策略: 自动并行探测 GitHub/Gitee")
 
 	// 检查定时配置
 	schedule := loadScheduleConfig()
