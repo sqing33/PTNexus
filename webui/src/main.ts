@@ -210,6 +210,25 @@ axios.interceptors.response.use(
 
 // Desktop Runtime: axios 适配器改为走 Wails 原生绑定（避免前端直接访问 HTTP API）
 const originalAdapter = axios.defaults.adapter
+const getAxiosAdapter = (
+  axios as unknown as { getAdapter?: (adapters: unknown) => unknown }
+).getAdapter
+const fallbackAxiosAdapter = (() => {
+  if (typeof originalAdapter === 'function') {
+    return originalAdapter
+  }
+  if (typeof getAxiosAdapter !== 'function') {
+    return null
+  }
+
+  try {
+    const resolved = getAxiosAdapter(originalAdapter)
+    return typeof resolved === 'function' ? resolved : null
+  } catch {
+    return null
+  }
+})()
+
 axios.defaults.adapter = async (config) => {
   const method = String(config.method || 'get').toUpperCase()
   const baseURL = String((config as { baseURL?: unknown }).baseURL || '')
@@ -236,8 +255,8 @@ axios.defaults.adapter = async (config) => {
 
   const desktopBridgeForAxios = getDesktopBridge()
   if (!desktopBridgeForAxios || !shouldProxyDesktopURL(finalURL)) {
-    if (typeof originalAdapter === 'function') {
-      return originalAdapter(config)
+    if (typeof fallbackAxiosAdapter === 'function') {
+      return fallbackAxiosAdapter(config)
     }
     throw new Error(`no axios adapter for url: ${finalURL}`)
   }
