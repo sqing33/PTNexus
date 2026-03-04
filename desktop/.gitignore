@@ -3,6 +3,7 @@ build/bin/
 build/windows/installer/tmp/
 build/windows/installer/wails_tools.nsh
 build/windows/sidecar/
+tools/windows/
 
 # Root dependencies
 node_modules/

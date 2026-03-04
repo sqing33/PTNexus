@@ -107,6 +107,8 @@ func buildServerSidecarCommand(env DesktopRuntimeEnv) (*exec.Cmd, error) {
 		"PTNEXUS_GLOBAL_MAPPINGS="+strings.TrimSpace(env.GlobalMapYML),
 		"PTNEXUS_RUNTIME=desktop",
 	)
+	cmd.Env = appendMediaToolEnvIfBundled(cmd.Env, env)
+	cmd.Env = appendBDInfoEnvIfBundled(cmd.Env, env)
 	configureCommandForPlatform(cmd)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
@@ -155,6 +157,116 @@ func buildUpdaterSidecarCommand(env DesktopRuntimeEnv) (*exec.Cmd, error) {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return cmd, nil
+}
+
+func appendMediaToolEnvIfBundled(envs []string, env DesktopRuntimeEnv) []string {
+	toolMap := map[string]string{
+		"PTNEXUS_MPV_PATH":       "mpv",
+		"PTNEXUS_FFMPEG_PATH":    "ffmpeg",
+		"PTNEXUS_FFPROBE_PATH":   "ffprobe",
+		"PTNEXUS_MEDIAINFO_PATH": "mediainfo",
+	}
+
+	out := envs
+	for envKey, tool := range toolMap {
+		if strings.TrimSpace(os.Getenv(envKey)) != "" {
+			// 已显式配置时优先遵从用户设置。
+			continue
+		}
+		if toolPath := resolveBundledMediaToolPath(env, tool); strings.TrimSpace(toolPath) != "" {
+			out = append(out, envKey+"="+toolPath)
+		}
+	}
+	return out
+}
+
+func appendBDInfoEnvIfBundled(envs []string, env DesktopRuntimeEnv) []string {
+	if strings.TrimSpace(os.Getenv("PTNEXUS_BDINFO_PATH")) != "" {
+		return envs
+	}
+	if strings.TrimSpace(os.Getenv("PTNEXUS_BDINFO_DIR")) != "" {
+		return envs
+	}
+	if dir := resolveBundledBDInfoDir(env); strings.TrimSpace(dir) != "" {
+		return append(envs, "PTNEXUS_BDINFO_DIR="+dir)
+	}
+	return envs
+}
+
+func resolveBundledBDInfoDir(env DesktopRuntimeEnv) string {
+	platformDir := "linux"
+	if runtime.GOOS == "windows" {
+		platformDir = "windows"
+	}
+
+	candidates := make([]string, 0, 8)
+	if strings.TrimSpace(env.ResourceDir) != "" {
+		candidates = append(candidates,
+			filepath.Join(env.ResourceDir, "bdinfo", platformDir),
+			filepath.Join(env.ResourceDir, "bdinfo"),
+		)
+	}
+
+	if exePath, err := os.Executable(); err == nil && strings.TrimSpace(exePath) != "" {
+		exeDir := filepath.Dir(exePath)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "bdinfo", platformDir),
+			filepath.Join(exeDir, "bdinfo"),
+		)
+	}
+
+	if cwd, err := os.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
+		candidates = append(candidates,
+			filepath.Join(cwd, "bdinfo", platformDir),
+			filepath.Join(cwd, "bdinfo"),
+			filepath.Join(cwd, "build", "windows", "sidecar", "bdinfo", platformDir),
+			filepath.Join(cwd, "build", "windows", "sidecar", "bdinfo"),
+		)
+	}
+
+	for _, candidate := range candidates {
+		if directoryExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func resolveBundledMediaToolPath(env DesktopRuntimeEnv, tool string) string {
+	name := tool
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+
+	candidates := make([]string, 0, 6)
+	if strings.TrimSpace(env.ResourceDir) != "" {
+		candidates = append(candidates, filepath.Join(env.ResourceDir, "tools", name))
+	}
+
+	if exePath, err := os.Executable(); err == nil && strings.TrimSpace(exePath) != "" {
+		exeDir := filepath.Dir(exePath)
+		candidates = append(candidates, filepath.Join(exeDir, "tools", name))
+	}
+
+	if cwd, err := os.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
+		candidates = append(candidates, filepath.Join(cwd, "tools", name))
+		candidates = append(candidates, filepath.Join(cwd, "build", "windows", "sidecar", "tools", name))
+	}
+
+	for _, candidate := range candidates {
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func directoryExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	stat, err := os.Stat(path)
+	return err == nil && stat.IsDir()
 }
 
 func resolveServerCommand() (path string, args []string, dir string, err error) {

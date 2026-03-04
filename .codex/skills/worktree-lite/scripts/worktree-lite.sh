@@ -267,6 +267,31 @@ title_parts() {
   printf '%s\t%s\t%s\n' "$action" "$subject" "$count"
 }
 
+ensure_source_branch_has_committed_diff() {
+  local common_root="$1"
+  local target_branch="$2"
+  local source_branch="$3"
+  local source_worktree=""
+  local ahead_count changed_count
+
+  source_worktree="$(find_worktree_by_branch "$common_root" "$source_branch" || true)"
+  if [[ -n "$source_worktree" ]]; then
+    if [[ -n "$(git -C "$source_worktree" status --porcelain)" ]]; then
+      die "source worktree is dirty; commit source branch changes first"
+    fi
+  fi
+
+  ahead_count="$(git -C "$common_root" rev-list --count "${target_branch}..${source_branch}" 2>/dev/null || echo 0)"
+  if [[ "${ahead_count:-0}" -eq 0 ]]; then
+    die "source branch has no committed changes ahead of ${target_branch}; commit first"
+  fi
+
+  changed_count="$(git -C "$common_root" diff --name-only "${target_branch}...${source_branch}" | awk 'NF{c++} END{print c+0}')"
+  if [[ "${changed_count:-0}" -eq 0 ]]; then
+    die "source branch has no effective diff against ${target_branch}; commit meaningful changes first"
+  fi
+}
+
 build_message_candidates() {
   local common_root="$1"
   local base_branch="$2"
@@ -671,6 +696,7 @@ cmd_review() {
 
   ensure_branch_exists "$common_root" "$base_branch"
   ensure_branch_exists "$common_root" "$source_branch"
+  ensure_source_branch_has_committed_diff "$common_root" "$base_branch" "$source_branch"
 
   range="${base_branch}...${source_branch}"
   echo "SOURCE_BRANCH=$source_branch"
@@ -713,6 +739,7 @@ cmd_propose_message() {
 
   ensure_branch_exists "$common_root" "$base_branch"
   ensure_branch_exists "$common_root" "$source_branch"
+  ensure_source_branch_has_committed_diff "$common_root" "$base_branch" "$source_branch"
 
   IFS=$'\t' read -r rec alt1 alt2 reason <<<"$(build_message_candidates "$common_root" "$base_branch" "$source_branch")"
 
@@ -765,6 +792,7 @@ cmd_merge_options() {
   ensure_branch_exists "$common_root" "$target_branch"
   ensure_branch_exists "$common_root" "$source_branch"
   [[ "$target_branch" != "$source_branch" ]] || die "target and source branch must be different"
+  ensure_source_branch_has_committed_diff "$common_root" "$target_branch" "$source_branch"
 
   IFS=$'\t' read -r rec alt1 alt2 reason <<<"$(build_message_candidates "$common_root" "$target_branch" "$source_branch")"
   local cmd1 cmd2 cmd3

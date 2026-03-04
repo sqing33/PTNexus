@@ -93,6 +93,14 @@ Section
     File /oname=CHANGELOG.json "..\sidecar\CHANGELOG.json"
     SetOutPath "$INSTDIR\configs"
     File /oname=global_mappings.yaml "..\sidecar\configs\global_mappings.yaml"
+    !if /FileExists "..\sidecar\tools\*.*"
+        SetOutPath "$INSTDIR\tools"
+        File /r "..\sidecar\tools\*.*"
+    !endif
+    !if /FileExists "..\sidecar\bdinfo\*.*"
+        SetOutPath "$INSTDIR\bdinfo"
+        File /r "..\sidecar\bdinfo\*.*"
+    !endif
     SetOutPath $INSTDIR
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"

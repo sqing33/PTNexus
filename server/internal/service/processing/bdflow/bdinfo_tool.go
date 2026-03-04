@@ -118,8 +118,10 @@ func resolveBDInfoBinaryPath() (string, error) {
 	}
 
 	isWindows := runtime.GOOS == "windows"
-	binaryCandidates := []string{"BDInfo", "BDInfo.exe"}
+	platformDir := "linux"
+	binaryCandidates := []string{"BDInfo"}
 	if isWindows {
+		platformDir = "windows"
 		binaryCandidates = []string{"BDInfo.exe", "BDInfo"}
 	}
 
@@ -140,37 +142,30 @@ func resolveBDInfoBinaryPath() (string, error) {
 
 	if dir := strings.TrimSpace(os.Getenv("PTNEXUS_BDINFO_DIR")); dir != "" {
 		addDir(dir)
-		addDir(pathJoin(dir, "linux"))
-		addDir(pathJoin(dir, "windows"))
+		addDir(pathJoin(dir, platformDir))
 	}
 
 	if baseDir := strings.TrimSpace(os.Getenv("PTNEXUS_BASE_DIR")); baseDir != "" {
+		addDir(pathJoin(baseDir, "bdinfo", platformDir))
 		addDir(pathJoin(baseDir, "bdinfo"))
-		addDir(pathJoin(baseDir, "bdinfo", "linux"))
-		addDir(pathJoin(baseDir, "bdinfo", "windows"))
+		addDir(pathJoin(baseDir, "server", "bdinfo", platformDir))
 		addDir(pathJoin(baseDir, "server", "bdinfo"))
-		addDir(pathJoin(baseDir, "server", "bdinfo", "linux"))
-		addDir(pathJoin(baseDir, "server", "bdinfo", "windows"))
 	}
 
 	if cwd, err := os.Getwd(); err == nil {
 		roots := []string{cwd, filepath.Dir(cwd), filepath.Dir(filepath.Dir(cwd))}
 		for _, root := range roots {
+			addDir(pathJoin(root, "server", "bdinfo", platformDir))
 			addDir(pathJoin(root, "server", "bdinfo"))
-			addDir(pathJoin(root, "server", "bdinfo", "linux"))
-			addDir(pathJoin(root, "server", "bdinfo", "windows"))
+			addDir(pathJoin(root, "bdinfo", platformDir))
 			addDir(pathJoin(root, "bdinfo"))
-			addDir(pathJoin(root, "bdinfo", "linux"))
-			addDir(pathJoin(root, "bdinfo", "windows"))
 		}
 	}
 
+	addDir(pathJoin("/app/server/bdinfo", platformDir))
 	addDir("/app/server/bdinfo")
-	addDir("/app/server/bdinfo/linux")
-	addDir("/app/server/bdinfo/windows")
+	addDir(pathJoin("/app/bdinfo", platformDir))
 	addDir("/app/bdinfo")
-	addDir("/app/bdinfo/linux")
-	addDir("/app/bdinfo/windows")
 
 	tried := make([]string, 0)
 	for _, dir := range candidateDirs {
@@ -184,7 +179,11 @@ func resolveBDInfoBinaryPath() (string, error) {
 		}
 	}
 
-	for _, name := range []string{"BDInfo", "BDInfo.exe", "bdinfo"} {
+	lookPathNames := []string{"BDInfo", "bdinfo"}
+	if isWindows {
+		lookPathNames = []string{"BDInfo.exe", "BDInfo", "bdinfo"}
+	}
+	for _, name := range lookPathNames {
 		if found, err := exec.LookPath(name); err == nil {
 			logx.Infof(bdinfoToolLogModule, "从系统PATH找到 BDInfo 可执行文件 path=%s", found)
 			return found, nil

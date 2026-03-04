@@ -18,6 +18,10 @@ SIDECAR_SITE_DATA="$UPDATER_OUT_DIR/sites_data.json"
 SIDECAR_CHANGELOG="$UPDATER_OUT_DIR/CHANGELOG.json"
 SIDECAR_CONFIG_DIR="$UPDATER_OUT_DIR/configs"
 SIDECAR_GLOBAL_MAP="$SIDECAR_CONFIG_DIR/global_mappings.yaml"
+TOOLS_SRC_DIR="$DESKTOP_ROOT/tools/windows"
+TOOLS_OUT_DIR="$UPDATER_OUT_DIR/tools"
+BDINFO_SRC_DIR="$SERVER_ROOT/bdinfo/windows"
+BDINFO_OUT_DIR="$UPDATER_OUT_DIR/bdinfo/windows"
 CHANGELOG_FILE="$REPO_ROOT/CHANGELOG.json"
 
 usage() {
@@ -168,7 +172,72 @@ frontend_build() {
     echo "[desktop] warning: global_mappings.yaml not found at $SERVER_ROOT/configs/global_mappings.yaml" >&2
   fi
 
+  prepare_windows_bdinfo_sidecar
+  prepare_optional_windows_tools
+
   echo "[desktop] frontend sync completed"
+}
+
+prepare_windows_bdinfo_sidecar() {
+  local source_dir="$BDINFO_SRC_DIR"
+  if [[ -n "${PTNEXUS_BDINFO_WIN_DIR:-}" ]]; then
+    source_dir="${PTNEXUS_BDINFO_WIN_DIR}"
+  fi
+
+  rm -rf "$UPDATER_OUT_DIR/bdinfo"
+  if [[ ! -d "$source_dir" ]]; then
+    echo "[desktop] warning: windows BDInfo directory not found: $source_dir" >&2
+    return
+  fi
+
+  mkdir -p "$BDINFO_OUT_DIR"
+  rsync -a "$source_dir/" "$BDINFO_OUT_DIR/"
+  echo "[desktop] bundled BDInfo dir: $source_dir"
+
+  if [[ ! -f "$BDINFO_OUT_DIR/BDInfo.exe" ]]; then
+    echo "[desktop] warning: BDInfo.exe missing in bundled directory: $BDINFO_OUT_DIR" >&2
+  fi
+}
+
+prepare_optional_windows_tools() {
+  rm -rf "$TOOLS_OUT_DIR"
+  if [[ -d "$TOOLS_SRC_DIR" ]]; then
+    mkdir -p "$TOOLS_OUT_DIR"
+    rsync -a "$TOOLS_SRC_DIR/" "$TOOLS_OUT_DIR/"
+    echo "[desktop] bundled tools dir: $TOOLS_SRC_DIR"
+  fi
+
+  copy_override_windows_tool "mpv.exe" "${PTNEXUS_MPV_WIN_BIN:-}"
+  copy_override_windows_tool "ffmpeg.exe" "${PTNEXUS_FFMPEG_WIN_BIN:-}"
+  copy_override_windows_tool "ffprobe.exe" "${PTNEXUS_FFPROBE_WIN_BIN:-}"
+  copy_override_windows_tool "mediainfo.exe" "${PTNEXUS_MEDIAINFO_WIN_BIN:-}"
+
+  local missing=0
+  for tool in mpv.exe ffmpeg.exe ffprobe.exe mediainfo.exe; do
+    if [[ ! -f "$TOOLS_OUT_DIR/$tool" ]]; then
+      echo "[desktop] warning: optional tool missing: $tool (place in $TOOLS_SRC_DIR or set PTNEXUS_*_WIN_BIN)" >&2
+      missing=1
+    fi
+  done
+  if [[ "$missing" -eq 0 ]]; then
+    echo "[desktop] bundled media tools are ready"
+  fi
+}
+
+copy_override_windows_tool() {
+  local tool_name="$1"
+  local custom_source="$2"
+  if [[ -z "$custom_source" ]]; then
+    return
+  fi
+  if [[ ! -f "$custom_source" ]]; then
+    echo "[desktop] warning: optional tool path is invalid: $custom_source" >&2
+    return
+  fi
+
+  mkdir -p "$TOOLS_OUT_DIR"
+  cp "$custom_source" "$TOOLS_OUT_DIR/$tool_name"
+  echo "[desktop] bundled tool override: $tool_name"
 }
 
 desktop_dev() {

@@ -64,13 +64,39 @@ func PickMediaTarget(savePath string) (string, error) {
 // 失败场景：系统未安装相关工具、命令执行失败或输出为空。
 // 副作用：会调用外部命令。
 func ExtractMediaInfo(targetFile string) (string, error) {
-	if output, err := runCommandCapture("mediainfo", targetFile); err == nil && strings.TrimSpace(output) != "" {
+	if output, err := runCommandCaptureWithEnv("mediainfo", "PTNEXUS_MEDIAINFO_PATH", targetFile); err == nil && strings.TrimSpace(output) != "" {
 		return output, nil
 	}
-	if output, err := runCommandCapture("ffprobe", "-hide_banner", "-i", targetFile); err == nil && strings.TrimSpace(output) != "" {
+	if output, err := runCommandCaptureWithEnv("ffprobe", "PTNEXUS_FFPROBE_PATH", "-hide_banner", "-i", targetFile); err == nil && strings.TrimSpace(output) != "" {
 		return output, nil
 	}
 	return "", fmt.Errorf("无法提取媒体信息，请确认系统已安装 mediainfo 或 ffprobe")
+}
+
+func runCommandCaptureWithEnv(defaultName string, envKey string, args ...string) (string, error) {
+	commandName, err := resolveCommandPath(defaultName, envKey)
+	if err != nil {
+		return "", err
+	}
+	return runCommandCapture(commandName, args...)
+}
+
+func resolveCommandPath(defaultName string, envKey string) (string, error) {
+	if configured := strings.TrimSpace(os.Getenv(envKey)); configured != "" {
+		stat, err := os.Stat(configured)
+		if err != nil {
+			return "", fmt.Errorf("%s 指向的文件不存在: %s", envKey, configured)
+		}
+		if stat.IsDir() {
+			return "", fmt.Errorf("%s 指向的是目录而不是可执行文件: %s", envKey, configured)
+		}
+		return configured, nil
+	}
+	path, err := exec.LookPath(defaultName)
+	if err != nil {
+		return "", fmt.Errorf("未找到可执行文件: %s", defaultName)
+	}
+	return path, nil
 }
 
 func runCommandCapture(name string, args ...string) (string, error) {

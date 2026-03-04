@@ -58,6 +58,7 @@ ENV SCHEDULE_ENABLED="false"
 # server 运行目录与数据目录（对齐 updater/batch 使用的 /app/data）
 ENV PTNEXUS_BASE_DIR="/app/server"
 ENV PTNEXUS_DATA_DIR="/app/data"
+ENV PTNEXUS_BDINFO_DIR="/app/bdinfo/linux"
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -83,8 +84,9 @@ COPY ./server/sites_data.json /app/server/sites_data.json
 COPY --from=webui-builder /app/webui/dist /app/server/dist
 
 # --- BDInfo（仅复制 Linux 工具，避免打入 Windows 版本）---
-COPY ./server/bdinfo/linux/ /app/bdinfo/
-RUN chmod +x /app/bdinfo/BDInfo /app/bdinfo/BDInfoDataSubstractor
+RUN mkdir -p /app/bdinfo/linux
+COPY ./server/bdinfo/linux/ /app/bdinfo/linux/
+RUN chmod +x /app/bdinfo/linux/BDInfo /app/bdinfo/linux/BDInfoDataSubstractor
 
 # --- updater ---
 COPY --from=updater-builder /out/updater /app/updater
