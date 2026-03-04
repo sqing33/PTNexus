@@ -18,7 +18,8 @@ This folder contains a Chrome/Edge MV3 extension that syncs browser cookies to t
 ## Usage
 
 1. Fill API base URL:
-   - updater direct access on LAN/local machine: `http://<your-host>:5274`
+   - desktop app (recommended): `http://127.0.0.1:5275`
+   - updater direct access on LAN/local machine: `http://<your-host>:5275`
    - HTTPS reverse proxy deployment: `https://<your-domain>`
 2. Fill PT Nexus username and password.
 3. Click `Login Test`.

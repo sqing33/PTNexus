@@ -61,7 +61,7 @@
 
 - [x] A1. 清理并标准化 `desktop` 工程结构
   - [x] 保留 Wails 官方骨架必要文件。
-  - [x] 增补目录：`desktop/internal/`、`desktop/scripts/`、`desktop/docs/`。
+  - [x] 增补目录：`desktop/internal/`、`desktop/docs/`（构建入口统一在根目录 `scripts/`）。
 
 - [x] A2. 完善桌面接入文档（仅本目录）
   - [x] 编写 `desktop/docs/integration.md`：说明未来如何挂接 `server`、`updater`、`webui`。
@@ -74,9 +74,9 @@
   - [x] 仅保留空实现或 mock handler，确保不依赖外部目录即可编译。
 
 - [x] A4. 预置构建脚本（仅本目录）
-  - [x] 新增 `desktop/scripts/dev-desktop.sh`：桌面开发启动流程（占位可执行）。
-  - [x] 新增 `desktop/scripts/build-windows.ps1`：Windows 打包流程（占位可执行）。
-  - [x] 脚本中写明未来会调用 `webui` 构建，但当前不改 `webui`。
+  - [x] 新增根脚本 `scripts/package-desktop.sh`：桌面开发/前端构建/安装包统一入口。
+  - [x] `desktop/wails.json` 的 `frontend:install/build/dev` 钩子全部指向统一脚本。
+  - [x] 移除 `desktop/scripts/*.sh` 分散入口，避免多入口维护成本。
 
 - [x] A5. 预置配置模板（仅本目录）
   - [x] 在 `desktop/docs/env.md` 记录未来需要的环境变量：
@@ -116,14 +116,14 @@
   - [x] 忽略前端生成文件（`dist`、`wailsjs`、`package-lock`、md5）。
 
 - [x] C6. 提供一条命令完成打包
-  - [x] 新增 `desktop/scripts/package-windows.sh`。
-  - [x] 支持执行单命令：`./desktop/scripts/package-windows.sh`。
+  - [x] 新增 `scripts/package-desktop.sh`。
+  - [x] 支持执行单命令：`bash scripts/package-desktop.sh`。
 
 ### 4.3 第一部分交付物
 
 1. `desktop/Plan.md`（本文件）
 2. `desktop/docs/*.md`（集成、构建、环境说明）
-3. `desktop/scripts/*`（开发与打包脚本占位）
+3. `scripts/package-desktop.sh`（统一脚本入口）
 4. `desktop/internal/*`（桌面分层骨架占位）
 
 ---

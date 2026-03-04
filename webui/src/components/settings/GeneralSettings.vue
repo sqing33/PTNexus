@@ -855,6 +855,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, reactive, nextTick, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 import {
   User,
@@ -872,6 +873,7 @@ import {
   Collection,
 } from '@element-plus/icons-vue'
 import { ElMessage } from '@/utils/uiNotify'
+const router = useRouter()
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
   if (axios.isAxiosError(error)) {
@@ -1462,7 +1464,7 @@ const onSubmit = async () => {
     if (res.data?.success) {
       ElMessage.success('保存成功，请重新登录')
       localStorage.removeItem('token')
-      window.location.href = '/login'
+      await router.replace('/login')
     } else {
       ElMessage.error(res.data?.message || '保存失败')
     }

@@ -29,19 +29,15 @@
 开发：
 
 ```bash
-cd desktop
-wails dev
+bash scripts/package-desktop.sh desktop-dev
 ```
 
 构建：
 
 ```bash
-cd desktop
-wails build
+bash scripts/package-desktop.sh
 ```
 
-脚本占位：
+统一入口脚本：
 
-1. `scripts/dev-desktop.sh`
-2. `scripts/build-windows.ps1`
-
+1. `scripts/package-desktop.sh`

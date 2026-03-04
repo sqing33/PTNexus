@@ -667,7 +667,7 @@ function buildHTTPHint(apiBaseUrl) {
     const parsed = new URL(apiBaseUrl);
     return `http://${parsed.host}`;
   } catch (_error) {
-    return "http://<你的服务器IP>:5274";
+    return "http://<你的服务器IP>:5275";
   }
 }
 

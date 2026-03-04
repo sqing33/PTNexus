@@ -1,6 +1,7 @@
 import { computed, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
 import axios from 'axios'
 import { ElNotification } from '@/utils/uiNotify'
+import { openSSE, type EventSourceLike } from '@/desktop/sse'
 
 import type {
   LimitAlert,
@@ -36,7 +37,7 @@ export type PublishFlowDeps = {
   reverseMappings: Ref<ReverseMappings>
 
   publishBatchId: Ref<string | null>
-  publishBatchEventSource: Ref<EventSource | null>
+  publishBatchEventSource: Ref<EventSourceLike | null>
 
   publishProgress: Ref<ProgressCounter>
   downloaderProgress: Ref<ProgressCounter>
@@ -254,9 +255,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       }
 
       publishBatchId.value = startResponse.data.batch_id
-      publishBatchEventSource.value = new EventSource(
-        `/api/migrate/publish_batch/stream/${publishBatchId.value}`,
-      )
+      publishBatchEventSource.value = openSSE(`/api/migrate/publish_batch/stream/${publishBatchId.value}`)
 
       publishBatchEventSource.value.onmessage = async (event) => {
         try {

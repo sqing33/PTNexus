@@ -40,6 +40,7 @@ import { ref, onMounted, onUnmounted, computed, nextTick, watch, provide } from 
 import axios from 'axios'
 import { useCrossSeedStore } from '@/stores/crossSeed'
 import { ElNotification } from '@/utils/uiNotify'
+import { openSSE, type EventSourceLike } from '@/desktop/sse'
 import LogProgress from './LogProgress.vue'
 import LogViewerCard from './LogViewerCard.vue'
 import CrossSeedStepsHeader from './cross-seed/CrossSeedStepsHeader.vue'
@@ -578,7 +579,7 @@ const downloaderList = ref<{ id: string; name: string }[]>([])
 const isDataFromDatabase = ref(false) // Flag to track if data was loaded from database
 
 // BDInfo SSE相关变量
-const bdinfoEventSource = ref<EventSource | null>(null)
+const bdinfoEventSource = ref<EventSourceLike | null>(null)
 
 // BDInfo 进度相关变量
 const bdinfoProgress = ref<BdinfoProgress>({
@@ -1256,7 +1257,7 @@ const startBDInfoSSE = () => {
   // 创建EventSource连接
   const url = `/api/migrate/bdinfo_sse/${torrentData.value.seed_id}`
   console.log(`SSE 连接 URL: ${url}`)
-  bdinfoEventSource.value = new EventSource(url)
+  bdinfoEventSource.value = openSSE(url)
 
   // 添加连接超时处理
   let connectionTimeout: ReturnType<typeof setTimeout> | null = setTimeout(() => {

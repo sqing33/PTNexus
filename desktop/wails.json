@@ -2,9 +2,9 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "pt-nexus",
   "outputfilename": "pt-nexus",
-  "frontend:install": "bash ../scripts/install-frontend-from-webui.sh",
-  "frontend:build": "bash ../scripts/build-frontend-from-webui.sh",
-  "frontend:dev:watcher": "bash ../scripts/dev-frontend-from-webui.sh",
+  "frontend:install": "bash ../../scripts/package-desktop.sh frontend-install",
+  "frontend:build": "bash ../../scripts/package-desktop.sh frontend-build",
+  "frontend:dev:watcher": "bash ../../scripts/package-desktop.sh frontend-dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "sqing",

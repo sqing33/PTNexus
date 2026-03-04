@@ -44,7 +44,7 @@
             <span>同步Cookie</span>
           </el-button>
           <el-link
-            href="https://github.com/sqing33/PTNexus"
+            href="https://github.com/sqing33/PTNexus/tree/go/extension"
             target="_blank"
             rel="noopener noreferrer"
             type="primary"
@@ -54,6 +54,10 @@
           </el-link>
         </el-form-item>
       </el-form>
+      <div class="cookiecloud-tip">
+        桌面端插件使用：浏览器加载根目录 <code>extension/</code> 后，API 地址填写
+        <code>http://127.0.0.1:5275</code>。
+      </div>
 
       <div class="right-action-group">
         <el-input
@@ -758,11 +762,30 @@ const normalizeSiteForm = (site: SiteConfig): SiteForm => ({
 
 // [新增] 合并后的保存与同步功能
 const handleSaveAndSync = async () => {
+  const rawURL = String(cookieCloudForm.value.url || '').trim()
+  const normalizedURL = (() => {
+    if (!rawURL) return ''
+    const withScheme = /^https?:\/\//i.test(rawURL) ? rawURL : `http://${rawURL}`
+    try {
+      const parsed = new URL(withScheme)
+      parsed.hash = ''
+      return parsed.toString().replace(/\/$/, '')
+    } catch {
+      return ''
+    }
+  })()
+
   // 1. 前端校验
-  if (!cookieCloudForm.value.url || !cookieCloudForm.value.key) {
-    ElMessage.warning('CookieCloud URL 和 KEY 不能为空！')
+  if (!normalizedURL) {
+    ElMessage.warning('CookieCloud URL 格式不正确，请填写 http(s)://host[:port]。')
     return
   }
+  if (!cookieCloudForm.value.key) {
+    ElMessage.warning('CookieCloud KEY 不能为空！')
+    return
+  }
+  cookieCloudForm.value.url = normalizedURL
+
   isCookieActionLoading.value = true
   try {
     // 2. 第一步：先保存配置
@@ -917,6 +940,20 @@ const handleDelete = (site: SiteConfig) => {
 .browser-extension-link {
   margin-left: 8px;
   white-space: nowrap;
+}
+
+.cookiecloud-tip {
+  width: 100%;
+  margin-top: -8px;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.cookiecloud-tip code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f5f7fa;
+  color: #303133;
 }
 
 .right-action-group {

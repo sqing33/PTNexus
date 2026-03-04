@@ -5,7 +5,9 @@ package tray
 import (
 	"context"
 	_ "embed"
+	goruntime "runtime"
 	"sync"
+	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -22,16 +24,25 @@ type windowsService struct {
 	onceStart sync.Once
 	onceStop  sync.Once
 	stopCh    chan struct{}
+	runDone   chan struct{}
 }
 
 func newService() Service {
-	return &windowsService{stopCh: make(chan struct{})}
+	return &windowsService{
+		stopCh:  make(chan struct{}),
+		runDone: make(chan struct{}),
+	}
 }
 
 func (s *windowsService) Start(ctx context.Context) {
 	s.onceStart.Do(func() {
 		s.ctx = ctx
-		go systray.Run(s.onReady, s.onExit)
+		go func() {
+			goruntime.LockOSThread()
+			defer goruntime.UnlockOSThread()
+			defer close(s.runDone)
+			systray.Run(s.onReady, s.onExit)
+		}()
 	})
 }
 
@@ -39,6 +50,10 @@ func (s *windowsService) Stop() {
 	s.onceStop.Do(func() {
 		close(s.stopCh)
 		systray.Quit()
+		select {
+		case <-s.runDone:
+		case <-time.After(2 * time.Second):
+		}
 	})
 }
 
@@ -59,12 +74,16 @@ func (s *windowsService) onReady() {
 			select {
 			case <-mShow.ClickedCh:
 				if s.ctx != nil {
-					runtime.WindowUnminimise(s.ctx)
-					runtime.WindowShow(s.ctx)
+					ctx := s.ctx
+					go func() {
+						runtime.WindowUnminimise(ctx)
+						runtime.WindowShow(ctx)
+					}()
 				}
 			case <-mQuit.ClickedCh:
 				if s.ctx != nil {
-					runtime.Quit(s.ctx)
+					ctx := s.ctx
+					go runtime.Quit(ctx)
 				} else {
 					systray.Quit()
 				}

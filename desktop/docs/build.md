@@ -9,15 +9,13 @@
 开发：
 
 ```bash
-cd desktop
-wails dev
+bash scripts/package-desktop.sh desktop-dev
 ```
 
 打包：
 
 ```bash
-cd desktop
-wails build
+bash scripts/package-desktop.sh
 ```
 
 ## 后续（第二部分）预期构建流程
@@ -32,4 +30,3 @@ wails build
 
 1. 开发模式：Wails dev 运行时应用。
 2. 生产模式：`desktop/build/bin` 下可分发产物（具体以 Wails 输出为准）。
-

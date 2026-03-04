@@ -15,18 +15,18 @@ var assets embed.FS
 
 func main() {
 	app := NewApp()
-	updateHandler, stopUpdater := desktopapp.NewUpdaterProxyHandler()
-	defer stopUpdater()
+	indexHTML, _ := assets.ReadFile("frontend/dist/index.html")
 
 	desktopHandler := desktopapp.NewRouteMux(desktopapp.RouteTargets{
-		APIHandler:    desktopapp.NewServerGoAPIHandler(),
-		UpdateHandler: updateHandler,
+		IndexHTML: indexHTML,
 	})
 
 	err := wails.Run(&options.App{
 		Title:  "PT Nexus",
 		Width:  1024,
 		Height: 768,
+		// 桌面端默认启动即最大化，避免首次进入时视口过小影响引导流程。
+		WindowStartState: options.Maximised,
 		// 关闭窗口时仅隐藏，应用留在后台（通过托盘菜单“退出”真正结束）。
 		HideWindowOnClose: true,
 		AssetServer: &assetserver.Options{

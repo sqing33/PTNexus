@@ -85,6 +85,11 @@ func (h *Handler) CookieCloudSync(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "CookieCloud URL 和 KEY 不能为空。"})
 		return
 	}
+	normalizedURL, err := normalizeCookieCloudURL(ccURL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "CookieCloud URL 格式不正确，请填写 http(s)://host[:port]。"})
+		return
+	}
 
 	sites, err := h.sites.ListSites("all")
 	if err != nil {
@@ -92,7 +97,7 @@ func (h *Handler) CookieCloudSync(c *gin.Context) {
 		return
 	}
 
-	targetURL := strings.TrimRight(ccURL, "/") + "/get/" + ccKey
+	targetURL := buildCookieCloudTargetURL(normalizedURL, ccKey)
 	reqBody := map[string]any{}
 	if e2ePassword != "" {
 		reqBody["password"] = e2ePassword
@@ -205,6 +210,33 @@ func normalizeCookieDomain(raw string) string {
 	}
 	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
 	return strings.TrimPrefix(host, ".")
+}
+
+func normalizeCookieCloudURL(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", fmt.Errorf("empty cookiecloud url")
+	}
+	if !strings.HasPrefix(value, "http://") && !strings.HasPrefix(value, "https://") {
+		value = "http://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return "", fmt.Errorf("missing host")
+	}
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func buildCookieCloudTargetURL(baseURL string, key string) string {
+	trimmed := strings.TrimSpace(strings.TrimRight(baseURL, "/"))
+	if strings.Contains(strings.ToLower(trimmed), "/get/") {
+		return trimmed
+	}
+	return trimmed + "/get/" + strings.TrimSpace(key)
 }
 
 func cookieValueToString(value any) string {

@@ -1,0 +1,2 @@
+This placeholder keeps frontend/dist in Git for `go:embed` compile in clean worktrees.
+It should be preserved by build script sync.

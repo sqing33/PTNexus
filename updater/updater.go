@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -17,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -177,18 +177,28 @@ func ensureDir(path string) {
 
 func withFileLock(lockPath string, fn func() error) error {
 	ensureDir(filepath.Dir(lockPath))
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
+	lockFile := lockPath + ".lock"
+	deadline := time.Now().Add(30 * time.Second)
+
+	for {
+		lockHandle, err := os.OpenFile(lockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		if err == nil {
+			_, _ = lockHandle.WriteString(strconv.FormatInt(time.Now().UnixNano(), 10))
+			_ = lockHandle.Close()
+			defer os.Remove(lockFile)
+			return fn()
+		}
+
+		if errors.Is(err, os.ErrExist) {
+			if time.Now().After(deadline) {
+				return fmt.Errorf("acquire file lock timeout: %s", lockFile)
+			}
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		return err
 	}
-	defer f.Close()
-
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-
-	return fn()
 }
 
 func getPipSyncMode() string {

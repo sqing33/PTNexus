@@ -8,7 +8,8 @@ build/windows/sidecar/
 node_modules/
 
 # Frontend generated files
-frontend/dist/
+frontend/dist/**
+!frontend/dist/placeholder.txt
 frontend/node_modules/
 frontend/package-lock.json
 frontend/package.json.md5

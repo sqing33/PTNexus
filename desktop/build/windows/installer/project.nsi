@@ -88,6 +88,12 @@ Section
 
     !insertmacro wails.files
     File /oname=updater.exe "..\sidecar\updater.exe"
+    File /oname=server.exe "..\sidecar\server.exe"
+    File /oname=sites_data.json "..\sidecar\sites_data.json"
+    File /oname=CHANGELOG.json "..\sidecar\CHANGELOG.json"
+    SetOutPath "$INSTDIR\configs"
+    File /oname=global_mappings.yaml "..\sidecar\configs\global_mappings.yaml"
+    SetOutPath $INSTDIR
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -104,7 +110,6 @@ Section "uninstall"
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
 
     RMDir /r $INSTDIR
-    Delete "$INSTDIR\\updater.exe"
 
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
     Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"

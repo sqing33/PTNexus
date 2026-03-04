@@ -98,6 +98,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { CircleCheck, CircleClose, Close, InfoFilled, Loading, Warning } from '@element-plus/icons-vue'
+import { openSSE, type EventSourceLike } from '@/desktop/sse'
 
 type StepStatus = 'pending' | 'processing' | 'success' | 'error' | 'warning' | 'info'
 
@@ -144,7 +145,7 @@ const showDynamicDetails = ref(false)
 const pendingWriteDbSuccess = ref(false)
 const pendingWriteDbSuccessMessage = ref('数据库写入完成')
 
-let eventSource: EventSource | null = null
+let eventSource: EventSourceLike | null = null
 let autoCloseTimer: ReturnType<typeof setTimeout> | null = null
 
 const dynamicSummaryStep = computed<StepState | null>(() => {
@@ -419,7 +420,7 @@ const connectSSE = () => {
   resetFlowState()
   currentTaskId.value = props.taskId
 
-  eventSource = new EventSource(`/api/migrate/logs/stream/${props.taskId}`)
+  eventSource = openSSE(`/api/migrate/logs/stream/${props.taskId}`)
 
   eventSource.onopen = () => {
     streamConnected.value = true
