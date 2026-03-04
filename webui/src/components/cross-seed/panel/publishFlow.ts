@@ -1,4 +1,4 @@
-import { computed, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
+import { computed, ref, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
 import axios from 'axios'
 import { ElNotification } from '@/utils/uiNotify'
 import { openSSE, type EventSourceLike } from '@/desktop/sse'
@@ -199,8 +199,24 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     downloaderProgress.value.current = results.filter((r) => r?.auto_add_result?.success).length
   }
 
+  const isBatchPublishing = ref(false)
+  const batchPublishConcurrency = ref(1)
+
+  const resetBatchPublishRuntime = () => {
+    isBatchPublishing.value = false
+    batchPublishConcurrency.value = 1
+  }
+
+  const setBatchPublishRuntime = (siteCount: number, rawConcurrency: unknown) => {
+    const parsed = Number(rawConcurrency)
+    const safeConcurrency = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1
+    batchPublishConcurrency.value = Math.max(1, Math.min(siteCount, safeConcurrency))
+    isBatchPublishing.value = true
+  }
+
   const handlePublishBatch = async (): Promise<boolean> => {
     stopPublishBatchSSE()
+    resetBatchPublishRuntime()
 
     activeStep.value = 3
     isLoading.value = true
@@ -254,6 +270,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
         throw new Error(startResponse.data?.message || '批量发布任务启动失败')
       }
 
+      setBatchPublishRuntime(siteCount, startResponse.data?.concurrency)
       publishBatchId.value = startResponse.data.batch_id
       publishBatchEventSource.value = openSSE(`/api/migrate/publish_batch/stream/${publishBatchId.value}`)
 
@@ -309,6 +326,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
             }
 
             case 'batch_finished': {
+              resetBatchPublishRuntime()
               stopPublishBatchSSE()
               ElNotification.closeAll()
 
@@ -365,6 +383,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
 
       publishBatchEventSource.value.onerror = (error) => {
         console.error('批量发布 SSE 连接错误:', error)
+        resetBatchPublishRuntime()
         stopPublishBatchSSE()
         ElNotification.closeAll()
         ElNotification.error({
@@ -379,6 +398,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       return true
     } catch (error: unknown) {
       console.error('批量发布启动失败:', error)
+      resetBatchPublishRuntime()
       stopPublishBatchSSE()
       ElNotification.closeAll()
       handleApiError(error, '批量发布启动失败')
@@ -388,6 +408,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
   }
 
   const handlePublishSerial = async () => {
+    resetBatchPublishRuntime()
     activeStep.value = 3
     isLoading.value = true
     finalResultsList.value = []
@@ -1324,9 +1345,26 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       resultsBySite.set(result.siteName, result)
     }
 
+    const unfinishedSites = selectedTargetSites.value.filter((siteName) => !resultsBySite.has(siteName))
     const hasUnfinishedSites = finalResultsList.value.length < selectedTargetSites.value.length
     const isStopped = limitAlert.value.visible && hasUnfinishedSites
-    const runningSites = new Set(publishingSites.value)
+    const runningSites = new Set(
+      publishingSites.value.filter((siteName) => !resultsBySite.has(siteName)),
+    )
+
+    if (isBatchPublishing.value && !isStopped && unfinishedSites.length > 0) {
+      const expectedRunningCount = Math.min(batchPublishConcurrency.value, unfinishedSites.length)
+      let missingSlots = expectedRunningCount - runningSites.size
+
+      if (missingSlots > 0) {
+        for (const siteName of unfinishedSites) {
+          if (runningSites.has(siteName)) continue
+          runningSites.add(siteName)
+          missingSlots--
+          if (missingSlots === 0) break
+        }
+      }
+    }
 
     return selectedTargetSites.value.map((siteName) => {
       const existing = resultsBySite.get(siteName)
