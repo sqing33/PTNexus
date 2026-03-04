@@ -10,6 +10,7 @@ import (
 	"github.com/pt-nexus/server/internal/platform/logx"
 	"github.com/pt-nexus/server/internal/repository"
 	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
+	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
 
 const (
@@ -160,14 +161,6 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 	if uploadData == nil {
 		uploadData = map[string]any{}
 	}
-	title := strings.TrimSpace(processingshared.ToString(uploadData["title"], ""))
-	if title == "" {
-		title = strings.TrimSpace(processingshared.ToString(uploadData["original_main_title"], ""))
-	}
-	if title == "" {
-		title = strings.TrimSpace(processingshared.ToString(uploadData["name"], ""))
-	}
-	subtitle := strings.TrimSpace(processingshared.ToString(uploadData["subtitle"], ""))
 
 	torrentID := strings.TrimSpace(ctxTorrentID)
 	if torrentID == "" {
@@ -176,6 +169,7 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 	if torrentID == "" {
 		torrentID = strings.TrimSpace(processingshared.ToString(uploadData["torrent_id"], processingshared.ToString(uploadData["torrentId"], "")))
 	}
+	title, subtitle := resolvePublishLogTitleFromUploadData(uploadData, torrentID)
 	if title == "" {
 		title = torrentID
 	}
@@ -244,10 +238,10 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 
 	if queueTaskID != nil && *queueTaskID > 0 {
 		if existing, ok, err := s.publishLogRepo.FindLatestByQueueTaskID(*queueTaskID); err == nil && ok && existing != nil {
-			if strings.TrimSpace(existing.Title) != "" {
+			if strings.TrimSpace(entry.Title) == "" && strings.TrimSpace(existing.Title) != "" {
 				entry.Title = existing.Title
 			}
-			if strings.TrimSpace(existing.Subtitle) != "" {
+			if strings.TrimSpace(entry.Subtitle) == "" && strings.TrimSpace(existing.Subtitle) != "" {
 				entry.Subtitle = existing.Subtitle
 			}
 		}
@@ -259,6 +253,102 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 
 	if _, err := s.publishLogRepo.Insert(&entry); err != nil {
 		logx.Warnf(publishLogModule, "写入发种日志失败 trigger=%s scene=%s target=%s err=%v", trigger, scene, targetSite, err)
+	}
+}
+
+func resolvePublishLogTitleFromUploadData(uploadData map[string]any, fallbackTitle string) (string, string) {
+	subtitle := strings.TrimSpace(processingshared.ToString(uploadData["subtitle"], ""))
+
+	title := resolvePreviewTitleFromFinalParams(uploadData["final_publish_parameters"])
+	baseTitle := strings.TrimSpace(firstNonEmptyString(
+		processingshared.ToString(uploadData["title"], ""),
+		processingshared.ToString(uploadData["original_main_title"], ""),
+		processingshared.ToString(uploadData["name"], ""),
+		fallbackTitle,
+	))
+
+	if title == "" {
+		titleComponents := parseUploadTitleComponents(uploadData["title_components"])
+		if len(titleComponents) > 0 {
+			completed := processingtitle.CompleteTitleComponents(titleComponents, baseTitle)
+			rebuilt := strings.TrimSpace(processingtitle.BuildPreviewTitleFromTitleComponents(completed, baseTitle))
+			if rebuilt != "" && rebuilt != "-NOGROUP" {
+				title = rebuilt
+			}
+		}
+	}
+
+	if title == "" {
+		title = baseTitle
+	}
+	return strings.TrimSpace(title), subtitle
+}
+
+func resolvePreviewTitleFromFinalParams(raw any) string {
+	parseMap := func(values map[string]any) string {
+		return strings.TrimSpace(firstNonEmptyString(
+			processingshared.ToString(values["主标题 (预览)"], ""),
+			processingshared.ToString(values["final_main_title"], ""),
+			processingshared.ToString(values["title"], ""),
+		))
+	}
+
+	switch typed := raw.(type) {
+	case map[string]any:
+		return parseMap(typed)
+	case map[string]string:
+		return strings.TrimSpace(firstNonEmptyString(
+			typed["主标题 (预览)"],
+			typed["final_main_title"],
+			typed["title"],
+		))
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return ""
+		}
+		decoded := map[string]any{}
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+			return ""
+		}
+		return parseMap(decoded)
+	default:
+		return ""
+	}
+}
+
+func parseUploadTitleComponents(raw any) []any {
+	switch typed := raw.(type) {
+	case []any:
+		return typed
+	case []map[string]any:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			items = append(items, item)
+		}
+		return items
+	case []map[string]string:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			converted := map[string]any{}
+			for key, value := range item {
+				converted[key] = value
+			}
+			items = append(items, converted)
+		}
+		return items
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return []any{}
+		}
+		decoded := []any{}
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+			return decoded
+		}
+		return []any{}
+	default:
+		return []any{}
 	}
 }
 

@@ -189,17 +189,11 @@ func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string
 		torrentID = strings.TrimSpace(processingshared.ToString(uploadData["torrent_id"], processingshared.ToString(payload["torrent_id"], "")))
 	}
 
-	title := strings.TrimSpace(processingshared.ToString(uploadData["title"], ""))
+	title, subtitle := resolvePublishLogTitleFromUploadData(uploadData, firstNonEmptyString(strings.TrimSpace(ctx.Name), torrentID))
 	if title == "" {
-		title = strings.TrimSpace(processingshared.ToString(uploadData["original_main_title"], ""))
+		title = strings.TrimSpace(firstNonEmptyString(ctx.Name, torrentID))
 	}
-	if title == "" {
-		title = strings.TrimSpace(processingshared.ToString(uploadData["name"], ""))
-	}
-	if title == "" {
-		title = strings.TrimSpace(ctx.Name)
-	}
-	subtitle := strings.TrimSpace(processingshared.ToString(uploadData["subtitle"], ""))
+	uploadData["title"] = title
 
 	downloaderID := strings.TrimSpace(processingshared.ToString(payload["downloaderId"], processingshared.ToString(payload["downloader_id"], "")))
 	if downloaderID == "" {
@@ -440,12 +434,11 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 			uploadData["downloader_id"] = downloaderID
 		}
 
-		title := strings.TrimSpace(processingshared.ToString(uploadData["title"], processingshared.ToString(uploadData["name"], "")))
+		title, subtitle := resolvePublishLogTitleFromUploadData(uploadData, torrentID)
 		if title == "" {
 			title = strings.TrimSpace(torrentID)
 		}
 		uploadData["title"] = title
-		subtitle := strings.TrimSpace(processingshared.ToString(uploadData["subtitle"], ""))
 
 		ctxTaskID := s.newID("ctx")
 		ctx := publishworkflow.BuildContextFromDBRow(
