@@ -57,6 +57,7 @@ func (s *TorrentDataService) refreshFromDownloaders() map[string]any {
 	}
 	siteMatcher := newRefreshSiteMatcher(siteRows)
 	groupMatcher := newRefreshGroupMatcher(siteRows)
+	siteLinkRules := toSiteLinkRules(siteRows)
 
 	nowStr := time.Now().Format("2006-01-02 15:04:05")
 	hiddenDisabledCount := int64(0)
@@ -120,7 +121,7 @@ func (s *TorrentDataService) refreshFromDownloaders() map[string]any {
 			continue
 		}
 
-		records := buildSyncRecords(downloader.ID, snapshots, siteMatcher, groupMatcher)
+		records := buildSyncRecords(downloader.ID, snapshots, siteMatcher, groupMatcher, siteLinkRules)
 		syncStats, syncErr := s.repo.SyncDownloaderTorrents(downloader.ID, records, nowStr)
 		if syncErr != nil {
 			failedDownloaders++
@@ -263,6 +264,7 @@ func buildSyncRecords(
 	snapshots []downloaderclient.TorrentSnapshot,
 	siteMatcher refreshSiteMatcher,
 	groupMatcher refreshGroupMatcher,
+	siteLinkRules map[string]string,
 ) []repository.TorrentSyncRecord {
 	records := make([]repository.TorrentSyncRecord, 0, len(snapshots))
 	for _, snapshot := range snapshots {
@@ -273,6 +275,7 @@ func buildSyncRecords(
 		}
 		details := extractDetailFromComment(snapshot.Comment)
 		siteName := siteMatcher.Match(snapshot.Trackers, details, snapshot.Comment)
+		details = normalizeDetailURL(details, siteName, siteLinkRules)
 		torrentGroup := groupMatcher.Match(name, snapshot.Group)
 		records = append(records, repository.TorrentSyncRecord{
 			Hash:         hash,
@@ -290,6 +293,56 @@ func buildSyncRecords(
 		})
 	}
 	return records
+}
+
+func toSiteLinkRules(rows []repository.SiteIdentity) map[string]string {
+	result := map[string]string{}
+	for _, row := range rows {
+		nickname := strings.TrimSpace(row.Nickname)
+		baseURL := strings.TrimSpace(row.BaseURL)
+		if nickname == "" || baseURL == "" {
+			continue
+		}
+		result[nickname] = baseURL
+	}
+	return result
+}
+
+func normalizeDetailURL(details string, siteName string, siteLinkRules map[string]string) string {
+	trimmed := strings.TrimSpace(details)
+	if trimmed == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(trimmed)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		// 数字 ID / 站点自定义 comment 保持原样，交由前端根据 site_link_rules 拼接。
+		return trimmed
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed == nil {
+		return trimmed
+	}
+
+	// 清理掉历史遗留 existed=1（避免前端重复处理，且该参数无实际用途）。
+	query := parsed.Query()
+	query.Del("existed")
+	parsed.RawQuery = query.Encode()
+
+	baseURL := strings.TrimSpace(siteLinkRules[strings.TrimSpace(siteName)])
+	if baseURL == "" {
+		return parsed.String()
+	}
+
+	normalizedBase := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(baseURL, "https://"), "http://"), "/"))
+	if normalizedBase == "" {
+		return parsed.String()
+	}
+
+	parsed.Scheme = "https"
+	parsed.Host = normalizedBase
+	return parsed.String()
 }
 
 func newRefreshGroupMatcher(rows []repository.SiteIdentity) refreshGroupMatcher {
