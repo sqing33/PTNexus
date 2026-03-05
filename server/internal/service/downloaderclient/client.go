@@ -604,14 +604,67 @@ func (c *qbClient) Login() error {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("qB 登录失败: HTTP %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	if strings.TrimSpace(string(body)) != "Ok." {
-		return fmt.Errorf("qB 登录失败: %s", strings.TrimSpace(string(body)))
+	// Python 版本使用 qbittorrentapi，部分 Windows/代理环境下 auth/login 会返回 204。
+	// 这里兼容 200/204 + SID cookie 判定，避免把可用连接误判为失败。
+	loginResp := strings.TrimSpace(string(body))
+	hasSIDCookie := qbHasSIDCookie(resp, c.host, c.client.Jar)
+	if loginResp == "Ok." || loginResp == "Ok" || hasSIDCookie || (resp.StatusCode == http.StatusNoContent && loginResp == "") {
+		c.isLoggedIn = true
+		return nil
+	}
+	// 兜底：部分网关会返回非标准登录响应，但会话实际上已建立。
+	if _, err := c.Get("app/version", nil); err == nil {
+		c.isLoggedIn = true
+		return nil
+	}
+	if loginResp == "" {
+		return fmt.Errorf("qB 登录失败: 响应内容为空")
+	}
+	if strings.EqualFold(loginResp, "fails.") {
+		return fmt.Errorf("qB 登录失败: 认证失败")
+	}
+	if !hasSIDCookie {
+		return fmt.Errorf("qB 登录失败: %s", loginResp)
 	}
 	c.isLoggedIn = true
 	return nil
+}
+
+func qbHasSIDCookie(resp *http.Response, host string, jar http.CookieJar) bool {
+	if resp != nil {
+		for _, cookie := range resp.Cookies() {
+			if qbIsSessionCookie(cookie) {
+				return true
+			}
+		}
+	}
+	if jar == nil {
+		return false
+	}
+	parsed, err := url.Parse(strings.TrimSpace(host))
+	if err != nil || parsed == nil {
+		return false
+	}
+	for _, cookie := range jar.Cookies(parsed) {
+		if qbIsSessionCookie(cookie) {
+			return true
+		}
+	}
+	return false
+}
+
+func qbIsSessionCookie(cookie *http.Cookie) bool {
+	if cookie == nil {
+		return false
+	}
+	if strings.TrimSpace(cookie.Value) == "" {
+		return false
+	}
+	name := strings.ToUpper(strings.TrimSpace(cookie.Name))
+	return name == "SID" || strings.HasPrefix(name, "QBT_SID_")
 }
 
 func (c *qbClient) PostForm(endpoint string, values url.Values) ([]byte, error) {
