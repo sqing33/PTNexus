@@ -70,19 +70,112 @@ var (
 
 // isBlurayDisc 检查给定路径是否是蓝光原盘目录
 func isBlurayDisc(path string) bool {
-	// 1. 尝试查找 BDMV 目录 (通常是大写，但为了保险也检查小写)
-	bdmvPath := filepath.Join(path, "BDMV")
-	info, err := os.Stat(bdmvPath)
-	if err != nil || !info.IsDir() {
-		// 尝试小写 bdmv
-		bdmvPath = filepath.Join(path, "bdmv")
-		info, err = os.Stat(bdmvPath)
-		if err != nil || !info.IsDir() {
-			return false
+	_, ok := resolveBlurayDiscRoot(path)
+	return ok
+}
+
+var blurayDiscNumberPattern = regexp.MustCompile(`(?i)(?:disc|disk|cd|part)[ _-]*0*(\d{1,2})`)
+
+// resolveBlurayDiscRoot 解析蓝光原盘根目录。
+// 支持常见结构：
+// 1) <root>/BDMV
+// 2) <root>/<disc>/BDMV  (多盘/分卷原盘)
+func resolveBlurayDiscRoot(path string) (string, bool) {
+	root, ok := detectBlurayRoot(path)
+	if ok {
+		return root, true
+	}
+
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", false
+	}
+
+	entries, err := os.ReadDir(trimmed)
+	if err != nil {
+		return "", false
+	}
+
+	best := ""
+	bestDiscNum := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		candidate := filepath.Join(trimmed, entry.Name())
+		candidateRoot, ok := detectBlurayRoot(candidate)
+		if !ok {
+			continue
+		}
+
+		discNum := guessBlurayDiscNumber(entry.Name())
+		if best == "" {
+			best = candidateRoot
+			bestDiscNum = discNum
+			continue
+		}
+
+		// 优先选择盘号更小的（如果能解析出 disc/part/cd 的数字）。
+		if discNum > 0 && (bestDiscNum == 0 || discNum < bestDiscNum) {
+			best = candidateRoot
+			bestDiscNum = discNum
+			continue
+		}
+
+		// 同分支时保持稳定性，选字典序最小。
+		if discNum == bestDiscNum && candidateRoot < best {
+			best = candidateRoot
+			bestDiscNum = discNum
 		}
 	}
 
-	// 2. 检查 BDMV 目录下是否存在索引文件
+	if best == "" {
+		return "", false
+	}
+	return best, true
+}
+
+func detectBlurayRoot(path string) (string, bool) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", false
+	}
+
+	// 兼容：传入路径直接指向 BDMV 目录。
+	if strings.EqualFold(filepath.Base(trimmed), "BDMV") {
+		if isValidBDMVDir(trimmed) {
+			return filepath.Dir(trimmed), true
+		}
+		return "", false
+	}
+
+	bdmvDir := findBDMVDir(trimmed)
+	if bdmvDir == "" {
+		return "", false
+	}
+	if !isValidBDMVDir(bdmvDir) {
+		return "", false
+	}
+	return trimmed, true
+}
+
+func findBDMVDir(root string) string {
+	candidates := []string{
+		filepath.Join(root, "BDMV"),
+		filepath.Join(root, "bdmv"),
+	}
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		return candidate
+	}
+	return ""
+}
+
+func isValidBDMVDir(bdmvDir string) bool {
 	candidates := []string{
 		"index.bdmv", "INDEX.BDMV",
 		"index.bdm", "INDEX.BDM",
@@ -90,18 +183,30 @@ func isBlurayDisc(path string) bool {
 	}
 
 	for _, name := range candidates {
-		targetFile := filepath.Join(bdmvPath, name)
+		targetFile := filepath.Join(bdmvDir, name)
 		if _, err := os.Stat(targetFile); err == nil {
 			return true
 		}
 	}
-
 	return false
+}
+
+func guessBlurayDiscNumber(name string) int {
+	matched := blurayDiscNumberPattern.FindStringSubmatch(name)
+	if len(matched) < 2 {
+		return 0
+	}
+	value, err := strconv.Atoi(matched[1])
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
 }
 
 // extractBDInfoWithProgress 提取蓝光原盘的BDInfo信息（带进度监控）
 func extractBDInfoWithProgress(blurayPath string, taskID string, callbackURL string) (string, error) {
-	if !isBlurayDisc(blurayPath) {
+	resolvedRoot, ok := resolveBlurayDiscRoot(blurayPath)
+	if !ok {
 		return "", fmt.Errorf("路径不是有效的蓝光原盘目录: %s", blurayPath)
 	}
 
@@ -113,7 +218,7 @@ func extractBDInfoWithProgress(blurayPath string, taskID string, callbackURL str
 	defer os.Remove(tempFile.Name())
 
 	bdinfoPath := "./bdinfo/BDInfo"
-	args := []string{"-p", blurayPath, "-o", tempFile.Name(), "-m"}
+	args := []string{"-p", resolvedRoot, "-o", tempFile.Name(), "-m"}
 
 	fmt.Printf("开始执行 BDInfo 命令（带进度监控）: %s %v\n", bdinfoPath, args)
 
