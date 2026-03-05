@@ -161,10 +161,10 @@ type UploadLimitBatchRequest struct {
 }
 
 type UploadLimitResult struct {
-	DownloaderID   string   `json:"downloader_id"`
-		AppliedGroups   int      `json:"applied_groups"`
-		AppliedTorrents int      `json:"applied_torrents"`
-	Errors         []string `json:"errors"`
+	DownloaderID    string   `json:"downloader_id"`
+	AppliedGroups   int      `json:"applied_groups"`
+	AppliedTorrents int      `json:"applied_torrents"`
+	Errors          []string `json:"errors"`
 }
 
 type UploadLimitBatchResponse struct {
@@ -176,6 +176,8 @@ type SubtitleEvent struct {
 	StartTime float64
 	EndTime   float64
 }
+
+var isoMountMutex sync.Mutex
 
 // ======================= 辅助函数 (无变动) =======================
 
@@ -189,6 +191,73 @@ func normalizePath(path string) string {
 		normalized = strings.ReplaceAll(normalized, "//", "/")
 	}
 	return normalized
+}
+
+func isISOFileInput(path string) bool {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return false
+	}
+	return strings.EqualFold(filepath.Ext(trimmed), ".iso")
+}
+
+func withMountedISOIfNeeded(inputPath string, scene string, fn func(resolvedPath string) error) (retErr error) {
+	normalizedPath := normalizePath(inputPath)
+	if !isISOFileInput(normalizedPath) {
+		return fn(normalizedPath)
+	}
+
+	fileInfo, err := os.Stat(normalizedPath)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("ISO文件不存在: %s", normalizedPath)
+	}
+	if err != nil {
+		return fmt.Errorf("访问ISO文件失败: %v", err)
+	}
+	if fileInfo.IsDir() {
+		return fmt.Errorf("ISO路径必须是文件: %s", normalizedPath)
+	}
+
+	isoMountMutex.Lock()
+	defer isoMountMutex.Unlock()
+
+	mountDir, err := os.MkdirTemp("", "ptnexus-iso-*")
+	if err != nil {
+		return fmt.Errorf("创建ISO挂载目录失败: %v", err)
+	}
+
+	mountStartedAt := time.Now()
+	_, err = executeCommand("mount", "-o", "loop,ro,nosuid,nodev,noexec", normalizedPath, mountDir)
+	if err != nil {
+		_ = os.RemoveAll(mountDir)
+		return fmt.Errorf("ISO挂载失败（需要 root/CAP_SYS_ADMIN）: %v", err)
+	}
+	log.Printf("%s: ISO挂载成功 iso=%s mount_dir=%s 耗时=%s", scene, normalizedPath, mountDir, time.Since(mountStartedAt).Round(time.Millisecond))
+
+	defer func() {
+		umountStartedAt := time.Now()
+		_, umountErr := executeCommand("umount", mountDir)
+		if umountErr != nil {
+			cleanupErr := fmt.Errorf("ISO卸载失败（请检查占用句柄）: %v", umountErr)
+			log.Printf("%s: ISO卸载失败 iso=%s mount_dir=%s err=%v", scene, normalizedPath, mountDir, umountErr)
+			if retErr != nil {
+				retErr = fmt.Errorf("%v；%v", retErr, cleanupErr)
+			} else {
+				retErr = cleanupErr
+			}
+		} else {
+			log.Printf("%s: ISO卸载成功 iso=%s mount_dir=%s 耗时=%s", scene, normalizedPath, mountDir, time.Since(umountStartedAt).Round(time.Millisecond))
+		}
+
+		if err := os.RemoveAll(mountDir); err != nil {
+			log.Printf("%s: 清理ISO挂载目录失败 mount_dir=%s err=%v", scene, mountDir, err)
+			if retErr == nil {
+				retErr = fmt.Errorf("清理ISO挂载目录失败: %v", err)
+			}
+		}
+	}()
+
+	return fn(mountDir)
 }
 
 func newQBHTTPClient(baseURL string) (*qbHTTPClient, error) {
@@ -1592,155 +1661,174 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	videoPath, err := findTargetVideoFile(initialPath, reqData.ContentName)
-	if err != nil {
-		writeJSONResponse(w, r, http.StatusBadRequest, ScreenshotResponse{Success: false, Message: err.Error()})
-		return
-	}
+	statusCode := http.StatusOK
+	response := ScreenshotResponse{}
 
-	duration, err := getVideoDuration(videoPath)
-	if err != nil {
-		writeJSONResponse(w, r, http.StatusInternalServerError, ScreenshotResponse{Success: false, Message: "获取视频时长失败: " + err.Error()})
-		return
-	}
-
-	chineseSubtitleSID, subtitleGlobalIndex, subtitleCodec, err := findBestChineseSubtitleStream(videoPath)
-	var subtitleSID int = 0
-	var subtitleIndex int = -1
-	if err != nil {
-		log.Printf("警告: 探测中文字幕流时发生错误: %v", err)
-	}
-
-	if chineseSubtitleSID > 0 {
-		subtitleSID = chineseSubtitleSID
-		subtitleIndex = subtitleGlobalIndex
-		log.Printf("   ✅ 找到中文字幕，将挂载字幕截图并使用该字幕流扫描时间点")
-	} else {
-		log.Printf("   ℹ️ 未找到中文字幕，将尝试查找任意字幕流用于智能扫描时间点（不挂载字幕）")
-		fallbackIndex, fallbackCodec, fallbackErr := findFirstSubtitleStream(videoPath)
-		if fallbackErr == nil && fallbackIndex >= 0 {
-			subtitleIndex = fallbackIndex
-			subtitleCodec = fallbackCodec
-			log.Printf("   ✅ 找到兜底字幕流 (索引: %d, 格式: %s) 用于智能扫描", subtitleIndex, subtitleCodec)
+	err := withMountedISOIfNeeded(initialPath, "截图请求", func(resolvedPath string) error {
+		videoPath, err := findTargetVideoFile(resolvedPath, reqData.ContentName)
+		if err != nil {
+			statusCode = http.StatusBadRequest
+			response = ScreenshotResponse{Success: false, Message: err.Error()}
+			return err
 		}
-	}
 
-	screenshotPoints := make([]float64, 0, 5)
-	var subtitleEvents []SubtitleEvent
-	const numScreenshots = 5
-	if subtitleIndex >= 0 {
-		if subtitleCodec == "subrip" || subtitleCodec == "ass" {
-			subtitleEvents, err = findSubtitleEvents(videoPath, subtitleIndex, duration)
-		} else if subtitleCodec == "hdmv_pgs_subtitle" {
-			subtitleEvents, err = findSubtitleEventsForPGS(videoPath, subtitleIndex, duration)
+		duration, err := getVideoDuration(videoPath)
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			response = ScreenshotResponse{Success: false, Message: "获取视频时长失败: " + err.Error()}
+			return err
+		}
+
+		chineseSubtitleSID, subtitleGlobalIndex, subtitleCodec, err := findBestChineseSubtitleStream(videoPath)
+		subtitleSID := 0
+		subtitleIndex := -1
+		if err != nil {
+			log.Printf("警告: 探测中文字幕流时发生错误: %v", err)
+		}
+
+		if chineseSubtitleSID > 0 {
+			subtitleSID = chineseSubtitleSID
+			subtitleIndex = subtitleGlobalIndex
+			log.Printf("   ✅ 找到中文字幕，将挂载字幕截图并使用该字幕流扫描时间点")
 		} else {
-			err = fmt.Errorf("不支持的字幕格式 '%s' 用于智能截图", subtitleCodec)
-		}
-	}
-	if err == nil && subtitleEvents != nil && len(subtitleEvents) >= numScreenshots {
-		log.Printf("智能截图模式启动：找到 %d 个有效字幕事件/时间段。", len(subtitleEvents))
-		rand.Seed(time.Now().UnixNano())
-		goldenStartTime := duration * 0.30
-		goldenEndTime := duration * 0.80
-		var goldenEvents []SubtitleEvent
-		for _, event := range subtitleEvents {
-			if event.StartTime >= goldenStartTime && event.EndTime <= goldenEndTime {
-				goldenEvents = append(goldenEvents, event)
+			log.Printf("   ℹ️ 未找到中文字幕，将尝试查找任意字幕流用于智能扫描时间点（不挂载字幕）")
+			fallbackIndex, fallbackCodec, fallbackErr := findFirstSubtitleStream(videoPath)
+			if fallbackErr == nil && fallbackIndex >= 0 {
+				subtitleIndex = fallbackIndex
+				subtitleCodec = fallbackCodec
+				log.Printf("   ✅ 找到兜底字幕流 (索引: %d, 格式: %s) 用于智能扫描", subtitleIndex, subtitleCodec)
 			}
 		}
-		log.Printf("   -> 在视频中部 (%.2fs - %.2fs) 找到 %d 个“黄金”字幕事件。", goldenStartTime, goldenEndTime, len(goldenEvents))
-		targetEvents := goldenEvents
-		if len(targetEvents) < numScreenshots {
-			log.Printf("   -> “黄金”字幕数量不足，将从所有字幕事件中随机选择。")
-			targetEvents = subtitleEvents
-		}
-		if len(targetEvents) > 0 {
-			sort.Slice(targetEvents, func(i, j int) bool {
-				return targetEvents[i].StartTime < targetEvents[j].StartTime
-			})
-			chosenEvents := selectWellDistributedEvents(targetEvents, numScreenshots)
-			for i, event := range chosenEvents {
-				durationOfEvent := event.EndTime - event.StartTime
-				randomOffset := durationOfEvent*0.1 + rand.Float64()*(durationOfEvent*0.8)
-				randomPoint := event.StartTime + randomOffset
-				screenshotPoints = append(screenshotPoints, randomPoint)
-				log.Printf("   -> 选中时间段 [%.2fs - %.2fs], 截图点: %.2fs (第%d张)", event.StartTime, event.EndTime, randomPoint, i+1)
+
+		screenshotPoints := make([]float64, 0, 5)
+		var subtitleEvents []SubtitleEvent
+		const numScreenshots = 5
+		if subtitleIndex >= 0 {
+			if subtitleCodec == "subrip" || subtitleCodec == "ass" {
+				subtitleEvents, err = findSubtitleEvents(videoPath, subtitleIndex, duration)
+			} else if subtitleCodec == "hdmv_pgs_subtitle" {
+				subtitleEvents, err = findSubtitleEventsForPGS(videoPath, subtitleIndex, duration)
+			} else {
+				err = fmt.Errorf("不支持的字幕格式 '%s' 用于智能截图", subtitleCodec)
 			}
 		}
-	}
-	if len(screenshotPoints) < numScreenshots {
+		if err == nil && subtitleEvents != nil && len(subtitleEvents) >= numScreenshots {
+			log.Printf("智能截图模式启动：找到 %d 个有效字幕事件/时间段。", len(subtitleEvents))
+			rand.Seed(time.Now().UnixNano())
+			goldenStartTime := duration * 0.30
+			goldenEndTime := duration * 0.80
+			var goldenEvents []SubtitleEvent
+			for _, event := range subtitleEvents {
+				if event.StartTime >= goldenStartTime && event.EndTime <= goldenEndTime {
+					goldenEvents = append(goldenEvents, event)
+				}
+			}
+			log.Printf("   -> 在视频中部 (%.2fs - %.2fs) 找到 %d 个“黄金”字幕事件。", goldenStartTime, goldenEndTime, len(goldenEvents))
+			targetEvents := goldenEvents
+			if len(targetEvents) < numScreenshots {
+				log.Printf("   -> “黄金”字幕数量不足，将从所有字幕事件中随机选择。")
+				targetEvents = subtitleEvents
+			}
+			if len(targetEvents) > 0 {
+				sort.Slice(targetEvents, func(i, j int) bool {
+					return targetEvents[i].StartTime < targetEvents[j].StartTime
+				})
+				chosenEvents := selectWellDistributedEvents(targetEvents, numScreenshots)
+				for i, event := range chosenEvents {
+					durationOfEvent := event.EndTime - event.StartTime
+					randomOffset := durationOfEvent*0.1 + rand.Float64()*(durationOfEvent*0.8)
+					randomPoint := event.StartTime + randomOffset
+					screenshotPoints = append(screenshotPoints, randomPoint)
+					log.Printf("   -> 选中时间段 [%.2fs - %.2fs], 截图点: %.2fs (第%d张)", event.StartTime, event.EndTime, randomPoint, i+1)
+				}
+			}
+		}
+		if len(screenshotPoints) < numScreenshots {
+			if err != nil {
+				log.Printf("警告: 智能截图失败，回退到按百分比截图。原因: %v", err)
+			} else {
+				log.Printf("警告: 有效字幕数量不足，回退到按百分比截图。")
+			}
+			percentages := []float64{0.15, 0.30, 0.50, 0.70, 0.85}
+			screenshotPoints = make([]float64, 0, len(percentages))
+			for _, p := range percentages {
+				screenshotPoints = append(screenshotPoints, duration*p)
+			}
+		}
+
+		tempDir, err := os.MkdirTemp("", "screenshots-*")
 		if err != nil {
-			log.Printf("警告: 智能截图失败，回退到按百分比截图。原因: %v", err)
-		} else {
-			log.Printf("警告: 有效字幕数量不足，回退到按百分比截图。")
+			statusCode = http.StatusInternalServerError
+			response = ScreenshotResponse{Success: false, Message: "创建临时目录失败: " + err.Error()}
+			return err
 		}
-		percentages := []float64{0.15, 0.30, 0.50, 0.70, 0.85}
-		screenshotPoints = make([]float64, 0, len(percentages))
-		for _, p := range percentages {
-			screenshotPoints = append(screenshotPoints, duration*p)
-		}
-	}
+		defer os.RemoveAll(tempDir)
 
-	tempDir, err := os.MkdirTemp("", "screenshots-*")
-	if err != nil {
-		writeJSONResponse(w, r, http.StatusInternalServerError, ScreenshotResponse{Success: false, Message: "创建临时目录失败: " + err.Error()})
-		return
-	}
-	defer os.RemoveAll(tempDir)
+		var uploadedURLs []string
 
-	var uploadedURLs []string
+		for i, point := range screenshotPoints {
+			log.Printf("开始处理第 %d/%d 张截图...", i+1, len(screenshotPoints))
+			totalSeconds := int(point)
+			hours, minutes, seconds := totalSeconds/3600, (totalSeconds%3600)/60, totalSeconds%60
+			timeStr := fmt.Sprintf("%02dh%02dm%02ds", hours, minutes, seconds)
+			fileName := fmt.Sprintf("s%d_%s.png", i+1, timeStr)
+			intermediatePngPath := filepath.Join(tempDir, "raw_"+fileName)
+			finalPngPath := filepath.Join(tempDir, fileName)
 
-	for i, point := range screenshotPoints {
-		log.Printf("开始处理第 %d/%d 张截图...", i+1, len(screenshotPoints))
-		totalSeconds := int(point)
-		hours, minutes, seconds := totalSeconds/3600, (totalSeconds%3600)/60, totalSeconds%60
-		timeStr := fmt.Sprintf("%02dh%02dm%02ds", hours, minutes, seconds)
-		fileName := fmt.Sprintf("s%d_%s.png", i+1, timeStr)
-		intermediatePngPath := filepath.Join(tempDir, "raw_"+fileName)
-		finalPngPath := filepath.Join(tempDir, fileName)
+			if err := takeScreenshot(videoPath, intermediatePngPath, point, subtitleSID); err != nil {
+				log.Printf("错误: 第 %d 张图截图失败: %v。跳过此图。", i+1, err)
+				continue
+			}
 
-		if err := takeScreenshot(videoPath, intermediatePngPath, point, subtitleSID); err != nil {
-			log.Printf("错误: 第 %d 张图截图失败: %v。跳过此图。", i+1, err)
-			continue
-		}
+			if err := convertPngToOptimizedPng(intermediatePngPath, finalPngPath); err != nil {
+				log.Printf("错误: 第 %d 张图PNG压缩失败: %v。跳过此图。", i+1, err)
+				continue
+			}
 
-		// 步骤2: PNG压缩
-		if err := convertPngToOptimizedPng(intermediatePngPath, finalPngPath); err != nil {
-			log.Printf("错误: 第 %d 张图PNG压缩失败: %v。跳过此图。", i+1, err)
-			continue // 跳到下一张图
+			showURL, err := uploadToPixhost(finalPngPath)
+			if err != nil {
+				log.Printf("错误: 第 %d 张图上传失败: %v。跳过此图。", i+1, err)
+				continue
+			}
+
+			directURL := strings.Replace(showURL, "https://pixhost.to/show/", "https://img2.pixhost.to/images/", 1)
+			uploadedURLs = append(uploadedURLs, directURL)
+			log.Printf("✅ 第 %d/%d 张截图处理成功: %s", i+1, len(screenshotPoints), fileName)
 		}
 
-		// 步骤3: 上传
-		showURL, err := uploadToPixhost(finalPngPath)
-		if err != nil {
-			log.Printf("错误: 第 %d 张图上传失败: %v。跳过此图。", i+1, err)
-			continue // 跳到下一张图
+		if len(uploadedURLs) == 0 {
+			msg := "所有截图处理均失败，请检查日志获取详细信息。"
+			log.Println(msg)
+			statusCode = http.StatusInternalServerError
+			response = ScreenshotResponse{Success: false, Message: msg}
+			return fmt.Errorf("%s", msg)
 		}
 
-		directURL := strings.Replace(showURL, "https://pixhost.to/show/", "https://img2.pixhost.to/images/", 1)
-		uploadedURLs = append(uploadedURLs, directURL)
-		log.Printf("✅ 第 %d/%d 张截图处理成功: %s", i+1, len(screenshotPoints), fileName)
-	}
+		sort.Strings(uploadedURLs)
+		var bbcodeBuilder strings.Builder
+		for _, url := range uploadedURLs {
+			bbcodeBuilder.WriteString(fmt.Sprintf("[img]%s[/img]\n", url))
+		}
 
-	// [核心修改] 最终响应逻辑
-	if len(uploadedURLs) == 0 {
-		msg := "所有截图处理均失败，请检查日志获取详细信息。"
-		log.Println(msg)
-		writeJSONResponse(w, r, http.StatusInternalServerError, ScreenshotResponse{Success: false, Message: msg})
-		return
-	}
-
-	sort.Strings(uploadedURLs)
-	var bbcodeBuilder strings.Builder
-	for _, url := range uploadedURLs {
-		bbcodeBuilder.WriteString(fmt.Sprintf("[img]%s[/img]\n", url))
-	}
-
-	successMsg := fmt.Sprintf("成功上传 %d/%d 张截图", len(uploadedURLs), numScreenshots)
-	log.Println(successMsg)
-	writeJSONResponse(w, r, http.StatusOK, ScreenshotResponse{
-		Success: true, Message: successMsg, BBCode: strings.TrimSpace(bbcodeBuilder.String()),
+		successMsg := fmt.Sprintf("成功上传 %d/%d 张截图", len(uploadedURLs), numScreenshots)
+		log.Println(successMsg)
+		response = ScreenshotResponse{
+			Success: true,
+			Message: successMsg,
+			BBCode:  strings.TrimSpace(bbcodeBuilder.String()),
+		}
+		return nil
 	})
+	if err != nil {
+		if statusCode == http.StatusOK || response.Success {
+			statusCode = http.StatusInternalServerError
+			response = ScreenshotResponse{Success: false, Message: err.Error()}
+		}
+		writeJSONResponse(w, r, statusCode, response)
+		return
+	}
+
+	writeJSONResponse(w, r, statusCode, response)
 }
 func mediainfoHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1757,33 +1845,57 @@ func mediainfoHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, r, http.StatusBadRequest, MediaInfoResponse{Success: false, Message: "remote_path 不能为空"})
 		return
 	}
+
 	log.Printf("MediaInfo请求: 开始处理路径 '%s'", initialPath)
-	if isBlurayDisc(initialPath) {
-		log.Printf("MediaInfo请求: 检测到蓝光原盘目录，返回 is_bdmv=true 由控制端决定后续操作: %s", initialPath)
-		writeJSONResponse(w, r, http.StatusOK, MediaInfoResponse{
-			Success: true,
-			Message: "检测到蓝光原盘",
-			IsBDMV:  true,
-		})
-		return
-	}
-	videoPath, err := findTargetVideoFile(initialPath, reqData.ContentName)
-	if err != nil {
-		log.Printf("MediaInfo请求: 查找视频文件失败: %v", err)
-		writeJSONResponse(w, r, http.StatusBadRequest, MediaInfoResponse{Success: false, Message: err.Error()})
-		return
-	}
-	log.Printf("正在获取 MediaInfo: %s", videoPath)
-	mediaInfoText, err := executeCommandWithTimeout(10*time.Minute, "mediainfo", "--Output=text", videoPath)
-	if err != nil {
-		log.Printf("MediaInfo请求: mediainfo命令执行失败: %v", err)
-		writeJSONResponse(w, r, http.StatusInternalServerError, MediaInfoResponse{Success: false, Message: "获取 MediaInfo 失败: " + err.Error()})
-		return
-	}
-	log.Printf("MediaInfo请求: 成功获取MediaInfo，长度: %d 字节", len(mediaInfoText))
-	writeJSONResponse(w, r, http.StatusOK, MediaInfoResponse{
-		Success: true, Message: "MediaInfo 获取成功", MediaInfo: strings.TrimSpace(mediaInfoText),
+
+	statusCode := http.StatusOK
+	response := MediaInfoResponse{}
+	err := withMountedISOIfNeeded(initialPath, "MediaInfo请求", func(resolvedPath string) error {
+		log.Printf("MediaInfo请求: 实际处理路径 '%s'", resolvedPath)
+		if isBlurayDisc(resolvedPath) {
+			log.Printf("MediaInfo请求: 检测到蓝光原盘目录，返回 is_bdmv=true 由控制端决定后续操作: %s", resolvedPath)
+			response = MediaInfoResponse{
+				Success: true,
+				Message: "检测到蓝光原盘",
+				IsBDMV:  true,
+			}
+			return nil
+		}
+
+		videoPath, innerErr := findTargetVideoFile(resolvedPath, reqData.ContentName)
+		if innerErr != nil {
+			log.Printf("MediaInfo请求: 查找视频文件失败: %v", innerErr)
+			statusCode = http.StatusBadRequest
+			response = MediaInfoResponse{Success: false, Message: innerErr.Error()}
+			return innerErr
+		}
+
+		log.Printf("正在获取 MediaInfo: %s", videoPath)
+		mediaInfoText, innerErr := executeCommandWithTimeout(10*time.Minute, "mediainfo", "--Output=text", videoPath)
+		if innerErr != nil {
+			log.Printf("MediaInfo请求: mediainfo命令执行失败: %v", innerErr)
+			statusCode = http.StatusInternalServerError
+			response = MediaInfoResponse{Success: false, Message: "获取 MediaInfo 失败: " + innerErr.Error()}
+			return innerErr
+		}
+
+		log.Printf("MediaInfo请求: 成功获取MediaInfo，长度: %d 字节", len(mediaInfoText))
+		response = MediaInfoResponse{
+			Success:   true,
+			Message:   "MediaInfo 获取成功",
+			MediaInfo: strings.TrimSpace(mediaInfoText),
+		}
+		return nil
 	})
+	if err != nil {
+		if statusCode == http.StatusOK || response.Success {
+			statusCode = http.StatusInternalServerError
+			response = MediaInfoResponse{Success: false, Message: err.Error()}
+		}
+		writeJSONResponse(w, r, statusCode, response)
+		return
+	}
+	writeJSONResponse(w, r, statusCode, response)
 }
 func fileCheckHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

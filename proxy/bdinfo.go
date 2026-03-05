@@ -205,49 +205,56 @@ func guessBlurayDiscNumber(name string) int {
 
 // extractBDInfoWithProgress 提取蓝光原盘的BDInfo信息（带进度监控）
 func extractBDInfoWithProgress(blurayPath string, taskID string, callbackURL string) (string, error) {
-	resolvedRoot, ok := resolveBlurayDiscRoot(blurayPath)
-	if !ok {
-		return "", fmt.Errorf("路径不是有效的蓝光原盘目录: %s", blurayPath)
-	}
+	processedContent := ""
+	err := withMountedISOIfNeeded(blurayPath, "BDInfo请求", func(resolvedPath string) error {
+		resolvedRoot, ok := resolveBlurayDiscRoot(resolvedPath)
+		if !ok {
+			return fmt.Errorf("路径不是有效的蓝光原盘目录: %s", blurayPath)
+		}
 
-	tempFile, err := os.CreateTemp("", "bdinfo-*.txt")
+		tempFile, err := os.CreateTemp("", "bdinfo-*.txt")
+		if err != nil {
+			return fmt.Errorf("创建临时文件失败: %v", err)
+		}
+		tempFile.Close()
+		defer os.Remove(tempFile.Name())
+
+		bdinfoPath := "./bdinfo/BDInfo"
+		args := []string{"-p", resolvedRoot, "-o", tempFile.Name(), "-m"}
+
+		fmt.Printf("开始执行 BDInfo 命令（带进度监控）: %s %v\n", bdinfoPath, args)
+
+		err = executeBDInfoWithProgressMonitoring(bdinfoPath, args, taskID, callbackURL)
+		if err != nil {
+			return fmt.Errorf("BDInfo执行失败: %v", err)
+		}
+
+		content, err := os.ReadFile(tempFile.Name())
+		if err != nil {
+			return fmt.Errorf("读取BDInfo输出文件失败: %v", err)
+		}
+
+		bdinfoContent := string(content)
+		if bdinfoContent == "" {
+			return fmt.Errorf("BDInfo生成的内容为空")
+		}
+
+		fmt.Printf("BDInfo 原始提取完成，内容长度: %d 字节\n", len(bdinfoContent))
+
+		processedContent, err = ProcessBDInfo(tempFile.Name())
+		if err != nil {
+			fmt.Printf("BDInfoDataSubstractor 处理失败，使用原始内容: %v\n", err)
+			processedContent = filterEmptyLines(bdinfoContent)
+		} else {
+			fmt.Printf("BDInfoDataSubstractor 处理成功，处理后内容长度: %d 字节\n", len(processedContent))
+		}
+
+		fmt.Printf("BDInfo 完整处理完成，最终内容长度: %d 字节\n", len(processedContent))
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("创建临时文件失败: %v", err)
+		return "", err
 	}
-	tempFile.Close()
-	defer os.Remove(tempFile.Name())
-
-	bdinfoPath := "./bdinfo/BDInfo"
-	args := []string{"-p", resolvedRoot, "-o", tempFile.Name(), "-m"}
-
-	fmt.Printf("开始执行 BDInfo 命令（带进度监控）: %s %v\n", bdinfoPath, args)
-
-	err = executeBDInfoWithProgressMonitoring(bdinfoPath, args, taskID, callbackURL)
-	if err != nil {
-		return "", fmt.Errorf("BDInfo执行失败: %v", err)
-	}
-
-	content, err := os.ReadFile(tempFile.Name())
-	if err != nil {
-		return "", fmt.Errorf("读取BDInfo输出文件失败: %v", err)
-	}
-
-	bdinfoContent := string(content)
-	if bdinfoContent == "" {
-		return "", fmt.Errorf("BDInfo生成的内容为空")
-	}
-
-	fmt.Printf("BDInfo 原始提取完成，内容长度: %d 字节\n", len(bdinfoContent))
-
-	processedContent, err := ProcessBDInfo(tempFile.Name())
-	if err != nil {
-		fmt.Printf("BDInfoDataSubstractor 处理失败，使用原始内容: %v\n", err)
-		processedContent = filterEmptyLines(bdinfoContent)
-	} else {
-		fmt.Printf("BDInfoDataSubstractor 处理成功，处理后内容长度: %d 字节\n", len(processedContent))
-	}
-
-	fmt.Printf("BDInfo 完整处理完成，最终内容长度: %d 字节\n", len(processedContent))
 	return processedContent, nil
 }
 

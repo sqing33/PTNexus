@@ -187,6 +187,30 @@ count_non_empty() {
   printf '%s\n' "$data" | awk 'NF{c++} END{print c+0}'
 }
 
+trim_text() {
+  local text="$1"
+  printf '%s' "$text" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
+}
+
+split_title_action_subject() {
+  local raw
+  raw="$(trim_text "${1:-}")"
+  if [[ -z "$raw" ]]; then
+    printf '\t\n'
+    return 0
+  fi
+
+  if [[ "$raw" =~ ^(修复|新增|优化|修改|合并)[：:][[:space:]]*(.+)$ ]]; then
+    local action subject
+    action="$(trim_text "${BASH_REMATCH[1]}")"
+    subject="$(trim_text "${BASH_REMATCH[2]}")"
+    printf '%s\t%s\n' "$action" "$subject"
+    return 0
+  fi
+
+  printf '\t%s\n' "$raw"
+}
+
 build_subject() {
   local files="$1"
   local count
@@ -197,27 +221,20 @@ build_subject() {
     return 0
   fi
 
-  local first_file
+  local first_file second_file
   first_file="$(printf '%s\n' "$files" | awk 'NF{print; exit}')"
+  second_file="$(printf '%s\n' "$files" | awk 'NF{if (++n==2){print; exit}}')"
+
   if [[ "$count" -eq 1 ]]; then
-    echo "调整 ${first_file} 相关逻辑"
+    echo "调整 ${first_file} 的实现"
     return 0
   fi
 
-  local modules m1 m2
-  modules="$(printf '%s\n' "$files" | awk -F/ 'NF{print $1}' | awk '!seen[$0]++')"
-  m1="$(printf '%s\n' "$modules" | awk 'NF{print; exit}')"
-  m2="$(printf '%s\n' "$modules" | awk 'NF{if (++n==2){print; exit}}')"
-
-  if [[ -n "$m1" && -n "$m2" && "$m1" != "$m2" ]]; then
-    echo "更新 ${m1} 与 ${m2} 相关改动"
+  if [[ -n "$first_file" && -n "$second_file" ]]; then
+    echo "调整 ${first_file} 与 ${second_file} 的实现"
     return 0
   fi
-  if [[ -n "$m1" ]]; then
-    echo "更新 ${m1} 模块相关改动"
-    return 0
-  fi
-  echo "更新 ${count} 处文件改动"
+  echo "调整代码实现"
 }
 
 detect_action() {
@@ -254,16 +271,32 @@ title_parts() {
   local base_branch="$2"
   local source_branch="$3"
   local range files statuses count action subject
+  local latest_title title_action title_subject
 
   range="${base_branch}...${source_branch}"
   files="$(git -C "$common_root" diff --name-only "$range" || true)"
   statuses="$(git -C "$common_root" diff --name-status "$range" || true)"
   count="$(count_non_empty "$files")"
-  subject="$(build_subject "$files")"
-  if [[ "$count" -eq 0 ]]; then
-    subject="同步 ${source_branch} 到 ${base_branch}"
-  fi
   action="$(detect_action "$common_root" "$range" "$statuses" "$count")"
+
+  latest_title="$(git -C "$common_root" log --format=%s --no-decorate "${base_branch}..${source_branch}" | awk 'NF{print; exit}' || true)"
+  if [[ -n "$latest_title" ]]; then
+    IFS=$'\t' read -r title_action title_subject <<<"$(split_title_action_subject "$latest_title")"
+    if [[ -n "$title_subject" ]]; then
+      subject="$title_subject"
+      if [[ -n "$title_action" ]]; then
+        action="$title_action"
+      fi
+    fi
+  fi
+
+  if [[ -z "${subject:-}" ]]; then
+    subject="$(build_subject "$files")"
+    if [[ "$count" -eq 0 ]]; then
+      subject="同步 ${source_branch} 到 ${base_branch}"
+    fi
+  fi
+
   printf '%s\t%s\t%s\n' "$action" "$subject" "$count"
 }
 
@@ -296,17 +329,76 @@ build_message_candidates() {
   local common_root="$1"
   local base_branch="$2"
   local source_branch="$3"
-  local action subject count rec alt1 alt2 reason
+  local range files action subject count rec alt1 alt2 reason
+  local scope_hint title_action title_subject
+  local -a options=()
 
   IFS=$'\t' read -r action subject count <<<"$(title_parts "$common_root" "$base_branch" "$source_branch")"
+  range="${base_branch}...${source_branch}"
+  files="$(git -C "$common_root" diff --name-only "$range" || true)"
+
   rec="${action}：${subject}"
-  alt1="${action}：处理 ${count} 处文件改动"
-  if [[ "$action" == "修改" ]]; then
-    alt2="优化：${subject}"
-  else
-    alt2="修改：${subject}"
+  options+=("$rec")
+
+  while IFS= read -r raw_title; do
+    [[ -n "$raw_title" ]] || continue
+    IFS=$'\t' read -r title_action title_subject <<<"$(split_title_action_subject "$raw_title")"
+    [[ -n "$title_subject" ]] || continue
+    if [[ -z "$title_action" ]]; then
+      title_action="$action"
+    fi
+    local candidate
+    candidate="${title_action}：${title_subject}"
+    local existed=0
+    local item
+    for item in "${options[@]}"; do
+      if [[ "$item" == "$candidate" ]]; then
+        existed=1
+        break
+      fi
+    done
+    if [[ "$existed" -eq 0 ]]; then
+      options+=("$candidate")
+    fi
+  done < <(git -C "$common_root" log --format=%s --no-decorate "${base_branch}..${source_branch}" | awk 'NF' | awk '!seen[$0]++')
+
+  if [[ "$count" -gt 0 ]]; then
+    local first_file second_file
+    first_file="$(printf '%s\n' "$files" | awk 'NF{print; exit}')"
+    second_file="$(printf '%s\n' "$files" | awk 'NF{if (++n==2){print; exit}}')"
+    if [[ "$count" -eq 1 && -n "$first_file" ]]; then
+      scope_hint="$first_file"
+    elif [[ "$count" -ge 2 && -n "$first_file" && -n "$second_file" ]]; then
+      scope_hint="$first_file 与 $second_file"
+    elif [[ -n "$first_file" ]]; then
+      scope_hint="$first_file"
+    fi
   fi
-  reason="根据 ${count} 个文件改动和 diff 关键词判断，动作词使用「${action}」。"
+  if [[ -z "${scope_hint:-}" ]]; then
+    scope_hint="当前改动范围"
+  fi
+
+  if [[ "${#options[@]}" -lt 2 ]]; then
+    options+=("${action}：${subject}（覆盖 ${scope_hint}）")
+  fi
+
+  if [[ "${#options[@]}" -lt 3 ]]; then
+    local alt_action
+    if [[ "$action" == "修改" ]]; then
+      alt_action="优化"
+    else
+      alt_action="修改"
+    fi
+    alt2="${alt_action}：${subject}（覆盖 ${scope_hint}）"
+    if [[ "$alt2" == "${options[0]}" || "$alt2" == "${options[1]}" ]]; then
+      alt2="${alt_action}：${subject}（覆盖 ${scope_hint}，含兼容处理）"
+    fi
+    options+=("$alt2")
+  fi
+
+  alt1="${options[1]}"
+  alt2="${options[2]}"
+  reason="优先使用来源分支已提交的标题生成候选，并附带明确改动范围。"
   printf '%s\t%s\t%s\t%s\n' "$rec" "$alt1" "$alt2" "$reason"
 }
 
