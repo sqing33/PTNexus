@@ -150,17 +150,16 @@ PY
 
 # Build bundles.
 ARTIFACTS_JSONL="$(mktemp)"
-trap 'rm -f "$ARTIFACTS_JSONL"' EXIT
+BUILD_BIN_DIR="$(mktemp -d)"
+trap 'rm -f "$ARTIFACTS_JSONL"; rm -rf "$BUILD_BIN_DIR"' EXIT
 
 for arch in $ARCHES; do
-  bin_src="${REPO_ROOT}/server/server-${arch}"
+  bin_src="${BUILD_BIN_DIR}/server-${arch}"
+
+  build_server_bin "$arch" "$bin_src" || true
 
   if [ ! -f "$bin_src" ]; then
-    build_server_bin "$arch" "server-${arch}" || true
-  fi
-
-  if [ ! -f "$bin_src" ]; then
-    echo "[update/build] Missing server binary: $bin_src (skip ${OS_NAME}/${arch})" >&2
+    echo "[update/build] Missing built server binary: $bin_src (skip ${OS_NAME}/${arch})" >&2
     continue
   fi
 

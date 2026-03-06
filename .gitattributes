@@ -1,8 +1,6 @@
 # Prerequisite (must run once per local repo):
 #   git config merge.ours.driver true
 # Generated binary artifacts: keep target-branch version on merge conflicts.
-server/server-amd64 -text -diff merge=ours
-server/server-arm64 -text -diff merge=ours
 updater/updater -text -diff merge=ours
 proxy/pt-nexus-box-proxy -text -diff merge=ours
 proxy/pt-nexus-box-proxy-amd64 -text -diff merge=ours

@@ -1,8 +1,4 @@
-# Go build artifacts
-*.exe
-*.dll
-*.so
-*.dylib
+# Go test / coverage artifacts
 *.test
 *.out
 coverage/
@@ -10,6 +6,8 @@ coverage.out
 
 # Local build outputs
 server
+server-amd64
+server-arm64
 
 # Go workspace/vendor (optional)
 go.work

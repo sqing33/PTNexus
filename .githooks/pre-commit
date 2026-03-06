@@ -105,16 +105,11 @@ else
     echo -e "${CYAN}⏭️  'updater' 目录无变更，跳过构建。${NC}"
 fi
 
-# --- 3. 检测并构建 Go server ---
+# --- 3. 检测 Go server 变更（不再自动构建 server/server-amd64 与 server/server-arm64）---
 if echo "$STAGED_FILES" | grep -q "^server/"; then
-    BUILDS_TRIGGERED=true
-    echo -e "${YELLOW}📦 检测到 'server' 目录有变更，开始构建双架构二进制...${NC}"
-    [ -x "$REPO_ROOT/scripts/build-server.sh" ] || chmod +x "$REPO_ROOT/scripts/build-server.sh"
-    "$REPO_ROOT/scripts/build-server.sh" || handle_error "Go server 双架构构建失败"
-    echo -e "${GREEN}✓ Go server 构建成功。正在暂存产物...${NC}"
-    git add server/server-amd64 server/server-arm64
+    echo -e "${CYAN}⏭️  'server' 目录有变更；已跳过 server/server-amd64 与 server/server-arm64 的自动构建。${NC}"
 else
-    echo -e "${CYAN}⏭️  'server' 目录无变更，跳过构建。${NC}"
+    echo -e "${CYAN}⏭️  'server' 目录无变更，跳过检查。${NC}"
 fi
 
 # --- 4. 检测并构建 Go proxy ---

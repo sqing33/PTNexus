@@ -1,30 +1,43 @@
-name: 手动发布 Runtime Release
+name: 手动构建并发布 Release
 
 on:
   workflow_dispatch:
     inputs:
-      draft:
-        description: 是否作为草稿 Release 发布
+      build_runtime:
+        description: 是否构建 在线更新文件
         required: false
-        default: false
+        default: true
         type: boolean
-      prerelease:
-        description: 是否标记为预发布
+      build_desktop_windows:
+        description: 是否构建 Windows 桌面安装包
         required: false
-        default: false
+        default: true
         type: boolean
-      arches:
-        description: 构建架构（空格分隔）
+      build_proxy:
+        description: 是否构建 盒子端代理
         required: false
-        default: "amd64 arm64"
-        type: string
+        default: true
+        type: boolean
+      build_docker_image:
+        description: 是否构建 Docker 镜像
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  IMAGE_NAME: pt-nexus
+  DEFAULT_TAG: go
 
 jobs:
-  release:
+  meta:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      body: ${{ steps.meta.outputs.body }}
 
     steps:
       - name: 1. 检出代码
@@ -75,54 +88,379 @@ jobs:
               f.write("body<<EOF\n")
               f.write(body + "\n")
               f.write("EOF\n")
-
-          print(f"version={version}")
           PY
 
-      - name: 3. 设置 Go
+
+  runtime:
+    needs: meta
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 跳过 Runtime 构建
+        if: ${{ !inputs.build_runtime }}
+        run: echo "Runtime 构建未启用，跳过。"
+
+      - name: 1. 检出代码
+        if: ${{ inputs.build_runtime }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 2. 设置 Go
+        if: ${{ inputs.build_runtime }}
         uses: actions/setup-go@v5
         with:
-          # Avoid path mismatch issues across branches/repositories.
           go-version: "1.23.x"
           cache-dependency-path: server/go.sum
 
-      - name: 4. 设置 pnpm
+      - name: 3. 设置 pnpm
+        if: ${{ inputs.build_runtime }}
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: 5. 设置 Node（启用 pnpm 缓存）
+      - name: 4. 设置 Node（启用 pnpm 缓存）
+        if: ${{ inputs.build_runtime }}
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "pnpm"
           cache-dependency-path: webui/pnpm-lock.yaml
 
-      - name: 6. 安装交叉编译依赖
+      - name: 5. 安装交叉编译依赖
+        if: ${{ inputs.build_runtime }}
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
-      - name: 7. 构建更新产物与 UPDATE_MANIFEST.json
+      - name: 6. 构建 Runtime 产物与 UPDATE_MANIFEST.json
+        if: ${{ inputs.build_runtime }}
         env:
-          ARCHES: ${{ inputs.arches }}
+          ARCHES: "amd64 arm64"
         run: |
           bash scripts/build-update-artifacts.sh
-          VERSION="${{ steps.meta.outputs.version }}"
+          VERSION="${{ needs.meta.outputs.version }}"
           test -f "dist/updates/${VERSION}/UPDATE_MANIFEST.json"
           ls -lh "dist/updates/${VERSION}"
 
-      - name: 8. 发布 GitHub Release
+      - name: 7. 上传 Runtime 发布产物
+        if: ${{ inputs.build_runtime }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-release-${{ needs.meta.outputs.version }}
+          path: |
+            dist/updates/${{ needs.meta.outputs.version }}/ptnexus-runtime-*.tar.gz
+            dist/updates/${{ needs.meta.outputs.version }}/UPDATE_MANIFEST.json
+          if-no-files-found: error
+
+  desktop_windows:
+    needs: meta
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 跳过 Windows 桌面端构建
+        if: ${{ !inputs.build_desktop_windows }}
+        run: echo "Windows 桌面端构建未启用，跳过。"
+
+      - name: 1. 检出代码
+        if: ${{ inputs.build_desktop_windows }}
+        uses: actions/checkout@v4
+
+      - name: 2. 设置 Go
+        if: ${{ inputs.build_desktop_windows }}
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+
+      - name: 3. 设置 pnpm
+        if: ${{ inputs.build_desktop_windows }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 4. 设置 Node（启用 pnpm 缓存）
+        if: ${{ inputs.build_desktop_windows }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: 5. 安装构建依赖
+        if: ${{ inputs.build_desktop_windows }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis p7zip-full unzip
+
+      - name: 6. 安装 Wails CLI
+        if: ${{ inputs.build_desktop_windows }}
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: 7. 下载 Windows 媒体工具（mpv / ffmpeg / ffprobe / mediainfo）
+        if: ${{ inputs.build_desktop_windows }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS_DIR="desktop/tools/windows"
+          TMP_DIR="$(mktemp -d)"
+          mkdir -p "$TOOLS_DIR"
+          rm -rf "$TOOLS_DIR"/*
+
+          python3 - <<'PY' "$TMP_DIR" "$TOOLS_DIR"
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import sys
+          import urllib.request
+
+          tmp_dir = pathlib.Path(sys.argv[1])
+          tools_dir = pathlib.Path(sys.argv[2])
+
+          def fetch_json(url: str):
+            headers = {"User-Agent": "ptnexus-ci"}
+            gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
+            if gh_token:
+              headers["Authorization"] = f"Bearer {gh_token}"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+              return json.load(resp)
+
+          def download(url: str, out: pathlib.Path):
+            out.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["curl", "-fsSL", "-o", str(out), url], check=True)
+
+          ff_rel = fetch_json("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest")
+          ff_asset = next(
+            a for a in ff_rel["assets"]
+            if a["name"] == "ffmpeg-master-latest-win64-gpl.zip"
+          )
+          ff_zip = tmp_dir / ff_asset["name"]
+          download(ff_asset["browser_download_url"], ff_zip)
+          subprocess.run(["unzip", "-q", "-o", str(ff_zip), "-d", str(tmp_dir / "ffmpeg")], check=True)
+
+          ffmpeg_exe = next((tmp_dir / "ffmpeg").rglob("ffmpeg.exe"))
+          ffprobe_exe = next((tmp_dir / "ffmpeg").rglob("ffprobe.exe"))
+          (tools_dir / "ffmpeg.exe").write_bytes(ffmpeg_exe.read_bytes())
+          (tools_dir / "ffprobe.exe").write_bytes(ffprobe_exe.read_bytes())
+
+          mpv_rel = fetch_json("https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest")
+          mpv_asset = next(
+            a for a in mpv_rel["assets"]
+            if a["name"].startswith("mpv-x86_64-") and a["name"].endswith(".7z")
+          )
+          mpv_7z = tmp_dir / mpv_asset["name"]
+          download(mpv_asset["browser_download_url"], mpv_7z)
+          subprocess.run(["7z", "x", "-y", str(mpv_7z), f"-o{tmp_dir / 'mpv'}"], check=True)
+
+          mpv_exe = next((tmp_dir / "mpv").rglob("mpv.exe"))
+          mpv_root = mpv_exe.parent
+          for item in mpv_root.iterdir():
+            target = tools_dir / item.name
+            if item.is_dir():
+              if target.exists():
+                subprocess.run(["rm", "-rf", str(target)], check=True)
+              subprocess.run(["cp", "-a", str(item), str(target)], check=True)
+            else:
+              target.write_bytes(item.read_bytes())
+
+          media_rel = fetch_json("https://api.github.com/repos/MediaArea/MediaInfo/releases/latest")
+          media_version = str(media_rel.get("tag_name", "")).strip().lstrip("v")
+          if not media_version:
+            raise RuntimeError("无法解析 MediaInfo 最新版本号(tag_name)")
+
+          media_zip = tmp_dir / f"MediaInfo_CLI_{media_version}_Windows_x64.zip"
+          media_urls = [
+            f"https://mediaarea.net/download/binary/mediainfo/{media_version}/MediaInfo_CLI_{media_version}_Windows_x64.zip",
+            f"https://mediaarea.net/download/binary/mediainfo/{media_version}/MediaInfo_CLI_{media_version}_Windows_x64_WithoutInstaller.zip",
+          ]
+          downloaded = False
+          for media_url in media_urls:
+            try:
+              download(media_url, media_zip)
+              downloaded = True
+              break
+            except subprocess.CalledProcessError:
+              continue
+          if not downloaded:
+            raise RuntimeError(f"下载 MediaInfo 失败，尝试地址: {media_urls}")
+
+          subprocess.run(["unzip", "-q", "-o", str(media_zip), "-d", str(tmp_dir / "mediainfo")], check=True)
+
+          media_exe = next(
+            p for p in (tmp_dir / "mediainfo").rglob("*")
+            if p.is_file() and p.name.lower() == "mediainfo.exe"
+          )
+          media_root = media_exe.parent
+          for item in media_root.iterdir():
+            target = tools_dir / item.name
+            if item.is_dir():
+              if target.exists():
+                subprocess.run(["rm", "-rf", str(target)], check=True)
+              subprocess.run(["cp", "-a", str(item), str(target)], check=True)
+            else:
+              target.write_bytes(item.read_bytes())
+
+          media_upper = tools_dir / "MediaInfo.exe"
+          media_lower = tools_dir / "mediainfo.exe"
+          if media_upper.exists():
+            if media_lower.exists():
+              media_lower.unlink()
+            media_upper.rename(media_lower)
+          PY
+
+          ls -lah "$TOOLS_DIR"
+
+      - name: 8. 构建桌面端安装包
+        if: ${{ inputs.build_desktop_windows }}
+        run: |
+          bash scripts/package-desktop.sh
+
+      - name: 9. 上传桌面端发布产物
+        if: ${{ inputs.build_desktop_windows }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-${{ needs.meta.outputs.version }}
+          path: |
+            desktop/build/bin/pt-nexus.exe
+            desktop/build/bin/pt-nexus-*-amd64-installer.exe
+          if-no-files-found: error
+
+  proxy:
+    needs: meta
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 跳过 Proxy 构建
+        if: ${{ !inputs.build_proxy }}
+        run: echo "Proxy 构建未启用，跳过。"
+
+      - name: 1. 检出代码
+        if: ${{ inputs.build_proxy }}
+        uses: actions/checkout@v4
+
+      - name: 2. 设置 Go
+        if: ${{ inputs.build_proxy }}
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: proxy/go.mod
+
+      - name: 3. 构建 Proxy 发布产物
+        if: ${{ inputs.build_proxy }}
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          ARCHES: "amd64 arm64"
+        run: |
+          bash scripts/build-proxy-release-assets.sh
+          ls -lh "dist/proxy/${VERSION}"
+
+      - name: 4. 上传 Proxy 发布产物
+        if: ${{ inputs.build_proxy }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-release-${{ needs.meta.outputs.version }}
+          path: dist/proxy/${{ needs.meta.outputs.version }}/*
+          if-no-files-found: error
+
+  docker_image:
+    needs: meta
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 跳过 Docker 镜像构建
+        if: ${{ !inputs.build_docker_image }}
+        run: echo "Docker 镜像构建未启用，跳过。"
+
+      - name: 1. 检出代码
+        if: ${{ inputs.build_docker_image }}
+        uses: actions/checkout@v4
+
+      - name: 2. 设置 Docker Buildx
+        if: ${{ inputs.build_docker_image }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: 3. 登录到 GitHub Container Registry (ghcr.io)
+        if: ${{ inputs.build_docker_image }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 4. 准备 Docker 标签
+        if: ${{ inputs.build_docker_image }}
+        id: prepare-tags
+        run: |
+          GHCR_REPO="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+          GIT_SHA=$(git rev-parse --short HEAD)
+          FULL_TAGS="${GHCR_REPO}:${{ needs.meta.outputs.version }},${GHCR_REPO}:${{ env.DEFAULT_TAG }},${GHCR_REPO}:${{ env.DEFAULT_TAG }}-sha-${GIT_SHA}"
+          echo "tags=$FULL_TAGS" >> "$GITHUB_OUTPUT"
+
+      - name: 5. 构建并推送 AMD64 Docker 镜像
+        if: ${{ inputs.build_docker_image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.prepare-tags.outputs.tags }}
+          cache-from: type=gha,scope=go-amd64
+          cache-to: type=gha,mode=max,scope=go-amd64
+
+  release:
+    needs:
+      - meta
+      - runtime
+      - desktop_windows
+      - proxy
+    if: ${{ inputs.build_runtime || inputs.build_desktop_windows || inputs.build_proxy }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. 创建 Release 产物目录
+        run: |
+          mkdir -p "dist/release-assets/${{ needs.meta.outputs.version }}"
+
+      - name: 2. 下载 Runtime 产物
+        if: ${{ inputs.build_runtime }}
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-release-${{ needs.meta.outputs.version }}
+          path: dist/release-assets/${{ needs.meta.outputs.version }}
+
+      - name: 3. 下载桌面端产物
+        if: ${{ inputs.build_desktop_windows }}
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-release-${{ needs.meta.outputs.version }}
+          path: dist/release-assets/${{ needs.meta.outputs.version }}
+
+      - name: 4. 下载 Proxy 产物
+        if: ${{ inputs.build_proxy }}
+        uses: actions/download-artifact@v4
+        with:
+          name: proxy-release-${{ needs.meta.outputs.version }}
+          path: dist/release-assets/${{ needs.meta.outputs.version }}
+
+
+      - name: 5. 校验待发布文件
+        run: |
+          find "dist/release-assets/${{ needs.meta.outputs.version }}" -maxdepth 1 -type f -printf '%f\n' | sort
+          test -n "$(find "dist/release-assets/${{ needs.meta.outputs.version }}" -maxdepth 1 -type f | head -n 1)"
+
+      - name: 6. 发布版本 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.version }}
-          name: ${{ steps.meta.outputs.version }}
-          body: ${{ steps.meta.outputs.body }}
-          draft: ${{ inputs.draft }}
-          prerelease: ${{ inputs.prerelease }}
+          tag_name: ${{ needs.meta.outputs.version }}
+          name: ${{ needs.meta.outputs.version }}
+          body: ${{ needs.meta.outputs.body }}
           fail_on_unmatched_files: true
-          files: |
-            dist/updates/${{ steps.meta.outputs.version }}/ptnexus-runtime-*.tar.gz
-            dist/updates/${{ steps.meta.outputs.version }}/UPDATE_MANIFEST.json
+          files: dist/release-assets/${{ needs.meta.outputs.version }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

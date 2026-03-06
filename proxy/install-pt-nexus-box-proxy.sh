@@ -2,9 +2,9 @@
 
 # PT Nexus Proxy 安装脚本
 # 用法:
-#   wget -O - https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash
+#   wget -O - https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash
 # 或者:
-#   curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash
+#   curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash
 
 set -e
 
@@ -87,8 +87,6 @@ download_proxy() {
 
     local proxy_candidates=(
         "proxy/pt-nexus-box-proxy-$ARCH"
-        "proxy/pt-nexus-box-proxy-$OS-$ARCH"
-        "proxy/pt-nexus-box-proxy"
     )
 
     local downloaded=false
@@ -169,29 +167,21 @@ download_bdinfo_tools() {
     # 下载每个文件
     for file in "${files[@]}"; do
         local downloaded=false
-        local path_candidates=(
-            "server/bdinfo/$bdinfo_platform_dir/$file"
-            "server/bdinfo/$file"
-        )
+        local remote_path="server/bdinfo/$bdinfo_platform_dir/$file"
+        local url="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$REPO_REF/$remote_path"
 
         log "正在下载 $file..."
+        log "尝试下载: $remote_path"
 
-        for remote_path in "${path_candidates[@]}"; do
-            local url="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$REPO_REF/$remote_path"
-            log "尝试下载: $remote_path"
-
-            if [ "$downloader" = "curl" ]; then
-                if curl -L -f -o "$file" "$url"; then
-                    downloaded=true
-                    break
-                fi
-            else
-                if wget -O "$file" "$url"; then
-                    downloaded=true
-                    break
-                fi
+        if [ "$downloader" = "curl" ]; then
+            if curl -L -f -o "$file" "$url"; then
+                downloaded=true
             fi
-        done
+        else
+            if wget -O "$file" "$url"; then
+                downloaded=true
+            fi
+        fi
 
         if [ "$downloaded" != "true" ]; then
             error "下载 $file 失败，未找到可用的 BDInfo 文件路径"
