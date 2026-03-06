@@ -10,8 +10,8 @@ set -e
 
 # 配置变量
 REPO_OWNER="sqing33"
-REPO_NAME="pt-nexus"
-REPO_REF="${REPO_REF:-main}"
+REPO_NAME="PTNexus"
+REPO_REF="${REPO_REF:-go}"
 INSTALL_DIR="/opt/pt-nexus-proxy"
 SERVICE_NAME="pt-nexus-proxy"
 
@@ -95,7 +95,7 @@ download_proxy() {
 
     # 依次尝试仓库中的常见命名（优先使用按架构区分的二进制）
     for proxy_path in "${proxy_candidates[@]}"; do
-        local PROXY_URL="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/refs/heads/$REPO_REF/$proxy_path"
+        local PROXY_URL="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$REPO_REF/$proxy_path"
         log "尝试下载: $proxy_path"
 
         # 尝试使用curl下载
@@ -170,14 +170,14 @@ download_bdinfo_tools() {
     for file in "${files[@]}"; do
         local downloaded=false
         local path_candidates=(
-            "server/core/bdinfo/$bdinfo_platform_dir/$file"
-            "server/core/bdinfo/$file"
+            "server/bdinfo/$bdinfo_platform_dir/$file"
+            "server/bdinfo/$file"
         )
 
         log "正在下载 $file..."
 
         for remote_path in "${path_candidates[@]}"; do
-            local url="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/refs/heads/$REPO_REF/$remote_path"
+            local url="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$REPO_REF/$remote_path"
             log "尝试下载: $remote_path"
 
             if [ "$downloader" = "curl" ]; then
