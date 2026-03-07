@@ -1161,7 +1161,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     }
 
     if (torrentData.value.screenshot_review_status === 'pending') {
-      return '当前视频未检测到字幕流，请先检查截图是否截到了合适的中文字幕时间点，并点击确认截图'
+      return '当前视频未检测到字幕流，请检查截图是否截到了中文字幕'
     }
 
     return '准备就绪'

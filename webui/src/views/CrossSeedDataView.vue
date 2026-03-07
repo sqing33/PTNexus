@@ -22,17 +22,12 @@
       <!-- 批量转种按钮 -->
       <el-button
         type="success"
-        @click="openBatchCrossSeedDialog"
+        @click="handleBatchCrossSeedButtonClick"
         plain
         style="margin-right: 15px"
-        :disabled="!canBatchCrossSeed || isDeleteMode"
+        :disabled="isDeleteMode"
       >
-        {{ batchCrossSeedButtonText }}
-      </el-button>
-
-      <!-- 查看发种日志按钮（批量转种记录已合并到这里） -->
-      <el-button type="info" @click="openPublishLogs" plain style="margin-right: 15px">
-        发种日志
+        批量转种
       </el-button>
 
       <!-- 查看BDInfo记录按钮 -->
@@ -134,7 +129,12 @@
             <el-radio :label="'1'">已删除</el-radio>
           </el-radio-group>
 
-          <el-divider content-position="left">不存在种子筛选</el-divider>
+          <el-divider content-position="left">
+            <span class="target-site-filter-title">
+              <el-icon><WarningFilled /></el-icon>
+              <span>选择批量转种目标站点</span>
+            </span>
+          </el-divider>
           <div class="target-sites-container">
             <div class="selected-site-display">
               <div v-if="selectedTargetSite" class="selected-site-info">
@@ -389,33 +389,6 @@
       </el-card>
     </div>
 
-    <!-- 批量转种弹窗 -->
-    <div v-if="batchCrossSeedDialogVisible" class="modal-overlay">
-      <el-card class="batch-cross-seed-card" shadow="always">
-        <template #header>
-          <div class="modal-header">
-            <span>批量转种</span>
-            <el-button type="danger" circle @click="closeBatchCrossSeedDialog" plain>X</el-button>
-          </div>
-        </template>
-        <div class="batch-cross-seed-content">
-          <div class="target-site-selection-body">
-            <div class="batch-info">
-              <p><strong>目标站点：</strong>{{ activeFilters.excludeTargetSites }}</p>
-              <p><strong>选中种子数量：</strong>{{ selectedRows.length }} 个</p>
-              <p style="color: #909399; font-size: 13px; margin-top: 10px">
-                将把选中的种子转种到上述目标站点，请确认无误后点击确定。
-              </p>
-            </div>
-          </div>
-        </div>
-        <div class="batch-cross-seed-footer">
-          <el-button @click="closeBatchCrossSeedDialog">取消</el-button>
-          <el-button type="primary" @click="handleBatchCrossSeed">确定</el-button>
-        </div>
-      </el-card>
-    </div>
-
     <!-- 处理记录查看弹窗 -->
     <BDInfoRecordsDialog v-model="recordDialogVisible" @closed="fetchData" />
 
@@ -442,6 +415,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { WarningFilled } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
@@ -571,7 +545,6 @@ const error = ref<string | null>(null)
 
 // 批量转种相关
 const selectedRows = ref<SeedParameter[]>([])
-const batchCrossSeedDialogVisible = ref<boolean>(false)
 
 // 批量获取数据相关
 const batchFetchDialogVisible = ref<boolean>(false)
@@ -637,27 +610,6 @@ const currentFilterText = computed(() => {
   }
 
   return filterTexts.join(', ')
-})
-
-// 检查是否可以进行批量转种
-const canBatchCrossSeed = computed(() => {
-  return (
-    selectedRows.value.length > 0 &&
-    activeFilters.value.excludeTargetSites &&
-    activeFilters.value.excludeTargetSites.trim() !== ''
-  )
-})
-
-// 批量转种按钮的文字
-const batchCrossSeedButtonText = computed(() => {
-  const selectedCount = selectedRows.value.length
-  const targetSite = activeFilters.value.excludeTargetSites
-
-  if (!targetSite || targetSite.trim() === '') {
-    return `批量转种 (${selectedCount}) - 请先在筛选中选择目标站点`
-  }
-
-  return `批量转种到 ${targetSite} (${selectedCount})`
 })
 
 // 检查是否有任何筛选条件被应用
@@ -1370,10 +1322,16 @@ const handleSelectionChange = (selection: SeedParameter[]) => {
   }
 }
 
-// 打开批量转种对话框
-const openBatchCrossSeedDialog = () => {
-  // 直接打开对话框，不需要获取站点列表
-  batchCrossSeedDialogVisible.value = true
+// 处理批量转种按钮点击
+const handleBatchCrossSeedButtonClick = () => {
+  const targetSiteName = activeFilters.value.excludeTargetSites.trim()
+
+  if (!targetSiteName || selectedRows.value.length === 0) {
+    openFilterDialog()
+    return
+  }
+
+  void handleBatchCrossSeed()
 }
 
 // 处理批量转种
@@ -1387,10 +1345,7 @@ const handleBatchCrossSeed = async () => {
   }
 
   try {
-    // 1. 关闭批量转种的确认弹窗
-    closeBatchCrossSeedDialog()
-
-    // 2. 构造要传递给后端的数据
+    // 1. 构造要传递给后端的数据
     const batchData = {
       target_site_name: targetSiteName,
       seeds: selectedRows.value.map((row) => ({
@@ -1404,7 +1359,7 @@ const handleBatchCrossSeed = async () => {
 
     console.log('批量转种数据:', batchData)
 
-    // 3. 调用批量入队接口
+    // 2. 调用批量入队接口
     const response = await axios.post('/api/migrate/publish_queue/enqueue_batch', {
       ...batchData,
       publish_scene: 'multi_torrent',
@@ -1442,11 +1397,6 @@ const handleBatchCrossSeed = async () => {
         : '网络错误'
     ElMessage.error(message)
   }
-}
-
-// 关闭批量转种对话框
-const closeBatchCrossSeedDialog = () => {
-  batchCrossSeedDialogVisible.value = false
 }
 
 // 获取删除按钮文字
@@ -1544,11 +1494,6 @@ const handleFetchCompleted = () => {
   ElMessage.success('批量获取种子数据已完成，正在刷新列表...')
   // 刷新种子列表
   fetchData()
-}
-
-// 打开发种日志页面（批量转种记录已合并到这里）
-const openPublishLogs = () => {
-  router.push({ path: '/publish-logs', query: { scene: 'multi_torrent' } })
 }
 
 // 打开记录查看对话框
@@ -1703,32 +1648,6 @@ onUnmounted(() => {
   height: 90vh;
   display: flex;
   flex-direction: column;
-}
-
-.batch-cross-seed-card {
-  width: 500px;
-  max-width: 95vw;
-  display: flex;
-  flex-direction: column;
-}
-
-:deep(.batch-cross-seed-card .el-card__body) {
-  padding: 20px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.batch-cross-seed-content {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.batch-cross-seed-footer {
-  padding: 10px 0 0 0;
-  border-top: 1px solid var(--el-border-color-lighter);
-  display: flex;
-  justify-content: flex-end;
 }
 
 :deep(.cross-seed-card .el-card__body) {
@@ -1918,27 +1837,12 @@ onUnmounted(() => {
   border-color: #f56c6c !important;
 }
 
-/* 批量转种弹窗样式 */
-.target-site-selection-body {
-  padding: 5px 20px 20px 20px;
-}
-
-.batch-info {
-  margin-top: 20px;
-  padding: 12px;
-  background-color: #f8f9fa;
-  border-radius: 4px;
-  border-left: 4px solid #409eff;
-}
-
-.batch-info p {
-  margin: 8px 0;
-  font-size: 14px;
-  color: #606266;
-}
-
-.batch-info p strong {
-  color: #303133;
+.target-site-filter-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--el-color-danger);
+  font-weight: 600;
 }
 
 /* 批量获取数据弹窗样式 */
