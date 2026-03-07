@@ -53,6 +53,8 @@ var (
 	reRousiTorrentFilename  = regexp.MustCompile(`^([^-]+)-(\d+)-`)
 )
 
+const rousiJPEGDataURLPrefix = "data:image/jpeg;base64,"
+
 type rousiImageSource struct {
 	URL     string
 	Referer string
@@ -669,15 +671,20 @@ func buildRousiImagesDataURLs(baseURL string, passkey string, userAgent string, 
 		if err != nil || jpegInfo.IsDir() {
 			continue
 		}
-		if totalUsed+jpegInfo.Size() > totalLimit {
-			break
-		}
 		jpegBytes, err := os.ReadFile(jpegPath)
 		if err != nil || len(jpegBytes) == 0 {
 			continue
 		}
-		totalUsed += int64(len(jpegBytes))
-		images = append(images, "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString(jpegBytes))
+		dataURL := rousiJPEGDataURLPrefix + base64.StdEncoding.EncodeToString(jpegBytes)
+		dataURLSize := int64(len(dataURL))
+		if dataURLSize > perImageLimit {
+			continue
+		}
+		if totalUsed+dataURLSize > totalLimit {
+			break
+		}
+		totalUsed += dataURLSize
+		images = append(images, dataURL)
 
 		if os.Getenv("DEV_ENV") == "true" {
 			debugManifest = append(debugManifest, map[string]any{
@@ -688,6 +695,7 @@ func buildRousiImagesDataURLs(baseURL string, passkey string, userAgent string, 
 				"original_size": originalSize,
 				"jpeg_path":     jpegPath,
 				"jpeg_size":     jpegInfo.Size(),
+				"data_url_size": dataURLSize,
 			})
 		}
 	}
@@ -698,7 +706,7 @@ func buildRousiImagesDataURLs(baseURL string, passkey string, userAgent string, 
 		}
 	}
 
-	summary := fmt.Sprintf("截图处理: sources=%d images=%d total_bytes=%d", len(sources), len(images), totalUsed)
+	summary := fmt.Sprintf("截图处理: sources=%d images=%d total_data_url_bytes=%d", len(sources), len(images), totalUsed)
 	return images, cleanup, summary, nil
 }
 
@@ -778,7 +786,7 @@ func ffmpegConvertToJpegUnderLimit(inputPath string, outputPath string, maxBytes
 				_ = cmd.Run()
 				cancel()
 
-				if info, err := os.Stat(outputPath); err == nil && !info.IsDir() && info.Size() <= maxBytes {
+				if info, err := os.Stat(outputPath); err == nil && !info.IsDir() && encodedBase64DataURLLen(info.Size(), rousiJPEGDataURLPrefix) <= maxBytes {
 					return true
 				}
 			}
@@ -792,10 +800,17 @@ func ffmpegConvertToJpegUnderLimit(inputPath string, outputPath string, maxBytes
 	if try(scalesSecondary, qValuesSecondary) {
 		return true
 	}
-	if info, err := os.Stat(outputPath); err == nil && !info.IsDir() && info.Size() <= maxBytes {
+	if info, err := os.Stat(outputPath); err == nil && !info.IsDir() && encodedBase64DataURLLen(info.Size(), rousiJPEGDataURLPrefix) <= maxBytes {
 		return true
 	}
 	return false
+}
+
+func encodedBase64DataURLLen(rawBytes int64, prefix string) int64 {
+	if rawBytes < 0 {
+		return 0
+	}
+	return int64(len(prefix)) + ((rawBytes+2)/3)*4
 }
 
 func downloadRousiImageToBytes(baseURL string, passkey string, userAgent string, targetURL string, referer string) ([]byte, error) {
