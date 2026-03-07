@@ -12,6 +12,34 @@
 - DockerHub：https://hub.docker.com/r/sqing33/pt-nexus
 - QQ交流群：1057366817
 
+## 手动触发 Release
+
+如需在推送代码后通过命令手动触发 GitHub Release，可直接使用仓库里的发布脚本。
+
+前置条件：
+
+- 已安装并登录 GitHub CLI：`gh auth login`
+- 已将待发布代码与 `CHANGELOG.json` 推送到目标分支
+
+推荐在仓库根目录执行，常用命令：
+
+```bash
+./scripts/release-manual-dispatch.sh
+./scripts/release-manual-dispatch.sh --dry-run
+./scripts/release-manual-dispatch.sh --all
+./scripts/release-manual-dispatch.sh --ref go --no-desktop
+```
+
+说明：
+
+- 不显式传入构建开关时，脚本会逐项以 Y/N 询问是否构建在线更新文件、Windows 桌面安装包、盒子端代理、Docker 镜像
+- 传入 `--all` 时，会跳过交互并直接启用全部四项发布
+- 命令会先执行 `git push origin <branch>`，成功后再触发 `.github/workflows/release-manual.yml`
+- 默认优先使用 `go` 分支；若仓库不存在 `go`，则回退到远端默认分支
+- 版本号与 Release 文案仍以 `CHANGELOG.json` 最新一条为准
+- 这是仓库级脚本，不需要进入 `webui/`，也不依赖 `npm` / `pnpm`
+- 若未安装 `gh`，脚本会先询问是否尝试自动安装 GitHub CLI
+
 ## 2026 年 1 月 1 日起规范转种功能限制
 
 > 转种限制方案由多位站点管理人员共同制定，转种限制代码使用 Go 编写编译且暂不开源，其他功能均在 Python 代码里实现，感谢各位站点管理人员的支持与配合。
