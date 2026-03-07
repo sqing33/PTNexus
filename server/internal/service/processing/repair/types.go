@@ -16,3 +16,12 @@ type ScreenshotGenerateInput struct {
 	ContentName string
 	RootConfig  map[string]any
 }
+
+// ScreenshotPreviewCandidate 表示供前端选择的低清截图候选。
+type ScreenshotPreviewCandidate struct {
+	ID          string  `json:"id"`
+	TimeSeconds float64 `json:"time_seconds"`
+	TimeLabel   string  `json:"time_label"`
+	PreviewData string  `json:"preview_data"`
+	Recommended bool    `json:"recommended"`
+}

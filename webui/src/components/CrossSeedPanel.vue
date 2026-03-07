@@ -32,6 +32,106 @@
     @complete="handleLogProgressComplete"
     @close="handleFetchLogProgressClose"
   />
+
+  <el-dialog
+    v-model="showScreenshotPreviewDialog"
+    title="选择截图候选"
+    width="1200px"
+    class="screenshot-preview-dialog"
+    destroy-on-close
+    @closed="resetScreenshotPreviewState"
+  >
+    <div class="screenshot-preview-dialog__hint">
+      只有在未找到字幕流时，才会生成低清候选图供手动选择；点击左侧缩略图可在右侧放大查看。
+    </div>
+    <div class="screenshot-preview-dialog__toolbar">
+      <span
+        >已选择 {{ selectedScreenshotPreviewIds.length }}/{{
+          screenshotPreviewSelectionLimit
+        }}
+        张</span
+      >
+      <span class="screenshot-preview-dialog__toolbar-tip">左侧滚动浏览，右侧查看大图</span>
+    </div>
+    <div class="screenshot-preview-dialog__layout">
+      <div class="screenshot-preview-dialog__sidebar">
+        <button
+          v-for="candidate in screenshotPreviewCandidates"
+          :key="candidate.id"
+          type="button"
+          class="screenshot-preview-dialog__item"
+          :class="{
+            'is-active': activeScreenshotPreviewId === candidate.id,
+            'is-selected': isScreenshotPreviewSelected(candidate.id),
+          }"
+          @click="setActiveScreenshotPreview(candidate.id)"
+        >
+          <img
+            :src="candidate.previewData"
+            :alt="candidate.timeLabel"
+            class="screenshot-preview-dialog__item-thumb"
+          />
+          <div class="screenshot-preview-dialog__item-meta">
+            <span>{{ candidate.timeLabel }}</span>
+            <el-checkbox
+              :model-value="isScreenshotPreviewSelected(candidate.id)"
+              @click.stop
+              @change="() => toggleScreenshotPreviewSelection(candidate.id)"
+            >
+              选择
+            </el-checkbox>
+          </div>
+        </button>
+      </div>
+      <div class="screenshot-preview-dialog__viewer">
+        <template v-if="activeScreenshotPreviewCandidate">
+          <div class="screenshot-preview-dialog__viewer-header">
+            <span>{{ activeScreenshotPreviewCandidate.timeLabel }}</span>
+            <el-button
+              size="small"
+              :type="
+                isScreenshotPreviewSelected(activeScreenshotPreviewCandidate.id)
+                  ? 'primary'
+                  : 'default'
+              "
+              @click="toggleScreenshotPreviewSelection(activeScreenshotPreviewCandidate.id)"
+            >
+              {{
+                isScreenshotPreviewSelected(activeScreenshotPreviewCandidate.id)
+                  ? '取消选择'
+                  : '选择此张'
+              }}
+            </el-button>
+          </div>
+          <div class="screenshot-preview-dialog__viewer-image-wrap">
+            <img
+              :src="activeScreenshotPreviewCandidate.previewData"
+              :alt="activeScreenshotPreviewCandidate.timeLabel"
+              class="screenshot-preview-dialog__viewer-image"
+            />
+          </div>
+        </template>
+      </div>
+    </div>
+    <template #footer>
+      <div class="screenshot-preview-dialog__footer">
+        <el-button
+          @click="showScreenshotPreviewDialog = false"
+          :disabled="isFinalizingScreenshotPreview"
+        >
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          @click="confirmScreenshotPreviewSelection"
+          :loading="isFinalizingScreenshotPreview"
+          :disabled="selectedScreenshotPreviewIds.length !== screenshotPreviewSelectionLimit"
+        >
+          生成正式截图
+        </el-button>
+      </div>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -102,8 +202,7 @@ const splitMediaInfoFromIntroBody = (
   const body = (rawBody || '').replace(/\r\n/g, '\n')
   if (!body.trim()) return { body: '', extractedMediainfo: '' }
 
-  const markerRe =
-    /\[url=javascript:void\(0\)\]\s*mediainfo\s*-\s*[\s\S]*?\[\/url\]\s*/i
+  const markerRe = /\[url=javascript:void\(0\)\]\s*mediainfo\s*-\s*[\s\S]*?\[\/url\]\s*/i
   const markerMatch = markerRe.exec(body)
   if (markerMatch && typeof markerMatch.index === 'number') {
     const extracted = body
@@ -121,8 +220,7 @@ const splitMediaInfoFromIntroBody = (
   if (generalIndex < 0) return { body: rawBody || '', extractedMediainfo: '' }
 
   const tail = body.slice(generalIndex)
-  const looksLikeMediaInfo =
-    /Overall\s*bit\s*rate/i.test(tail) && /Complete\s*name/i.test(tail)
+  const looksLikeMediaInfo = /Overall\s*bit\s*rate/i.test(tail) && /Complete\s*name/i.test(tail)
   if (!looksLikeMediaInfo) return { body: rawBody || '', extractedMediainfo: '' }
 
   return {
@@ -190,12 +288,12 @@ const parseBBCode = (text?: string | null): string => {
 
 const handleApiError = (error: unknown, defaultMessage: string) => {
   const message = axios.isAxiosError(error)
-    ? ((error.response?.data as { logs?: string; error?: string; message?: string } | undefined)
+    ? (error.response?.data as { logs?: string; error?: string; message?: string } | undefined)
         ?.logs ||
-        (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
-        (error.response?.data as { error?: string; message?: string } | undefined)?.message ||
-        error.message ||
-        defaultMessage)
+      (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+      (error.response?.data as { error?: string; message?: string } | undefined)?.message ||
+      error.message ||
+      defaultMessage
     : error instanceof Error
       ? error.message || defaultMessage
       : defaultMessage
@@ -211,6 +309,13 @@ interface SiteStatus {
   is_target: boolean
   uses_public_publisher?: boolean
   uses_public_extractor?: boolean
+}
+
+interface ScreenshotPreviewCandidateItem {
+  id: string
+  timeSeconds: number
+  timeLabel: string
+  previewData: string
 }
 
 const props = defineProps({
@@ -577,6 +682,12 @@ const publishBatchId = ref<string | null>(null)
 const publishBatchEventSource = ref<EventSource | null>(null)
 const isReparsing = ref(false)
 const isRefreshingScreenshots = ref(false)
+const isFinalizingScreenshotPreview = ref(false)
+const showScreenshotPreviewDialog = ref(false)
+const screenshotPreviewCandidates = ref<ScreenshotPreviewCandidateItem[]>([])
+const activeScreenshotPreviewId = ref('')
+const selectedScreenshotPreviewIds = ref<string[]>([])
+const screenshotPreviewSelectionLimit = ref(5)
 const isRefreshingIntro = ref(false)
 const isRefreshingMediainfo = ref(false)
 const isRefreshingPosters = ref(false)
@@ -640,6 +751,154 @@ const reverseMappings = ref<ReverseMappings>({
 
 const posterImages = computed(() => parseImageUrls(torrentData.value.intro.poster))
 const screenshotImages = computed(() => parseImageUrls(torrentData.value.intro.screenshots))
+
+const buildScreenshotPayload = (type: string, extra: Record<string, unknown> = {}) => ({
+  type,
+  content_name: torrentData.value.original_main_title,
+  source_info: {
+    main_title: torrentData.value.original_main_title,
+    source_site: sourceSite.value,
+    imdb_link: torrentData.value.imdb_link,
+    douban_link: torrentData.value.douban_link,
+    tmdb_link: torrentData.value.tmdb_link,
+  },
+  savePath: torrent.value.save_path,
+  torrentName: torrent.value.name,
+  downloaderId: torrent.value.downloaderId,
+  ...extra,
+})
+
+const normalizeScreenshotPreviewCandidates = (value: unknown): ScreenshotPreviewCandidateItem[] => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item, index) => {
+      const candidate = item as Record<string, unknown>
+      const id =
+        typeof candidate.id === 'string' && candidate.id.trim()
+          ? candidate.id.trim()
+          : `candidate-${index}`
+      const timeSeconds =
+        typeof candidate.time_seconds === 'number'
+          ? candidate.time_seconds
+          : typeof candidate.time_seconds === 'string'
+            ? Number(candidate.time_seconds)
+            : 0
+      const timeLabel =
+        typeof candidate.time_label === 'string' && candidate.time_label.trim()
+          ? candidate.time_label.trim()
+          : '--:--:--'
+      const previewData = typeof candidate.preview_data === 'string' ? candidate.preview_data : ''
+      return { id, timeSeconds, timeLabel, previewData }
+    })
+    .filter((candidate) => candidate.previewData)
+}
+
+const resetScreenshotPreviewState = () => {
+  screenshotPreviewCandidates.value = []
+  activeScreenshotPreviewId.value = ''
+  selectedScreenshotPreviewIds.value = []
+  screenshotPreviewSelectionLimit.value = 5
+}
+
+const activeScreenshotPreviewCandidate = computed(
+  () =>
+    screenshotPreviewCandidates.value.find(
+      (candidate) => candidate.id === activeScreenshotPreviewId.value,
+    ) ||
+    screenshotPreviewCandidates.value[0] ||
+    null,
+)
+
+const setActiveScreenshotPreview = (id: string) => {
+  activeScreenshotPreviewId.value = id
+}
+
+const isScreenshotPreviewSelected = (id: string) => selectedScreenshotPreviewIds.value.includes(id)
+
+const toggleScreenshotPreviewSelection = (id: string) => {
+  if (isFinalizingScreenshotPreview.value) return
+  if (!activeScreenshotPreviewId.value) {
+    activeScreenshotPreviewId.value = id
+  }
+  if (isScreenshotPreviewSelected(id)) {
+    selectedScreenshotPreviewIds.value = selectedScreenshotPreviewIds.value.filter(
+      (item) => item !== id,
+    )
+    return
+  }
+  if (selectedScreenshotPreviewIds.value.length >= screenshotPreviewSelectionLimit.value) {
+    ElNotification.warning(`最多只能选择 ${screenshotPreviewSelectionLimit.value} 张候选截图。`)
+    return
+  }
+  selectedScreenshotPreviewIds.value = [...selectedScreenshotPreviewIds.value, id]
+}
+
+const confirmScreenshotPreviewSelection = async () => {
+  if (selectedScreenshotPreviewIds.value.length !== screenshotPreviewSelectionLimit.value) {
+    ElNotification.warning(`请先选择 ${screenshotPreviewSelectionLimit.value} 张候选截图。`)
+    return
+  }
+
+  const selectedTimes = screenshotPreviewCandidates.value
+    .filter((candidate) => selectedScreenshotPreviewIds.value.includes(candidate.id))
+    .sort((left, right) => left.timeSeconds - right.timeSeconds)
+    .map((candidate) => candidate.timeSeconds)
+  if (selectedTimes.length !== screenshotPreviewSelectionLimit.value) {
+    ElNotification.error('候选截图时间点读取失败，请重新生成候选截图。')
+    return
+  }
+
+  isFinalizingScreenshotPreview.value = true
+  isRefreshingScreenshots.value = true
+  ElNotification.info({
+    title: '正在生成正式截图',
+    message: '已按所选时间点开始生成正式截图并上传图床...',
+    duration: 0,
+  })
+
+  try {
+    const response = await axios.post(
+      '/api/media/validate',
+      buildScreenshotPayload('screenshot_finalize', {
+        selected_times: selectedTimes,
+      }),
+    )
+    ElNotification.closeAll()
+
+    if (response.data.success && response.data.screenshots) {
+      torrentData.value.intro.screenshots = response.data.screenshots
+      screenshotValid.value = true
+      showScreenshotPreviewDialog.value = false
+      ElNotification.success({
+        title: '截图已更新',
+        message: '已成功生成并加载所选时间点的正式截图。',
+      })
+      return
+    }
+
+    ElNotification.error({
+      title: '正式截图生成失败',
+      message: response.data.error || '后端未返回可用截图，请查看后台日志。',
+    })
+  } catch (error: unknown) {
+    ElNotification.closeAll()
+    const errorMsg = axios.isAxiosError(error)
+      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+        (error.response?.data as { message?: string } | undefined)?.message ||
+        error.message ||
+        '未能生成正式截图，请查看后台日志。'
+      : error instanceof Error
+        ? error.message || '未能生成正式截图，请查看后台日志。'
+        : '未能生成正式截图，请查看后台日志。'
+    ElNotification.error({
+      title: '正式截图生成失败',
+      message: errorMsg,
+    })
+  } finally {
+    isFinalizingScreenshotPreview.value = false
+    isRefreshingScreenshots.value = false
+  }
+}
 
 const filteredDeclarationsList = computed(() => {
   const removedDeclarations = torrentData.value.intro.removed_ardtudeclarations
@@ -917,10 +1176,10 @@ const refreshIntro = async () => {
   } catch (error: unknown) {
     ElNotification.closeAll()
     const errorMsg = axios.isAxiosError(error)
-      ? ((error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
         (error.response?.data as { message?: string } | undefined)?.message ||
         error.message ||
-        '未能重新获取简介')
+        '未能重新获取简介'
       : error instanceof Error
         ? error.message || '未能重新获取简介'
         : '未能重新获取简介'
@@ -998,72 +1257,72 @@ const refreshScreenshots = async () => {
     return
   }
 
-  // 防止重复请求
-  if (isRefreshingScreenshots.value) {
+  if (isRefreshingScreenshots.value || isFinalizingScreenshotPreview.value) {
     ElNotification.info({
       title: '正在处理中',
-      message: '截图重新生成请求已在处理中，请稍候...',
+      message: '截图预览或正式生成已在处理中，请稍候...',
     })
     return
   }
 
   isRefreshingScreenshots.value = true
   ElNotification.info({
-    title: '正在重新获取',
-    message: '正在从视频重新生成截图...',
+    title: '正在重新获取截图',
+    message: '正在检查字幕流；若未找到字幕流，将生成候选截图供手动选择...',
     duration: 0,
   })
 
-  const payload = {
-    type: 'screenshot',
-    content_name: torrentData.value.original_main_title,
-    source_info: {
-      main_title: torrentData.value.original_main_title,
-      source_site: sourceSite.value,
-      imdb_link: torrentData.value.imdb_link,
-      douban_link: torrentData.value.douban_link,
-      tmdb_link: torrentData.value.tmdb_link,
-    },
-    savePath: torrent.value.save_path,
-    torrentName: torrent.value.name,
-    downloaderId: torrent.value.downloaderId, // 添加下载器ID
-  }
-
   try {
-    const response = await axios.post('/api/media/validate', payload)
+    const response = await axios.post(
+      '/api/media/validate',
+      buildScreenshotPayload('screenshot', {
+        preview_count: 12,
+      }),
+    )
     ElNotification.closeAll()
+
+    const candidates = normalizeScreenshotPreviewCandidates(response.data.candidates)
+    const selectionLimit =
+      typeof response.data.selection_limit === 'number'
+        ? response.data.selection_limit
+        : Number(response.data.selection_limit || 5)
 
     if (response.data.success && response.data.screenshots) {
       torrentData.value.intro.screenshots = response.data.screenshots
-      screenshotValid.value = true // 标记截图有效
+      screenshotValid.value = true
       ElNotification.success({
         title: '重新获取成功',
-        message: '已成功生成并加载了新的截图。',
+        message: '已根据字幕流自动生成并加载新的截图。',
+      })
+    } else if (response.data.success && candidates.length > 0) {
+      screenshotPreviewCandidates.value = candidates
+      activeScreenshotPreviewId.value = candidates[0]?.id || ''
+      screenshotPreviewSelectionLimit.value = selectionLimit > 0 ? selectionLimit : 5
+      showScreenshotPreviewDialog.value = true
+      ElNotification.success({
+        title: '候选已生成',
+        message: '未检测到字幕流，请手动选择 5 张截图后再生成正式截图。',
       })
     } else {
-      // 如果重新获取截图失败，标记截图无效
-      screenshotValid.value = false
       ElNotification.error({
-        title: '重新获取失败',
-        message: response.data.error || '无法从后端获取新的截图，请查看后台日志。',
+        title: '候选生成失败',
+        message: response.data.error || '无法从后端获取候选截图，请查看后台日志。',
       })
     }
   } catch (error: unknown) {
     ElNotification.closeAll()
     const errorMsg = axios.isAxiosError(error)
-      ? ((error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
         (error.response?.data as { message?: string } | undefined)?.message ||
         error.message ||
-        '未能重新获取截图，请查看后台日志。')
+        '未能生成候选截图，请查看后台日志。'
       : error instanceof Error
-        ? error.message || '未能重新获取截图，请查看后台日志。'
-        : '未能重新获取截图，请查看后台日志。'
+        ? error.message || '未能生成候选截图，请查看后台日志。'
+        : '未能生成候选截图，请查看后台日志。'
     ElNotification.error({
-      title: '操作失败',
+      title: '候选生成失败',
       message: errorMsg,
     })
-    // 如果重新获取截图失败，标记截图无效
-    screenshotValid.value = false
   } finally {
     isRefreshingScreenshots.value = false
   }
@@ -1141,10 +1400,10 @@ const refreshMediainfo = async () => {
   } catch (error: unknown) {
     ElNotification.closeAll()
     const errorMsg = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (error.response?.data as { error?: string } | undefined)?.error ||
         error.message ||
-        '未能重新获取媒体信息，请查看后台日志。')
+        '未能重新获取媒体信息，请查看后台日志。'
       : error instanceof Error
         ? error.message || '未能重新获取媒体信息，请查看后台日志。'
         : '未能重新获取媒体信息，请查看后台日志。'
@@ -1538,10 +1797,10 @@ const refreshPosters = async () => {
   } catch (error: unknown) {
     ElNotification.closeAll()
     const errorMsg = axios.isAxiosError(error)
-      ? ((error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
         (error.response?.data as { message?: string } | undefined)?.message ||
         error.message ||
-        '未能重新获取海报，请查看后台日志。')
+        '未能重新获取海报，请查看后台日志。'
       : error instanceof Error
         ? error.message || '未能重新获取海报，请查看后台日志。'
         : '未能重新获取海报，请查看后台日志。'
@@ -1680,6 +1939,22 @@ const handleImageError = async (url: string, type: 'poster' | 'screenshot', inde
           title: '截图已更新',
           message: '已成功生成并加载了新的截图。',
         })
+      } else if (type === 'screenshot' && Array.isArray(response.data.candidates)) {
+        const candidates = normalizeScreenshotPreviewCandidates(response.data.candidates)
+        const selectionLimit =
+          typeof response.data.selection_limit === 'number'
+            ? response.data.selection_limit
+            : Number(response.data.selection_limit || 5)
+        if (candidates.length > 0) {
+          screenshotPreviewCandidates.value = candidates
+          activeScreenshotPreviewId.value = candidates[0]?.id || ''
+          screenshotPreviewSelectionLimit.value = selectionLimit > 0 ? selectionLimit : 5
+          showScreenshotPreviewDialog.value = true
+          ElNotification.info({
+            title: '需要手动选择截图',
+            message: '当前未检测到字幕流，请在候选列表中选择 5 张截图。',
+          })
+        }
       } else if (type === 'poster' && response.data.posters) {
         torrentData.value.intro.poster = response.data.posters
         ElNotification.success({
@@ -1700,10 +1975,10 @@ const handleImageError = async (url: string, type: 'poster' | 'screenshot', inde
     }
   } catch (error: unknown) {
     const errorMsg = axios.isAxiosError(error)
-      ? ((error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
         (error.response?.data as { message?: string } | undefined)?.message ||
         error.message ||
-        `发送失效${type === 'poster' ? '海报' : '截图'}信息请求时发生错误，请查看后台日志。`)
+        `发送失效${type === 'poster' ? '海报' : '截图'}信息请求时发生错误，请查看后台日志。`
       : error instanceof Error
         ? error.message ||
           `发送失效${type === 'poster' ? '海报' : '截图'}信息请求时发生错误，请查看后台日志。`
@@ -1884,86 +2159,83 @@ const handleFetchLogProgressClose = () => {
 
 const showCompleteButton = computed(() => props.showCompleteButton)
 
-provide(
-  crossSeedPanelContextKey,
-  {
-    steps,
-    activeStep,
-    activeTab,
-    torrentData,
-    reverseMappings,
-    filteredTitleComponents,
-    initialTitleComponents,
-    unrecognizedValue,
-    invalidStandardParams,
-    reparseTitle,
-    isReparsing,
-    handleTeamInput,
-    allTagOptions,
-    invalidTagsList,
-    isRestrictedTag,
-    getTagType,
-    handleTagClose,
-    refreshPosters,
-    isRefreshingPosters,
-    posterImages,
-    getProxyImageUrl,
-    handleImageErrorWithProxy,
-    refreshScreenshots,
-    isRefreshingScreenshots,
-    screenshotImages,
-    refreshIntro,
-    isRefreshingIntro,
-    refreshMediainfo,
-    isRefreshingMediainfo,
-    bdinfoProgress,
-    discSize,
-    formatFileSize,
-    runInBackground,
-    stopBDInfoSSE,
-    filteredDeclarationsCount,
-    filteredDeclarationsList,
-    getMappedValue,
-    getMappedTags,
-    filteredTags,
-    parseBBCode,
-    autoUpdateExistingTorrent,
-    autoAddExistingToDownloader,
-    saveAutoAddExistingSetting,
-    saveAutoUpdateExistingTorrentSetting,
-    isUbitsDisabled,
-    allSitesStatus,
-    selectedTargetSites,
-    selectAllTargetSites,
-    clearAllTargetSites,
-    getButtonType,
-    isTargetSiteSelectable,
-    toggleSiteSelection,
-    isAutoUpdateHighlightSite,
-    isIloliconSite,
-    isCurrentSeedAnimationRelated,
-    publishProgress,
-    downloaderProgress,
-    limitAlert,
-    groupedResults,
-    showSiteLog,
-    filterUploadedParam,
-    hasValidUrlsInRow,
-    openAllSitesInRow,
-    getValidUrlsCount,
-    showCompleteButton,
-    isLoading,
-    isEnqueueing,
-    isNextButtonDisabled,
-    nextButtonTooltipContent,
-    isScrolledToBottom,
-    handleCancelClick,
-    goToPublishPreviewStep,
-    handlePreviousStep,
-    handleCompleteClick,
-    handleScrollOrNextStep,
-    handleEnqueue,
-    handlePublish,
-  } satisfies CrossSeedPanelContext,
-)
+provide(crossSeedPanelContextKey, {
+  steps,
+  activeStep,
+  activeTab,
+  torrentData,
+  reverseMappings,
+  filteredTitleComponents,
+  initialTitleComponents,
+  unrecognizedValue,
+  invalidStandardParams,
+  reparseTitle,
+  isReparsing,
+  handleTeamInput,
+  allTagOptions,
+  invalidTagsList,
+  isRestrictedTag,
+  getTagType,
+  handleTagClose,
+  refreshPosters,
+  isRefreshingPosters,
+  posterImages,
+  getProxyImageUrl,
+  handleImageErrorWithProxy,
+  refreshScreenshots,
+  isRefreshingScreenshots,
+  screenshotImages,
+  refreshIntro,
+  isRefreshingIntro,
+  refreshMediainfo,
+  isRefreshingMediainfo,
+  bdinfoProgress,
+  discSize,
+  formatFileSize,
+  runInBackground,
+  stopBDInfoSSE,
+  filteredDeclarationsCount,
+  filteredDeclarationsList,
+  getMappedValue,
+  getMappedTags,
+  filteredTags,
+  parseBBCode,
+  autoUpdateExistingTorrent,
+  autoAddExistingToDownloader,
+  saveAutoAddExistingSetting,
+  saveAutoUpdateExistingTorrentSetting,
+  isUbitsDisabled,
+  allSitesStatus,
+  selectedTargetSites,
+  selectAllTargetSites,
+  clearAllTargetSites,
+  getButtonType,
+  isTargetSiteSelectable,
+  toggleSiteSelection,
+  isAutoUpdateHighlightSite,
+  isIloliconSite,
+  isCurrentSeedAnimationRelated,
+  publishProgress,
+  downloaderProgress,
+  limitAlert,
+  groupedResults,
+  showSiteLog,
+  filterUploadedParam,
+  hasValidUrlsInRow,
+  openAllSitesInRow,
+  getValidUrlsCount,
+  showCompleteButton,
+  isLoading,
+  isEnqueueing,
+  isNextButtonDisabled,
+  nextButtonTooltipContent,
+  isScrolledToBottom,
+  handleCancelClick,
+  goToPublishPreviewStep,
+  handlePreviousStep,
+  handleCompleteClick,
+  handleScrollOrNextStep,
+  handleEnqueue,
+  handlePublish,
+} satisfies CrossSeedPanelContext)
 </script>

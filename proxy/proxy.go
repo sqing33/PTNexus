@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -90,13 +91,25 @@ type qbHTTPClient struct {
 	IsLoggedIn bool
 }
 type ScreenshotRequest struct {
-	RemotePath  string `json:"remote_path"`
-	ContentName string `json:"content_name,omitempty"`
+	RemotePath    string    `json:"remote_path"`
+	ContentName   string    `json:"content_name,omitempty"`
+	Mode          string    `json:"mode,omitempty"`
+	PreviewCount  int       `json:"preview_count,omitempty"`
+	SelectedTimes []float64 `json:"selected_times,omitempty"`
+}
+type ScreenshotPreviewCandidate struct {
+	ID          string  `json:"id"`
+	TimeSeconds float64 `json:"time_seconds"`
+	TimeLabel   string  `json:"time_label"`
+	PreviewData string  `json:"preview_data"`
+	Recommended bool    `json:"recommended"`
 }
 type ScreenshotResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	BBCode  string `json:"bbcode,omitempty"`
+	Success           bool                         `json:"success"`
+	Message           string                       `json:"message"`
+	BBCode            string                       `json:"bbcode,omitempty"`
+	HasSubtitleStream bool                         `json:"has_subtitle_stream,omitempty"`
+	PreviewCandidates []ScreenshotPreviewCandidate `json:"preview_candidates,omitempty"`
 }
 type MediaInfoRequest struct {
 	RemotePath  string `json:"remote_path"`
@@ -878,6 +891,293 @@ func takeScreenshot(videoPath, outputPath string, timePoint float64, subtitleSID
 	}
 	log.Printf("   ✅ mpv 原始截图成功 (等待优化) -> %s", outputPath)
 	return nil
+}
+
+const (
+	screenshotPreviewDefaultCount = 12
+	screenshotPreviewMinCount     = 5
+	screenshotPreviewSelectCount  = 5
+)
+
+func normalizeScreenshotPreviewCount(count int) int {
+	if count <= 0 {
+		return screenshotPreviewDefaultCount
+	}
+	if count < screenshotPreviewMinCount {
+		return screenshotPreviewMinCount
+	}
+	if count > 20 {
+		return 20
+	}
+	return count
+}
+
+func detectVideoHDR(videoPath string) bool {
+	output, err := executeCommand("ffprobe", "-v", "error", "-show_streams", "-select_streams", "v:0", videoPath)
+	if err != nil {
+		return false
+	}
+	text := strings.ToLower(output)
+	return strings.Contains(text, "smpte2084") || strings.Contains(text, "bt2020")
+}
+
+func takePreviewScreenshot(videoPath, outputPath string, timePoint float64, isHDR bool) error {
+	vfFilter := "scale='min(640,iw)':-2,format=yuv420p"
+	if isHDR {
+		vfFilter = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,scale='min(640,iw)':-2,format=yuv420p"
+	}
+	args := []string{
+		"-y",
+		"-ss", fmt.Sprintf("%.3f", timePoint),
+		"-i", videoPath,
+		"-frames:v", "1",
+		"-an",
+		"-sn",
+		"-vf", vfFilter,
+		"-q:v", "14",
+		outputPath,
+	}
+	_, err := executeCommandWithTimeout(180*time.Second, "ffmpeg", args...)
+	if err != nil {
+		return fmt.Errorf("ffmpeg 预览截图失败: %v", err)
+	}
+	if stat, statErr := os.Stat(outputPath); statErr != nil || stat.Size() == 0 {
+		return fmt.Errorf("预览截图文件未生成")
+	}
+	return nil
+}
+
+func buildSmartScreenshotPointsForPreview(videoPath string, duration float64, count int) []float64 {
+	if count <= 0 {
+		return nil
+	}
+	_, subtitleIndex, subtitleCodec, err := findBestChineseSubtitleStream(videoPath)
+	if err != nil {
+		log.Printf("警告: 预览模式探测中文字幕流失败: %v", err)
+	}
+	if subtitleIndex < 0 {
+		fallbackIndex, fallbackCodec, fallbackErr := findFirstSubtitleStream(videoPath)
+		if fallbackErr == nil && fallbackIndex >= 0 {
+			subtitleIndex = fallbackIndex
+			subtitleCodec = fallbackCodec
+		}
+	}
+	if subtitleIndex < 0 {
+		return nil
+	}
+
+	var subtitleEvents []SubtitleEvent
+	if subtitleCodec == "subrip" || subtitleCodec == "ass" {
+		subtitleEvents, err = findSubtitleEvents(videoPath, subtitleIndex, duration)
+	} else if subtitleCodec == "hdmv_pgs_subtitle" {
+		subtitleEvents, err = findSubtitleEventsForPGS(videoPath, subtitleIndex, duration)
+	}
+	if err != nil || len(subtitleEvents) == 0 {
+		return nil
+	}
+
+	goldenStartTime := duration * 0.30
+	goldenEndTime := duration * 0.80
+	goldenEvents := make([]SubtitleEvent, 0, len(subtitleEvents))
+	for _, event := range subtitleEvents {
+		if event.StartTime >= goldenStartTime && event.EndTime <= goldenEndTime {
+			goldenEvents = append(goldenEvents, event)
+		}
+	}
+	targetEvents := goldenEvents
+	if len(targetEvents) < count {
+		targetEvents = subtitleEvents
+	}
+	if len(targetEvents) == 0 {
+		return nil
+	}
+	sort.Slice(targetEvents, func(i, j int) bool {
+		return targetEvents[i].StartTime < targetEvents[j].StartTime
+	})
+	chosenEvents := selectWellDistributedEvents(targetEvents, count)
+	points := make([]float64, 0, len(chosenEvents))
+	rand.Seed(time.Now().UnixNano())
+	for _, event := range chosenEvents {
+		durationOfEvent := event.EndTime - event.StartTime
+		if durationOfEvent <= 0 {
+			continue
+		}
+		randomOffset := durationOfEvent*0.1 + rand.Float64()*(durationOfEvent*0.8)
+		points = append(points, event.StartTime+randomOffset)
+	}
+	return points
+}
+
+func buildUniformPreviewPoints(duration float64, count int) []float64 {
+	if duration <= 0 || count <= 0 {
+		return nil
+	}
+	start := duration * 0.12
+	end := duration * 0.88
+	if end <= start {
+		start = duration * 0.10
+		end = duration * 0.90
+	}
+	segment := (end - start) / float64(count)
+	if segment <= 0 {
+		segment = duration / float64(count+1)
+	}
+	points := make([]float64, 0, count)
+	for i := 0; i < count; i++ {
+		point := start + segment*(float64(i)+0.5)
+		if point < 1 {
+			point = 1
+		}
+		if point > duration-1 {
+			point = math.Max(1, duration-1)
+		}
+		points = append(points, point)
+	}
+	return points
+}
+
+func mergePreviewPoints(primary, secondary []float64, limit int, duration float64) []float64 {
+	points := make([]float64, 0, limit)
+	minSpacing := math.Max(12, duration/240)
+	appendPoint := func(candidate float64) {
+		if candidate <= 0 {
+			return
+		}
+		if candidate > duration-1 {
+			candidate = math.Max(1, duration-1)
+		}
+		for _, existing := range points {
+			if math.Abs(existing-candidate) < minSpacing {
+				return
+			}
+		}
+		points = append(points, candidate)
+	}
+	for _, candidate := range primary {
+		if len(points) >= limit {
+			break
+		}
+		appendPoint(candidate)
+	}
+	for _, candidate := range secondary {
+		if len(points) >= limit {
+			break
+		}
+		appendPoint(candidate)
+	}
+	sort.Float64s(points)
+	if len(points) > limit {
+		return points[:limit]
+	}
+	return points
+}
+
+func sanitizeSelectedScreenshotTimes(selected []float64, duration float64) []float64 {
+	result := make([]float64, 0, len(selected))
+	for _, item := range selected {
+		if item <= 0 || item >= duration {
+			continue
+		}
+		duplicated := false
+		for _, existing := range result {
+			if math.Abs(existing-item) < 0.8 {
+				duplicated = true
+				break
+			}
+		}
+		if duplicated {
+			continue
+		}
+		result = append(result, item)
+	}
+	sort.Float64s(result)
+	if len(result) > screenshotPreviewSelectCount {
+		result = result[:screenshotPreviewSelectCount]
+	}
+	return result
+}
+
+func formatSecondClockValue(second float64) string {
+	total := int(second)
+	if total < 0 {
+		total = 0
+	}
+	h := total / 3600
+	m := (total % 3600) / 60
+	s := total % 60
+	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+}
+
+func markRecommendedPreviewCandidates(candidates []ScreenshotPreviewCandidate, want int) {
+	if len(candidates) == 0 || want <= 0 {
+		return
+	}
+	if want > len(candidates) {
+		want = len(candidates)
+	}
+	if want == 1 {
+		candidates[len(candidates)/2].Recommended = true
+		return
+	}
+	step := float64(len(candidates)-1) / float64(want-1)
+	seen := map[int]struct{}{}
+	for i := 0; i < want; i++ {
+		idx := int(math.Round(float64(i) * step))
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(candidates) {
+			idx = len(candidates) - 1
+		}
+		if _, ok := seen[idx]; ok {
+			continue
+		}
+		seen[idx] = struct{}{}
+		candidates[idx].Recommended = true
+	}
+}
+
+func generatePreviewCandidates(videoPath string, duration float64, previewCount int) ([]ScreenshotPreviewCandidate, error) {
+	previewCount = normalizeScreenshotPreviewCount(previewCount)
+	smartCount := previewCount
+	if smartCount > screenshotPreviewSelectCount {
+		smartCount = screenshotPreviewSelectCount
+	}
+	smartPoints := buildSmartScreenshotPointsForPreview(videoPath, duration, smartCount)
+	points := mergePreviewPoints(smartPoints, buildUniformPreviewPoints(duration, previewCount), previewCount, duration)
+	if len(points) == 0 {
+		return nil, fmt.Errorf("未找到可用的候选截图时间点")
+	}
+	isHDR := detectVideoHDR(videoPath)
+	tempDir, err := os.MkdirTemp("", "screenshots-preview-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tempDir)
+
+	candidates := make([]ScreenshotPreviewCandidate, 0, len(points))
+	for i, point := range points {
+		filePath := filepath.Join(tempDir, fmt.Sprintf("preview_%02d.jpg", i+1))
+		if err := takePreviewScreenshot(videoPath, filePath, point, isHDR); err != nil {
+			log.Printf("警告: 生成候选截图失败 point=%.2f err=%v", point, err)
+			continue
+		}
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			log.Printf("警告: 读取候选截图失败 path=%s err=%v", filePath, err)
+			continue
+		}
+		candidates = append(candidates, ScreenshotPreviewCandidate{
+			ID:          fmt.Sprintf("candidate-%02d", len(candidates)+1),
+			TimeSeconds: point,
+			TimeLabel:   formatSecondClockValue(point),
+			PreviewData: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(content),
+		})
+	}
+	if len(candidates) < screenshotPreviewMinCount {
+		return nil, fmt.Errorf("可用候选截图不足，仅生成 %d 张", len(candidates))
+	}
+	return candidates, nil
 }
 
 // [核心修改] 增加二次压缩逻辑
@@ -1663,6 +1963,7 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 
 	statusCode := http.StatusOK
 	response := ScreenshotResponse{}
+	mode := strings.ToLower(strings.TrimSpace(reqData.Mode))
 
 	err := withMountedISOIfNeeded(initialPath, "截图请求", func(resolvedPath string) error {
 		videoPath, err := findTargetVideoFile(resolvedPath, reqData.ContentName)
@@ -1679,80 +1980,79 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		chineseSubtitleSID, subtitleGlobalIndex, subtitleCodec, err := findBestChineseSubtitleStream(videoPath)
-		subtitleSID := 0
-		subtitleIndex := -1
-		if err != nil {
-			log.Printf("警告: 探测中文字幕流时发生错误: %v", err)
+		if mode == "preview" {
+			candidates, previewErr := generatePreviewCandidates(videoPath, duration, reqData.PreviewCount)
+			if previewErr != nil {
+				statusCode = http.StatusInternalServerError
+				response = ScreenshotResponse{Success: false, Message: previewErr.Error()}
+				return previewErr
+			}
+			response = ScreenshotResponse{
+				Success:           true,
+				Message:           fmt.Sprintf("成功生成 %d 张候选截图", len(candidates)),
+				PreviewCandidates: candidates,
+			}
+			return nil
 		}
 
+		if mode == "inspect" {
+			_, subtitleIndex, _, subtitleErr := findBestChineseSubtitleStream(videoPath)
+			if subtitleErr != nil {
+				log.Printf("警告: 探测中文字幕流时发生错误: %v", subtitleErr)
+			}
+			hasSubtitleStream := subtitleIndex >= 0
+			if !hasSubtitleStream {
+				fallbackIndex, _, fallbackErr := findFirstSubtitleStream(videoPath)
+				if fallbackErr != nil {
+					statusCode = http.StatusInternalServerError
+					response = ScreenshotResponse{Success: false, Message: fallbackErr.Error()}
+					return fallbackErr
+				}
+				hasSubtitleStream = fallbackIndex >= 0
+			}
+			response = ScreenshotResponse{
+				Success:           true,
+				HasSubtitleStream: hasSubtitleStream,
+				Message: func() string {
+					if hasSubtitleStream {
+						return "检测到可用字幕流"
+					}
+					return "未检测到可用字幕流"
+				}(),
+			}
+			return nil
+		}
+
+		chineseSubtitleSID, _, _, subtitleErr := findBestChineseSubtitleStream(videoPath)
+		if subtitleErr != nil {
+			log.Printf("警告: 探测中文字幕流时发生错误: %v", subtitleErr)
+		}
+		subtitleSID := 0
 		if chineseSubtitleSID > 0 {
 			subtitleSID = chineseSubtitleSID
-			subtitleIndex = subtitleGlobalIndex
-			log.Printf("   ✅ 找到中文字幕，将挂载字幕截图并使用该字幕流扫描时间点")
+			log.Printf("   ✅ 找到中文字幕，将挂载字幕截图")
 		} else {
-			log.Printf("   ℹ️ 未找到中文字幕，将尝试查找任意字幕流用于智能扫描时间点（不挂载字幕）")
-			fallbackIndex, fallbackCodec, fallbackErr := findFirstSubtitleStream(videoPath)
-			if fallbackErr == nil && fallbackIndex >= 0 {
-				subtitleIndex = fallbackIndex
-				subtitleCodec = fallbackCodec
-				log.Printf("   ✅ 找到兜底字幕流 (索引: %d, 格式: %s) 用于智能扫描", subtitleIndex, subtitleCodec)
-			}
+			log.Printf("   ℹ️ 未检测到明确的中文字幕，将截取无字幕画面。")
 		}
 
 		screenshotPoints := make([]float64, 0, 5)
-		var subtitleEvents []SubtitleEvent
 		const numScreenshots = 5
-		if subtitleIndex >= 0 {
-			if subtitleCodec == "subrip" || subtitleCodec == "ass" {
-				subtitleEvents, err = findSubtitleEvents(videoPath, subtitleIndex, duration)
-			} else if subtitleCodec == "hdmv_pgs_subtitle" {
-				subtitleEvents, err = findSubtitleEventsForPGS(videoPath, subtitleIndex, duration)
-			} else {
-				err = fmt.Errorf("不支持的字幕格式 '%s' 用于智能截图", subtitleCodec)
+		if mode == "finalize" {
+			screenshotPoints = sanitizeSelectedScreenshotTimes(reqData.SelectedTimes, duration)
+			if len(screenshotPoints) == 0 {
+				statusCode = http.StatusBadRequest
+				response = ScreenshotResponse{Success: false, Message: "selected_times 不能为空，且至少需要 1 个有效时间点"}
+				return fmt.Errorf("selected_times 不能为空")
 			}
-		}
-		if err == nil && subtitleEvents != nil && len(subtitleEvents) >= numScreenshots {
-			log.Printf("智能截图模式启动：找到 %d 个有效字幕事件/时间段。", len(subtitleEvents))
-			rand.Seed(time.Now().UnixNano())
-			goldenStartTime := duration * 0.30
-			goldenEndTime := duration * 0.80
-			var goldenEvents []SubtitleEvent
-			for _, event := range subtitleEvents {
-				if event.StartTime >= goldenStartTime && event.EndTime <= goldenEndTime {
-					goldenEvents = append(goldenEvents, event)
+		} else {
+			screenshotPoints = buildSmartScreenshotPointsForPreview(videoPath, duration, numScreenshots)
+			if len(screenshotPoints) < numScreenshots {
+				log.Printf("警告: 智能截图不足，回退到按百分比截图。")
+				percentages := []float64{0.15, 0.30, 0.50, 0.70, 0.85}
+				screenshotPoints = make([]float64, 0, len(percentages))
+				for _, p := range percentages {
+					screenshotPoints = append(screenshotPoints, duration*p)
 				}
-			}
-			log.Printf("   -> 在视频中部 (%.2fs - %.2fs) 找到 %d 个“黄金”字幕事件。", goldenStartTime, goldenEndTime, len(goldenEvents))
-			targetEvents := goldenEvents
-			if len(targetEvents) < numScreenshots {
-				log.Printf("   -> “黄金”字幕数量不足，将从所有字幕事件中随机选择。")
-				targetEvents = subtitleEvents
-			}
-			if len(targetEvents) > 0 {
-				sort.Slice(targetEvents, func(i, j int) bool {
-					return targetEvents[i].StartTime < targetEvents[j].StartTime
-				})
-				chosenEvents := selectWellDistributedEvents(targetEvents, numScreenshots)
-				for i, event := range chosenEvents {
-					durationOfEvent := event.EndTime - event.StartTime
-					randomOffset := durationOfEvent*0.1 + rand.Float64()*(durationOfEvent*0.8)
-					randomPoint := event.StartTime + randomOffset
-					screenshotPoints = append(screenshotPoints, randomPoint)
-					log.Printf("   -> 选中时间段 [%.2fs - %.2fs], 截图点: %.2fs (第%d张)", event.StartTime, event.EndTime, randomPoint, i+1)
-				}
-			}
-		}
-		if len(screenshotPoints) < numScreenshots {
-			if err != nil {
-				log.Printf("警告: 智能截图失败，回退到按百分比截图。原因: %v", err)
-			} else {
-				log.Printf("警告: 有效字幕数量不足，回退到按百分比截图。")
-			}
-			percentages := []float64{0.15, 0.30, 0.50, 0.70, 0.85}
-			screenshotPoints = make([]float64, 0, len(percentages))
-			for _, p := range percentages {
-				screenshotPoints = append(screenshotPoints, duration*p)
 			}
 		}
 
@@ -1764,8 +2064,7 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer os.RemoveAll(tempDir)
 
-		var uploadedURLs []string
-
+		uploadedURLs := make([]string, 0, len(screenshotPoints))
 		for i, point := range screenshotPoints {
 			log.Printf("开始处理第 %d/%d 张截图...", i+1, len(screenshotPoints))
 			totalSeconds := int(point)
@@ -1779,7 +2078,6 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("错误: 第 %d 张图截图失败: %v。跳过此图。", i+1, err)
 				continue
 			}
-
 			if err := convertPngToOptimizedPng(intermediatePngPath, finalPngPath); err != nil {
 				log.Printf("错误: 第 %d 张图PNG压缩失败: %v。跳过此图。", i+1, err)
 				continue
@@ -1804,13 +2102,12 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("%s", msg)
 		}
 
-		sort.Strings(uploadedURLs)
 		var bbcodeBuilder strings.Builder
 		for _, url := range uploadedURLs {
 			bbcodeBuilder.WriteString(fmt.Sprintf("[img]%s[/img]\n", url))
 		}
 
-		successMsg := fmt.Sprintf("成功上传 %d/%d 张截图", len(uploadedURLs), numScreenshots)
+		successMsg := fmt.Sprintf("成功上传 %d/%d 张截图", len(uploadedURLs), len(screenshotPoints))
 		log.Println(successMsg)
 		response = ScreenshotResponse{
 			Success: true,

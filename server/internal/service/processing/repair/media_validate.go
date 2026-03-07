@@ -25,8 +25,69 @@ func ValidateMediaPayload(payload map[string]any, rootConfig map[string]any, csp
 	subtitle := strings.TrimSpace(toStringAny(sourceInfo["subtitle"], ""))
 
 	switch mediaType {
+	case "screenshot_preview":
+		previewCount := parsePreviewCountAny(payload["preview_count"])
+		candidates, previewErr := GenerateScreenshotPreviewCandidates(ScreenshotGenerateInput{
+			Payload:     payload,
+			SourceInfo:  sourceInfo,
+			ContentName: contentName,
+			RootConfig:  rootConfig,
+		}, previewCount)
+		if previewErr != nil {
+			return map[string]any{"success": false, "error": previewErr.Error()}, 400
+		}
+		return map[string]any{
+			"success":         true,
+			"candidates":      candidates,
+			"selection_limit": screenshotPreviewSelectCount,
+		}, 200
+
+	case "screenshot_finalize":
+		selectedTimes := parseFloatSliceAny(payload["selected_times"])
+		generated, genErr := GenerateAndUploadSelectedScreenshots(ScreenshotGenerateInput{
+			Payload:     payload,
+			SourceInfo:  sourceInfo,
+			ContentName: contentName,
+			RootConfig:  rootConfig,
+		}, selectedTimes)
+		if genErr != nil {
+			return map[string]any{"success": false, "error": genErr.Error()}, 400
+		}
+		if len(generated) == 0 {
+			return map[string]any{"success": false, "error": "未找到可用截图，且正式截图生成失败。"}, 400
+		}
+		return map[string]any{"success": true, "screenshots": ToBBCodeImages(generated)}, 200
+
 	case "screenshot":
-		// “重新获取截图”语义：固定从视频重建，不复用来源文本里的截图。
+		// “重新获取截图”语义：优先沿用原有字幕流直出逻辑；仅在未找到可用字幕流时返回候选截图供人工选择。
+		usePreview, previewDecisionErr := ShouldUseScreenshotPreview(ScreenshotGenerateInput{
+			Payload:     payload,
+			SourceInfo:  sourceInfo,
+			ContentName: contentName,
+			RootConfig:  rootConfig,
+		})
+		if previewDecisionErr != nil {
+			usePreview = false
+		}
+		if usePreview {
+			previewCount := parsePreviewCountAny(payload["preview_count"])
+			candidates, previewErr := GenerateScreenshotPreviewCandidates(ScreenshotGenerateInput{
+				Payload:     payload,
+				SourceInfo:  sourceInfo,
+				ContentName: contentName,
+				RootConfig:  rootConfig,
+			}, previewCount)
+			if previewErr != nil {
+				return map[string]any{"success": false, "error": previewErr.Error()}, 400
+			}
+			return map[string]any{
+				"success":          true,
+				"preview_required": true,
+				"candidates":       candidates,
+				"selection_limit":  screenshotPreviewSelectCount,
+			}, 200
+		}
+
 		generated, genErr := GenerateAndUploadScreenshots(ScreenshotGenerateInput{
 			Payload:     payload,
 			SourceInfo:  sourceInfo,

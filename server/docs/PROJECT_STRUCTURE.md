@@ -258,7 +258,8 @@
 | `internal/service/processing/repair/intro_completeness.go` | 简介关键字段完整性检测（片名/产地/简介） |
 | `internal/service/processing/repair/media_validate.go` | 媒体文本校验逻辑 |
 | `internal/service/processing/repair/media_validate_entry.go` | 媒体校验外部入口 |
-| `internal/service/processing/repair/screenshot.go` | 截图生成、上传与路径解析 |
+| `internal/service/processing/repair/screenshot.go` | 正式截图生成、上传与路径解析 |
+| `internal/service/processing/repair/screenshot_preview.go` | 低清候选截图生成与正式截图时间点收敛 |
 | `internal/service/processing/repair/images.go` | 图片链接提取与 BBCode 转换 |
 | `internal/service/processing/repair/pixhost.go` | Pixhost 上传与链接标准化 |
 | `internal/service/processing/repair/http.go` | 修复环节网络请求工具 |
