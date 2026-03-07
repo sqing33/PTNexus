@@ -1290,16 +1290,53 @@ const refreshIntro = async () => {
   }
 }
 
+type InferredStandardizedParams = Partial<
+  Pick<StandardizedParams, 'video_codec' | 'audio_codec' | 'resolution'>
+>
+
 type SeedUpdates = {
   title_components?: TitleComponent[]
   standardized_params?: Partial<StandardizedParams>
-  inferred_standardized_params?: Partial<
-    Pick<StandardizedParams, 'video_codec' | 'audio_codec' | 'resolution'>
-  >
+  inferred_standardized_params?: InferredStandardizedParams
 }
 
-const applySeedUpdates = (seedUpdates: unknown) => {
-  if (!seedUpdates || typeof seedUpdates !== 'object') return
+const standardParamLabels: Record<keyof InferredStandardizedParams, string> = {
+  video_codec: '视频编码',
+  audio_codec: '音频编码',
+  resolution: '分辨率',
+}
+
+const applyInferredStandardizedParams = (
+  inferred: unknown,
+): Array<keyof InferredStandardizedParams> => {
+  if (!inferred || typeof inferred !== 'object') return []
+  const params = inferred as InferredStandardizedParams
+  const changed: Array<keyof InferredStandardizedParams> = []
+
+  ;(['video_codec', 'audio_codec', 'resolution'] as const).forEach((key) => {
+    const candidate = typeof params[key] === 'string' ? params[key].trim() : ''
+    if (!candidate || candidate.endsWith('.other')) return
+
+    const current = torrentData.value.standardized_params[key].trim()
+    if (current === candidate) return
+
+    torrentData.value.standardized_params[key] = candidate
+    changed.push(key)
+  })
+
+  return changed
+}
+
+const formatCorrectedStandardParams = (
+  keys: Array<keyof InferredStandardizedParams>,
+): string => {
+  const uniqueKeys = [...new Set(keys)]
+  if (uniqueKeys.length === 0) return ''
+  return uniqueKeys.map((key) => standardParamLabels[key]).join('、')
+}
+
+const applySeedUpdates = (seedUpdates: unknown): Array<keyof InferredStandardizedParams> => {
+  if (!seedUpdates || typeof seedUpdates !== 'object') return []
   const updates = seedUpdates as SeedUpdates
 
   // 1) 标题组件/媒介等：直接同步后端回传的最新值
@@ -1332,21 +1369,8 @@ const applySeedUpdates = (seedUpdates: unknown) => {
     }
   }
 
-  // 2) 编码/分辨率推断：仅在当前为空或 *.other 时纠正
-  const inferred = updates.inferred_standardized_params
-  if (inferred && typeof inferred === 'object') {
-    const applyIfEmptyOrOther = (key: 'video_codec' | 'audio_codec' | 'resolution') => {
-      const current = torrentData.value.standardized_params[key].trim()
-      const candidate = typeof inferred[key] === 'string' ? inferred[key].trim() : ''
-      if (!candidate) return
-      if (!current || current.endsWith('.other')) {
-        torrentData.value.standardized_params[key] = candidate
-      }
-    }
-    applyIfEmptyOrOther('video_codec')
-    applyIfEmptyOrOther('audio_codec')
-    applyIfEmptyOrOther('resolution')
-  }
+  // 2) 编码/分辨率推断：有有效值就直接覆盖当前种子信息参数。
+  return applyInferredStandardizedParams(updates.inferred_standardized_params)
 }
 
 const refreshScreenshots = async () => {
@@ -1461,9 +1485,10 @@ const refreshMediainfo = async () => {
       }
 
       // 同步后端回传的最新字段更新（标签/标题组件/媒介/推断编码分辨率等）。
-      if (response.data.seed_updates) {
-        applySeedUpdates(response.data.seed_updates)
-      }
+      const correctedKeys = response.data.seed_updates
+        ? applySeedUpdates(response.data.seed_updates)
+        : []
+      const correctedText = formatCorrectedStandardParams(correctedKeys)
 
       // 如果 BDInfo 在后台处理中，开始SSE连接
       if (response.data.bdinfo_async && response.data.bdinfo_async.bdinfo_status === 'processing') {
@@ -1476,7 +1501,10 @@ const refreshMediainfo = async () => {
       } else if (response.data.mediainfo) {
         ElNotification.success({
           title: '重新获取成功',
-          message: response.data.message || '已成功生成并加载了新的媒体信息。',
+          message:
+            correctedText !== ''
+              ? `已成功生成并加载新的媒体信息，并修正${correctedText}。`
+              : response.data.message || '已成功生成并加载了新的媒体信息。',
         })
       } else {
         ElNotification.info({
@@ -1919,53 +1947,13 @@ const reparseTitle = async () => {
     })
     if (response.data.success) {
       torrentData.value.title_components = response.data.components
-      const inferred = response.data.inferred_standardized_params
-      const inferredAudioCodec =
-        inferred && typeof inferred === 'object' ? String(inferred.audio_codec || '').trim() : ''
+      const correctedKeys = applyInferredStandardizedParams(
+        response.data.inferred_standardized_params,
+      )
+      const correctedText = formatCorrectedStandardParams(correctedKeys)
 
-      const currentAudioCodec = String(
-        torrentData.value.standardized_params?.audio_codec || '',
-      ).trim()
-      const shouldUpgradeAudioCodec = (current: string, candidate: string): boolean => {
-        if (!candidate) return false
-        if (!current || current.endsWith('.other')) return true
-        if (current === candidate) return false
-
-        const dtsRank = (value: string): number => {
-          if (value === 'audio.dtsx') return 3
-          if (value === 'audio.dts_hd_ma') return 2
-          if (value === 'audio.dts') return 1
-          return 0
-        }
-        const truehdRank = (value: string): number => {
-          if (value === 'audio.truehd_atmos') return 2
-          if (value === 'audio.truehd') return 1
-          return 0
-        }
-
-        const currentDTS = dtsRank(current)
-        const candidateDTS = dtsRank(candidate)
-        if (currentDTS > 0 && candidateDTS > 0) {
-          return candidateDTS > currentDTS
-        }
-
-        const currentTrueHD = truehdRank(current)
-        const candidateTrueHD = truehdRank(candidate)
-        if (currentTrueHD > 0 && candidateTrueHD > 0) {
-          return candidateTrueHD > currentTrueHD
-        }
-
-        return false
-      }
-
-      let audioFixed = false
-      if (shouldUpgradeAudioCodec(currentAudioCodec, inferredAudioCodec)) {
-        torrentData.value.standardized_params.audio_codec = inferredAudioCodec
-        audioFixed = true
-      }
-
-      if (audioFixed) {
-        ElNotification.success('标题已重新解析，并已根据标题修正音频编码。')
+      if (correctedText) {
+        ElNotification.success(`标题已重新解析，并已同步修正${correctedText}。`)
       } else {
         ElNotification.success('标题已重新解析！')
       }

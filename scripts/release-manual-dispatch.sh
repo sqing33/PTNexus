@@ -10,6 +10,7 @@ TITLE_RUNTIME="在线更新文件"
 TITLE_DESKTOP="Windows 桌面安装包"
 TITLE_PROXY="盒子端代理"
 TITLE_DOCKER="Docker 镜像"
+TITLE_WATCH="自动跟踪进度"
 TITLE_INSTALL_GH="是否现在尝试安装 gh"
 PROMPT_LABEL_WIDTH=0
 SUMMARY_LABEL_WIDTH=0
@@ -18,6 +19,7 @@ build_runtime=true
 build_desktop_windows=true
 build_proxy=true
 build_docker_image=true
+watch_workflow=true
 dry_run=false
 ref_override=""
 build_flags_explicit=false
@@ -33,6 +35,7 @@ Options:
   --no-desktop       跳过 Windows 桌面安装包
   --no-proxy         跳过盒子端代理产物
   --no-docker        跳过 Docker 镜像
+  --no-watch         触发 workflow 后不自动跟踪执行进度
   --dry-run          只打印命令，不实际执行
   --help, -h         显示帮助
 
@@ -41,10 +44,12 @@ Examples:
   ./scripts/release-manual-dispatch.sh --dry-run
   ./scripts/release-manual-dispatch.sh --all
   ./scripts/release-manual-dispatch.sh --ref go --no-desktop
+  ./scripts/release-manual-dispatch.sh --all --no-watch
 
 Notes:
   未显式传入构建开关时，脚本会逐项使用 Y/N 询问本次要发布的内容。
   使用 --all 时，会直接启用全部四项发布并跳过交互选择。
+  默认会在 workflow_dispatch 成功后自动执行 gh run watch 跟踪进度。
 USAGE
 }
 
@@ -327,8 +332,81 @@ ensure_gh_cli() {
   fail "未找到 gh，请先安装 GitHub CLI：https://cli.github.com/"
 }
 
+find_dispatched_run_id() {
+  local repo_slug="$1"
+  local ref="$2"
+  local head_sha="$3"
+  local dispatch_started_at="$4"
+  local run_id=""
+  local attempt=0
+
+  while (( attempt < 20 )); do
+    run_id="$({
+      gh run list \
+        --repo "$repo_slug" \
+        --workflow "$WORKFLOW_FILE" \
+        --branch "$ref" \
+        --event workflow_dispatch \
+        --limit 20 \
+        --json databaseId,headBranch,headSha,createdAt 2>/dev/null || true
+    } | python3 - "$head_sha" "$ref" "$dispatch_started_at" <<'PY'
+import datetime as dt
+import json
+import sys
+
+head_sha = sys.argv[1]
+ref = sys.argv[2]
+dispatch_started_at = sys.argv[3]
+
+try:
+    threshold = dt.datetime.fromisoformat(dispatch_started_at.replace('Z', '+00:00'))
+except ValueError:
+    threshold = None
+
+try:
+    runs = json.load(sys.stdin)
+except json.JSONDecodeError:
+    runs = []
+
+candidates = []
+for item in runs:
+    if item.get('headSha') != head_sha:
+        continue
+    if item.get('headBranch') != ref:
+        continue
+
+    created_at = item.get('createdAt') or ''
+    if threshold is not None and created_at:
+        try:
+            created = dt.datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+        except ValueError:
+            continue
+        if created < threshold:
+            continue
+
+    run_id = item.get('databaseId')
+    if run_id:
+        candidates.append(str(run_id))
+
+if candidates:
+    print(candidates[0])
+PY
+    )"
+
+    if [[ -n "$run_id" ]]; then
+      printf '%s\n' "$run_id"
+      return 0
+    fi
+
+    attempt=$(( attempt + 1 ))
+    sleep 3
+  done
+
+  return 1
+}
+
 PROMPT_LABEL_WIDTH="$(compute_label_width "$TITLE_RUNTIME" "$TITLE_DESKTOP" "$TITLE_PROXY" "$TITLE_DOCKER" "$TITLE_INSTALL_GH")"
-SUMMARY_LABEL_WIDTH="$(compute_label_width 仓库 发布分支 版本 "$TITLE_RUNTIME" "$TITLE_DESKTOP" "$TITLE_PROXY" "$TITLE_DOCKER" 模式)"
+SUMMARY_LABEL_WIDTH="$(compute_label_width 仓库 发布分支 版本 "$TITLE_RUNTIME" "$TITLE_DESKTOP" "$TITLE_PROXY" "$TITLE_DOCKER" "$TITLE_WATCH" 模式)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -363,6 +441,10 @@ while [[ $# -gt 0 ]]; do
     --no-docker)
       build_docker_image=false
       build_flags_explicit=true
+      shift
+      ;;
+    --no-watch)
+      watch_workflow=false
       shift
       ;;
     --dry-run)
@@ -409,6 +491,8 @@ repo_slug="$(resolve_repo_slug "$origin_url" || true)"
 version="$(read_changelog_version 2>/dev/null || true)"
 [[ -n "$version" ]] || fail "CHANGELOG.json 缺少 history[0].version"
 
+head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+
 if ensure_gh_cli && [[ "$dry_run" != "true" ]]; then
   gh auth status >/dev/null 2>&1 || fail "gh 尚未登录，请先执行 gh auth login"
 fi
@@ -421,12 +505,14 @@ print_config_line "$TITLE_RUNTIME" "$build_runtime"
 print_config_line "$TITLE_DESKTOP" "$build_desktop_windows"
 print_config_line "$TITLE_PROXY" "$build_proxy"
 print_config_line "$TITLE_DOCKER" "$build_docker_image"
+print_config_line "$TITLE_WATCH" "$watch_workflow"
 
 if [[ "$dry_run" == "true" ]]; then
   print_config_line "模式" "dry-run"
 fi
 
 run_cmd git -C "$REPO_ROOT" push origin "$ref"
+dispatch_started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 run_cmd gh workflow run "$WORKFLOW_FILE" \
   --repo "$repo_slug" \
   --ref "$ref" \
@@ -436,10 +522,26 @@ run_cmd gh workflow run "$WORKFLOW_FILE" \
   -f "build_docker_image=$build_docker_image"
 
 if [[ "$dry_run" == "true" ]]; then
+  if [[ "$watch_workflow" == "true" ]]; then
+    print_cmd gh run watch --repo "$repo_slug"
+  fi
   exit 0
 fi
 
 echo
-echo "Release workflow 已触发。可使用以下命令查看状态："
+echo "Release workflow 已触发。"
+
+if [[ "$watch_workflow" == "true" ]]; then
+  echo "正在定位本次 workflow run，并自动跟踪进度..."
+  run_id="$(find_dispatched_run_id "$repo_slug" "$ref" "$head_sha" "$dispatch_started_at" || true)"
+  if [[ -n "$run_id" ]]; then
+    run_cmd gh run watch "$run_id" --repo "$repo_slug"
+    exit 0
+  fi
+
+  warn "未能自动定位本次 workflow run，请改用手动查看状态。"
+fi
+
+echo "可使用以下命令查看状态："
 echo "  gh run list --repo $repo_slug --workflow $WORKFLOW_FILE --limit 5"
 echo "  gh run watch --repo $repo_slug"

@@ -81,8 +81,9 @@ func (s *MigrateService) refreshMediainfoAsync(payload map[string]any) (map[stri
 			ResolveMediaTargetFile: processingrepair.ResolveMediaTargetFile,
 			AfterPersist: func(hash, torrentID, siteName string, row map[string]any, savePath string, torrentName string, mediainfo string) {
 				now := time.Now()
+				seedID := processingpersist.ComposeSeedID(hash, torrentID, siteName)
 				if processingpersist.BoolFromAny(row["is_reviewed"]) {
-					logx.Infof(mediainfoRefreshLogModule, "标题组件回写跳过：seed_id=%s is_reviewed=true", processingpersist.ComposeSeedID(hash, torrentID, siteName))
+					logx.Infof(mediainfoRefreshLogModule, "标题组件回写跳过：seed_id=%s is_reviewed=true", seedID)
 				} else {
 					processingpersist.RewriteSeedTitleComponentsByMediaInfo(
 						mediainfoRefreshLogModule,
@@ -94,25 +95,47 @@ func (s *MigrateService) refreshMediainfoAsync(payload map[string]any) (map[stri
 						row,
 						mediainfo,
 					)
+				}
 
-					currentAudioCodec := strings.TrimSpace(toStringAny(row["audio_codec"]))
-					if currentAudioCodec == "" || strings.HasSuffix(currentAudioCodec, ".other") {
-						title := strings.TrimSpace(toStringAny(row["title"]))
-						body := strings.TrimSpace(toStringAny(row["body"]))
-						inferred := parser.InferStandardizedValues(title, strings.TrimSpace(mediainfo), body)
-						candidate := strings.TrimSpace(inferred["audio_codec"])
-						if candidate != "" && candidate != "audio.other" {
-							if err := s.repo.UpdateSeedParameterByKey(hash, torrentID, siteName, map[string]any{
-								"audio_codec": candidate,
-								"updated_at":  now.Format("2006-01-02 15:04:05"),
-							}); err != nil {
-								logx.Warnf(mediainfoRefreshLogModule, "音频编码回写失败：seed_id=%s audio_codec=%s err=%v", processingpersist.ComposeSeedID(hash, torrentID, siteName), candidate, err)
-							} else {
-								logx.Infof(mediainfoRefreshLogModule, "音频编码回写完成：seed_id=%s audio_codec=%s", processingpersist.ComposeSeedID(hash, torrentID, siteName), candidate)
-							}
-						} else if candidate != "" && candidate == "audio.other" {
-							logx.Infof(mediainfoRefreshLogModule, "音频编码回写跳过：seed_id=%s inferred=audio.other", processingpersist.ComposeSeedID(hash, torrentID, siteName))
-						}
+				title := strings.TrimSpace(toStringAny(row["title"]))
+				if title == "" {
+					title = strings.TrimSpace(toStringAny(row["name"]))
+				}
+				body := strings.TrimSpace(toStringAny(row["body"]))
+				inferred := parser.InferStandardizedValues(title, strings.TrimSpace(mediainfo), body)
+				standardUpdates := map[string]any{}
+				for _, key := range []string{"video_codec", "audio_codec", "resolution"} {
+					candidate := strings.TrimSpace(inferred[key])
+					if candidate == "" || strings.HasSuffix(candidate, ".other") {
+						continue
+					}
+					current := strings.TrimSpace(toStringAny(row[key]))
+					if current == candidate {
+						continue
+					}
+					standardUpdates[key] = candidate
+				}
+				if len(standardUpdates) > 0 {
+					standardUpdates["updated_at"] = now.Format("2006-01-02 15:04:05")
+					if err := s.repo.UpdateSeedParameterByKey(hash, torrentID, siteName, standardUpdates); err != nil {
+						logx.Warnf(
+							mediainfoRefreshLogModule,
+							"标准参数回写失败：seed_id=%s video_codec=%s audio_codec=%s resolution=%s err=%v",
+							seedID,
+							strings.TrimSpace(toStringAny(standardUpdates["video_codec"])),
+							strings.TrimSpace(toStringAny(standardUpdates["audio_codec"])),
+							strings.TrimSpace(toStringAny(standardUpdates["resolution"])),
+							err,
+						)
+					} else {
+						logx.Infof(
+							mediainfoRefreshLogModule,
+							"标准参数回写完成：seed_id=%s video_codec=%s audio_codec=%s resolution=%s",
+							seedID,
+							strings.TrimSpace(toStringAny(standardUpdates["video_codec"])),
+							strings.TrimSpace(toStringAny(standardUpdates["audio_codec"])),
+							strings.TrimSpace(toStringAny(standardUpdates["resolution"])),
+						)
 					}
 				}
 				// 对齐 Python：媒体文本刷新后，重新补全 tags 并写回（仅未审核时生效）。
