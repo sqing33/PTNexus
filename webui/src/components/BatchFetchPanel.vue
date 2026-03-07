@@ -1057,6 +1057,8 @@ const getResultStatusType = (status: string) => {
   switch (status) {
     case 'success':
       return 'success'
+    case 'pending_review':
+      return 'warning'
     case 'failed':
       return 'danger'
     case 'skipped':
@@ -1070,6 +1072,8 @@ const getResultStatusText = (status: string) => {
   switch (status) {
     case 'success':
       return '成功'
+    case 'pending_review':
+      return '待确认'
     case 'failed':
       return '失败'
     case 'skipped':

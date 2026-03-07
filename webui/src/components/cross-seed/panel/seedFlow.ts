@@ -4,6 +4,7 @@ import { ElNotification } from '@/utils/uiNotify'
 
 import type {
   ReverseMappings,
+  ScreenshotReviewStatus,
   SiteStatus,
   StandardParamKey,
   TagOption,
@@ -47,6 +48,7 @@ export type SeedFlowDeps = {
   }
 
   checkAndStartBDInfoProgress: (seedId: string, isFromFetch?: boolean) => void
+  openFetchedScreenshotPreview: () => Promise<void>
   handleApiError: (error: unknown, defaultMessage: string) => void
   isTargetSiteSelectable: (siteName: string) => boolean
 
@@ -94,11 +96,21 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     filterExtraEmptyLines,
     normalizeIntroBodyAndMediainfo,
     checkAndStartBDInfoProgress,
+    openFetchedScreenshotPreview,
     handleApiError,
     isTargetSiteSelectable,
     screenshotValid,
     screenshotImages,
   } = deps
+
+  const normalizeScreenshotReviewStatus = (value: unknown): ScreenshotReviewStatus => {
+    if (typeof value !== 'string') return 'none'
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'pending' || normalized === 'confirmed') {
+      return normalized
+    }
+    return 'none'
+  }
 
   const isRestrictedTag = (tag: string): boolean => {
     return (
@@ -290,6 +302,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
               savePath: torrent.value.save_path,
               torrentName: torrent.value.name,
               downloaderId: torrent.value.downloaderId,
+              screenshotReviewMode: 'interactive',
               task_id: continuedTaskId, // 传递相同的task_id以继续使用同一日志流
             },
             {
@@ -357,6 +370,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
             imdb_link: dbData.imdb_link,
             douban_link: dbData.douban_link,
             tmdb_link: dbData.tmdb_link,
+            screenshot_review_status: normalizeScreenshotReviewStatus(
+              dbData.screenshot_review_status,
+            ),
             intro: {
               statement: filterExtraEmptyLines(dbData.statement) || '',
               poster: dbData.poster || '',
@@ -393,11 +409,12 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           // 检查 BDInfo 进度状态（从抓取流程调用，增加重试次数和延迟）
           checkAndStartBDInfoProgress(compositeSeedId, true)
 
-          nextTick(() => {
-            checkScreenshotValidity()
-          })
-
           isLoading.value = false
+          await nextTick()
+          await checkScreenshotValidity()
+          if (storeResponse.data.screenshot_preview_required) {
+            await openFetchedScreenshotPreview()
+          }
           return
         } catch (error: unknown) {
           ElNotification.closeAll()
@@ -440,6 +457,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           imdb_link: dbData.imdb_link,
           douban_link: dbData.douban_link,
           tmdb_link: dbData.tmdb_link,
+          screenshot_review_status: normalizeScreenshotReviewStatus(dbData.screenshot_review_status),
           intro: {
             statement: filterExtraEmptyLines(dbData.statement) || '',
             poster: dbData.poster || '',
@@ -611,6 +629,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           savePath: torrent.value.save_path,
           torrentName: torrent.value.name,
           downloaderId: primaryDownloaderId,
+          screenshotReviewMode: 'interactive',
         },
         {
           timeout: 600000, // 10分钟超时，用于抓取和存储
@@ -693,6 +712,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
             imdb_link: dbData.imdb_link,
             douban_link: dbData.douban_link,
             tmdb_link: dbData.tmdb_link,
+            screenshot_review_status: normalizeScreenshotReviewStatus(
+              dbData.screenshot_review_status,
+            ),
             intro: {
               statement: filterExtraEmptyLines(dbData.statement) || '',
               poster: dbData.poster || '',
@@ -778,10 +800,12 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           }
 
           activeStep.value = 0
-          // Check screenshot validity after loading data
-          nextTick(() => {
-            checkScreenshotValidity()
-          })
+          isLoading.value = false
+          await nextTick()
+          await checkScreenshotValidity()
+          if (storeResponse.data.screenshot_preview_required) {
+            await openFetchedScreenshotPreview()
+          }
         } else {
           ElNotification.closeAll()
 
@@ -1040,6 +1064,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         imdb_link: torrentData.value.imdb_link,
         douban_link: torrentData.value.douban_link,
         tmdb_link: torrentData.value.tmdb_link,
+        screenshot_review_status: torrentData.value.screenshot_review_status,
         poster: torrentData.value.intro.poster,
         screenshots: torrentData.value.intro.screenshots,
         statement: filterExtraEmptyLines(torrentData.value.intro.statement),

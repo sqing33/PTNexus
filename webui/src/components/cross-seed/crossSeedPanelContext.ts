@@ -33,6 +33,8 @@ export interface StandardizedParams {
   tags: string[]
 }
 
+export type ScreenshotReviewStatus = 'none' | 'pending' | 'confirmed'
+
 export type StandardParamKey = Exclude<keyof StandardizedParams, 'tags'>
 
 export interface IntroData {
@@ -51,6 +53,7 @@ export interface TorrentData {
   imdb_link: string
   douban_link: string
   tmdb_link: string
+  screenshot_review_status: ScreenshotReviewStatus
   intro: IntroData
   mediainfo: string
   source_params: Record<string, unknown>
@@ -167,6 +170,9 @@ export interface CrossSeedPanelContext {
   handleImageErrorWithProxy: (url: string, type: 'poster' | 'screenshot', index: number) => void
   refreshScreenshots: () => Promise<void>
   isRefreshingScreenshots: Ref<boolean>
+  confirmScreenshotReview: () => Promise<void>
+  isConfirmingScreenshotReview: Ref<boolean>
+  isScreenshotReviewPending: ComputedRef<boolean>
   screenshotImages: ComputedRef<string[]>
   refreshIntro: () => Promise<void>
   isRefreshingIntro: Ref<boolean>

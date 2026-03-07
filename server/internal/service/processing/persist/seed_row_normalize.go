@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
 
@@ -37,6 +38,7 @@ func NormalizeSeedRow(row map[string]any) map[string]any {
 	item["poster"] = toStringWithFallback(item["poster"], "")
 	item["body"] = toStringWithFallback(item["body"], "")
 	item["screenshots"] = toStringWithFallback(item["screenshots"], "")
+	item["screenshot_review_status"] = processingshared.NormalizeScreenshotReviewStatus(toStringWithFallback(item["screenshot_review_status"], processingshared.ScreenshotReviewStatusNone))
 	item["mediainfo"] = toStringWithFallback(item["mediainfo"], "")
 	item["team"] = parser.NormalizeTeamKey(toStringWithFallback(item["team"], ""))
 

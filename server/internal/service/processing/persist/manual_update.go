@@ -6,6 +6,7 @@ import (
 	"time"
 
 	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 	processingtagging "github.com/pt-nexus/server/internal/service/processing/tagging"
 	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 )
@@ -93,6 +94,9 @@ func BuildManualUpdatedSeedRecord(input BuildManualUpdateInput) BuildManualUpdat
 		removedSource = updated["removed_ardtudeclarations"]
 	}
 	removedDeclarations := parseStringArray(removedSource)
+	screenshotReviewStatus := processingshared.NormalizeScreenshotReviewStatus(
+		toStringAny(updated["screenshot_review_status"], toStringAny(existing["screenshot_review_status"], processingshared.ScreenshotReviewStatusNone)),
+	)
 
 	now := time.Now().Format("2006-01-02 15:04:05")
 	draft := NewSeedDraft(hash, torrentID, siteName, toStringAny(existing["nickname"], siteName))
@@ -112,6 +116,7 @@ func BuildManualUpdatedSeedRecord(input BuildManualUpdateInput) BuildManualUpdat
 	draft.Tags = parseStringArray(standardized["tags"])
 	draft.Poster = toStringAny(updated["poster"], toStringAny(existing["poster"], ""))
 	draft.Screenshots = toStringAny(updated["screenshots"], toStringAny(existing["screenshots"], ""))
+	draft.ScreenshotReviewStatus = screenshotReviewStatus
 	draft.Statement = toStringAny(updated["statement"], toStringAny(existing["statement"], ""))
 	draft.Body = toStringAny(updated["body"], toStringAny(existing["body"], ""))
 	draft.Mediainfo = toStringAny(updated["mediainfo"], toStringAny(existing["mediainfo"], ""))

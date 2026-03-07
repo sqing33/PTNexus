@@ -36,11 +36,12 @@ type SeedDraft struct {
 	Team       string
 	Source     string
 
-	Poster      string
-	Screenshots string
-	Statement   string
-	Body        string
-	Mediainfo   string
+	Poster                 string
+	Screenshots            string
+	ScreenshotReviewStatus string
+	Statement              string
+	Body                   string
+	Mediainfo              string
 
 	RawTags         []string
 	Tags            []string
@@ -134,6 +135,7 @@ func (d *SeedDraft) ApplyRepairResult(result processingrepair.ParallelFetchRepai
 	d.Poster = strings.TrimSpace(result.ReviewData.Poster)
 	d.Body = strings.TrimSpace(result.ReviewData.Body)
 	d.Screenshots = strings.TrimSpace(result.ReviewData.Screens)
+	d.ScreenshotReviewStatus = strings.TrimSpace(result.ScreenshotReviewStatus)
 
 	d.IMDbLink = strings.TrimSpace(result.IMDbLink)
 	d.DoubanLink = strings.TrimSpace(result.DoubanLink)
@@ -274,6 +276,7 @@ func (d *SeedDraft) ToSeedParameterRecord() map[string]any {
 		"tags":                      string(encodedTags),
 		"poster":                    strings.TrimSpace(d.Poster),
 		"screenshots":               strings.TrimSpace(d.Screenshots),
+		"screenshot_review_status":  strings.TrimSpace(d.ScreenshotReviewStatus),
 		"statement":                 strings.TrimSpace(d.Statement),
 		"body":                      strings.TrimSpace(d.Body),
 		"mediainfo":                 strings.TrimSpace(d.Mediainfo),

@@ -7,6 +7,7 @@ import (
 
 	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 // FinalizeFetchedSeedInput 定义抓取阶段草稿收敛为可入库记录所需的输入。
@@ -95,6 +96,7 @@ func FinalizeFetchedSeed(input FinalizeFetchedSeedInput) (FinalizeFetchedSeedRes
 	}
 
 	draft.MediainfoStatus = mediainfoStatus
+	draft.ScreenshotReviewStatus = processingshared.NormalizeScreenshotReviewStatus(draft.ScreenshotReviewStatus)
 	draft.IsReviewed = false
 	draft.BDInfoTaskID = nil
 	draft.BDInfoStartedAt = nil

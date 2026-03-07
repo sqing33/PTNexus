@@ -323,17 +323,40 @@
                 <template #label>
                   <div class="form-label-with-button">
                     <span>截图</span>
-                    <el-button
-                      :icon="Refresh"
-                      @click="refreshScreenshots"
-                      :loading="isRefreshingScreenshots"
-                      size="small"
-                      type="text"
-                    >
-                      重新获取
-                    </el-button>
+                    <div class="form-label-actions">
+                      <el-tag v-if="isScreenshotReviewPending" type="warning" size="small">
+                        待确认
+                      </el-tag>
+                      <el-button
+                        v-if="isScreenshotReviewPending"
+                        @click="confirmScreenshotReview"
+                        :loading="isConfirmingScreenshotReview"
+                        size="small"
+                        type="primary"
+                        plain
+                      >
+                        确认截图
+                      </el-button>
+                      <el-button
+                        :icon="Refresh"
+                        @click="refreshScreenshots"
+                        :loading="isRefreshingScreenshots"
+                        size="small"
+                        type="text"
+                      >
+                        重新获取
+                      </el-button>
+                    </div>
                   </div>
                 </template>
+                <el-alert
+                  v-if="isScreenshotReviewPending"
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                  title="当前视频未检测到字幕流，请先确认截图是否截到了合适的中文字幕时间点。"
+                  style="margin-bottom: 12px"
+                />
                 <el-input type="textarea" v-model="torrentData.intro.screenshots" :rows="20" />
               </el-form-item>
             </el-form>
@@ -522,6 +545,9 @@ const {
   handleImageErrorWithProxy,
   refreshScreenshots,
   isRefreshingScreenshots,
+  confirmScreenshotReview,
+  isConfirmingScreenshotReview,
+  isScreenshotReviewPending,
   screenshotImages,
   refreshIntro,
   isRefreshingIntro,

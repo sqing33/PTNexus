@@ -3,6 +3,8 @@ package fetch
 import (
 	"strings"
 	"time"
+
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 // BatchFetchRunnerDeps 定义批量抓取执行器依赖。
@@ -67,11 +69,12 @@ func RunBatchFetch(torrentNames []string, sourcePriority []string, rows []map[st
 		}
 
 		fetchResult, status := deps.FetchAndStore(map[string]any{
-			"sourceSite":   sourceSite,
-			"searchTerm":   torrentID,
-			"torrentName":  name,
-			"savePath":     savePath,
-			"downloaderId": downloaderID,
+			"sourceSite":           sourceSite,
+			"searchTerm":           torrentID,
+			"torrentName":          name,
+			"savePath":             savePath,
+			"downloaderId":         downloaderID,
+			"screenshotReviewMode": processingshared.ScreenshotReviewModeBackground,
 		})
 		if status != 200 || !isSuccessResult(fetchResult) {
 			result["status"] = "failed"
@@ -82,11 +85,18 @@ func RunBatchFetch(torrentNames []string, sourcePriority []string, rows []map[st
 			continue
 		}
 
-		result["status"] = "success"
+		screenshotReviewStatus := processingshared.NormalizeScreenshotReviewStatus(toStringAny(fetchResult["screenshot_review_status"], processingshared.ScreenshotReviewStatusNone))
+		if processingshared.NeedsScreenshotManualReview(screenshotReviewStatus) {
+			result["status"] = "pending_review"
+			result["message"] = "抓取成功，截图待人工确认"
+		} else {
+			result["status"] = "success"
+			result["message"] = "抓取成功"
+		}
 		result["source_site"] = sourceSite
 		result["torrent_id"] = torrentID
 		result["task_id"] = toStringAny(fetchResult["task_id"], "")
-		result["message"] = "抓取成功"
+		result["screenshot_review_status"] = screenshotReviewStatus
 		emit(true, result)
 		sleep(50 * time.Millisecond)
 	}

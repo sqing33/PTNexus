@@ -166,6 +166,7 @@
 | `internal/service/migrationflow/fetch_store.go` | 抓取并入库总入口（调度 acquire + processing） |
 | `internal/service/migrationflow/db_seed_query.go` | DB 种子参数查询入口 |
 | `internal/service/migrationflow/db_seed_update.go` | DB 种子参数手动更新入口 |
+| `internal/service/migrationflow/screenshot_review.go` | 截图人工确认状态更新入口 |
 | `internal/service/migrationflow/batch_fetch.go` | 批量抓取任务管理 |
 | `internal/service/migrationflow/downloader.go` | 发布后加种/下载器信息入口 |
 | `internal/service/migrationflow/media.go` | 标题解析、媒体校验、MediaInfo 刷新入口 |
@@ -245,6 +246,7 @@
 | 文件 | 说明 |
 |---|---|
 | `internal/service/processing/shared/conversion.go` | 字符串/数字/布尔统一转换工具 |
+| `internal/service/processing/shared/screenshot_review_status.go` | 截图人工确认状态常量与归一化工具 |
 
 ### `processing/repair`
 

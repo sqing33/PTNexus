@@ -7,6 +7,7 @@ import (
 	"github.com/pt-nexus/server/internal/platform/logx"
 	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 // FetchAndStoreOutcomeInput 定义抓取入口执行后的收口输入。
@@ -113,7 +114,19 @@ func BuildFetchAndStoreOutcome(input FetchAndStoreOutcomeInput, deps FetchAndSto
 	logx.Infof(input.FetchStoreModule, "抓取流程完成 source_site=%s search_term=%s task_id=%s context_id=%s save_path=%s downloader_id=%s", input.SourceSite, input.SearchTerm, input.TaskID, contextID, processResult.SavePath, processResult.DownloaderID)
 
 	if deps.BuildSuccessResponse != nil {
-		return deps.BuildSuccessResponse(contextID), 200
+		response := deps.BuildSuccessResponse(contextID)
+		screenshotReviewStatus := processingshared.NormalizeScreenshotReviewStatus(repairResult.ScreenshotReviewStatus)
+		response["screenshot_review_status"] = screenshotReviewStatus
+		response["screenshot_review_required"] = processingshared.NeedsScreenshotManualReview(screenshotReviewStatus)
+		response["screenshot_preview_required"] = repairResult.ScreenshotPreviewRequired
+		return response, 200
 	}
-	return map[string]any{"success": true, "task_id": contextID}, 200
+	screenshotReviewStatus := processingshared.NormalizeScreenshotReviewStatus(repairResult.ScreenshotReviewStatus)
+	return map[string]any{
+		"success":                     true,
+		"task_id":                     contextID,
+		"screenshot_review_status":    screenshotReviewStatus,
+		"screenshot_review_required":  processingshared.NeedsScreenshotManualReview(screenshotReviewStatus),
+		"screenshot_preview_required": repairResult.ScreenshotPreviewRequired,
+	}, 200
 }

@@ -28,6 +28,9 @@ func (s *MigrateService) FetchAndStore(payload map[string]any) (map[string]any, 
 	torrentName := strings.TrimSpace(processingshared.ToString(payload["torrentName"], ""))
 	savePath := strings.TrimSpace(processingshared.ToString(payload["savePath"], ""))
 	downloaderID := strings.TrimSpace(processingshared.ToString(payload["downloaderId"], ""))
+	screenshotReviewMode := processingshared.NormalizeScreenshotReviewMode(
+		processingshared.ToString(payload["screenshotReviewMode"], processingshared.ToString(payload["screenshot_review_mode"], processingshared.ScreenshotReviewModeBackground)),
+	)
 	action := "开始抓取"
 	// sourceSite 在不同入口可能是站点 code（ssd）或昵称（不可说），这里两者都尝试匹配。
 	if s != nil && s.extractorEngine != nil {
@@ -63,12 +66,13 @@ func (s *MigrateService) FetchAndStore(payload map[string]any) (map[string]any, 
 
 	entryResult, statusCode, isAcquireError, runErr := processingpersist.ExecuteFetchAndStoreEntry(
 		processingpersist.FetchAndStoreEntryInput{
-			SourceSite:   sourceSite,
-			SearchTerm:   searchTerm,
-			TorrentName:  torrentName,
-			SavePath:     savePath,
-			DownloaderID: downloaderID,
-			TaskID:       taskID,
+			SourceSite:           sourceSite,
+			SearchTerm:           searchTerm,
+			TorrentName:          torrentName,
+			SavePath:             savePath,
+			DownloaderID:         downloaderID,
+			TaskID:               taskID,
+			ScreenshotReviewMode: screenshotReviewMode,
 		},
 		processingpersist.FetchAndStoreEntryDeps{
 			Repo:            s.repo,

@@ -160,6 +160,7 @@ import type {
   LimitAlert,
   ProgressCounter,
   ReverseMappings,
+  ScreenshotReviewStatus,
   StandardizedParams,
   TitleComponent,
   TorrentData,
@@ -340,6 +341,15 @@ const crossSeedStore = useCrossSeedStore()
 const torrent = computed(() => crossSeedStore.workingParams as WorkingTorrent)
 const sourceSite = computed(() => crossSeedStore.sourceInfo?.name || '')
 
+const normalizeScreenshotReviewStatus = (value: unknown): ScreenshotReviewStatus => {
+  if (typeof value !== 'string') return 'none'
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'pending' || normalized === 'confirmed') {
+    return normalized
+  }
+  return 'none'
+}
+
 const getInitialTorrentData = (): TorrentData => ({
   seed_id: null,
   title_components: [] as { key: string; value: string }[],
@@ -348,6 +358,7 @@ const getInitialTorrentData = (): TorrentData => ({
   imdb_link: '',
   douban_link: '',
   tmdb_link: '',
+  screenshot_review_status: 'none',
   intro: { statement: '', poster: '', body: '', screenshots: '', removed_ardtudeclarations: [] },
   mediainfo: '',
   source_params: {},
@@ -682,6 +693,7 @@ const publishBatchId = ref<string | null>(null)
 const publishBatchEventSource = ref<EventSource | null>(null)
 const isReparsing = ref(false)
 const isRefreshingScreenshots = ref(false)
+const isConfirmingScreenshotReview = ref(false)
 const isFinalizingScreenshotPreview = ref(false)
 const showScreenshotPreviewDialog = ref(false)
 const screenshotPreviewCandidates = ref<ScreenshotPreviewCandidateItem[]>([])
@@ -751,6 +763,9 @@ const reverseMappings = ref<ReverseMappings>({
 
 const posterImages = computed(() => parseImageUrls(torrentData.value.intro.poster))
 const screenshotImages = computed(() => parseImageUrls(torrentData.value.intro.screenshots))
+const isScreenshotReviewPending = computed(
+  () => torrentData.value.screenshot_review_status === 'pending',
+)
 
 const buildScreenshotPayload = (type: string, extra: Record<string, unknown> = {}) => ({
   type,
@@ -791,6 +806,88 @@ const normalizeScreenshotPreviewCandidates = (value: unknown): ScreenshotPreview
       return { id, timeSeconds, timeLabel, previewData }
     })
     .filter((candidate) => candidate.previewData)
+}
+
+const applyScreenshotPreviewCandidates = (
+  rawCandidates: unknown,
+  rawSelectionLimit: unknown,
+  notification?: { title: string; message: string; type?: 'success' | 'info' },
+) => {
+  const candidates = normalizeScreenshotPreviewCandidates(rawCandidates)
+  const selectionLimit =
+    typeof rawSelectionLimit === 'number'
+      ? rawSelectionLimit
+      : Number(rawSelectionLimit || 5)
+  if (candidates.length === 0) {
+    return false
+  }
+
+  screenshotPreviewCandidates.value = candidates
+  activeScreenshotPreviewId.value = candidates[0]?.id || ''
+  screenshotPreviewSelectionLimit.value = selectionLimit > 0 ? selectionLimit : 5
+  torrentData.value.screenshot_review_status = 'pending'
+  showScreenshotPreviewDialog.value = true
+
+  if (notification) {
+    ElNotification[notification.type || 'info']({
+      title: notification.title,
+      message: notification.message,
+    })
+  }
+  return true
+}
+
+const openFetchedScreenshotPreview = async () => {
+  if (!torrentData.value.original_main_title) return
+  if (isRefreshingScreenshots.value || isFinalizingScreenshotPreview.value) return
+
+  isRefreshingScreenshots.value = true
+  ElNotification.info({
+    title: '正在生成候选截图',
+    message: '抓取过程中未检测到字幕流，正在生成候选截图供选择...',
+    duration: 0,
+  })
+
+  try {
+    const response = await axios.post(
+      '/api/media/validate',
+      buildScreenshotPayload('screenshot_preview', {
+        preview_count: 12,
+      }),
+    )
+    ElNotification.closeAll()
+    if (
+      response.data.success &&
+      applyScreenshotPreviewCandidates(response.data.candidates, response.data.selection_limit, {
+        title: '请选择截图候选',
+        message: '当前未检测到字幕流，请直接在候选列表中选择 5 张截图。',
+        type: 'success',
+      })
+    ) {
+      return
+    }
+
+    ElNotification.error({
+      title: '候选生成失败',
+      message: response.data.error || '未能生成候选截图，请查看后台日志。',
+    })
+  } catch (error: unknown) {
+    ElNotification.closeAll()
+    const errorMsg = axios.isAxiosError(error)
+      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+        (error.response?.data as { message?: string } | undefined)?.message ||
+        error.message ||
+        '未能生成候选截图，请查看后台日志。'
+      : error instanceof Error
+        ? error.message || '未能生成候选截图，请查看后台日志。'
+        : '未能生成候选截图，请查看后台日志。'
+    ElNotification.error({
+      title: '候选生成失败',
+      message: errorMsg,
+    })
+  } finally {
+    isRefreshingScreenshots.value = false
+  }
 }
 
 const resetScreenshotPreviewState = () => {
@@ -867,6 +964,7 @@ const confirmScreenshotPreviewSelection = async () => {
 
     if (response.data.success && response.data.screenshots) {
       torrentData.value.intro.screenshots = response.data.screenshots
+      torrentData.value.screenshot_review_status = 'confirmed'
       screenshotValid.value = true
       showScreenshotPreviewDialog.value = false
       ElNotification.success({
@@ -1281,28 +1379,23 @@ const refreshScreenshots = async () => {
     )
     ElNotification.closeAll()
 
-    const candidates = normalizeScreenshotPreviewCandidates(response.data.candidates)
-    const selectionLimit =
-      typeof response.data.selection_limit === 'number'
-        ? response.data.selection_limit
-        : Number(response.data.selection_limit || 5)
-
     if (response.data.success && response.data.screenshots) {
       torrentData.value.intro.screenshots = response.data.screenshots
+      torrentData.value.screenshot_review_status = 'none'
       screenshotValid.value = true
       ElNotification.success({
         title: '重新获取成功',
         message: '已根据字幕流自动生成并加载新的截图。',
       })
-    } else if (response.data.success && candidates.length > 0) {
-      screenshotPreviewCandidates.value = candidates
-      activeScreenshotPreviewId.value = candidates[0]?.id || ''
-      screenshotPreviewSelectionLimit.value = selectionLimit > 0 ? selectionLimit : 5
-      showScreenshotPreviewDialog.value = true
-      ElNotification.success({
+    } else if (
+      response.data.success &&
+      applyScreenshotPreviewCandidates(response.data.candidates, response.data.selection_limit, {
         title: '候选已生成',
         message: '未检测到字幕流，请手动选择 5 张截图后再生成正式截图。',
+        type: 'success',
       })
+    ) {
+      return
     } else {
       ElNotification.error({
         title: '候选生成失败',
@@ -1934,27 +2027,21 @@ const handleImageError = async (url: string, type: 'poster' | 'screenshot', inde
     if (response.data.success) {
       if (type === 'screenshot' && response.data.screenshots) {
         torrentData.value.intro.screenshots = response.data.screenshots
+        torrentData.value.screenshot_review_status = 'none'
         screenshotValid.value = true // 标记截图有效
         ElNotification.success({
           title: '截图已更新',
           message: '已成功生成并加载了新的截图。',
         })
-      } else if (type === 'screenshot' && Array.isArray(response.data.candidates)) {
-        const candidates = normalizeScreenshotPreviewCandidates(response.data.candidates)
-        const selectionLimit =
-          typeof response.data.selection_limit === 'number'
-            ? response.data.selection_limit
-            : Number(response.data.selection_limit || 5)
-        if (candidates.length > 0) {
-          screenshotPreviewCandidates.value = candidates
-          activeScreenshotPreviewId.value = candidates[0]?.id || ''
-          screenshotPreviewSelectionLimit.value = selectionLimit > 0 ? selectionLimit : 5
-          showScreenshotPreviewDialog.value = true
-          ElNotification.info({
-            title: '需要手动选择截图',
-            message: '当前未检测到字幕流，请在候选列表中选择 5 张截图。',
-          })
-        }
+      } else if (
+        type === 'screenshot' &&
+        applyScreenshotPreviewCandidates(response.data.candidates, response.data.selection_limit, {
+          title: '需要手动选择截图',
+          message: '当前未检测到字幕流，请在候选列表中选择 5 张截图。',
+          type: 'info',
+        })
+      ) {
+        return
       } else if (type === 'poster' && response.data.posters) {
         torrentData.value.intro.poster = response.data.posters
         ElNotification.success({
@@ -2030,6 +2117,7 @@ const seedFlow = createSeedFlow({
   normalizeIntroBodyAndMediainfo,
 
   checkAndStartBDInfoProgress,
+  openFetchedScreenshotPreview,
   handleApiError,
   isTargetSiteSelectable,
 
@@ -2038,6 +2126,7 @@ const seedFlow = createSeedFlow({
 })
 
 const {
+  getEnglishSiteName,
   fetchSitesStatus,
   fetchCrossSeedSettings,
   saveAutoAddExistingSetting,
@@ -2052,6 +2141,106 @@ const {
   invalidStandardParams,
   allTagOptions,
 } = seedFlow
+
+const resolveCurrentSeedLookupIdentity = async (): Promise<{
+  torrentId: string
+  siteName: string
+} | null> => {
+  const currentTorrent = torrent.value
+  if (!currentTorrent) return null
+
+  if (isDataFromDatabase.value && taskId.value && taskId.value.startsWith('db_')) {
+    const parts = taskId.value.split('_')
+    if (parts.length >= 3) {
+      return {
+        torrentId: parts[1],
+        siteName: parts.slice(2).join('_'),
+      }
+    }
+  }
+
+  if (taskId.value && taskId.value.startsWith('db_')) {
+    const parts = taskId.value.split('_')
+    if (parts.length >= 3) {
+      return {
+        torrentId: parts[1],
+        siteName: parts.slice(2).join('_'),
+      }
+    }
+  }
+
+  const siteDetails = currentTorrent.sites?.[sourceSite.value]
+  if (!siteDetails) {
+    return null
+  }
+
+  let torrentId = siteDetails.torrentId || ''
+  if (!torrentId) {
+    const idMatch = siteDetails.comment?.match(/id=(\d+)/)
+    if (idMatch?.[1]) {
+      torrentId = idMatch[1]
+    }
+  }
+  const siteName = await getEnglishSiteName(sourceSite.value)
+  if (!torrentId || !siteName) {
+    return null
+  }
+  return { torrentId, siteName }
+}
+
+const confirmScreenshotReview = async () => {
+  if (!torrentData.value.intro.screenshots.trim()) {
+    ElNotification.warning('当前没有可确认的截图，请先重新获取截图。')
+    return
+  }
+
+  const identity = await resolveCurrentSeedLookupIdentity()
+  if (!identity) {
+    ElNotification.error({
+      title: '确认失败',
+      message: '无法定位当前种子的 torrent_id 或 site_name，请刷新后重试。',
+    })
+    return
+  }
+
+  isConfirmingScreenshotReview.value = true
+  try {
+    const response = await axios.post('/api/migrate/update_screenshot_review_status', {
+      torrent_id: identity.torrentId,
+      site_name: identity.siteName,
+      screenshot_review_status: 'confirmed',
+    })
+    if (response.data.success) {
+      torrentData.value.screenshot_review_status = normalizeScreenshotReviewStatus(
+        response.data.screenshot_review_status,
+      )
+      ElNotification.success({
+        title: '截图已确认',
+        message: '已确认当前截图时间点，可继续下一步。',
+      })
+      return
+    }
+
+    ElNotification.error({
+      title: '确认失败',
+      message: response.data.message || '截图确认状态更新失败，请查看后台日志。',
+    })
+  } catch (error: unknown) {
+    const errorMsg = axios.isAxiosError(error)
+      ? (error.response?.data as { message?: string } | undefined)?.message ||
+        error.message ||
+        '截图确认状态更新失败，请查看后台日志。'
+      : error instanceof Error
+        ? error.message || '截图确认状态更新失败，请查看后台日志。'
+        : '截图确认状态更新失败，请查看后台日志。'
+    ElNotification.error({
+      title: '确认失败',
+      message: errorMsg,
+    })
+  } finally {
+    isConfirmingScreenshotReview.value = false
+  }
+}
 
 watch(isCurrentSeedAnimationRelated, (isAnimationRelated) => {
   if (isAnimationRelated) {
@@ -2184,6 +2373,9 @@ provide(crossSeedPanelContextKey, {
   handleImageErrorWithProxy,
   refreshScreenshots,
   isRefreshingScreenshots,
+  confirmScreenshotReview,
+  isConfirmingScreenshotReview,
+  isScreenshotReviewPending,
   screenshotImages,
   refreshIntro,
   isRefreshingIntro,

@@ -22,17 +22,18 @@ type FetchPersistPipelineRepo interface {
 
 // FetchPersistPipelineInput 定义抓取流水线输入。
 type FetchPersistPipelineInput struct {
-	TaskID             string
-	Hash               string
-	TorrentID          string
-	SiteIdentifier     string
-	SavePath           string
-	DownloaderID       string
-	TorrentNameForPath string
-	MetaName           string
-	DetailHTML         string
-	ReviewData         parser.ReviewExtractedData
-	Draft              *SeedDraft
+	TaskID               string
+	Hash                 string
+	TorrentID            string
+	SiteIdentifier       string
+	SavePath             string
+	DownloaderID         string
+	TorrentNameForPath   string
+	ScreenshotReviewMode string
+	MetaName             string
+	DetailHTML           string
+	ReviewData           parser.ReviewExtractedData
+	Draft                *SeedDraft
 }
 
 // FetchPersistPipelineDeps 定义抓取流水线依赖。
@@ -68,16 +69,17 @@ func RunFetchPersistPipeline(input FetchPersistPipelineInput, deps FetchPersistP
 
 	repairFinalizeResult, finalizeErr := RunFetchRepairAndFinalize(
 		FetchRepairFinalizeInput{
-			TaskID:             input.TaskID,
-			SavePath:           input.SavePath,
-			DownloaderID:       input.DownloaderID,
-			TorrentNameForPath: input.TorrentNameForPath,
-			RootConfig:         deps.FetchRepairDeps.RootConfig,
-			ReviewData:         input.ReviewData,
-			DetailHTML:         input.DetailHTML,
-			Draft:              input.Draft,
-			MetaName:           input.MetaName,
-			SiteIdentifier:     input.SiteIdentifier,
+			TaskID:               input.TaskID,
+			SavePath:             input.SavePath,
+			DownloaderID:         input.DownloaderID,
+			TorrentNameForPath:   input.TorrentNameForPath,
+			ScreenshotReviewMode: input.ScreenshotReviewMode,
+			RootConfig:           deps.FetchRepairDeps.RootConfig,
+			ReviewData:           input.ReviewData,
+			DetailHTML:           input.DetailHTML,
+			Draft:                input.Draft,
+			MetaName:             input.MetaName,
+			SiteIdentifier:       input.SiteIdentifier,
 		},
 		FetchRepairFinalizeDeps{
 			FetchRepairDeps:            deps.FetchRepairDeps,

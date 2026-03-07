@@ -1059,6 +1059,10 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     // 注意：这里依靠 screenshotValid 状态，但如果截图文本本身为空，在第3步就已经拦截了
     const hasInvalidScreenshots = !screenshotValid.value
 
+    if (torrentData.value.screenshot_review_status === 'pending') {
+      return true
+    }
+
     if (hasUnrecognized || hasInvalidScreenshots) {
       return true
     }
@@ -1154,6 +1158,10 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     // 6. 检查截图链接有效性
     if (!screenshotValid.value) {
       return '截图链接失效，请等待重新获取或手动修复'
+    }
+
+    if (torrentData.value.screenshot_review_status === 'pending') {
+      return '当前视频未检测到字幕流，请先检查截图是否截到了合适的中文字幕时间点，并点击确认截图'
     }
 
     return '准备就绪'

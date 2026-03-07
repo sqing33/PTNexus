@@ -222,7 +222,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		       ct.downloader_id AS downloader_id,
 		       sp.title, sp.subtitle, sp.type, sp.medium, sp.video_codec,
 		       sp.audio_codec, sp.resolution, sp.team, sp.source, sp.tags,
-		       sp.title_components,
+		       sp.title_components, sp.screenshot_review_status,
 		       %s,
 		       sp.is_reviewed, sp.updated_at
 		%s

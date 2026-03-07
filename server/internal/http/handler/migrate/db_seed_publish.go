@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	dbSeedInfoHandlerLogModule   = "迁移接口-种子查询"
-	fetchStoreHandlerLogModule   = "迁移接口-源站抓取"
-	updateDBSeedHandlerLogModule = "迁移接口-种子更新"
+	dbSeedInfoHandlerLogModule      = "迁移接口-种子查询"
+	fetchStoreHandlerLogModule      = "迁移接口-源站抓取"
+	updateDBSeedHandlerLogModule    = "迁移接口-种子更新"
+	updateScreenshotReviewLogModule = "迁移接口-截图审查"
 )
 
 func (h *Handler) GetDBSeedInfo(c *gin.Context) {
@@ -68,6 +69,29 @@ func (h *Handler) UpdateDBSeedInfo(c *gin.Context) {
 		logx.Warnf(updateDBSeedHandlerLogModule, "请求结束 请求ID=%s torrent_id=%s site_name=%s 状态码=%d", requestID, torrentID, siteName, status)
 	} else {
 		logx.Infof(updateDBSeedHandlerLogModule, "请求结束 请求ID=%s torrent_id=%s site_name=%s 状态码=%d", requestID, torrentID, siteName, status)
+	}
+	c.JSON(status, result)
+}
+
+// UpdateScreenshotReviewStatus 更新指定种子的截图人工确认状态。
+// 参数/返回：请求体包含 torrent_id、site_name 与 screenshot_review_status；成功时返回最新状态。
+// 失败场景：请求体无效、参数缺失或数据库写入失败时返回对应错误码。
+// 副作用：会更新 seed_parameters 的 screenshot_review_status 字段。
+func (h *Handler) UpdateScreenshotReviewStatus(c *gin.Context) {
+	requestID := c.GetString("request_id")
+	payload, ok := bindMapPayload(c)
+	if !ok {
+		logx.Warnf(updateScreenshotReviewLogModule, "请求体绑定失败 请求ID=%s", requestID)
+		return
+	}
+	torrentID := strings.TrimSpace(handlerToString(payload["torrent_id"], ""))
+	siteName := strings.TrimSpace(handlerToString(payload["site_name"], ""))
+	logx.Infof(updateScreenshotReviewLogModule, "收到请求 请求ID=%s torrent_id=%s site_name=%s", requestID, torrentID, siteName)
+	result, status := h.service.UpdateScreenshotReviewStatus(payload)
+	if status >= http.StatusBadRequest {
+		logx.Warnf(updateScreenshotReviewLogModule, "请求结束 请求ID=%s torrent_id=%s site_name=%s 状态码=%d", requestID, torrentID, siteName, status)
+	} else {
+		logx.Infof(updateScreenshotReviewLogModule, "请求结束 请求ID=%s torrent_id=%s site_name=%s 状态码=%d", requestID, torrentID, siteName, status)
 	}
 	c.JSON(status, result)
 }

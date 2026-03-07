@@ -10,19 +10,20 @@ import (
 
 // FetchFinalizeFlowInput 定义抓取后“修复+入库+收敛日志”流程输入。
 type FetchFinalizeFlowInput struct {
-	TaskID             string
-	SourceSite         string
-	SearchTerm         string
-	Hash               string
-	TorrentID          string
-	SiteIdentifier     string
-	SavePath           string
-	DownloaderID       string
-	TorrentNameForPath string
-	MetaName           string
-	DetailHTML         string
-	ReviewData         parser.ReviewExtractedData
-	Draft              *SeedDraft
+	TaskID               string
+	SourceSite           string
+	SearchTerm           string
+	Hash                 string
+	TorrentID            string
+	SiteIdentifier       string
+	SavePath             string
+	DownloaderID         string
+	TorrentNameForPath   string
+	ScreenshotReviewMode string
+	MetaName             string
+	DetailHTML           string
+	ReviewData           parser.ReviewExtractedData
+	Draft                *SeedDraft
 }
 
 // FetchFinalizeFlowDeps 定义抓取后“修复+入库+收敛日志”流程依赖。
@@ -63,17 +64,18 @@ func RunFetchFinalizeFlow(input FetchFinalizeFlowInput, deps FetchFinalizeFlowDe
 
 	pipelineResult, pipelineErr := RunFetchPersistPipeline(
 		FetchPersistPipelineInput{
-			TaskID:             input.TaskID,
-			Hash:               input.Hash,
-			TorrentID:          input.TorrentID,
-			SiteIdentifier:     input.SiteIdentifier,
-			SavePath:           input.SavePath,
-			DownloaderID:       input.DownloaderID,
-			TorrentNameForPath: input.TorrentNameForPath,
-			MetaName:           input.MetaName,
-			DetailHTML:         input.DetailHTML,
-			ReviewData:         input.ReviewData,
-			Draft:              input.Draft,
+			TaskID:               input.TaskID,
+			Hash:                 input.Hash,
+			TorrentID:            input.TorrentID,
+			SiteIdentifier:       input.SiteIdentifier,
+			SavePath:             input.SavePath,
+			DownloaderID:         input.DownloaderID,
+			TorrentNameForPath:   input.TorrentNameForPath,
+			ScreenshotReviewMode: input.ScreenshotReviewMode,
+			MetaName:             input.MetaName,
+			DetailHTML:           input.DetailHTML,
+			ReviewData:           input.ReviewData,
+			Draft:                input.Draft,
 		},
 		FetchPersistPipelineDeps{
 			Repo:                       deps.Repo,

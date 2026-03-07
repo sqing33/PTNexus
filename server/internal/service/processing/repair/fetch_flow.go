@@ -8,6 +8,7 @@ import (
 
 	"github.com/pt-nexus/server/internal/platform/logx"
 	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
 const (
@@ -42,24 +43,27 @@ type FetchRepairDeps struct {
 
 // ParallelFetchRepairInput 表示并发修复输入。
 type ParallelFetchRepairInput struct {
-	TaskID             string
-	SavePath           string
-	DownloaderID       string
-	TorrentNameForPath string
-	TorrentName        string
-	Subtitle           string
-	ReviewData         parser.ReviewExtractedData
-	IMDbLink           string
-	DoubanLink         string
-	TMDbLink           string
+	TaskID               string
+	SavePath             string
+	DownloaderID         string
+	TorrentNameForPath   string
+	TorrentName          string
+	ScreenshotReviewMode string
+	Subtitle             string
+	ReviewData           parser.ReviewExtractedData
+	IMDbLink             string
+	DoubanLink           string
+	TMDbLink             string
 }
 
 // ParallelFetchRepairResult 表示并发修复输出。
 type ParallelFetchRepairResult struct {
-	ReviewData parser.ReviewExtractedData
-	IMDbLink   string
-	DoubanLink string
-	TMDbLink   string
+	ReviewData                parser.ReviewExtractedData
+	IMDbLink                  string
+	DoubanLink                string
+	TMDbLink                  string
+	ScreenshotReviewStatus    string
+	ScreenshotPreviewRequired bool
 }
 
 type posterRepairResult struct {
@@ -77,7 +81,9 @@ type introRepairResult struct {
 }
 
 type screenshotsRepairResult struct {
-	Screens string
+	Screens                   string
+	ScreenshotReviewStatus    string
+	ScreenshotPreviewRequired bool
 }
 
 type screenshotValidateJob struct {
@@ -185,10 +191,12 @@ func RunParallelFetchRepairs(input ParallelFetchRepairInput, deps FetchRepairDep
 	screenshotResult := <-screenshotResultCh
 
 	merged := ParallelFetchRepairResult{
-		ReviewData: input.ReviewData,
-		IMDbLink:   strings.TrimSpace(input.IMDbLink),
-		DoubanLink: strings.TrimSpace(input.DoubanLink),
-		TMDbLink:   strings.TrimSpace(input.TMDbLink),
+		ReviewData:                input.ReviewData,
+		IMDbLink:                  strings.TrimSpace(input.IMDbLink),
+		DoubanLink:                strings.TrimSpace(input.DoubanLink),
+		TMDbLink:                  strings.TrimSpace(input.TMDbLink),
+		ScreenshotReviewStatus:    processingshared.ScreenshotReviewStatusNone,
+		ScreenshotPreviewRequired: false,
 	}
 
 	if strings.TrimSpace(posterResult.Poster) != "" {
@@ -200,6 +208,8 @@ func RunParallelFetchRepairs(input ParallelFetchRepairInput, deps FetchRepairDep
 	if strings.TrimSpace(screenshotResult.Screens) != "" {
 		merged.ReviewData.Screens = screenshotResult.Screens
 	}
+	merged.ScreenshotReviewStatus = processingshared.NormalizeScreenshotReviewStatus(screenshotResult.ScreenshotReviewStatus)
+	merged.ScreenshotPreviewRequired = screenshotResult.ScreenshotPreviewRequired
 
 	merged.IMDbLink = firstNonEmpty(merged.IMDbLink, strings.TrimSpace(posterResult.IMDbLink), strings.TrimSpace(introResult.IMDbLink))
 	merged.DoubanLink = firstNonEmpty(merged.DoubanLink, strings.TrimSpace(posterResult.DoubanLink), strings.TrimSpace(introResult.DoubanLink))
@@ -236,7 +246,9 @@ func RunParallelFetchRepairs(input ParallelFetchRepairInput, deps FetchRepairDep
 func (r ParallelFetchRepairResult) Summary() string {
 	return "poster=" + boolText(strings.TrimSpace(r.ReviewData.Poster) != "") +
 		" intro=" + boolText(strings.TrimSpace(r.ReviewData.Body) != "") +
-		" screens=" + boolText(strings.TrimSpace(r.ReviewData.Screens) != "")
+		" screens=" + boolText(strings.TrimSpace(r.ReviewData.Screens) != "") +
+		" screenshot_review=" + processingshared.NormalizeScreenshotReviewStatus(r.ScreenshotReviewStatus) +
+		" screenshot_preview_required=" + boolText(r.ScreenshotPreviewRequired)
 }
 
 // TriggerMediainfoRepairDuringFetch 在抓取流程内触发媒体信息修复。
@@ -321,17 +333,22 @@ func runIntroRepairTask(input ParallelFetchRepairInput, deps FetchRepairDeps) in
 func runScreenshotsRepairTask(input ParallelFetchRepairInput, deps FetchRepairDeps) screenshotsRepairResult {
 	localReview := input.ReviewData
 
-	repairScreenshotsDuringFetch(
+	reviewStatus, previewRequired := repairScreenshotsDuringFetch(
 		input.TaskID,
 		input.SavePath,
 		input.DownloaderID,
 		input.TorrentNameForPath,
 		input.TorrentName,
+		input.ScreenshotReviewMode,
 		&localReview,
 		deps,
 	)
 
-	return screenshotsRepairResult{Screens: localReview.Screens}
+	return screenshotsRepairResult{
+		Screens:                   localReview.Screens,
+		ScreenshotReviewStatus:    processingshared.NormalizeScreenshotReviewStatus(reviewStatus),
+		ScreenshotPreviewRequired: previewRequired,
+	}
 }
 
 func repairPosterDuringFetch(
@@ -547,11 +564,15 @@ func repairScreenshotsDuringFetch(
 	downloaderID string,
 	torrentNameForPath string,
 	contentName string,
+	screenshotReviewMode string,
 	reviewData *parser.ReviewExtractedData,
 	deps FetchRepairDeps,
-) {
+) (string, bool) {
+	reviewStatus := processingshared.ScreenshotReviewStatusNone
+	previewRequired := false
+	mode := processingshared.NormalizeScreenshotReviewMode(screenshotReviewMode)
 	if reviewData == nil {
-		return
+		return reviewStatus, previewRequired
 	}
 
 	rawURLs := ExtractImageURLsFromText(reviewData.Screens)
@@ -564,7 +585,7 @@ func repairScreenshotsDuringFetch(
 		reviewData.Screens = ToBBCodeImages(validURLs)
 		logx.Infof(fetchRepairScreenshotLogModule, "截图校验通过 valid_count=%d", len(validURLs))
 		emitLog(deps, taskID, "修复截图", "截图校验通过", "success")
-		return
+		return reviewStatus, previewRequired
 	}
 
 	logx.Warnf(fetchRepairScreenshotLogModule, "截图不合规，开始自动重建 raw_count=%d valid_count=%d", len(rawURLs), len(validURLs))
@@ -578,6 +599,30 @@ func repairScreenshotsDuringFetch(
 		"current_images": reviewData.Screens,
 	}
 	sourceInfo := map[string]any{"main_title": strings.TrimSpace(contentName)}
+	usePendingReview, previewDecisionErr := ShouldUseScreenshotPreview(ScreenshotGenerateInput{
+		Payload:     payload,
+		SourceInfo:  sourceInfo,
+		ContentName: contentName,
+		RootConfig:  deps.RootConfig,
+	})
+	if previewDecisionErr != nil {
+		logx.Warnf(fetchRepairScreenshotLogModule, "截图字幕流探测失败，继续按自动重建处理 task_id=%s err=%v", taskID, previewDecisionErr)
+	} else if usePendingReview {
+		reviewStatus = processingshared.ScreenshotReviewStatusPending
+		if mode == processingshared.ScreenshotReviewModeInteractive {
+			previewRequired = true
+			if len(validURLs) > 0 {
+				reviewData.Screens = ToBBCodeImages(validURLs)
+			} else {
+				reviewData.Screens = ""
+			}
+			logx.Warnf(fetchRepairScreenshotLogModule, "未检测到可用字幕流，单条抓取改走候选截图选择 task_id=%s", taskID)
+			emitLog(deps, taskID, "修复截图", "未检测到字幕流，等待前端候选截图选择", "warning")
+			return reviewStatus, previewRequired
+		}
+		logx.Warnf(fetchRepairScreenshotLogModule, "未检测到可用字幕流，本次截图将标记为待人工确认 task_id=%s", taskID)
+		emitLog(deps, taskID, "修复截图", "未检测到字幕流，将自动生成截图并标记为待人工确认", "warning")
+	}
 	generatedURLs, err := GenerateAndUploadScreenshots(ScreenshotGenerateInput{
 		Payload:     payload,
 		SourceInfo:  sourceInfo,
@@ -587,19 +632,24 @@ func repairScreenshotsDuringFetch(
 	if err == nil && len(generatedURLs) > 0 {
 		reviewData.Screens = ToBBCodeImages(generatedURLs)
 		logx.Infof(fetchRepairScreenshotLogModule, "截图自动重建成功 generated_count=%d", len(generatedURLs))
-		emitLog(deps, taskID, "修复截图", "截图自动重建成功", "success")
-		return
+		if processingshared.NeedsScreenshotManualReview(reviewStatus) {
+			emitLog(deps, taskID, "修复截图", "截图自动重建成功，请在审查时人工确认字幕时间点", "warning")
+		} else {
+			emitLog(deps, taskID, "修复截图", "截图自动重建成功", "success")
+		}
+		return reviewStatus, previewRequired
 	}
 
 	if len(validURLs) > 0 {
 		reviewData.Screens = ToBBCodeImages(validURLs)
 		logx.Warnf(fetchRepairScreenshotLogModule, "截图自动重建失败，回退保留可用截图 valid_count=%d err=%v", len(validURLs), err)
 		emitLog(deps, taskID, "修复截图", "截图重建失败，已回退保留可用截图", "warning")
-		return
+		return processingshared.ScreenshotReviewStatusNone, false
 	}
 
 	logx.Warnf(fetchRepairScreenshotLogModule, "截图自动重建失败且无可用回退截图 err=%v", err)
 	emitLog(deps, taskID, "修复截图", "截图自动重建失败，未获得可用截图", "warning")
+	return processingshared.ScreenshotReviewStatusNone, false
 }
 
 func filterReachableImageURLsConcurrently(urls []string, workers int) []string {

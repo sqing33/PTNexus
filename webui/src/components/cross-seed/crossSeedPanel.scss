@@ -1418,12 +1418,22 @@
     width: 100%;
   }
 
+  .form-label-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   .form-label-with-button .el-button {
     font-size: 12px;
     padding: 4px 12px;
     height: 28px;
     border-radius: 4px;
     transform: translate(10px, 0);
+  }
+
+  .form-label-with-button .form-label-actions .el-button {
+    transform: none;
   }
 
   /* 海报与声明面板样式 */

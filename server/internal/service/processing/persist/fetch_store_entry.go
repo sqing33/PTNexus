@@ -17,12 +17,13 @@ type FetchAndStoreEntryRepo interface {
 
 // FetchAndStoreEntryInput 定义 FetchAndStore 编排流程输入。
 type FetchAndStoreEntryInput struct {
-	SourceSite   string
-	SearchTerm   string
-	TorrentName  string
-	SavePath     string
-	DownloaderID string
-	TaskID       string
+	SourceSite           string
+	SearchTerm           string
+	TorrentName          string
+	SavePath             string
+	DownloaderID         string
+	TaskID               string
+	ScreenshotReviewMode string
 }
 
 // FetchAndStoreEntryDeps 定义 FetchAndStore 编排流程依赖。
@@ -86,11 +87,12 @@ func ExecuteFetchAndStoreEntry(input FetchAndStoreEntryInput, deps FetchAndStore
 	}
 	processResult, processErr := RunFetchStoreProcess(
 		FetchStoreProcessInput{
-			TaskID:          input.TaskID,
-			SourceSite:      input.SourceSite,
-			SearchTerm:      input.SearchTerm,
-			AcquireResult:   acquireResult,
-			ExtractorEngine: deps.ExtractorEngine,
+			TaskID:               input.TaskID,
+			SourceSite:           input.SourceSite,
+			SearchTerm:           input.SearchTerm,
+			ScreenshotReviewMode: input.ScreenshotReviewMode,
+			AcquireResult:        acquireResult,
+			ExtractorEngine:      deps.ExtractorEngine,
 		},
 		FetchStoreProcessDeps{
 			Repo:                       deps.Repo,

@@ -11,13 +11,14 @@ import (
 
 // FetchRepairFinalizeInput 定义“抓取修复 + 草稿收敛”组合流程输入。
 type FetchRepairFinalizeInput struct {
-	TaskID             string
-	SavePath           string
-	DownloaderID       string
-	TorrentNameForPath string
-	RootConfig         map[string]any
-	ReviewData         parser.ReviewExtractedData
-	DetailHTML         string
+	TaskID               string
+	SavePath             string
+	DownloaderID         string
+	TorrentNameForPath   string
+	ScreenshotReviewMode string
+	RootConfig           map[string]any
+	ReviewData           parser.ReviewExtractedData
+	DetailHTML           string
 
 	Draft          *SeedDraft
 	MetaName       string
@@ -56,16 +57,17 @@ func RunFetchRepairAndFinalize(input FetchRepairFinalizeInput, deps FetchRepairF
 
 	repairResult := processingrepair.RunParallelFetchRepairs(
 		processingrepair.ParallelFetchRepairInput{
-			TaskID:             input.TaskID,
-			SavePath:           input.SavePath,
-			DownloaderID:       input.DownloaderID,
-			TorrentNameForPath: input.TorrentNameForPath,
-			TorrentName:        torrentName,
-			Subtitle:           subtitle,
-			ReviewData:         input.ReviewData,
-			IMDbLink:           imdbLink,
-			DoubanLink:         doubanLink,
-			TMDbLink:           tmdbLink,
+			TaskID:               input.TaskID,
+			SavePath:             input.SavePath,
+			DownloaderID:         input.DownloaderID,
+			TorrentNameForPath:   input.TorrentNameForPath,
+			TorrentName:          torrentName,
+			ScreenshotReviewMode: input.ScreenshotReviewMode,
+			Subtitle:             subtitle,
+			ReviewData:           input.ReviewData,
+			IMDbLink:             imdbLink,
+			DoubanLink:           doubanLink,
+			TMDbLink:             tmdbLink,
 		},
 		deps.FetchRepairDeps,
 	)
