@@ -5,6 +5,8 @@ import (
 	neturl "net/url"
 	"regexp"
 	"strings"
+
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
 var (
@@ -52,6 +54,10 @@ func BuildUploadDescription(siteCode string, uploadData map[string]any) string {
 		intro = item
 	}
 
+	if strings.EqualFold(strings.TrimSpace(siteCode), "pterclub") {
+		return buildPTerClubUploadDescription(uploadData, intro)
+	}
+
 	statement := pickDescriptionSection(uploadData, intro, "statement")
 	poster := pickDescriptionSection(uploadData, intro, "poster")
 	body := pickDescriptionSection(uploadData, intro, "body")
@@ -77,6 +83,63 @@ func BuildUploadDescription(siteCode string, uploadData map[string]any) string {
 		return strings.TrimSpace(toStringAny(uploadData["subtitle"], ""))
 	}
 	return strings.Join(parts, "\n")
+}
+
+func buildPTerClubUploadDescription(uploadData map[string]any, intro map[string]any) string {
+	statement := pickDescriptionSection(uploadData, intro, "statement")
+	poster := pickDescriptionSection(uploadData, intro, "poster")
+	body := pickDescriptionSection(uploadData, intro, "body")
+	screenshots := pickDescriptionSection(uploadData, intro, "screenshots")
+	mediainfo := strings.TrimSpace(toStringAny(uploadData["mediainfo"], ""))
+	bdinfo := strings.TrimSpace(toStringAny(uploadData["bdinfo"], ""))
+
+	parts := make([]string, 0, 6)
+	for _, section := range []string{statement, poster, body} {
+		if strings.TrimSpace(section) != "" {
+			parts = append(parts, section)
+		}
+	}
+
+	if mediaBlock := buildPTerClubMediaBlock(mediainfo); mediaBlock != "" {
+		parts = append(parts, mediaBlock)
+	}
+	if bdinfoBlock := buildPTerClubBDInfoBlock(bdinfo); bdinfoBlock != "" {
+		parts = append(parts, bdinfoBlock)
+	}
+
+	if strings.TrimSpace(screenshots) != "" {
+		parts = append(parts, screenshots)
+	}
+
+	if len(parts) == 0 {
+		return strings.TrimSpace(toStringAny(uploadData["subtitle"], ""))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func buildPTerClubMediaBlock(mediaText string) string {
+	trimmed := strings.TrimSpace(mediaText)
+	if trimmed == "" {
+		return ""
+	}
+
+	isMediainfo, isBDInfo, _ := processingmedia.ValidateMediaInfoFormat(trimmed)
+	switch {
+	case isBDInfo:
+		return "[hide=bdinfo]" + trimmed + "[/hide]"
+	case isMediainfo:
+		return "[hide=mediainfo]" + trimmed + "[/hide]"
+	default:
+		return "[hide=mediainfo]" + trimmed + "[/hide]"
+	}
+}
+
+func buildPTerClubBDInfoBlock(mediaText string) string {
+	trimmed := strings.TrimSpace(mediaText)
+	if trimmed == "" {
+		return ""
+	}
+	return "[hide=bdinfo]" + trimmed + "[/hide]"
 }
 
 func pickDescriptionSection(uploadData map[string]any, intro map[string]any, key string) string {
