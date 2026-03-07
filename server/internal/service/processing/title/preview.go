@@ -90,13 +90,10 @@ func BuildPreviewTitleFromTitleComponents(titleComponents []any, fallbackTitle s
 		releaseGroup = "NOGROUP"
 	}
 
-	// 对特殊制作组进行处理，不需要添加前缀连字符（对齐 Python）。
-	switch releaseGroup {
-	case "MNHD-FRDS", "mUHD-FRDS":
+	if isSpaceSeparatedReleaseGroup(releaseGroup) {
 		return strings.TrimSpace(mainPart + " " + releaseGroup)
-	default:
-		return strings.TrimSpace(mainPart + "-" + releaseGroup)
 	}
+	return strings.TrimSpace(mainPart + "-" + releaseGroup)
 }
 
 func defaultTitleComponentsOrder() []string {

@@ -37,11 +37,14 @@ var (
 	reBDRipToken    = regexp.MustCompile(`(?i)\bBD[-\s]?RIP\b`)
 )
 
+var specialReleaseGroupSuffixes = []string{"mUHD-FRDS", "MNHD-FRDS", "￡cXcY-FRDS", "DMG&VCB-Studio", "VCB-Studio"}
+
 const sourcePlatformAlternatives = `MA|Apple\s?TV\+|ViuTV|MyTVSuper|MyTVS|DNSP|iT|NowE|MyVideo|TWN|LiTV|TVBAnywhere|DMM|iPad|TX|iQIYI|MUBI|TVB|YOUKU|NowPlay|AMZN|Amazon|Netflix|NF|DSNP|MAX|HMAX|HULU|ATVP|iTunes|friDay|USA|EUR|JPN|CEE|FRA|LINETV|PCOK|Hami|GBR|NowPlayer|CR|Crunchyroll|SEEZN|GER|CAN|CHN|Viu|WeTV|meWATCH|CATCHPLAY|AMC\+|TVING|Baha|KKTV|IQ|HKG|ITA|ESP|Disney\+|Disney`
 
 var (
 	reSourcePlatformBoundary = regexp.MustCompile("(?i)(?:^|[^\\p{L}\\p{N}_])(" + sourcePlatformAlternatives + ")(?:$|[^\\p{L}\\p{N}_])")
 	reAudioDTSHDMA           = regexp.MustCompile(`(?i)\bDTS[-\s]?HD\s*MA\b`)
+	reAudioCodecDD           = regexp.MustCompile(`(?i)\bDD\b`)
 	reReleaseGroupSplit      = regexp.MustCompile(`[@\-\s]+`)
 )
 
@@ -170,14 +173,15 @@ func splitTitleAndTeamPythonish(title string, releaseGroup string) (string, stri
 		return "", ""
 	}
 
-	// 特殊制作组（完整匹配）
-	specialGroups := []string{"mUHD-FRDS", "MNHD-FRDS", "DMG&VCB-Studio", "VCB-Studio"}
-	for _, group := range specialGroups {
+	for _, group := range specialReleaseGroupSuffixes {
 		if strings.HasSuffix(trimmed, " "+group) {
 			return strings.TrimSpace(trimmed[:len(trimmed)-len(group)-1]), group
 		}
 		if strings.HasSuffix(trimmed, "-"+group) {
 			return strings.TrimSpace(trimmed[:len(trimmed)-len(group)-1]), group
+		}
+		if strings.HasPrefix(group, "￡") && strings.HasSuffix(trimmed, group) {
+			return strings.TrimSpace(trimmed[:len(trimmed)-len(group)]), group
 		}
 	}
 
@@ -372,7 +376,7 @@ func extractMainTitleAndUnrecognized(titlePart string, values map[string]string)
 		found = append(found, v)
 	}
 	if v := strings.TrimSpace(values["视频编码"]); v != "" {
-		found = append(found, v)
+		found = append(found, videoCodecCleanupTags(v)...)
 	}
 	if v := strings.TrimSpace(values["音频编码"]); v != "" {
 		// 对齐 Python：清理“无法识别”时优先移除完整音频标签，并补充声道/Atmos/音轨数 token。
@@ -446,6 +450,7 @@ func audioCleanupTags(audio string) []string {
 		"TrueHD",
 		"DTS",
 		"DDP",
+		"DD",
 		"AC3",
 		"FLAC",
 		"AAC",
@@ -486,19 +491,55 @@ func audioCleanupTags(audio string) []string {
 	return out
 }
 
-func splitTitleAndTeam(title string, releaseGroup string) (string, string) {
-	trimmed := strings.TrimSpace(title)
-	team := parser.NormalizeTeamLabel(releaseGroup)
-	mainTitle := trimmed
-
-	if team == "" {
-		if idx := strings.LastIndex(trimmed, "-"); idx > 0 && idx < len(trimmed)-1 {
-			mainTitle = strings.TrimSpace(trimmed[:idx])
-			team = parser.NormalizeTeamLabel(trimmed[idx+1:])
-		}
+func videoCodecCleanupTags(codec string) []string {
+	trimmed := strings.TrimSpace(codec)
+	if trimmed == "" {
+		return nil
 	}
 
-	return strings.TrimSpace(mainTitle), strings.TrimSpace(team)
+	seen := make(map[string]struct{}, 5)
+	out := make([]string, 0, 5)
+	appendTag := func(tag string) {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			return
+		}
+		key := strings.ToUpper(tag)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, tag)
+	}
+
+	switch detectVideoCodecFamily(trimmed) {
+	case "h265":
+		for _, tag := range []string{trimmed, "HEVC", "H.265", "H265", "x265"} {
+			appendTag(tag)
+		}
+	case "h264":
+		for _, tag := range []string{trimmed, "AVC", "H.264", "H264", "x264"} {
+			appendTag(tag)
+		}
+	default:
+		appendTag(trimmed)
+	}
+
+	return out
+}
+
+func splitTitleAndTeam(title string, releaseGroup string) (string, string) {
+	mainTitle, team := splitTitleAndTeamPythonish(title, releaseGroup)
+	return strings.TrimSpace(mainTitle), strings.TrimSpace(parser.NormalizeTeamLabel(team))
+}
+
+func isSpaceSeparatedReleaseGroup(group string) bool {
+	switch strings.TrimSpace(group) {
+	case "MNHD-FRDS", "mUHD-FRDS", "￡cXcY-FRDS":
+		return true
+	default:
+		return false
+	}
 }
 
 func extractCompletionStatusFromTitle(title string) string {
@@ -863,6 +904,7 @@ func normalizeTitleAudioTokens(title string) string {
 		{regexp.MustCompile(`(?i)\bE[-\s\.]*AC[-\s\.]*3\b`), "DDP"},
 		// 对齐 Python：DD+ 等价于 DDP（E-AC-3），这里统一输出 DDP，且兼容全角加号等变体。
 		{regexp.MustCompile(`(?i)(^|[^\p{L}\p{N}_])DD\s*[\+＋﹢]([^\p{L}\p{N}_]|$)`), "${1}DDP${2}"},
+		{regexp.MustCompile(`(?i)\bAC[-\s\.]*3\b`), "DD"},
 		{regexp.MustCompile(`(?i)\bLPCM\s*/\s*PCM\b`), "LPCM"},
 	}
 	for _, rule := range codecStandardizationRules {
@@ -870,7 +912,7 @@ func normalizeTitleAudioTokens(title string) string {
 	}
 
 	// 对齐 Python：修复音频标签中常见的缺空格/缺小数点/单复数问题（避免影响其他字段提取）。
-	audioKeywords := `DTS[-\s\.]*HD[-\s\.]*MA|DTS[-\s\.]*HD[-\s\.]*HR|DTS[-\s\.]*HD|DTS[:\-\s\.]*X|DTS|TRUEHD|DDP|DD\+|E[-\s]?AC[-\s]?3|AC[-\s]?3|AC3|FLAC|AAC|LPCM|PCM|OPUS|MP3`
+	audioKeywords := `DTS[-\s\.]*HD[-\s\.]*MA|DTS[-\s\.]*HD[-\s\.]*HR|DTS[-\s\.]*HD|DTS[:\-\s\.]*X|DTS|TRUEHD|DDP|DD\+|DD|E[-\s]?AC[-\s]?3|AC[-\s]?3|AC3|FLAC|AAC|LPCM|PCM|OPUS|MP3`
 
 	// 修复 "DDP 5 1" -> "DDP 5.1" 这类空格分隔声道格式。
 	reSpaceDecimal := regexp.MustCompile(`(?i)\b(` + audioKeywords + `)\b\s*(\d)\s*(\d)\b`)
@@ -938,9 +980,11 @@ func extractAudioFromTitle(title string) string {
 		} else if idx := strings.Index(upper, "E-AC-3"); idx >= 0 {
 			audioCodecPos = idx
 		}
-	case strings.Contains(upper, "AC-3"), strings.Contains(upper, "AC3"):
-		audioCodec = "AC3"
-		if idx := strings.Index(upper, "AC-3"); idx >= 0 {
+	case reAudioCodecDD.MatchString(title), strings.Contains(upper, "AC-3"), strings.Contains(upper, "AC3"):
+		audioCodec = "DD"
+		if idx := reAudioCodecDD.FindStringIndex(title); idx != nil {
+			audioCodecPos = idx[0]
+		} else if idx := strings.Index(upper, "AC-3"); idx >= 0 {
 			audioCodecPos = idx
 		} else {
 			audioCodecPos = strings.Index(upper, "AC3")
