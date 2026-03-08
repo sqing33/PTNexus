@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/pt-nexus/server/internal/platform/logx"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
@@ -252,7 +253,7 @@ func extractDescriptionCategoryText(description string) (string, bool) {
 
 // extractRawTagsFromMediaText 从 MediaInfo/BDInfo 文本中提取语言/字幕/HDR/高帧率/高码率等原始标签（不带 tag. 前缀）。
 func extractRawTagsFromMediaText(mediaText string, isBDInfo bool) []string {
-	text := strings.TrimSpace(mediaText)
+	text := strings.TrimSpace(parser.SanitizeMediaTextForAnalysis(mediaText))
 	if text == "" {
 		return []string{}
 	}

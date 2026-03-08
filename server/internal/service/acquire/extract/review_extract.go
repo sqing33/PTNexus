@@ -2114,8 +2114,9 @@ func splitCompactTokens(text string) []string {
 }
 
 func inferStandardizedValues(title, mediainfo, body string) map[string]string {
-	upperTech := strings.ToUpper(strings.TrimSpace(title + "\n" + mediainfo))
-	upperAll := strings.ToUpper(strings.TrimSpace(title + "\n" + mediainfo + "\n" + body))
+	sanitizedMediainfo := SanitizeMediaTextForAnalysis(mediainfo)
+	upperTech := strings.ToUpper(strings.TrimSpace(title + "\n" + sanitizedMediainfo))
+	upperAll := strings.ToUpper(strings.TrimSpace(title + "\n" + sanitizedMediainfo + "\n" + body))
 	values := map[string]string{
 		"type":        "category.movie",
 		"medium":      "medium.other",
@@ -2128,7 +2129,7 @@ func inferStandardizedValues(title, mediainfo, body string) map[string]string {
 	}
 
 	normalizedTitleForAudio := normalizeAudioCodecTokensForInference(title)
-	normalizedUpperTechForAudio := strings.ToUpper(normalizeAudioCodecTokensForInference(title + "\n" + mediainfo))
+	normalizedUpperTechForAudio := strings.ToUpper(normalizeAudioCodecTokensForInference(title + "\n" + sanitizedMediainfo))
 
 	inferAudioCodec := func(upperText string) string {
 		upper := strings.ToUpper(strings.TrimSpace(upperText))
@@ -2234,11 +2235,11 @@ func inferStandardizedValues(title, mediainfo, body string) map[string]string {
 	switch {
 	case true:
 		// 对齐 Python：优先使用 MediaInfo 的 Width/Height 推断分辨率，避免 "k" 子串误判 8K。
-		if fromMediaInfo := inferResolutionFromMediainfo(mediainfo); fromMediaInfo != "" {
+		if fromMediaInfo := inferResolutionFromMediainfo(sanitizedMediainfo); fromMediaInfo != "" {
 			values["resolution"] = fromMediaInfo
 			break
 		}
-		if fromToken := inferResolutionFromTokens(title + "\n" + mediainfo); fromToken != "" {
+		if fromToken := inferResolutionFromTokens(title + "\n" + sanitizedMediainfo); fromToken != "" {
 			values["resolution"] = fromToken
 		}
 	}

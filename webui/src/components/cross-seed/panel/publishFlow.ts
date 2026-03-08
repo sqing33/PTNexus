@@ -272,7 +272,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
 
       setBatchPublishRuntime(siteCount, startResponse.data?.concurrency)
       publishBatchId.value = startResponse.data.batch_id
-      publishBatchEventSource.value = openSSE(`/api/migrate/publish_batch/stream/${publishBatchId.value}`)
+      publishBatchEventSource.value = openSSE(
+        `/api/migrate/publish_batch/stream/${publishBatchId.value}`,
+      )
 
       publishBatchEventSource.value.onmessage = async (event) => {
         try {
@@ -596,9 +598,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
         }
       } catch (error: unknown) {
         const logs = axios.isAxiosError(error)
-          ? ((error.response?.data as { logs?: string; message?: string } | undefined)?.logs ||
+          ? (error.response?.data as { logs?: string; message?: string } | undefined)?.logs ||
             (error.response?.data as { message?: string } | undefined)?.message ||
-            error.message)
+            error.message
           : error instanceof Error
             ? error.message
             : String(error)
@@ -783,7 +785,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     if (remaining <= 5) return
 
     // 固定滚动速度：当前速度提升为 2 倍（600 -> 1200 px/s）
-    const duration = remaining / previewAutoScrollSpeedPxPerSecond * 1000
+    const duration = (remaining / previewAutoScrollSpeedPxPerSecond) * 1000
     const startTime = performance.now()
     const startScroll = panelContent.scrollTop
     const target = scrollHeight - clientHeight
@@ -827,10 +829,10 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
 
   const handleApiError = (error: unknown, defaultMessage: string) => {
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { logs?: string; message?: string } | undefined)?.logs ||
+      ? (error.response?.data as { logs?: string; message?: string } | undefined)?.logs ||
         (error.response?.data as { message?: string } | undefined)?.message ||
         error.message ||
-        defaultMessage)
+        defaultMessage
       : error instanceof Error
         ? error.message || defaultMessage
         : defaultMessage
@@ -957,7 +959,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     },
     // Setter: 当 v-model 试图修改值时调用
     set(newValue) {
-      const index = torrentData.value.title_components.findIndex((param) => param.key === '无法识别')
+      const index = torrentData.value.title_components.findIndex(
+        (param) => param.key === '无法识别',
+      )
 
       // 如果新输入的值是空的，就从数组里删除这个项目
       if (newValue === '' || newValue === null) {
@@ -982,7 +986,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
   // 计算属性：检查下一步按钮是否应该禁用
   const isNextButtonDisabled = computed(() => {
     // 1. 检查“无法识别”
-    const unrecognized = torrentData.value.title_components.find((param) => param.key === '无法识别')
+    const unrecognized = torrentData.value.title_components.find(
+      (param) => param.key === '无法识别',
+    )
     const hasUnrecognized = unrecognized && unrecognized.value !== ''
 
     // 2. 检查禁转标签
@@ -1078,7 +1084,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     }
 
     // 2. 检查是否存在"无法识别"的内容
-    const unrecognized = torrentData.value.title_components.find((param) => param.key === '无法识别')
+    const unrecognized = torrentData.value.title_components.find(
+      (param) => param.key === '无法识别',
+    )
     if (unrecognized && unrecognized.value !== '') {
       return '存在无法识别的标题内容，请手动修正或删除'
     }
@@ -1167,6 +1175,54 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     return '准备就绪'
   })
 
+  const _isMediaTextSectionHeaderLike = (line: string): boolean => {
+    const trimmed = line.trim()
+    if (!trimmed) return false
+    return (
+      /^(General|Video|Audio|Text|Menu|Chapters)(\s*#\d+)?$/i.test(trimmed) ||
+      /^(DISC INFO|PLAYLIST REPORT|QUICK SUMMARY|VIDEO:|AUDIO:|SUBTITLES:|FILES:|CHAPTERS:|DISC SIZE)$/i.test(
+        trimmed,
+      )
+    )
+  }
+
+  const _sanitizeMediaTextForValidation = (text: string): string => {
+    const normalized = (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+    if (!normalized) return ''
+
+    const lines = normalized.split('\n')
+    const sanitized: string[] = []
+    let skipContinuation = false
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+
+      if (skipContinuation) {
+        if (!trimmed) {
+          continue
+        }
+        if (_isMediaTextSectionHeaderLike(line)) {
+          skipContinuation = false
+        } else if (/^[\t ]/.test(line)) {
+          continue
+        } else {
+          skipContinuation = false
+        }
+      }
+
+      if (/^\s*Description\s*:/i.test(line)) {
+        const idx = line.indexOf(':')
+        sanitized.push(idx >= 0 ? line.slice(0, idx + 1) : line.trimEnd())
+        skipContinuation = true
+        continue
+      }
+
+      sanitized.push(line)
+    }
+
+    return sanitized.join('\n').trim()
+  }
+
   // 辅助函数：检查是否为有效的 MediaInfo 格式
   // 辅助函数：检查是否包含禁止模式
   const _hasForbiddenPatterns = (text: string): boolean => {
@@ -1206,13 +1262,14 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       'Height',
     ]
 
-    const matches = standardMediainfoKeywords.filter((keyword) => text.includes(keyword))
+    const sanitizedText = _sanitizeMediaTextForValidation(text)
+    const matches = standardMediainfoKeywords.filter((keyword) => sanitizedText.includes(keyword))
     if (matches.length < 3) {
       return false
     }
 
     // 关键字验证通过后，检查禁止模式
-    if (_hasForbiddenPatterns(text)) {
+    if (_hasForbiddenPatterns(sanitizedText)) {
       return false
     }
 
@@ -1237,8 +1294,13 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       'Description',
     ]
 
-    const requiredMatches = bdInfoRequiredKeywords.filter((keyword) => text.includes(keyword)).length
-    const optionalMatches = bdInfoOptionalKeywords.filter((keyword) => text.includes(keyword)).length
+    const sanitizedText = _sanitizeMediaTextForValidation(text)
+    const requiredMatches = bdInfoRequiredKeywords.filter((keyword) =>
+      sanitizedText.includes(keyword),
+    ).length
+    const optionalMatches = bdInfoOptionalKeywords.filter((keyword) =>
+      sanitizedText.includes(keyword),
+    ).length
 
     // 必须所有必要关键字都存在，或者至少有1个必要关键字且2个以上可选关键字
     const hasRequiredKeywords =
@@ -1250,7 +1312,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     }
 
     // 关键字验证通过后，检查禁止模式
-    if (_hasForbiddenPatterns(text)) {
+    if (_hasForbiddenPatterns(sanitizedText)) {
       return false
     }
 
@@ -1351,7 +1413,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       resultsBySite.set(result.siteName, result)
     }
 
-    const unfinishedSites = selectedTargetSites.value.filter((siteName) => !resultsBySite.has(siteName))
+    const unfinishedSites = selectedTargetSites.value.filter(
+      (siteName) => !resultsBySite.has(siteName),
+    )
     const hasUnfinishedSites = finalResultsList.value.length < selectedTargetSites.value.length
     const isStopped = limitAlert.value.visible && hasUnfinishedSites
     const runningSites = new Set(

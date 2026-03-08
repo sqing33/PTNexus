@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 )
 
 type HDRInfo struct {
@@ -25,7 +27,7 @@ type AudioInfo struct {
 }
 
 func ExtractHDRInfoFromMediaText(text string, isBDInfo bool) HDRInfo {
-	trimmed := strings.TrimSpace(text)
+	trimmed := strings.TrimSpace(parser.SanitizeMediaTextForAnalysis(text))
 	if trimmed == "" {
 		return HDRInfo{}
 	}
@@ -192,7 +194,7 @@ func determineBDInfoHDRStandardTag(videoLines []string) string {
 }
 
 func ExtractAudioInfoFromMediaText(text string, isBDInfo bool) AudioInfo {
-	trimmed := strings.TrimSpace(text)
+	trimmed := strings.TrimSpace(parser.SanitizeMediaTextForAnalysis(text))
 	if trimmed == "" {
 		return AudioInfo{}
 	}

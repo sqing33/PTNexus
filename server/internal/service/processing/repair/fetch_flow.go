@@ -113,11 +113,15 @@ func ValidateFetchedMediainfoFormat(text string) (bool, string) {
 	if trimmed == "" {
 		return false, "媒体信息为空"
 	}
-	if !parser.IsLikelyMediaInfoText(trimmed) && !parser.IsLikelyBDInfoText(trimmed) {
+	sanitized := strings.TrimSpace(parser.SanitizeMediaTextForAnalysis(trimmed))
+	if sanitized == "" {
+		return false, "媒体信息为空"
+	}
+	if !parser.IsLikelyMediaInfoText(sanitized) && !parser.IsLikelyBDInfoText(sanitized) {
 		return false, "关键字不足"
 	}
 	for _, pattern := range fetchForbiddenMediaPatterns {
-		if pattern.MatchString(trimmed) {
+		if pattern.MatchString(sanitized) {
 			return false, "命中禁止模式"
 		}
 	}

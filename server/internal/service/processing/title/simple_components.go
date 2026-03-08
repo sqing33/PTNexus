@@ -65,6 +65,7 @@ func BuildSimpleTitleComponentsWithMediaInfo(title string, releaseGroup string, 
 	if trimmed == "" {
 		return []map[string]any{}
 	}
+	sanitizedMediaInfo := parser.SanitizeMediaTextForAnalysis(mediaInfo)
 
 	// 与 Python 的 upload_data_title 行为对齐：优先按 title 中的 "-" / "@" 做制作组切分，
 	// 这会导致诸如 WEB-DL / DTS-HD 等标题把后半段误识别为制作组，但可以确保 Go 侧输出与 Python 一致。
@@ -132,7 +133,7 @@ func BuildSimpleTitleComponentsWithMediaInfo(title string, releaseGroup string, 
 	if videoCodec := extractVideoCodecFromTitle(titlePart); videoCodec != "" {
 		values["视频编码"] = videoCodec
 	}
-	normalizeVideoCodecByMedium(values, mediaInfo)
+	normalizeVideoCodecByMedium(values, sanitizedMediaInfo)
 	if videoFormat := extractVideoFormatFromTitle(titlePart); videoFormat != "" {
 		values["视频格式"] = videoFormat
 	}

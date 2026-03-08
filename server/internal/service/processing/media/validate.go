@@ -9,6 +9,7 @@ import (
 
 	"github.com/pt-nexus/server/internal/config"
 	"github.com/pt-nexus/server/internal/platform/logx"
+	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 	"gopkg.in/yaml.v3"
 )
 
@@ -183,13 +184,17 @@ func ValidateMediaInfoFormat(text string) (bool, bool, string) {
 	if trimmed == "" {
 		return false, false, "媒体文本为空"
 	}
+	sanitized := strings.TrimSpace(parser.SanitizeMediaTextForAnalysis(trimmed))
+	if sanitized == "" {
+		return false, false, "媒体文本为空"
+	}
 
 	cfg := loadMediaFormatKeywordConfig()
 
-	mediainfoRequiredMatches := countKeywordMatches(trimmed, cfg.mediainfoRequired)
-	mediainfoOptionalMatches := countKeywordMatches(trimmed, cfg.mediainfoOptional)
-	bdinfoRequiredMatches := countKeywordMatches(trimmed, cfg.bdinfoRequired)
-	bdinfoOptionalMatches := countKeywordMatches(trimmed, cfg.bdinfoOptional)
+	mediainfoRequiredMatches := countKeywordMatches(sanitized, cfg.mediainfoRequired)
+	mediainfoOptionalMatches := countKeywordMatches(sanitized, cfg.mediainfoOptional)
+	bdinfoRequiredMatches := countKeywordMatches(sanitized, cfg.bdinfoRequired)
+	bdinfoOptionalMatches := countKeywordMatches(sanitized, cfg.bdinfoOptional)
 
 	isMediainfo := (len(cfg.mediainfoRequired) > 0 && mediainfoRequiredMatches == len(cfg.mediainfoRequired)) ||
 		(mediainfoRequiredMatches >= 2 && mediainfoOptionalMatches >= 3)
@@ -203,12 +208,12 @@ func ValidateMediaInfoFormat(text string) (bool, bool, string) {
 				logx.Debugf(mediaFormatValidateLogModule, "忽略非法 forbidden pattern pattern=%s err=%v", item.pattern, err)
 				continue
 			}
-			if compiled.MatchString(trimmed) {
+			if compiled.MatchString(sanitized) {
 				desc := strings.TrimSpace(item.description)
 				if desc == "" {
 					desc = item.pattern
 				}
-				matched := sanitizeForbiddenMatch(compiled.FindString(trimmed))
+				matched := sanitizeForbiddenMatch(compiled.FindString(sanitized))
 				if matched == "" {
 					return false, false, "命中禁止模式:" + desc
 				}
