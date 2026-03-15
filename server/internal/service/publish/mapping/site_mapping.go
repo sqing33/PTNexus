@@ -15,8 +15,9 @@ import (
 
 // SitePublishConfig 表示站点发布映射配置。
 type SitePublishConfig struct {
-	FormFields map[string]string
-	Mappings   map[string]map[string]string
+	FormFields         map[string]string
+	Mappings           map[string]map[string]string
+	GenreOptionsByType map[string][]string
 }
 
 var publishConfigCache sync.Map
@@ -61,8 +62,9 @@ func LoadSitePublishConfig(siteCode string) (*SitePublishConfig, error) {
 		return nil, err
 	}
 	cfg := &SitePublishConfig{
-		FormFields: mapStringMap(raw["form_fields"]),
-		Mappings:   mapStringNestedMap(raw["mappings"]),
+		FormFields:         mapStringMap(raw["form_fields"]),
+		Mappings:           mapStringNestedMap(raw["mappings"]),
+		GenreOptionsByType: mapStringSliceNestedMap(raw["genre_options_by_type"]),
 	}
 	publishConfigCache.Store(trimmed, cfg)
 	return cfg, nil
@@ -106,6 +108,51 @@ func mapStringNestedMap(value any) map[string]map[string]string {
 		result[key] = mapStringMap(raw)
 	}
 	return result
+}
+
+func mapStringSliceNestedMap(value any) map[string][]string {
+	result := map[string][]string{}
+	item, ok := value.(map[string]any)
+	if !ok {
+		if direct, ok := value.(map[string]interface{}); ok {
+			for key, raw := range direct {
+				result[key] = toStringSlice(raw)
+			}
+		}
+		return result
+	}
+	for key, raw := range item {
+		result[key] = toStringSlice(raw)
+	}
+	return result
+}
+
+func toStringSlice(value any) []string {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case []string:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		return result
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(toStringAny(item)); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		return result
+	default:
+		if trimmed := strings.TrimSpace(toStringAny(value)); trimmed != "" {
+			return []string{trimmed}
+		}
+		return nil
+	}
 }
 
 // PickMappedValue 将标准值映射为站点字段值。

@@ -191,6 +191,16 @@ func tryUploadTorrentRousiAPI(
 		payload["images"] = images
 	}
 
+	if debugMeta := mapStringAny(payload["_ptnexus_debug"]); len(debugMeta) > 0 {
+		resolvedCategory := strings.TrimSpace(toStringLoose(debugMeta["resolved_category"]))
+		genres := toStringSliceLoose(debugMeta["genres"])
+		detailLines = append(detailLines, fmt.Sprintf("分类映射: category=%s genre_count=%d", resolvedCategory, len(genres)))
+		if len(genres) > 0 {
+			detailLines = append(detailLines, fmt.Sprintf("题材标签: %s", strings.Join(genres, ", ")))
+		}
+		delete(payload, "_ptnexus_debug")
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		detailLines = append(detailLines, fmt.Sprintf("序列化 API 参数失败: %v", err))
@@ -313,9 +323,14 @@ func buildRousiAPIPayload(siteCode string, uploadData map[string]any, torrentFil
 		strings.TrimSpace(toStringLoose(standardized["category"])),
 		strings.TrimSpace(toStringLoose(standardized["type"])),
 	)
-	payload["category"] = resolveRousiCategory(rawCategory, siteCfg)
+	resolvedCategory := resolveRousiCategory(rawCategory, siteCfg)
+	payload["category"] = resolvedCategory
 
 	attributes := map[string]any{}
+	genres := resolveRousiGenres(resolvedCategory, uploadData, standardized, siteCfg)
+	if len(genres) > 0 {
+		attributes["genre"] = genres
+	}
 	resolutionRaw := firstNonEmpty(
 		strings.TrimSpace(toStringLoose(uploadData["resolution"])),
 		strings.TrimSpace(toStringLoose(standardized["resolution"])),
@@ -377,6 +392,11 @@ func buildRousiAPIPayload(siteCode string, uploadData map[string]any, torrentFil
 
 	if price, exists := uploadData["price"]; exists {
 		payload["price"] = price
+	}
+
+	payload["_ptnexus_debug"] = map[string]any{
+		"resolved_category": resolvedCategory,
+		"genres":            genres,
 	}
 
 	for key, value := range payload {
@@ -921,6 +941,90 @@ func resolveRousiMappedValue(siteCfg *publishmapping.SitePublishConfig, mappingK
 	return normalizeRousiToken(candidate)
 }
 
+func resolveRousiGenres(category string, uploadData map[string]any, standardized map[string]any, siteCfg *publishmapping.SitePublishConfig) []string {
+	if siteCfg == nil || len(siteCfg.GenreOptionsByType) == 0 {
+		return nil
+	}
+
+	normalizedCategory := normalizeRousiToken(category)
+	if normalizedCategory == "" {
+		return nil
+	}
+
+	allowedGenres := siteCfg.GenreOptionsByType[normalizedCategory]
+	if len(allowedGenres) == 0 {
+		return nil
+	}
+
+	candidates := collectRousiGenreCandidates(uploadData, standardized)
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	genreSet := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		normalized := normalizeRousiGenreToken(candidate)
+		if normalized == "" {
+			continue
+		}
+		genreSet[normalized] = struct{}{}
+	}
+
+	result := make([]string, 0, len(allowedGenres))
+	for _, item := range allowedGenres {
+		normalized := normalizeRousiGenreToken(item)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := genreSet[normalized]; ok {
+			result = append(result, normalized)
+		}
+	}
+	return result
+}
+
+func collectRousiGenreCandidates(uploadData map[string]any, standardized map[string]any) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, 16)
+	appendValue := func(value string) {
+		normalized := normalizeRousiGenreToken(value)
+		if normalized == "" {
+			return
+		}
+		if _, exists := seen[normalized]; exists {
+			return
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	appendTags := func(value any) {
+		for _, item := range toStringSliceLoose(value) {
+			appendValue(item)
+		}
+	}
+
+	appendTags(standardized["tags"])
+	appendTags(uploadData["tags"])
+	if sourceParams := mapStringAny(uploadData["source_params"]); len(sourceParams) > 0 {
+		appendTags(sourceParams["标签"])
+	}
+	return result
+}
+
+func normalizeRousiGenreToken(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "tag.") {
+		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "tag."))
+	}
+	if trimmed == "其他" {
+		return "其它"
+	}
+	return trimmed
+}
+
 func inferRousiSourceFromTitle(title string) string {
 	text := strings.TrimSpace(title)
 	if text == "" {
@@ -958,6 +1062,50 @@ func normalizeRousiToken(value string) string {
 		}
 	}
 	return trimmed
+}
+
+func toStringSliceLoose(value any) []string {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case []string:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		return result
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(toStringLoose(item)); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		return result
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return nil
+		}
+		if strings.Contains(trimmed, ",") {
+			parts := strings.Split(trimmed, ",")
+			result := make([]string, 0, len(parts))
+			for _, part := range parts {
+				if item := strings.TrimSpace(part); item != "" {
+					result = append(result, item)
+				}
+			}
+			return result
+		}
+		return []string{trimmed}
+	default:
+		if trimmed := strings.TrimSpace(toStringLoose(value)); trimmed != "" {
+			return []string{trimmed}
+		}
+		return nil
+	}
 }
 
 func buildRousiDescriptionMarkdown(uploadData map[string]any, fallback string) string {
