@@ -143,10 +143,11 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
   const normalizePublishResult = (siteName: string, raw: unknown): RawPublishResult => {
     const rawResult = (typeof raw === 'object' && raw !== null ? raw : {}) as RawPublishResultServer
     const logs = typeof rawResult.logs === 'string' ? rawResult.logs : ''
+    const fallbackMessage = rawResult.success === false ? '发布失败' : '发布成功'
     const result: RawPublishResult = {
       ...rawResult,
       siteName,
-      message: getCleanMessage(logs || '发布成功'),
+      message: getCleanMessage(logs || fallbackMessage),
     }
 
     if (rawResult.is_existing_torrent === true) {
@@ -459,9 +460,10 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
           publish_scene: publishScene,
         })
 
+        const fallbackMessage = response.data?.success === false ? '发布失败' : '发布成功'
         const result = {
           siteName,
-          message: getCleanMessage(response.data.logs || '发布成功'),
+          message: getCleanMessage(response.data.logs || fallbackMessage),
           ...response.data,
         }
 
@@ -817,14 +819,22 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
 
   const getCleanMessage = (logs: string): string => {
     if (!logs || logs === '发布成功') return '发布成功'
+    if (logs === '发布失败') return '发布失败'
     if (logs.includes('种子已存在')) {
       return '种子已存在，发布成功'
     }
     const lines = logs
       .split('\n')
-      .filter((line) => line && !line.includes('--- [步骤') && !line.includes('INFO - ---'))
+      .filter(
+        (line) =>
+          line &&
+          !line.includes('--- [步骤') &&
+          !line.includes('INFO - ---') &&
+          !line.startsWith('详情页链接:') &&
+          !line.startsWith('直链下载:'),
+      )
     const cleanLines = lines.map((line) => line.replace(/^\d{2}:\d{2}:\d{2} - \w+ - /, ''))
-    return cleanLines.filter(Boolean).pop() || '发布成功'
+    return cleanLines.filter(Boolean).pop() || (logs.includes('失败') ? '发布失败' : '发布成功')
   }
 
   const handleApiError = (error: unknown, defaultMessage: string) => {

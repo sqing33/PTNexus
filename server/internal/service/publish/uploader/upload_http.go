@@ -102,9 +102,16 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 
 	isExisting := looksLikeExistingTorrent(bodyText)
 	responseDetail := summarizeResponseBody(bodyText)
+	detailLines = append(detailLines, fmt.Sprintf("响应状态: %d %s", resp.StatusCode, strings.TrimSpace(resp.Status)))
 
 	// 检查 Location URL 中是否包含 existed=1 / exist=1 参数
 	location := strings.TrimSpace(resp.Header.Get("Location"))
+	if location != "" {
+		detailLines = append(detailLines, fmt.Sprintf("Location: %s", redactURLQuery(location)))
+	}
+	if responseDetail != "" {
+		detailLines = append(detailLines, fmt.Sprintf("站点响应: %s", responseDetail))
+	}
 	if hasExistingFlagInLocation(location) {
 		isExisting = true
 	}
@@ -113,19 +120,24 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 	}
 
 	if location != "" {
-		if publishURL := NormalizePublishURLWithOfferSupport(baseURL, location); publishURL != "" {
+		if publishURL := NormalizePublishURLWithOfferSupport(baseURL, location); publishURL != "" && isValidPublishedDetailURL(publishURL) {
 			detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
 			return publishURL, isExisting, buildDetail(), nil
 		}
 	}
-	if publishURL := ExtractPublishURLFromText(baseURL, bodyText); publishURL != "" {
+	if publishURL := ExtractPublishURLFromText(baseURL, bodyText); publishURL != "" && isValidPublishedDetailURL(publishURL) {
 		detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
 		return publishURL, isExisting, buildDetail(), nil
 	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		if looksLikeUploadLoginResult(location, respBody) {
+			err = errLikelyLoginPage
+			detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+			return "", isExisting, buildDetail(), err
+		}
 		if strings.Contains(bodyText, "已存在") || strings.Contains(strings.ToLower(bodyText), "already exists") {
-			if publishURL := ExtractPublishURLFromText(baseURL, bodyText); publishURL != "" {
+			if publishURL := ExtractPublishURLFromText(baseURL, bodyText); publishURL != "" && isValidPublishedDetailURL(publishURL) {
 				detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
 				return publishURL, true, buildDetail(), nil
 			}
@@ -253,6 +265,67 @@ func looksLikeUploadFormPage(text string) bool {
 func looksLikeHTMLResponse(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	return strings.HasPrefix(lower, "<!doctype html") || strings.Contains(lower, "<html")
+}
+
+func looksLikeUploadLoginResult(location string, body []byte) bool {
+	if isUploadLoginURL(location) {
+		return true
+	}
+	return looksLikeUploadLoginHTML(body)
+}
+
+func isUploadLoginURL(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false
+	}
+	parsed, err := neturl.Parse(trimmed)
+	if err != nil {
+		lower := strings.ToLower(trimmed)
+		return strings.Contains(lower, "login.php") && strings.Contains(lower, "returnto=")
+	}
+	path := strings.ToLower(strings.TrimSpace(parsed.Path))
+	if strings.HasSuffix(path, "/login.php") || path == "login.php" {
+		return true
+	}
+	query := strings.ToLower(parsed.RawQuery)
+	return strings.Contains(path, "login.php") && strings.Contains(query, "returnto=")
+}
+
+func looksLikeUploadLoginHTML(content []byte) bool {
+	if len(content) == 0 {
+		return false
+	}
+	limit := len(content)
+	if limit > 4096 {
+		limit = 4096
+	}
+	sample := strings.ToLower(string(content[:limit]))
+	trimmed := strings.TrimSpace(sample)
+	if !strings.HasPrefix(trimmed, "<!doctype") && !strings.HasPrefix(trimmed, "<html") {
+		return false
+	}
+	if strings.Contains(sample, "login.php") && strings.Contains(sample, "returnto=") {
+		return true
+	}
+	if strings.Contains(sample, "name=\"username\"") && strings.Contains(sample, "name=\"password\"") {
+		return true
+	}
+	return strings.Contains(sample, "action=\"login.php\"")
+}
+
+func isValidPublishedDetailURL(raw string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	if trimmed == "" {
+		return false
+	}
+	if isUploadLoginURL(trimmed) {
+		return false
+	}
+	return strings.Contains(trimmed, "details.php?") ||
+		strings.Contains(trimmed, "offers.php?") ||
+		strings.Contains(trimmed, "/torrent/") ||
+		strings.Contains(trimmed, "/torrent/info/")
 }
 
 func extractUploadHTMLTitle(text string) string {

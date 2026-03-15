@@ -117,16 +117,27 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 		addMessage = "已通过本地种子文件添加到下载器"
 	} else {
 		addedByData := false
+		downloadByDataErr := error(nil)
 		if len(detailSite) > 0 {
 			if _, _, torrentBytes, dlErr := acquirefetch.DownloadTorrentForSource(detailSite, rawURL); dlErr == nil && len(torrentBytes) > 0 {
 				fileName := fmt.Sprintf("auto-%d.torrent", time.Now().UnixNano())
 				if err := downloader.AddTorrentDataWithOptions(torrentBytes, fileName, savePath, addOptions); err == nil {
 					addedByData = true
 					addMessage = "已从详情页下载种子并添加到下载器"
+				} else {
+					downloadByDataErr = fmt.Errorf("下载种子后写入下载器失败: %w", err)
 				}
+			} else if dlErr != nil {
+				downloadByDataErr = fmt.Errorf("从详情页下载种子失败: %w", dlErr)
 			}
 		}
 		if !addedByData {
+			if len(detailSite) > 0 && !looksLikeDirectDownloadURL(rawURL) {
+				if downloadByDataErr == nil {
+					downloadByDataErr = fmt.Errorf("详情页链接未能解析出可直接下载的 torrent 文件")
+				}
+				return map[string]any{"success": false, "message": "添加下载任务失败: " + downloadByDataErr.Error()}, 500
+			}
 			if err := downloader.AddTorrentURLWithOptions(rawURL, savePath, addOptions); err != nil {
 				return map[string]any{"success": false, "message": "添加下载任务失败: " + err.Error()}, 500
 			}
@@ -230,4 +241,15 @@ func appendUniqueTag(tags []string, tag string) []string {
 		}
 	}
 	return append(tags, trimmed)
+}
+
+func looksLikeDirectDownloadURL(raw string) bool {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	if lower == "" {
+		return false
+	}
+	return strings.Contains(lower, "/download.php") ||
+		strings.Contains(lower, ".torrent") ||
+		strings.Contains(lower, "/api/torrent/") && strings.Contains(lower, "/download/") ||
+		strings.Contains(lower, "/api/torrent/download/")
 }
