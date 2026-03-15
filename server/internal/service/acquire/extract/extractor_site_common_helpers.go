@@ -16,6 +16,7 @@ var (
 	reListRowByTorrentID  = regexp.MustCompile(`(?is)<tr[^>]*>.*?details\.php\?[^"'>]*id=(\d+)[^"'>]*.*?</tr>`)
 	reListTagSpan         = regexp.MustCompile(`(?is)<span[^>]*class=["'][^"']*(?:optiontag|details-tag|chs_tag|tags)[^"']*["'][^>]*>(.*?)</span>`)
 	reListTagAnchor       = regexp.MustCompile(`(?is)<a[^>]*class=["'][^"']*(?:optiontag|details-tag|chs_tag|tags)[^"']*["'][^>]*>(.*?)</a>`)
+	reListTagDiv          = regexp.MustCompile(`(?is)<div[^>]*class=["'][^"']*\btag\b[^"']*["'][^>]*>(.*?)</div>`)
 	reListTagImageAlt     = regexp.MustCompile(`(?is)<img[^>]*alt=["']([^"']+)["'][^>]*>`)
 	reListOptionTagSpan   = regexp.MustCompile(`(?is)<span[^>]*class=["'][^"']*optiontag[^"']*["'][^>]*>(.*?)</span>`)
 	reListOptionTagAnchor = regexp.MustCompile(`(?is)<a[^>]*class=["'][^"']*optiontag[^"']*["'][^>]*>(.*?)</a>`)
@@ -201,12 +202,44 @@ func extractTagsFromListRowHTML(rowHTML string) []string {
 			collectTag(match[1])
 		}
 	}
-	for _, match := range reListTagImageAlt.FindAllStringSubmatch(rowHTML, -1) {
+	for _, match := range reListTagDiv.FindAllStringSubmatch(rowHTML, -1) {
 		if len(match) >= 2 {
 			collectTag(match[1])
 		}
 	}
+	if len(tags) == 0 {
+		for _, match := range reListTagImageAlt.FindAllStringSubmatch(rowHTML, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			tag := normalizeSourceTagText(match[1])
+			if tag == "" || shouldIgnoreSourceTag(tag) || shouldIgnoreListImageAltTag(tag) {
+				continue
+			}
+			tags = appendUniqueString(tags, tag)
+		}
+	}
 	return tags
+}
+
+func shouldIgnoreListImageAltTag(tag string) bool {
+	trimmed := strings.TrimSpace(tag)
+	if trimmed == "" {
+		return true
+	}
+	if regexp.MustCompile(`^\d+$`).MatchString(trimmed) {
+		return true
+	}
+
+	lower := strings.ToLower(trimmed)
+	switch lower {
+	case
+		"movies", "documentaries", "animations", "tv series", "tv shows", "music", "sports", "demo", "game",
+		"sticky", "free", "download", "unbookmarked", "bookmarked",
+		"comments", "time", "size", "seeders", "leechers", "snatched":
+		return true
+	}
+	return false
 }
 
 func findTorrentRowHTMLFromListPage(pageHTML string, torrentID string) (string, bool) {
