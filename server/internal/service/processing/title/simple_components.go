@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 )
@@ -49,6 +51,7 @@ var (
 	reAudioDTSHDMA           = regexp.MustCompile(`(?i)\bDTS[-\s]?HD\s*MA\b`)
 	reAudioCodecDD           = regexp.MustCompile(`(?i)\bDD\b`)
 	reReleaseGroupSplit      = regexp.MustCompile(`[@\-\s]+`)
+	reHDRTitleToken          = regexp.MustCompile(`(?i)Dolby Vision|DoVi|HDR10\+|HDRVivid|HDR10|HLG|HDR|SDR|EDR|DV|Vivid`)
 )
 
 // BuildSimpleTitleComponents 构建标题组件（不使用媒体文本纠偏）。
@@ -977,27 +980,59 @@ func extractHDRFormatFromTitle(title string) string {
 		return ""
 	}
 
-	matches := regexp.MustCompile(`(?i)\b(?:Dolby Vision|DoVi|HDR10\+|HDRVivid|HDR10|HLG|HDR|SDR|EDR|DV|Vivid)\b`).FindAllString(trimmed, -1)
+	matches := findHDRTitleTokens(trimmed)
 	if len(matches) == 0 {
 		return ""
 	}
 
-	seen := make(map[string]struct{}, len(matches))
-	parts := make([]string, 0, len(matches))
+	hasDoVi := false
+	hasHDR10Plus := false
+	hasHDR := false
+	hasHLG := false
+	hasVivid := false
+	hasSDR := false
+	hasEDR := false
 	for _, item := range matches {
-		value := strings.TrimSpace(item)
-		if value == "" {
-			continue
+		switch strings.ToUpper(strings.TrimSpace(item)) {
+		case "DOLBY VISION", "DOVI", "DV":
+			hasDoVi = true
+		case "HDR10+":
+			hasHDR10Plus = true
+		case "HDR10", "HDR":
+			hasHDR = true
+		case "HLG":
+			hasHLG = true
+		case "HDRVIVID", "VIVID":
+			hasVivid = true
+		case "SDR":
+			hasSDR = true
+		case "EDR":
+			hasEDR = true
 		}
-		key := strings.ToUpper(value)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		parts = append(parts, value)
 	}
 
-	return strings.TrimSpace(strings.Join(parts, " "))
+	switch {
+	case hasDoVi && hasHDR10Plus:
+		return "DoVi HDR10+"
+	case hasDoVi && hasHDR:
+		return "DoVi HDR"
+	case hasDoVi:
+		return "DoVi"
+	case hasHDR10Plus:
+		return "HDR10+"
+	case hasVivid:
+		return "HDR Vivid"
+	case hasHDR:
+		return "HDR"
+	case hasHLG:
+		return "HLG"
+	case hasSDR:
+		return "SDR"
+	case hasEDR:
+		return "EDR"
+	default:
+		return ""
+	}
 }
 
 func hdrCleanupTags(hdr string) []string {
@@ -1022,12 +1057,89 @@ func hdrCleanupTags(hdr string) []string {
 	}
 
 	appendTag(trimmed)
-	matches := regexp.MustCompile(`(?i)\b(?:Dolby Vision|DoVi|HDR10\+|HDRVivid|HDR10|HLG|HDR|SDR|EDR|DV|Vivid)\b`).FindAllString(trimmed, -1)
+	for _, alias := range hdrCleanupAliases(trimmed) {
+		appendTag(alias)
+	}
+	matches := findHDRTitleTokens(trimmed)
 	for _, item := range matches {
 		appendTag(item)
 	}
 
 	return out
+}
+
+func hdrCleanupAliases(hdr string) []string {
+	upper := strings.ToUpper(strings.TrimSpace(hdr))
+	if upper == "" {
+		return nil
+	}
+
+	aliases := make([]string, 0, 6)
+	switch {
+	case strings.Contains(upper, "DOVI") && strings.Contains(upper, "HDR10+"):
+		aliases = append(aliases, "DoVi", "DV", "Dolby Vision", "HDR10+", "HDR")
+	case strings.Contains(upper, "DOVI") && strings.Contains(upper, "HDR"):
+		aliases = append(aliases, "DoVi", "DV", "Dolby Vision", "HDR10", "HDR")
+	case strings.Contains(upper, "DOVI"):
+		aliases = append(aliases, "DoVi", "DV", "Dolby Vision")
+	case strings.Contains(upper, "HDR10+"):
+		aliases = append(aliases, "HDR10+", "HDR")
+	case strings.Contains(upper, "VIVID"):
+		aliases = append(aliases, "HDRVivid", "Vivid")
+	case strings.Contains(upper, "HDR"):
+		aliases = append(aliases, "HDR10", "HDR")
+	case strings.Contains(upper, "HLG"):
+		aliases = append(aliases, "HLG")
+	case strings.Contains(upper, "SDR"):
+		aliases = append(aliases, "SDR")
+	case strings.Contains(upper, "EDR"):
+		aliases = append(aliases, "EDR")
+	}
+	return aliases
+}
+
+func findHDRTitleTokens(text string) []string {
+	indexes := reHDRTitleToken.FindAllStringIndex(text, -1)
+	if len(indexes) == 0 {
+		return nil
+	}
+
+	matches := make([]string, 0, len(indexes))
+	for _, loc := range indexes {
+		if len(loc) < 2 {
+			continue
+		}
+		start, end := loc[0], loc[1]
+		if !isHDRTitleTokenBoundary(text, start, end) {
+			continue
+		}
+		value := strings.TrimSpace(text[start:end])
+		if value == "" {
+			continue
+		}
+		matches = append(matches, value)
+	}
+	return matches
+}
+
+func isHDRTitleTokenBoundary(text string, start int, end int) bool {
+	if start > 0 {
+		prev, _ := utf8.DecodeLastRuneInString(text[:start])
+		if isHDRTitleWordRune(prev) {
+			return false
+		}
+	}
+	if end < len(text) {
+		next, _ := utf8.DecodeRuneInString(text[end:])
+		if isHDRTitleWordRune(next) {
+			return false
+		}
+	}
+	return true
+}
+
+func isHDRTitleWordRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 func extractBitDepthFromTitle(title string) string {
