@@ -879,50 +879,10 @@ func cleanSubtitleValue(raw string) string {
 }
 
 func extractSubtitleFromTable(pageHTML string) string {
-	page := strings.TrimSpace(pageHTML)
-	if page == "" {
-		return ""
+	if cell := findDetailValueCellByLabels(pageHTML, []string{"副标题", "副標題", "subtitle"}); cell != nil {
+		return strings.TrimSpace(extractVisibleText(cell))
 	}
-
-	doc, err := xhtml.Parse(strings.NewReader(page))
-	if err != nil || doc == nil {
-		return ""
-	}
-
-	isSubtitleLabel := func(text string) bool {
-		normalized := strings.ToLower(strings.TrimSpace(text))
-		normalized = strings.Join(strings.Fields(normalized), "")
-		return normalized == "副标题" || normalized == "副標題" || normalized == "subtitle"
-	}
-
-	var found string
-	var walk func(node *xhtml.Node)
-	walk = func(node *xhtml.Node) {
-		if node == nil || found != "" {
-			return
-		}
-		if node.Type == xhtml.ElementNode && strings.EqualFold(node.Data, "td") {
-			label := strings.TrimSpace(extractVisibleText(node))
-			if isSubtitleLabel(label) {
-				if next := nextSiblingElement(node, "td"); next != nil {
-					candidate := strings.TrimSpace(extractVisibleText(next))
-					if candidate != "" {
-						found = candidate
-						return
-					}
-				}
-			}
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			walk(child)
-			if found != "" {
-				return
-			}
-		}
-	}
-
-	walk(doc)
-	return strings.TrimSpace(found)
+	return ""
 }
 
 func nextSiblingElement(node *xhtml.Node, tag string) *xhtml.Node {
@@ -978,6 +938,66 @@ func extractVisibleText(node *xhtml.Node) string {
 	return strings.TrimSpace(text)
 }
 
+func findDetailValueCellByLabels(pageHTML string, labels []string) *xhtml.Node {
+	page := strings.TrimSpace(pageHTML)
+	if page == "" || len(labels) == 0 {
+		return nil
+	}
+
+	doc, err := xhtml.Parse(strings.NewReader(page))
+	if err != nil || doc == nil {
+		return nil
+	}
+
+	labelSet := make(map[string]struct{}, len(labels))
+	for _, label := range labels {
+		normalized := normalizeDetailFieldLabel(label)
+		if normalized == "" {
+			continue
+		}
+		labelSet[normalized] = struct{}{}
+	}
+	if len(labelSet) == 0 {
+		return nil
+	}
+
+	var found *xhtml.Node
+	var walk func(node *xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node == nil || found != nil {
+			return
+		}
+		if node.Type == xhtml.ElementNode && strings.EqualFold(node.Data, "td") {
+			label := normalizeDetailFieldLabel(extractVisibleText(node))
+			if _, ok := labelSet[label]; ok {
+				if next := nextSiblingElement(node, "td"); next != nil {
+					found = next
+					return
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+			if found != nil {
+				return
+			}
+		}
+	}
+
+	walk(doc)
+	return found
+}
+
+func normalizeDetailFieldLabel(text string) string {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return ""
+	}
+	normalized = strings.ReplaceAll(normalized, "\u00a0", " ")
+	normalized = strings.ReplaceAll(normalized, "\u3000", " ")
+	return strings.Join(strings.Fields(normalized), "")
+}
+
 func extractTeamFromPage(page string) string {
 	trimmed := strings.TrimSpace(page)
 	if trimmed == "" {
@@ -1006,15 +1026,6 @@ func extractTagsFromPage(page string) []string {
 		return []string{}
 	}
 
-	match := reTagsFieldRow.FindStringSubmatch(trimmed)
-	if len(match) < 2 {
-		return []string{}
-	}
-	cell := strings.TrimSpace(match[1])
-	if cell == "" {
-		return []string{}
-	}
-
 	tags := make([]string, 0, 8)
 	appendTag := func(raw string) {
 		tag := normalizeSourceTagText(raw)
@@ -1025,6 +1036,42 @@ func extractTagsFromPage(page string) []string {
 			return
 		}
 		tags = appendUniqueString(tags, tag)
+	}
+
+	if cellNode := findDetailValueCellByLabels(trimmed, []string{"标签", "標籤", "tags", "类别与标签", "類別與標籤"}); cellNode != nil {
+		var walk func(node *xhtml.Node)
+		walk = func(node *xhtml.Node) {
+			if node == nil {
+				return
+			}
+			if node.Type == xhtml.ElementNode && (strings.EqualFold(node.Data, "span") || strings.EqualFold(node.Data, "a")) {
+				appendTag(extractVisibleText(node))
+			}
+			for child := node.FirstChild; child != nil; child = child.NextSibling {
+				walk(child)
+			}
+		}
+		walk(cellNode)
+		if len(tags) == 0 {
+			plain := normalizeSourceTagText(extractVisibleText(cellNode))
+			for _, token := range strings.FieldsFunc(plain, func(r rune) bool {
+				return r == ',' || r == '，' || r == '、' || r == '/' || r == '|' || r == ';'
+			}) {
+				appendTag(token)
+			}
+		}
+		if len(tags) > 0 {
+			return tags
+		}
+	}
+
+	match := reTagsFieldRow.FindStringSubmatch(trimmed)
+	if len(match) < 2 {
+		return []string{}
+	}
+	cell := strings.TrimSpace(match[1])
+	if cell == "" {
+		return []string{}
 	}
 
 	for _, item := range reCellSpan.FindAllStringSubmatch(cell, -1) {
