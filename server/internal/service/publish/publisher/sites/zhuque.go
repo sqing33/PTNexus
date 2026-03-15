@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server/internal/config"
 	"github.com/pt-nexus/server/internal/platform/logx"
 	publishmapping "github.com/pt-nexus/server/internal/service/publish/mapping"
 	"github.com/pt-nexus/server/internal/service/publish/publisher"
@@ -146,7 +145,7 @@ func PublishZhuque(input publisher.PublishInput) (publisher.PublishResult, error
 // BuildZhuqueUploadFields 构造朱雀站点（TNode/API）的 multipart 表单字段。
 // 参数/返回：uploadData 为发布 payload；title/subtitle/mediainfo/imdbLink/doubanLink 为最终展示字段；返回可直接提交给 /api/torrent/upload 的字段映射。
 // 失败场景：配置缺失、必需映射字段缺失时返回 error。
-// 副作用：读取运行时 config.json 以决定是否匿名发布。
+// 副作用：读取运行时配置中的匿名发布开关。
 func BuildZhuqueUploadFields(uploadData map[string]any, title, subtitle, mediainfo, imdbLink, doubanLink string) (map[string]string, error) {
 	siteCfg, err := publishmapping.LoadSitePublishConfig("zhuque")
 	if err != nil {
@@ -165,14 +164,7 @@ func BuildZhuqueUploadFields(uploadData map[string]any, title, subtitle, mediain
 	videoCoding := strings.TrimSpace(publishmapping.PickMappedValueWithFallback("video_codec", siteCfg.Mappings["video_codec"], strings.TrimSpace(toStringAny(standardized["video_codec"], ""))))
 	resolution := strings.TrimSpace(publishmapping.PickMappedValueWithFallback("resolution", siteCfg.Mappings["resolution"], strings.TrimSpace(toStringAny(standardized["resolution"], ""))))
 
-	anonymousUpload := true
-	paths := config.ResolveRuntimePaths()
-	if manager, mgrErr := config.NewManager(paths); mgrErr == nil {
-		root := manager.Get()
-		if uploadSettings, ok := root["upload_settings"].(map[string]any); ok && uploadSettings != nil {
-			anonymousUpload = boolFromAnyWithDefault(uploadSettings["anonymous_upload"], true)
-		}
-	}
+	anonymousUpload := publisher.ResolveAnonymousUploadEnabled()
 
 	tmdbID, tmdbType := extractZhuqueTMDBInfo(uploadData)
 	screenshots := extractZhuqueScreenshots(uploadData)

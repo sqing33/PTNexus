@@ -18,6 +18,15 @@ type SitePublishConfig struct {
 	FormFields         map[string]string
 	Mappings           map[string]map[string]string
 	GenreOptionsByType map[string][]string
+	Anonymous          SiteAnonymousConfig
+}
+
+// SiteAnonymousConfig 表示站点匿名发布字段配置。
+type SiteAnonymousConfig struct {
+	Field            string
+	EnabledValue     string
+	DisabledValue    string
+	OmitWhenDisabled bool
 }
 
 var publishConfigCache sync.Map
@@ -65,9 +74,27 @@ func LoadSitePublishConfig(siteCode string) (*SitePublishConfig, error) {
 		FormFields:         mapStringMap(raw["form_fields"]),
 		Mappings:           mapStringNestedMap(raw["mappings"]),
 		GenreOptionsByType: mapStringSliceNestedMap(raw["genre_options_by_type"]),
+		Anonymous:          mapAnonymousConfig(raw["anonymous"]),
 	}
 	publishConfigCache.Store(trimmed, cfg)
 	return cfg, nil
+}
+
+func mapAnonymousConfig(value any) SiteAnonymousConfig {
+	item, ok := value.(map[string]any)
+	if !ok {
+		if direct, ok := value.(map[string]interface{}); ok {
+			item = direct
+		} else {
+			return SiteAnonymousConfig{}
+		}
+	}
+	return SiteAnonymousConfig{
+		Field:            strings.TrimSpace(toStringAny(item["field"])),
+		EnabledValue:     strings.TrimSpace(toStringAny(item["enabled_value"])),
+		DisabledValue:    strings.TrimSpace(toStringAny(item["disabled_value"])),
+		OmitWhenDisabled: toBoolAny(item["omit_when_disabled"]),
+	}
 }
 
 func mapStringMap(value any) map[string]string {
@@ -308,5 +335,41 @@ func toStringAny(value any) string {
 			return ""
 		}
 		return fmt.Sprintf("%v", value)
+	}
+}
+
+func toBoolAny(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		lower := strings.ToLower(strings.TrimSpace(typed))
+		return lower == "1" || lower == "true" || lower == "yes" || lower == "y"
+	case int:
+		return typed != 0
+	case int8:
+		return typed != 0
+	case int16:
+		return typed != 0
+	case int32:
+		return typed != 0
+	case int64:
+		return typed != 0
+	case uint:
+		return typed != 0
+	case uint8:
+		return typed != 0
+	case uint16:
+		return typed != 0
+	case uint32:
+		return typed != 0
+	case uint64:
+		return typed != 0
+	case float32:
+		return typed != 0
+	case float64:
+		return typed != 0
+	default:
+		return false
 	}
 }

@@ -379,6 +379,7 @@
 | 文件 | 说明 |
 |---|---|
 | `internal/service/publish/publisher/types.go` | 发布器输入输出结构体 |
+| `internal/service/publish/publisher/anonymous.go` | 匿名发布开关读取与公共表单匿名字段注入 |
 | `internal/service/publish/publisher/public.go` | 公共发布器（表单 takeupload.php/upload.php） |
 | `internal/service/publish/publisher/engine/engine.go` | 发布器路由（按站点选择 public/special 发布器） |
 | `internal/service/publish/publisher/sites/helpers.go` | 特殊发布器公共辅助（字符串/布尔转换等） |

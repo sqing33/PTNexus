@@ -310,7 +310,7 @@ func buildRousiAPIPayload(siteCode string, uploadData map[string]any, torrentFil
 		"torrent":     base64.StdEncoding.EncodeToString(torrentFile),
 		"title":       trimmedTitle,
 		"description": trimmedDescription,
-		"anonymous":   true,
+		"anonymous":   publisher.ResolveAnonymousUploadEnabled(),
 	}
 
 	if subtitle := strings.TrimSpace(toStringLoose(uploadData["subtitle"])); subtitle != "" {
