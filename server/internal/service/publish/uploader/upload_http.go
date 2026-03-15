@@ -110,7 +110,7 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 		detailLines = append(detailLines, fmt.Sprintf("Location: %s", redactURLQuery(location)))
 	}
 	if responseDetail != "" {
-		detailLines = append(detailLines, fmt.Sprintf("站点响应: %s", responseDetail))
+		detailLines = append(detailLines, fmt.Sprintf("站点响应摘要: %s", responseDetail))
 	}
 	if hasExistingFlagInLocation(location) {
 		isExisting = true
@@ -133,6 +133,7 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		if looksLikeUploadLoginResult(location, respBody) {
 			err = errLikelyLoginPage
+			appendUploadRawResponse(&detailLines, bodyText)
 			detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
 			return "", isExisting, buildDetail(), err
 		}
@@ -146,6 +147,7 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 		}
 		if looksLikeUploadFormPage(bodyText) {
 			err = fmt.Errorf("站点返回上传表单页面，可能是字段缺失、校验未通过或会话状态异常")
+			appendUploadRawResponse(&detailLines, bodyText)
 			detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
 			return "", isExisting, buildDetail(), err
 		}
@@ -155,6 +157,7 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 		responseDetail = "<empty response body>"
 	}
 	err = fmt.Errorf("HTTP %d 上传失败: %s", resp.StatusCode, responseDetail)
+	appendUploadRawResponse(&detailLines, bodyText)
 	detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
 	return "", isExisting, buildDetail(), err
 }
@@ -226,6 +229,17 @@ func summarizeResponseBody(text string) string {
 		return truncateLogText("返回 HTML 页面: "+normalized, uploadResponseSummaryLimit)
 	}
 	return truncateLogText(normalized, uploadResponseSummaryLimit)
+}
+
+func appendUploadRawResponse(detailLines *[]string, bodyText string) {
+	if detailLines == nil {
+		return
+	}
+	if strings.TrimSpace(bodyText) == "" {
+		return
+	}
+	*detailLines = append(*detailLines, "--- [站点原始响应] ---")
+	*detailLines = append(*detailLines, bodyText)
 }
 
 func newUploadHTTPClient() *http.Client {
