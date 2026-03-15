@@ -35,6 +35,7 @@ var (
 	reTitleBadgeText         = regexp.MustCompile(`(?i)\s*\[[^\]]*(?:免费|free|hot|置顶|促销|活动|推荐|通过)[^\]]*\]\s*$`)
 	reTitleBadgeWord         = regexp.MustCompile(`(?i)\s*(?:免费|free|hot|置顶|促销|活动|推荐|通过)\s*$`)
 	reTitleRemainingTimeText = regexp.MustCompile(`(?i)\s*(?:剩余时间|剩餘時間|remaining\s*time)\s*[:：].*$`)
+	reTitleLimitedTimeText   = regexp.MustCompile(`(?i)\s*[（(]\s*限时[^）)]*[）)]\s*$`)
 	reQuotePrefix            = regexp.MustCompile(`(?im)^\s*(?:\[?(?:引用|quote)\]?\s*[:：]?\s*)`)
 	reQuoteOpen              = regexp.MustCompile(`(?is)^\s*\[quote\]\s*`)
 	reQuoteClose             = regexp.MustCompile(`(?is)\s*\[/quote\]\s*$`)
@@ -823,12 +824,14 @@ func cleanTopTitleText(rawHTML string) string {
 
 	// 去除“剩余时间：...”这类非标题信息（通常出现在促销徽标后面）。
 	text = strings.TrimSpace(reTitleRemainingTimeText.ReplaceAllString(text, ""))
+	text = strings.TrimSpace(reTitleLimitedTimeText.ReplaceAllString(text, ""))
 
 	// 再兜底移除文本层面的尾部状态词，避免把“免费”等误当成标题。
 	for {
 		next := reTitleBadgeText.ReplaceAllString(text, "")
 		next = reTitleBadgeWord.ReplaceAllString(next, "")
 		next = reTitleRemainingTimeText.ReplaceAllString(next, "")
+		next = reTitleLimitedTimeText.ReplaceAllString(next, "")
 		next = strings.TrimSpace(next)
 		if next == text {
 			break
