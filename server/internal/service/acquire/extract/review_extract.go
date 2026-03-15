@@ -2204,9 +2204,27 @@ func inferStandardizedValues(title, mediainfo, body string) map[string]string {
 			return "audio.ac3"
 		case strings.Contains(upper, "FLAC"):
 			return "audio.flac"
+		case strings.Contains(upper, "AV3A") || strings.Contains(upper, "AUDIO VIVID"):
+			return "audio.av3a"
+		case strings.Contains(upper, "ALAC"):
+			return "audio.alac"
+		case strings.Contains(upper, "APE"):
+			return "audio.ape"
+		case strings.Contains(upper, "WAV"):
+			return "audio.wav"
+		case strings.Contains(upper, "OGG"), strings.Contains(upper, "VORBIS"):
+			return "audio.ogg"
+		case strings.Contains(upper, "DSD"):
+			return "audio.dsd"
 		case strings.Contains(upper, "AAC"):
 			return "audio.aac"
+		case strings.Contains(upper, "LPCM"), strings.Contains(upper, "PCM"):
+			return "audio.lpcm"
+		case strings.Contains(upper, "OPUS"):
+			return "audio.opus"
 		case strings.Contains(upper, "MP3"):
+			return "audio.mp3"
+		case strings.Contains(upper, "MP2"):
 			return "audio.mp3"
 		default:
 			return ""
@@ -2243,6 +2261,12 @@ func inferStandardizedValues(title, mediainfo, body string) map[string]string {
 	switch {
 	case hasTech("REMUX"):
 		values["medium"] = "medium.remux"
+	case hasTech("UHDTV"):
+		values["medium"] = "medium.uhdtv"
+	case hasTech("TVRIP", "TV-RIP", "TV RIP"):
+		values["medium"] = "medium.tvrip"
+	case hasTech("DVDRIP", "DVD-RIP", "DVD RIP"):
+		values["medium"] = "medium.dvdr"
 	case hasTech("UHD", "ULTRA HD"):
 		values["medium"] = "medium.uhd_bluray"
 	case hasTech("BLURAY", "BLU-RAY", "BDMV", "BD25", "BD50", "BD66", "BD100"):
@@ -2255,13 +2279,17 @@ func inferStandardizedValues(title, mediainfo, body string) map[string]string {
 		values["medium"] = "medium.webrip"
 	case hasTech("HDTV"):
 		values["medium"] = "medium.hdtv"
-	case hasTech("DVD", "DVDRIP"):
+	case hasTech("DVD5", "DVD9", "DVD"):
 		values["medium"] = "medium.dvd"
 	}
 
 	switch {
 	case hasTech("AV1"):
 		values["video_codec"] = "video.av1"
+	case hasTech("VP9", "VP8/9", "VPB/VP9"):
+		values["video_codec"] = "video.vp9"
+	case hasTech("AVS2"):
+		values["video_codec"] = "video.avs2"
 	case hasTech("X265"):
 		values["video_codec"] = "video.x265"
 	case hasTech("H.265", "H265", "HEVC"):

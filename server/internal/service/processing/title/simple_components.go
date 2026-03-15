@@ -35,6 +35,9 @@ var (
 	reResolutionTok = regexp.MustCompile(`(?i)\b(4320p|8k|2160p|4k|1080p|1080i|720p|480p)\b`)
 	reVCBVariant    = regexp.MustCompile(`(?i)^(.+?)-([\w\s]+&VCB-Studio)$`)
 	reBDRipToken    = regexp.MustCompile(`(?i)\bBD[-\s]?RIP\b`)
+	reTVRipToken    = regexp.MustCompile(`(?i)\bTV[-\s]?RIP\b`)
+	reDVDRipToken   = regexp.MustCompile(`(?i)\bDVD[-\s]?RIP\b`)
+	reDVDDiscToken  = regexp.MustCompile(`(?i)\bDVD(?:5|9)\b`)
 )
 
 var specialReleaseGroupSuffixes = []string{"mUHD-FRDS", "MNHD-FRDS", "￡cXcY-FRDS", "DMG&VCB-Studio", "VCB-Studio"}
@@ -246,7 +249,15 @@ func extractYearAndRemove(title string) (string, string) {
 
 func extractMediumPythonish(title string) string {
 	upper := strings.ToUpper(title)
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 6)
+
+	if regexp.MustCompile(`(?i)\bUHDTV\b`).FindStringIndex(title) != nil {
+		parts = append(parts, "UHDTV")
+	}
+
+	if regexp.MustCompile(`(?i)\bHDTV\b`).FindStringIndex(title) != nil {
+		parts = append(parts, "HDTV")
+	}
 
 	if strings.Contains(upper, "UHD") {
 		parts = append(parts, "UHD")
@@ -254,7 +265,11 @@ func extractMediumPythonish(title string) string {
 
 	blurayToken := PreferredBlurayTokenFromTitle(title)
 	if blurayToken != "" {
-		parts = append(parts, blurayToken)
+		if regexp.MustCompile(`(?i)\bDIY\b`).FindStringIndex(title) != nil {
+			parts = append(parts, blurayToken+" DIY")
+		} else {
+			parts = append(parts, blurayToken)
+		}
 	}
 
 	if strings.Contains(upper, "REMUX") {
@@ -265,6 +280,18 @@ func extractMediumPythonish(title string) string {
 		parts = append(parts, "BDRip")
 	}
 
+	if raw := strings.TrimSpace(reTVRipToken.FindString(title)); raw != "" {
+		parts = append(parts, normalizeMediumToken(raw))
+	}
+
+	if raw := strings.TrimSpace(reDVDRipToken.FindString(title)); raw != "" {
+		parts = append(parts, normalizeMediumToken(raw))
+	}
+
+	if raw := strings.TrimSpace(reDVDDiscToken.FindString(title)); raw != "" {
+		parts = append(parts, strings.ToUpper(raw))
+	}
+
 	// WEB 类媒介保持原始语义（仅当标题中明确出现 WEB-DL/WEBRIP 等）。
 	if strings.Contains(upper, "WEB-DL") || strings.Contains(upper, "WEBDL") {
 		parts = append(parts, "WEB-DL")
@@ -273,6 +300,21 @@ func extractMediumPythonish(title string) string {
 	}
 
 	return strings.Join(parts, " ")
+}
+
+func normalizeMediumToken(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	switch {
+	case reTVRipToken.MatchString(trimmed):
+		return "TVRip"
+	case reDVDRipToken.MatchString(trimmed):
+		return "DVDRip"
+	default:
+		return regexp.MustCompile(`[\s\.]+`).ReplaceAllString(trimmed, " ")
+	}
 }
 
 func containsTokenFold(text string, token string) bool {
@@ -358,6 +400,9 @@ func extractMainTitleAndUnrecognized(titlePart string, values map[string]string)
 		// BDRip 兼容变体（BDrip/BD-Rip/BD Rip）统一从“无法识别”清理集合中移除。
 		found = append(found, match, "BDRip", "BD-Rip", "BD Rip", "BDrip")
 	}
+	if v := strings.TrimSpace(values["媒介"]); v != "" {
+		found = append(found, mediumCleanupTags(v)...)
+	}
 	if v := strings.TrimSpace(values["剧集状态"]); v != "" {
 		found = append(found, v)
 	}
@@ -368,6 +413,9 @@ func extractMainTitleAndUnrecognized(titlePart string, values map[string]string)
 		found = append(found, v)
 	}
 	if v := strings.TrimSpace(values["HDR格式"]); v != "" {
+		found = append(found, hdrCleanupTags(v)...)
+	}
+	if v := strings.TrimSpace(values["视频格式"]); v != "" {
 		found = append(found, v)
 	}
 	if v := strings.TrimSpace(values["色深"]); v != "" {
@@ -456,8 +504,15 @@ func audioCleanupTags(audio string) []string {
 		"FLAC",
 		"AAC",
 		"LPCM",
+		"AV3A",
+		"ALAC",
+		"APE",
+		"WAV",
+		"OGG",
+		"DSD",
 		"Opus",
 		"MP3",
+		"Dual",
 	}
 	upper := strings.ToUpper(trimmed)
 	for _, codec := range codecPatterns {
@@ -487,6 +542,75 @@ func audioCleanupTags(audio string) []string {
 		}
 		appendTag(match[1])
 		appendTag(strings.ReplaceAll(match[1], " ", ""))
+	}
+
+	return out
+}
+
+func mediumCleanupTags(medium string) []string {
+	trimmed := strings.TrimSpace(medium)
+	if trimmed == "" {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, 10)
+	out := make([]string, 0, 10)
+	appendTag := func(tag string) {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			return
+		}
+		key := strings.ToUpper(tag)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, tag)
+	}
+
+	appendTag(trimmed)
+	for _, token := range strings.Fields(trimmed) {
+		appendTag(token)
+	}
+
+	switch {
+	case regexp.MustCompile(`(?i)\bUHDTV\b`).FindStringIndex(trimmed) != nil:
+		appendTag("UHDTV")
+	case regexp.MustCompile(`(?i)\bHDTV\b`).FindStringIndex(trimmed) != nil:
+		appendTag("HDTV")
+	}
+
+	if regexp.MustCompile(`(?i)\bBlu[-\s]?ray\b`).FindStringIndex(trimmed) != nil {
+		appendTag("Blu-ray")
+		appendTag("BluRay")
+		appendTag("BLURAY")
+	}
+	if regexp.MustCompile(`(?i)\bTV[-\s]?Rip\b`).FindStringIndex(trimmed) != nil {
+		appendTag("TVRip")
+		appendTag("TV-Rip")
+		appendTag("TV Rip")
+	}
+	if regexp.MustCompile(`(?i)\bDVD[-\s]?Rip\b`).FindStringIndex(trimmed) != nil {
+		appendTag("DVDRip")
+		appendTag("DVD-Rip")
+		appendTag("DVD Rip")
+	}
+	if regexp.MustCompile(`(?i)\bDVD(?:5|9)\b`).FindStringIndex(trimmed) != nil {
+		appendTag("DVD5")
+		appendTag("DVD9")
+	}
+	if regexp.MustCompile(`(?i)\bWEB[-\s]?DL\b`).FindStringIndex(trimmed) != nil {
+		appendTag("WEB-DL")
+		appendTag("WEBDL")
+	}
+	if regexp.MustCompile(`(?i)\bWEBRIP\b`).FindStringIndex(trimmed) != nil {
+		appendTag("WEBRip")
+		appendTag("WEBRIP")
+	}
+	if regexp.MustCompile(`(?i)\bBD[-\s]?Rip\b`).FindStringIndex(trimmed) != nil {
+		appendTag("BDRip")
+		appendTag("BD-Rip")
+		appendTag("BD Rip")
 	}
 
 	return out
@@ -524,6 +648,12 @@ func videoCodecCleanupTags(codec string) []string {
 		}
 	default:
 		appendTag(trimmed)
+		switch {
+		case strings.EqualFold(trimmed, "VP9"):
+			appendTag("VP9")
+		case strings.EqualFold(trimmed, "AVS2"):
+			appendTag("AVS2")
+		}
 	}
 
 	return out
@@ -562,17 +692,20 @@ func extractReleaseVersionFromTitle(title string) string {
 		label   string
 	}{
 		{regexp.MustCompile(`(?i)\bREPACK\b`), "REPACK"},
+		{regexp.MustCompile(`(?i)\bRERIP\b`), "RERIP"},
 		{regexp.MustCompile(`(?i)\bPROPER\b`), "PROPER"},
+		{regexp.MustCompile(`(?i)\bREPOST\b`), "REPOST"},
 		{regexp.MustCompile(`(?i)\bEXTENDED\b`), "Extended"},
 		{regexp.MustCompile(`(?i)\bUNCUT\b`), "Uncut"},
 		{regexp.MustCompile(`(?i)\bHYBRID\b`), "Hybrid"},
 		{regexp.MustCompile(`(?i)\bIMAX\b`), "IMAX"},
 		{regexp.MustCompile(`(?i)\bREMASTER(?:ED)?\b`), "Remastered"},
 		{regexp.MustCompile(`(?i)DIRECTOR['’]?S?\s*CUT`), "Director's Cut"},
+		{regexp.MustCompile(`(?i)\bV\d+\b`), strings.ToUpper(strings.TrimSpace(regexp.MustCompile(`(?i)\bV\d+\b`).FindString(title)))},
 	}
 	parts := make([]string, 0, 2)
 	for _, pair := range pairs {
-		if pair.pattern.MatchString(title) {
+		if pair.pattern.MatchString(title) && strings.TrimSpace(pair.label) != "" {
 			parts = append(parts, pair.label)
 		}
 	}
@@ -698,6 +831,12 @@ func classifySourceFromMedium(medium string) string {
 	if regexp.MustCompile(`(?i)\b(?:UHDTV|HDTV)\b`).FindStringIndex(m) != nil {
 		return "webdl"
 	}
+	if regexp.MustCompile(`(?i)\bTV[-\s]?RIP\b`).FindStringIndex(m) != nil {
+		return "rip"
+	}
+	if regexp.MustCompile(`(?i)\bDVD[-\s]?RIP\b`).FindStringIndex(m) != nil {
+		return "rip"
+	}
 	if regexp.MustCompile(`(?i)\bRemux\b`).FindStringIndex(m) != nil {
 		return "disc"
 	}
@@ -799,6 +938,10 @@ func extractVideoCodecFromTitle(title string) string {
 	switch {
 	case strings.Contains(upper, "AV1"):
 		return "AV1"
+	case strings.Contains(upper, "VP9"), strings.Contains(upper, "VP8"):
+		return "VP9"
+	case strings.Contains(upper, "AVS2"):
+		return "AVS2"
 	case strings.Contains(upper, "X265"):
 		return "x265"
 	case strings.Contains(upper, "H.265"), strings.Contains(upper, "H265"), strings.Contains(upper, "HEVC"):
@@ -821,33 +964,74 @@ func extractVideoFormatFromTitle(title string) string {
 	switch {
 	case strings.Contains(upper, "3D"):
 		return "3D"
-	case strings.Contains(upper, "SDR"):
-		return "SDR"
+	case strings.Contains(upper, "HSBS"):
+		return "HSBS"
 	default:
 		return ""
 	}
 }
 
 func extractHDRFormatFromTitle(title string) string {
-	upper := strings.ToUpper(title)
-	switch {
-	case strings.Contains(upper, "DOLBY VISION"), strings.Contains(upper, "DOVI"), regexp.MustCompile(`(?i)\bDV\b`).MatchString(title):
-		return "Dolby Vision"
-	case strings.Contains(upper, "HDR10+"):
-		return "HDR10+"
-	case strings.Contains(upper, "HDR10"):
-		return "HDR10"
-	case strings.Contains(upper, "HLG"):
-		return "HLG"
-	case strings.Contains(upper, "HDR"):
-		return "HDR"
-	default:
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
 		return ""
 	}
+
+	matches := regexp.MustCompile(`(?i)\b(?:Dolby Vision|DoVi|HDR10\+|HDRVivid|HDR10|HLG|HDR|SDR|EDR|DV|Vivid)\b`).FindAllString(trimmed, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+
+	seen := make(map[string]struct{}, len(matches))
+	parts := make([]string, 0, len(matches))
+	for _, item := range matches {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+		key := strings.ToUpper(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		parts = append(parts, value)
+	}
+
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func hdrCleanupTags(hdr string) []string {
+	trimmed := strings.TrimSpace(hdr)
+	if trimmed == "" {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, 8)
+	out := make([]string, 0, 8)
+	appendTag := func(tag string) {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			return
+		}
+		key := strings.ToUpper(tag)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, tag)
+	}
+
+	appendTag(trimmed)
+	matches := regexp.MustCompile(`(?i)\b(?:Dolby Vision|DoVi|HDR10\+|HDRVivid|HDR10|HLG|HDR|SDR|EDR|DV|Vivid)\b`).FindAllString(trimmed, -1)
+	for _, item := range matches {
+		appendTag(item)
+	}
+
+	return out
 }
 
 func extractBitDepthFromTitle(title string) string {
-	re := regexp.MustCompile(`(?i)\b(8|10|12)\s*BIT\b`)
+	re := regexp.MustCompile(`(?i)\b(8|10|12|16|24)\s*BIT\b`)
 	match := re.FindStringSubmatch(title)
 	if len(match) >= 2 {
 		return match[1] + "bit"
@@ -996,6 +1180,24 @@ func extractAudioFromTitle(title string) string {
 	case strings.Contains(upper, "AAC"):
 		audioCodec = "AAC"
 		audioCodecPos = strings.Index(upper, "AAC")
+	case strings.Contains(upper, "AV3A"):
+		audioCodec = "AV3A"
+		audioCodecPos = strings.Index(upper, "AV3A")
+	case strings.Contains(upper, "ALAC"):
+		audioCodec = "ALAC"
+		audioCodecPos = strings.Index(upper, "ALAC")
+	case strings.Contains(upper, "APE"):
+		audioCodec = "APE"
+		audioCodecPos = strings.Index(upper, "APE")
+	case strings.Contains(upper, "WAV"):
+		audioCodec = "WAV"
+		audioCodecPos = strings.Index(upper, "WAV")
+	case strings.Contains(upper, "OGG"):
+		audioCodec = "OGG"
+		audioCodecPos = strings.Index(upper, "OGG")
+	case strings.Contains(upper, "DSD"):
+		audioCodec = "DSD"
+		audioCodecPos = strings.Index(upper, "DSD")
 	case strings.Contains(upper, "LPCM"), strings.Contains(upper, "PCM"):
 		audioCodec = "LPCM"
 		if idx := strings.Index(upper, "LPCM"); idx >= 0 {
@@ -1009,6 +1211,12 @@ func extractAudioFromTitle(title string) string {
 	case strings.Contains(upper, "MP3"):
 		audioCodec = "MP3"
 		audioCodecPos = strings.Index(upper, "MP3")
+	case strings.Contains(upper, "MP2"):
+		audioCodec = "MP3"
+		audioCodecPos = strings.Index(upper, "MP2")
+	case strings.Contains(upper, "DUAL"):
+		audioCodec = "Dual"
+		audioCodecPos = strings.Index(upper, "DUAL")
 	}
 	if audioCodec == "" {
 		return ""
