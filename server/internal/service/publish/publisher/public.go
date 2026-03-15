@@ -131,72 +131,32 @@ func PublishPublic(input PublishInput) (PublishResult, error) {
 		return PublishResult{UploadFormFields: formFields, AttemptDetailLog: buildDetail()}, fmt.Errorf("读取种子文件失败: %w", err)
 	}
 
-	uploadURLs := []string{
-		strings.TrimRight(baseURL, "/") + "/takeupload.php",
-		strings.TrimRight(baseURL, "/") + "/upload.php",
-	}
-	fileFields := []string{"file", "torrent", "torrentfile", "uplfile"}
-	type uploadAttemptTarget struct {
-		uploadURL string
-		fileField string
-	}
-	attemptTargets := make([]uploadAttemptTarget, 0, len(uploadURLs)*len(fileFields))
-	for _, uploadURL := range uploadURLs {
-		for _, fileField := range fileFields {
-			attemptTargets = append(attemptTargets, uploadAttemptTarget{uploadURL: uploadURL, fileField: fileField})
-		}
-	}
-	if len(attemptTargets) == 0 {
-		return PublishResult{UploadFormFields: formFields, AttemptDetailLog: buildDetail()}, fmt.Errorf("上传配置缺失")
+	uploadURL := strings.TrimRight(baseURL, "/") + "/takeupload.php"
+	fileField := "file"
+	appendLog(fmt.Sprintf("上传尝试: %s (文件字段: %s)", uploadURL, fileField))
+
+	publishURL, existing, attemptDetail, attemptErr := publishuploader.TryUploadTorrent(
+		uploadURL,
+		baseURL,
+		cookie,
+		fileField,
+		torrentFile,
+		strings.TrimSpace(filepath.Base(torrentPath)),
+		formFields,
+	)
+	appendLog(attemptDetail)
+	if attemptErr == nil {
+		return PublishResult{
+			PublishURL:        publishURL,
+			IsExistingTorrent: existing,
+			UploadFormFields:  formFields,
+			AttemptDetailLog:  buildDetail(),
+		}, nil
 	}
 
-	lastErr := error(nil)
-	existing := false
-	totalAttempts := len(attemptTargets)
-	takeUploadURL := uploadURLs[0]
-
-	for attemptIndex := 0; attemptIndex < totalAttempts; attemptIndex++ {
-		target := attemptTargets[attemptIndex]
-		appendLog(fmt.Sprintf("上传尝试 %d/%d: %s (文件字段: %s)", attemptIndex+1, totalAttempts, target.uploadURL, target.fileField))
-		publishURL, attemptExisting, attemptDetail, attemptErr := publishuploader.TryUploadTorrent(
-			target.uploadURL,
-			baseURL,
-			cookie,
-			target.fileField,
-			torrentFile,
-			filepath.Base(torrentPath),
-			formFields,
-		)
-		existing = existing || attemptExisting
-		appendLog(attemptDetail)
-		if attemptErr == nil {
-			return PublishResult{
-				PublishURL:        publishURL,
-				IsExistingTorrent: existing,
-				UploadFormFields:  formFields,
-				AttemptDetailLog:  buildDetail(),
-			}, nil
-		}
-		lastErr = attemptErr
-		// 站点已明确提示“种子已存在”时不再重试，避免后续尝试把错误覆盖为冗长 HTML 页面。
-		if attemptExisting {
-			break
-		}
-		if publishuploader.ShouldRetryUploadNetworkError(attemptErr) && target.uploadURL == takeUploadURL {
-			nextIndex := attemptIndex + 1
-			if nextIndex >= totalAttempts || attemptTargets[nextIndex].uploadURL != takeUploadURL {
-				appendLog("网络异常持续发生，已停止切换到 upload.php，保留原始网络错误")
-				break
-			}
-		}
-	}
-
-	if lastErr == nil {
-		lastErr = fmt.Errorf("发布失败")
-	}
 	return PublishResult{
 		IsExistingTorrent: existing,
 		UploadFormFields:  formFields,
 		AttemptDetailLog:  buildDetail(),
-	}, lastErr
+	}, attemptErr
 }
