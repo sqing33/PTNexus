@@ -35,8 +35,10 @@ type FetchRepairFinalizeDeps struct {
 
 // FetchRepairFinalizeResult 定义“抓取修复 + 草稿收敛”组合流程输出。
 type FetchRepairFinalizeResult struct {
-	RepairResult   processingrepair.ParallelFetchRepairResult
-	FinalizeResult FinalizeFetchedSeedResult
+	RepairResult          processingrepair.ParallelFetchRepairResult
+	FinalizeResult        FinalizeFetchedSeedResult
+	RestrictionPrecheck   FetchRestrictionPrecheckResult
+	SkippedRepairByTagHit bool
 }
 
 // RunFetchRepairAndFinalize 执行抓取修复并将草稿收敛为可入库记录。
@@ -49,29 +51,55 @@ func RunFetchRepairAndFinalize(input FetchRepairFinalizeInput, deps FetchRepairF
 	}
 
 	input.Draft.ApplyReviewExtract(input.ReviewData, input.DetailHTML)
+	restrictionPrecheck := DetectFetchRestrictionPrecheck(
+		input.Draft,
+		input.SiteIdentifier,
+		input.SavePath,
+		input.TorrentNameForPath,
+		input.DownloaderID,
+		input.RootConfig,
+	)
 	torrentName := strings.TrimSpace(input.Draft.Title)
 	subtitle := strings.TrimSpace(input.Draft.Subtitle)
 	imdbLink := strings.TrimSpace(input.Draft.IMDbLink)
 	doubanLink := strings.TrimSpace(input.Draft.DoubanLink)
 	tmdbLink := strings.TrimSpace(input.Draft.TMDbLink)
 
-	repairResult := processingrepair.RunParallelFetchRepairs(
-		processingrepair.ParallelFetchRepairInput{
-			TaskID:               input.TaskID,
-			SavePath:             input.SavePath,
-			DownloaderID:         input.DownloaderID,
-			TorrentNameForPath:   input.TorrentNameForPath,
-			TorrentName:          torrentName,
-			ScreenshotReviewMode: input.ScreenshotReviewMode,
-			Subtitle:             subtitle,
-			ReviewData:           input.ReviewData,
-			IMDbLink:             imdbLink,
-			DoubanLink:           doubanLink,
-			TMDbLink:             tmdbLink,
-		},
-		deps.FetchRepairDeps,
-	)
-	input.Draft.ApplyRepairResult(repairResult)
+	repairResult := processingrepair.ParallelFetchRepairResult{
+		ReviewData:             input.ReviewData,
+		IMDbLink:               imdbLink,
+		DoubanLink:             doubanLink,
+		TMDbLink:               tmdbLink,
+		ScreenshotReviewStatus: "none",
+	}
+	if restrictionPrecheck.Matched {
+		if deps.FetchRepairDeps.EmitLog != nil {
+			deps.FetchRepairDeps.EmitLog(
+				input.TaskID,
+				"标签预检",
+				"检测到受限标签，已跳过海报/简介/截图修复: "+strings.Join(restrictionPrecheck.RestrictedTags, ", "),
+				"warning",
+			)
+		}
+	} else {
+		repairResult = processingrepair.RunParallelFetchRepairs(
+			processingrepair.ParallelFetchRepairInput{
+				TaskID:               input.TaskID,
+				SavePath:             input.SavePath,
+				DownloaderID:         input.DownloaderID,
+				TorrentNameForPath:   input.TorrentNameForPath,
+				TorrentName:          torrentName,
+				ScreenshotReviewMode: input.ScreenshotReviewMode,
+				Subtitle:             subtitle,
+				ReviewData:           input.ReviewData,
+				IMDbLink:             imdbLink,
+				DoubanLink:           doubanLink,
+				TMDbLink:             tmdbLink,
+			},
+			deps.FetchRepairDeps,
+		)
+		input.Draft.ApplyRepairResult(repairResult)
+	}
 
 	finalizeResult, err := FinalizeFetchedSeed(FinalizeFetchedSeedInput{
 		Draft:                      input.Draft,
@@ -89,7 +117,9 @@ func RunFetchRepairAndFinalize(input FetchRepairFinalizeInput, deps FetchRepairF
 	}
 
 	return FetchRepairFinalizeResult{
-		RepairResult:   repairResult,
-		FinalizeResult: finalizeResult,
+		RepairResult:          repairResult,
+		FinalizeResult:        finalizeResult,
+		RestrictionPrecheck:   restrictionPrecheck,
+		SkippedRepairByTagHit: restrictionPrecheck.Matched,
 	}, nil
 }

@@ -132,6 +132,7 @@ func RunFetchPersistPipeline(input FetchPersistPipelineInput, deps FetchPersistP
 			CurrentMedia:       input.Draft.Mediainfo,
 			MediainfoValid:     finalizeResult.MediainfoValid,
 			InitialStatus:      finalizeResult.MediainfoStatus,
+			SkipAutoRefresh:    repairFinalizeResult.RestrictionPrecheck.Matched,
 		},
 		FetchPostPersistDeps{
 			TriggerMediainfoRepair: deps.TriggerMediainfoRepair,

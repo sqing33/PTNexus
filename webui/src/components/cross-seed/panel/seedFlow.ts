@@ -123,7 +123,16 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     )
   }
 
+  const hasRestrictedTags = (): boolean => {
+    const tags = torrentData.value.standardized_params.tags || []
+    return tags.some((tag) => typeof tag === 'string' && isRestrictedTag(tag))
+  }
+
   const checkScreenshotValidity = async () => {
+    if (hasRestrictedTags()) {
+      screenshotValid.value = true
+      return
+    }
     const screenshots = screenshotImages.value
     if (screenshots.length === 0) {
       screenshotValid.value = true
@@ -412,7 +421,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           isLoading.value = false
           await nextTick()
           await checkScreenshotValidity()
-          if (storeResponse.data.screenshot_preview_required) {
+          if (!hasRestrictedTags() && storeResponse.data.screenshot_preview_required) {
             await openFetchedScreenshotPreview()
           }
           return
@@ -561,7 +570,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         activeStep.value = 0
         // Check screenshot validity after loading data
         nextTick(() => {
-          checkScreenshotValidity()
+          void checkScreenshotValidity()
         })
         // Set flag to indicate data was loaded from database
         isDataFromDatabase.value = true
@@ -803,7 +812,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           isLoading.value = false
           await nextTick()
           await checkScreenshotValidity()
-          if (storeResponse.data.screenshot_preview_required) {
+          if (!hasRestrictedTags() && storeResponse.data.screenshot_preview_required) {
             await openFetchedScreenshotPreview()
           }
         } else {

@@ -24,6 +24,7 @@ type FetchPostPersistInput struct {
 	CurrentMedia       string
 	MediainfoValid     bool
 	InitialStatus      string
+	SkipAutoRefresh    bool
 }
 
 // FetchPostPersistDeps 定义抓取入库后收敛依赖。
@@ -44,6 +45,16 @@ type FetchPostPersistResult struct {
 // 副作用：可能触发媒体修复回调，并在媒体完成后触发标签重算回调。
 func FinalizeFetchPostPersist(repo FetchPostPersistRepo, input FetchPostPersistInput, deps FetchPostPersistDeps) FetchPostPersistResult {
 	seedID := ComposeSeedID(strings.TrimSpace(input.Hash), strings.TrimSpace(input.TorrentID), strings.TrimSpace(input.SiteIdentifier))
+	if input.SkipAutoRefresh {
+		finalMediainfoStatus := strings.TrimSpace(input.InitialStatus)
+		if finalMediainfoStatus == "" {
+			finalMediainfoStatus = "queued"
+		}
+		return FetchPostPersistResult{
+			FinalMediainfoStatus: finalMediainfoStatus,
+			FinalBDInfoTaskID:    "",
+		}
+	}
 	if !input.MediainfoValid && deps.TriggerMediainfoRepair != nil {
 		deps.TriggerMediainfoRepair(processingrepair.TriggerMediainfoRepairInput{
 			TaskID:          strings.TrimSpace(input.TaskID),

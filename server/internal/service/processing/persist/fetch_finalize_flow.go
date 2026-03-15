@@ -96,6 +96,7 @@ func RunFetchFinalizeFlow(input FetchFinalizeFlowInput, deps FetchFinalizeFlowDe
 		SearchTerm:        input.SearchTerm,
 		SiteIdentifier:    input.SiteIdentifier,
 		FinalizeResult:    pipelineResult.RepairFinalizeResult.FinalizeResult,
+		RestrictionResult: pipelineResult.RepairFinalizeResult.RestrictionPrecheck,
 		Draft:             input.Draft,
 		FetchRepairModule: deps.FetchRepairModule,
 		TagMappingModule:  deps.TagMappingModule,

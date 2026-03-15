@@ -13,6 +13,7 @@ type FetchFinalizeLoggingInput struct {
 	SearchTerm        string
 	SiteIdentifier    string
 	FinalizeResult    FinalizeFetchedSeedResult
+	RestrictionResult FetchRestrictionPrecheckResult
 	Draft             *SeedDraft
 	FetchRepairModule string
 	TagMappingModule  string
@@ -79,6 +80,16 @@ func LogFetchFinalizeResult(input FetchFinalizeLoggingInput) FetchFinalizeLoggin
 		if reason := strings.TrimSpace(input.Draft.EpisodeTagReason); reason != "" {
 			logx.Infof(input.TagCompleteModule, "分集判定结果 torrent_id=%s site=%s matched=%v reason=%s", input.SearchTerm, input.SiteIdentifier, containsStringLocal(input.Draft.Tags, "tag.分集"), reason)
 		}
+	}
+	if input.RestrictionResult.Matched {
+		logx.Warnf(
+			input.FetchRepairModule,
+			"抓取修复已短路 source_site=%s search_term=%s restricted_tags=%v reason=%s",
+			input.SourceSite,
+			input.SearchTerm,
+			input.RestrictionResult.RestrictedTags,
+			input.RestrictionResult.Reason,
+		)
 	}
 
 	mediainfoStatus := strings.TrimSpace(finalizeResult.MediainfoStatus)

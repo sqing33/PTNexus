@@ -88,7 +88,20 @@ func BuildFetchAndStoreOutcome(input FetchAndStoreOutcomeInput, deps FetchAndSto
 	}
 
 	repairResult := processResult.PipelineResult.RepairFinalizeResult.RepairResult
-	logx.Infof(input.FetchRepairModule, "并发修复结果 source_site=%s search_term=%s task_id=%s %s", input.SourceSite, input.SearchTerm, input.TaskID, repairResult.Summary())
+	restrictionPrecheck := processResult.PipelineResult.RepairFinalizeResult.RestrictionPrecheck
+	if restrictionPrecheck.Matched {
+		logx.Warnf(
+			input.FetchRepairModule,
+			"标签预检命中 source_site=%s search_term=%s task_id=%s restricted_tags=%v reason=%s",
+			input.SourceSite,
+			input.SearchTerm,
+			input.TaskID,
+			restrictionPrecheck.RestrictedTags,
+			restrictionPrecheck.Reason,
+		)
+	} else {
+		logx.Infof(input.FetchRepairModule, "并发修复结果 source_site=%s search_term=%s task_id=%s %s", input.SourceSite, input.SearchTerm, input.TaskID, repairResult.Summary())
+	}
 	loggingResult := processResult.LoggingResult
 	mediainfoStatus := loggingResult.MediainfoStatus
 

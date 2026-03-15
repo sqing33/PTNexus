@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
+	processingtagging "github.com/pt-nexus/server/internal/service/processing/tagging"
 )
 
 var (
@@ -18,30 +19,12 @@ var (
 
 // DetectRestrictedTags 检测上传参数中的禁转/限转/分集标签。
 func DetectRestrictedTags(uploadData map[string]any) []string {
-	restrictedMap := map[string]string{
-		"禁转":     "tag.禁转",
-		"tag.禁转": "tag.禁转",
-		"限转":     "tag.限转",
-		"tag.限转": "tag.限转",
-		"分集":     "tag.分集",
-		"tag.分集": "tag.分集",
-	}
-	result := []string{}
-	seen := map[string]struct{}{}
 	standardized := map[string]any{}
 	if item, ok := uploadData["standardized_params"].(map[string]any); ok {
 		standardized = item
 	}
 	rawTags := append(parseStringArray(standardized["tags"]), parseStringArray(uploadData["tags"])...)
-	for _, tag := range rawTags {
-		if mapped, ok := restrictedMap[tag]; ok {
-			if _, exists := seen[mapped]; !exists {
-				seen[mapped] = struct{}{}
-				result = append(result, mapped)
-			}
-		}
-	}
-	return result
+	return processingtagging.DetectRestrictedTags(rawTags)
 }
 
 // BuildUploadDescription 按固定顺序拼接发布描述正文。

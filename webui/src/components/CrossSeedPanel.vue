@@ -766,6 +766,18 @@ const screenshotImages = computed(() => parseImageUrls(torrentData.value.intro.s
 const isScreenshotReviewPending = computed(
   () => torrentData.value.screenshot_review_status === 'pending',
 )
+const hasRestrictedAutoRepairTags = computed(() => {
+  const tags = torrentData.value.standardized_params.tags || []
+  return tags.some(
+    (tag) =>
+      tag === '禁转' ||
+      tag === 'tag.禁转' ||
+      tag === '限转' ||
+      tag === 'tag.限转' ||
+      tag === '分集' ||
+      tag === 'tag.分集',
+  )
+})
 
 const buildScreenshotPayload = (type: string, extra: Record<string, unknown> = {}) => ({
   type,
@@ -1968,6 +1980,14 @@ const reparseTitle = async () => {
 }
 
 const handleImageError = async (url: string, type: 'poster' | 'screenshot', index: number) => {
+  if (hasRestrictedAutoRepairTags.value) {
+    console.log(`受限标签已命中，跳过失效${type === 'poster' ? '海报' : '截图'}自动修复: ${url}`)
+    if (type === 'screenshot') {
+      screenshotValid.value = true
+    }
+    return
+  }
+
   // 如果是 pixhost.to 的图片，跳过检测
   if (url && url.includes('pixhost.to')) {
     console.log(`检测到 pixhost.to 图片，跳过有效性检测: ${url}`)
