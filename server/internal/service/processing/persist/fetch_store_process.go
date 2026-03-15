@@ -103,6 +103,7 @@ func RunFetchStoreProcess(input FetchStoreProcessInput, deps FetchStoreProcessDe
 
 	draft := NewSeedDraft(meta.InfoHash, input.SearchTerm, siteIdentifier, nickname)
 	draft.Title = strings.TrimSpace(torrentName)
+	draft.TorrentFileNames = append([]string{}, acquireResult.TorrentFileNames...)
 
 	finalizeResult, finalizeErr := RunFetchFinalizeFlow(
 		FetchFinalizeFlowInput{

@@ -76,6 +76,9 @@ func LogFetchFinalizeResult(input FetchFinalizeLoggingInput) FetchFinalizeLoggin
 	}
 	if input.Draft != nil {
 		logx.Infof(input.TagCompleteModule, "标签补全完成 torrent_id=%s site=%s tags_count=%d tags_sample=%v", input.SearchTerm, input.SiteIdentifier, len(input.Draft.Tags), processingtagging.TagSample(input.Draft.Tags, 8))
+		if reason := strings.TrimSpace(input.Draft.EpisodeTagReason); reason != "" {
+			logx.Infof(input.TagCompleteModule, "分集判定结果 torrent_id=%s site=%s matched=%v reason=%s", input.SearchTerm, input.SiteIdentifier, containsStringLocal(input.Draft.Tags, "tag.分集"), reason)
+		}
 	}
 
 	mediainfoStatus := strings.TrimSpace(finalizeResult.MediainfoStatus)
@@ -91,4 +94,13 @@ func LogFetchFinalizeResult(input FetchFinalizeLoggingInput) FetchFinalizeLoggin
 		MediainfoValid:  mediainfoValid,
 		MediainfoReason: formatReason,
 	}
+}
+
+func containsStringLocal(items []string, target string) bool {
+	for _, item := range items {
+		if strings.TrimSpace(item) == strings.TrimSpace(target) {
+			return true
+		}
+	}
+	return false
 }

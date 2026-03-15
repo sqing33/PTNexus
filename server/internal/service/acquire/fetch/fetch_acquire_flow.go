@@ -39,6 +39,8 @@ type FetchAcquireResult struct {
 	Meta      TorrentMeta
 	TorrentID string
 
+	TorrentFileNames []string
+
 	TorrentPath string
 	DetailURL   string
 
@@ -95,12 +97,13 @@ func AcquireSeedForFetch(input FetchAcquireInput, deps FetchAcquireDeps) (FetchA
 	emit("下载种子", "种子文件下载完成", "success")
 
 	emit("解析种子", "正在解析种子元数据...", "processing")
-	meta, err := ParseTorrentMeta(torrentBytes)
+	parsedMeta, err := ParseTorrentContentMeta(torrentBytes)
 	if err != nil {
 		logx.Errorf(fetchAcquireLogModule, "解析种子元数据失败 source_site=%s search_term=%s task_id=%s err=%v", sourceSite, searchTerm, taskID, err)
 		emit("解析种子", err.Error(), "error")
 		return FetchAcquireResult{}, 500, err
 	}
+	meta := parsedMeta.Meta
 	logx.Infof(fetchAcquireLogModule, "解析种子元数据成功 source_site=%s search_term=%s task_id=%s info_hash=%s name=%s size=%d", sourceSite, searchTerm, taskID, meta.InfoHash, meta.Name, meta.Size)
 	emit("解析种子", "种子元数据解析完成", "success")
 
@@ -128,6 +131,8 @@ func AcquireSeedForFetch(input FetchAcquireInput, deps FetchAcquireDeps) (FetchA
 		SourceInfo: sourceInfo,
 		Meta:       meta,
 		TorrentID:  searchTerm,
+
+		TorrentFileNames: append([]string{}, parsedMeta.FileNames...),
 
 		TorrentPath: torrentPath,
 		DetailURL:   detailURL,

@@ -47,6 +47,12 @@ type TorrentMeta struct {
 	InfoHash string
 }
 
+// TorrentContentMeta 表示 .torrent 内容解析后的元信息与文件名采样。
+type TorrentContentMeta struct {
+	Meta      TorrentMeta
+	FileNames []string
+}
+
 type bdecodeParser struct {
 	data []byte
 	idx  int
@@ -215,12 +221,24 @@ func MinInt(a, b int) int {
 // 失败场景：bencode 非法、缺少 info 字段、结构异常。
 // 副作用：无。
 func ParseTorrentMeta(content []byte) (TorrentMeta, error) {
+	parsed, err := ParseTorrentContentMeta(content)
+	if err != nil {
+		return TorrentMeta{}, err
+	}
+	return parsed.Meta, nil
+}
+
+// ParseTorrentContentMeta 解析 torrent 字节并提取 name/size/infohash/文件名列表。
+// 参数/返回：content 为 torrent 文件内容，返回解析后的元信息与 info.files 文件名。
+// 失败场景：bencode 非法、缺少 info 字段、结构异常。
+// 副作用：无。
+func ParseTorrentContentMeta(content []byte) (TorrentContentMeta, error) {
 	if len(content) == 0 {
-		return TorrentMeta{}, errors.New("torrent 内容为空")
+		return TorrentContentMeta{}, errors.New("torrent 内容为空")
 	}
 	p := &bdecodeParser{data: content}
 	if err := p.expect('d'); err != nil {
-		return TorrentMeta{}, err
+		return TorrentContentMeta{}, err
 	}
 	var infoValue any
 	infoStart := -1
@@ -228,28 +246,28 @@ func ParseTorrentMeta(content []byte) (TorrentMeta, error) {
 	for p.idx < len(p.data) && p.data[p.idx] != 'e' {
 		keyBytes, err := p.parseBytes()
 		if err != nil {
-			return TorrentMeta{}, err
+			return TorrentContentMeta{}, err
 		}
 		key := string(keyBytes)
 		if key == "info" {
 			infoStart = p.idx
 			value, err := p.parseValue()
 			if err != nil {
-				return TorrentMeta{}, err
+				return TorrentContentMeta{}, err
 			}
 			infoEnd = p.idx
 			infoValue = value
 			continue
 		}
 		if _, err := p.parseValue(); err != nil {
-			return TorrentMeta{}, err
+			return TorrentContentMeta{}, err
 		}
 	}
 	if err := p.expect('e'); err != nil {
-		return TorrentMeta{}, err
+		return TorrentContentMeta{}, err
 	}
 	if infoStart < 0 || infoEnd <= infoStart || infoValue == nil {
-		return TorrentMeta{}, errors.New("torrent 缺少 info 字段")
+		return TorrentContentMeta{}, errors.New("torrent 缺少 info 字段")
 	}
 
 	infoBytes := content[infoStart:infoEnd]
@@ -258,7 +276,7 @@ func ParseTorrentMeta(content []byte) (TorrentMeta, error) {
 
 	infoMap, ok := infoValue.(map[string]any)
 	if !ok {
-		return TorrentMeta{}, errors.New("torrent info 结构异常")
+		return TorrentContentMeta{}, errors.New("torrent info 结构异常")
 	}
 	meta.Name = strings.TrimSpace(firstNonEmptyString(infoMap["name.utf-8"], infoMap["name"]))
 	if meta.Name == "" {
@@ -268,7 +286,52 @@ func ParseTorrentMeta(content []byte) (TorrentMeta, error) {
 	if meta.Size < 0 {
 		meta.Size = 0
 	}
-	return meta, nil
+	return TorrentContentMeta{
+		Meta:      meta,
+		FileNames: extractTorrentFileNames(infoMap),
+	}, nil
+}
+
+func extractTorrentFileNames(info map[string]any) []string {
+	if len(info) == 0 {
+		return []string{}
+	}
+
+	files, ok := info["files"].([]any)
+	if !ok {
+		name := strings.TrimSpace(firstNonEmptyString(info["name.utf-8"], info["name"]))
+		if name == "" {
+			return []string{}
+		}
+		return []string{name}
+	}
+
+	result := make([]string, 0, len(files))
+	seen := map[string]struct{}{}
+	for _, item := range files {
+		fileMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		pathValue, ok := fileMap["path.utf-8"]
+		if !ok {
+			pathValue = fileMap["path"]
+		}
+		pathList, ok := pathValue.([]any)
+		if !ok || len(pathList) == 0 {
+			continue
+		}
+		name := strings.TrimSpace(toStringAny(pathList[len(pathList)-1], ""))
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	return result
 }
 
 func (p *bdecodeParser) expect(ch byte) error {

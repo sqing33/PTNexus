@@ -43,9 +43,11 @@ type SeedDraft struct {
 	Body                   string
 	Mediainfo              string
 
-	RawTags         []string
-	Tags            []string
-	TitleComponents []map[string]any
+	RawTags          []string
+	Tags             []string
+	TitleComponents  []map[string]any
+	TorrentFileNames []string
+	EpisodeTagReason string
 
 	RemovedARDTUDeclarations []string
 
@@ -202,6 +204,19 @@ func (d *SeedDraft) CompleteAndMapTags(siteIdentifier string, formatIsBDInfo boo
 	)
 	if processingtagging.ShouldAddCompletionTag(rawTagCandidates, completion) {
 		rawTagCandidates = append(rawTagCandidates, "完结")
+	}
+	episodeTagResult := processingtagging.DetectEpisodeTag(processingtagging.EpisodeTagInput{
+		Title:            d.Title,
+		Subtitle:         d.Subtitle,
+		TorrentName:      torrentNameForPath,
+		Type:             d.Type,
+		ExistingTags:     rawTagCandidates,
+		TorrentFileNames: d.TorrentFileNames,
+		Completion:       completion,
+	})
+	d.EpisodeTagReason = strings.TrimSpace(episodeTagResult.Reason)
+	if episodeTagResult.Matched {
+		rawTagCandidates = append(rawTagCandidates, "分集")
 	}
 
 	mappedTags, unmappedTags := processingtagging.MapTagsToStandard(rawTagCandidates, siteIdentifier)
