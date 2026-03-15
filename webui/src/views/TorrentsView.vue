@@ -742,6 +742,7 @@ import { useCrossSeedStore } from '@/stores/crossSeed'
 import { useSiteDataStore } from '@/stores/siteData'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import type { ISourceInfo, Torrent, SiteData, Downloader } from '@/types'
+import { resolveSourceTorrentId } from '@/utils/sourceTorrentId'
 import { ElMessage } from '@/utils/uiNotify'
 
 const emits = defineEmits(['ready'])
@@ -1213,9 +1214,7 @@ const startCrossSeed = async (row: Torrent) => {
     .filter((site) => {
       const isSourceSite = site.migration === 1 || site.migration === 3
       if (!isSourceSite) return false
-      const hasDetailsLink = site.comment && site.comment.includes('details.php?id=')
-      const hasTorrentId = site.comment && /^\d+$/.test(site.comment.trim())
-      return hasDetailsLink || hasTorrentId
+      return !!resolveSourceTorrentId({ siteDetails: site })
     })
 
   // 将当前要操作的种子信息存入 store
@@ -1277,6 +1276,7 @@ const confirmSourceSiteAndProceed = async (sourceSite: SourceSiteOption | null) 
 
   const siteDetails = row.sites[sourceSite.siteName]
   const siteName = sourceSite.siteName
+  const torrentId = resolveSourceTorrentId({ siteDetails })
 
   // 1. 检查站点数据是否存在
   if (!siteDetails) {
@@ -1285,7 +1285,7 @@ const confirmSourceSiteAndProceed = async (sourceSite: SourceSiteOption | null) 
   }
 
   // 2. 检查站点是否有有效链接
-  if (!hasLink(siteDetails, siteName)) {
+  if (!hasLink(siteDetails, siteName) && !torrentId) {
     // 2. 如果没有链接，触发IYUU查询
     ElMessage.info(`站点 [${siteName}] 缺少详情链接，正在触发 IYUU 查询...`)
     sourceSiteQueryLoading.value[siteName] = true
@@ -1298,15 +1298,9 @@ const confirmSourceSiteAndProceed = async (sourceSite: SourceSiteOption | null) 
   }
 
   // 3. 如果有链接，执行原有的获取ID和转种的逻辑
-  let torrentId = ''
-  const idMatch = siteDetails?.comment?.match(/id=(\d+)/)
-  if (idMatch && idMatch[1]) {
-    torrentId = idMatch[1]
-  } else if (siteDetails?.comment && /^\d+$/.test(siteDetails.comment.trim())) {
-    torrentId = siteDetails.comment.trim()
-  } else {
+  if (!torrentId) {
     ElMessage.error(
-      `无法从源站点 ${siteName} 的详情页链接中提取种子ID。请尝试使用IYUU查询更新链接。`,
+      `无法从源站点 ${siteName} 的详情页链接或已缓存种子ID中提取有效的源站ID。请尝试使用 IYUU 查询更新链接。`,
     )
     return // 留在弹窗中，让用户重试或使用IYUU
   }

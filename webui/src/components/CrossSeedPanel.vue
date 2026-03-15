@@ -154,6 +154,7 @@ import { createPublishFlow, type RawPublishResult } from './cross-seed/panel/pub
 import { createSeedFlow } from './cross-seed/panel/seedFlow'
 import type { WorkingTorrent } from './cross-seed/panel/types'
 import { crossSeedPanelContextKey } from './cross-seed/crossSeedPanelContext'
+import { resolveSourceTorrentId } from '@/utils/sourceTorrentId'
 import type {
   BdinfoProgress,
   CrossSeedPanelContext,
@@ -340,6 +341,7 @@ const crossSeedStore = useCrossSeedStore()
 
 const torrent = computed(() => crossSeedStore.workingParams as WorkingTorrent)
 const sourceSite = computed(() => crossSeedStore.sourceInfo?.name || '')
+const sourceTorrentId = computed(() => crossSeedStore.sourceInfo?.torrentId || '')
 
 const normalizeScreenshotReviewStatus = (value: unknown): ScreenshotReviewStatus => {
   if (typeof value !== 'string') return 'none'
@@ -2096,8 +2098,8 @@ const handleImageError = async (url: string, type: 'poster' | 'screenshot', inde
 
 // --- Extracted: seed fetch/preview/site selection (see cross-seed/panel/seedFlow.ts) ---
 const seedFlow = createSeedFlow({
-  emit,
   sourceSite,
+  sourceTorrentId,
   torrent,
   crossSeedStore,
 
@@ -2182,13 +2184,10 @@ const resolveCurrentSeedLookupIdentity = async (): Promise<{
     return null
   }
 
-  let torrentId = siteDetails.torrentId || ''
-  if (!torrentId) {
-    const idMatch = siteDetails.comment?.match(/id=(\d+)/)
-    if (idMatch?.[1]) {
-      torrentId = idMatch[1]
-    }
-  }
+  const torrentId = resolveSourceTorrentId({
+    sourceInfoTorrentId: sourceTorrentId.value,
+    siteDetails,
+  })
   const siteName = await getEnglishSiteName(sourceSite.value)
   if (!torrentId || !siteName) {
     return null

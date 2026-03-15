@@ -1,6 +1,7 @@
 import { computed, nextTick, type ComputedRef, type Ref } from 'vue'
 import axios from 'axios'
 import { ElNotification } from '@/utils/uiNotify'
+import { resolveSourceTorrentId } from '@/utils/sourceTorrentId'
 
 import type {
   ReverseMappings,
@@ -13,11 +14,9 @@ import type {
 } from '../crossSeedPanelContext'
 import type { DownloaderListItem, WorkingTorrent } from './types'
 
-export type PanelEmit = (event: 'complete' | 'cancel' | 'close-with-refresh') => void
-
 export type SeedFlowDeps = {
-  emit: PanelEmit
   sourceSite: ComputedRef<string>
+  sourceTorrentId: ComputedRef<string>
   torrent: ComputedRef<WorkingTorrent | null>
   crossSeedStore: { setParams: (params: object) => void }
 
@@ -73,10 +72,48 @@ export type SeedFlowApi = {
   allTagOptions: ComputedRef<TagOption[]>
 }
 
+type DbSeedRecord = {
+  hash?: string
+  title?: string
+  title_components?: TitleComponent[]
+  subtitle?: string
+  imdb_link?: string
+  douban_link?: string
+  tmdb_link?: string
+  screenshot_review_status?: string
+  statement?: string
+  poster?: string
+  body?: string
+  mediainfo?: string
+  screenshots?: string
+  removed_ardtudeclarations?: string[]
+  source_params?: Record<string, unknown>
+  standardized_params?: Record<string, unknown>
+  type?: string
+  medium?: string
+  video_codec?: string
+  audio_codec?: string
+  resolution?: string
+  team?: string
+  source?: string
+  tags?: string[]
+  final_publish_parameters?: Record<string, string>
+  complete_publish_params?: Record<string, unknown>
+  raw_params_for_preview?: Record<string, unknown>
+}
+
+type DbSeedInfoResponse = {
+  should_fetch?: boolean
+  task_id?: string
+  success?: boolean
+  reverse_mappings?: ReverseMappings
+  data?: DbSeedRecord
+}
+
 export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
   const {
-    emit,
     sourceSite,
+    sourceTorrentId,
     torrent,
     crossSeedStore,
     allSitesStatus,
@@ -249,18 +286,22 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     fetchFlowErrorMessage.value = ''
 
     const siteDetails = torrent.value.sites[sourceSite.value]
-    // 首先检查是否有存储的种子ID
-    let torrentId = siteDetails.torrentId || null
+    if (!siteDetails) {
+      const message = `无法获取源站点 ${sourceSite.value} 的详情信息。`
+      ElNotification.error({ title: '参数错误', message, duration: 0, showClose: true })
+      setFetchFlowError(message)
+      return
+    }
 
-    // 如果没有存储的ID，则尝试从链接中提取
+    const torrentId = resolveSourceTorrentId({
+      sourceInfoTorrentId: sourceTorrentId.value,
+      siteDetails,
+    })
     if (!torrentId) {
-      const idMatch = siteDetails.comment?.match(/id=(\d+)/)
-      if (!idMatch || !idMatch[1]) {
-        ElNotification.error(`无法从源站点 ${sourceSite.value} 的链接中提取种子ID。`)
-        emit('cancel')
-        return
-      }
-      torrentId = idMatch[1]
+      const message = `无法从源站点 ${sourceSite.value} 的链接或种子ID中提取有效的源站ID。`
+      ElNotification.error({ title: '参数错误', message, duration: 0, showClose: true })
+      setFetchFlowError(message)
+      return
     }
 
     isLoading.value = true
@@ -285,8 +326,8 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         )
       }
       const dbResponse = prefetchedDbSeedInfo
-        ? ({ status: 200, data: prefetchedDbSeedInfo } as { status: number; data: any })
-        : await axios.get('/api/migrate/get_db_seed_info', {
+        ? ({ status: 200, data: prefetchedDbSeedInfo as DbSeedInfoResponse })
+        : await axios.get<DbSeedInfoResponse>('/api/migrate/get_db_seed_info', {
             params: {
               torrent_id: torrentId,
               site_name: englishSiteName,
@@ -462,19 +503,21 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           seed_id: compositeSeedId,
           original_main_title: dbData.title || '',
           title_components: dbData.title_components || [],
-          subtitle: dbData.subtitle,
-          imdb_link: dbData.imdb_link,
-          douban_link: dbData.douban_link,
-          tmdb_link: dbData.tmdb_link,
+          subtitle: dbData.subtitle || '',
+          imdb_link: dbData.imdb_link || '',
+          douban_link: dbData.douban_link || '',
+          tmdb_link: dbData.tmdb_link || '',
           screenshot_review_status: normalizeScreenshotReviewStatus(dbData.screenshot_review_status),
           intro: {
-            statement: filterExtraEmptyLines(dbData.statement) || '',
+            statement: filterExtraEmptyLines(dbData.statement || '') || '',
             poster: dbData.poster || '',
-            body: normalizeIntroBodyAndMediainfo(dbData.body, dbData.mediainfo).body || '',
+            body: normalizeIntroBodyAndMediainfo(dbData.body || '', dbData.mediainfo || '').body || '',
             screenshots: dbData.screenshots || '',
             removed_ardtudeclarations: dbData.removed_ardtudeclarations || [],
           },
-          mediainfo: normalizeIntroBodyAndMediainfo(dbData.body, dbData.mediainfo).mediainfo || '',
+          mediainfo:
+            normalizeIntroBodyAndMediainfo(dbData.body || '', dbData.mediainfo || '').mediainfo ||
+            '',
           source_params: dbData.source_params || {},
           standardized_params: {
             type: dbData.type || '',
@@ -1032,15 +1075,11 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         if (!siteDetails) {
           throw new Error('无法获取源站点详情（缺少站点映射信息）')
         }
-        torrentId = siteDetails.torrentId || null
+        torrentId = resolveSourceTorrentId({
+          sourceInfoTorrentId: sourceTorrentId.value,
+          siteDetails,
+        })
         siteName = await getEnglishSiteName(sourceSite.value)
-
-        if (!torrentId) {
-          const idMatch = siteDetails.comment?.match(/id=(\d+)/)
-          if (idMatch && idMatch[1]) {
-            torrentId = idMatch[1]
-          }
-        }
       }
 
       if (!torrentId || !siteName) {

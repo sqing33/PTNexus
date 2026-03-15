@@ -1,6 +1,8 @@
 export interface TorrentSiteDetails {
   comment?: string
   torrentId?: string
+  site?: string
+  site_name?: string
   [key: string]: unknown
 }
 
@@ -22,4 +24,3 @@ export interface DownloaderListItem {
   id: string
   name: string
 }
-

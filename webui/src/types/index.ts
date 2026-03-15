@@ -4,6 +4,9 @@ export interface SiteData {
   migration: number
   state: string
   seeders: number
+  torrentId?: string
+  site?: string
+  site_name?: string
 }
 
 export interface Torrent {
