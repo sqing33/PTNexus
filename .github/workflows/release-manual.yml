@@ -1,4 +1,4 @@
-name: 手动构建并发布 Release
+name: 手动构建发布产物 / Docker 镜像
 
 on:
   workflow_dispatch:
@@ -412,7 +412,7 @@ jobs:
           cache-from: type=gha,scope=go-amd64
           cache-to: type=gha,mode=max,scope=go-amd64
 
-  release:
+  release_assets:
     needs:
       - meta
       - runtime
@@ -463,4 +463,3 @@ jobs:
           files: dist/release-assets/${{ needs.meta.outputs.version }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

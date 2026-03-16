@@ -480,8 +480,8 @@ fi
 
 prompt_build_selection
 
-if [[ "$build_runtime" == "false" && "$build_desktop_windows" == "false" && "$build_proxy" == "false" ]]; then
-  fail "至少需要启用在线更新文件、Windows 桌面安装包、盒子端代理之一，否则不会创建 GitHub Release。"
+if [[ "$build_runtime" == "false" && "$build_desktop_windows" == "false" && "$build_proxy" == "false" && "$build_docker_image" == "false" ]]; then
+  fail "至少需要启用一项构建内容。"
 fi
 
 origin_url="$(git -C "$REPO_ROOT" remote get-url origin)"
@@ -497,7 +497,7 @@ if ensure_gh_cli && [[ "$dry_run" != "true" ]]; then
   gh auth status >/dev/null 2>&1 || fail "gh 尚未登录，请先执行 gh auth login"
 fi
 
-echo "Release config:"
+echo "Build config:"
 print_config_line "仓库" "$repo_slug"
 print_config_line "发布分支" "$ref"
 print_config_line "版本" "$version"
@@ -529,7 +529,7 @@ if [[ "$dry_run" == "true" ]]; then
 fi
 
 echo
-echo "Release workflow 已触发。"
+echo "构建 workflow 已触发。"
 
 if [[ "$watch_workflow" == "true" ]]; then
   echo "正在定位本次 workflow run，并自动跟踪进度..."

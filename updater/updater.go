@@ -36,20 +36,28 @@ var (
 	)
 	updateDir = getEnv("UPDATE_DIR", DEFAULT_UPDATE_DIR)
 
-	localConfigFile string
-	shanghaiLoc     *time.Location
+	localConfigFile    string
+	embeddedConfigFile string
+	shanghaiLoc        *time.Location
 	// 新增：互斥锁防止重复触发更新
 	updateMutex      sync.Mutex
 	isSystemUpdating bool
 )
 
+var (
+	readPreparedUpdateFn    = readPreparedUpdate
+	installPreparedBundleFn = installPreparedBundle
+)
+
 func init() {
 	if os.Getenv("DEV_ENV") == "true" {
 		// 开发环境
-		localConfigFile = getEnv("LOCAL_CONFIG_FILE", "/home/sqing/Codes/PTNexus/CHANGELOG.json")
+		embeddedConfigFile = getEnv("EMBEDDED_CONFIG_FILE", "/home/sqing/Codes/PTNexus/CHANGELOG.json")
+		localConfigFile = getEnv("LOCAL_CONFIG_FILE", embeddedConfigFile)
 	} else {
-		// 生产环境
-		localConfigFile = getEnv("LOCAL_CONFIG_FILE", "/app/CHANGELOG.json")
+		// 生产环境优先读取 /app/data 下的持久化版本状态，容器重建后仍能识别在线更新后的版本。
+		embeddedConfigFile = getEnv("EMBEDDED_CONFIG_FILE", "/app/CHANGELOG.json")
+		localConfigFile = getEnv("LOCAL_CONFIG_FILE", filepath.Join(updateDir, "local", "CHANGELOG.json"))
 	}
 
 	// 初始化时区
@@ -372,7 +380,7 @@ func runAutoUpdate() {
 	}
 
 	remoteVersion := strings.TrimSpace(manifest.Latest.Version)
-	shouldForce := manifest.Latest.ForceUpdate
+	shouldForce := manifest.Latest.ForceUpdate || hasCrossVersionForceUpdate(localVersion, manifest.History)
 	shouldDisable := manifest.Latest.DisableUpdate
 
 	if !isNewerVersion(remoteVersion, localVersion) {
@@ -469,14 +477,14 @@ func checkAndRunScheduledUpdate() {
 }
 
 // 检查是否有跨版本强制更新
-func hasCrossVersionForceUpdate(localVersion string, remoteConfig *UpdateConfig) bool {
-	if len(remoteConfig.History) == 0 {
+func hasCrossVersionForceUpdate(localVersion string, history []VersionInfo) bool {
+	if len(history) == 0 {
 		return false
 	}
 
 	// 找到本地版本在历史中的位置
 	localVersionIndex := -1
-	for i, version := range remoteConfig.History {
+	for i, version := range history {
 		if version.Version == localVersion {
 			localVersionIndex = i
 			break
@@ -485,20 +493,16 @@ func hasCrossVersionForceUpdate(localVersion string, remoteConfig *UpdateConfig)
 
 	// 如果找不到本地版本，检查从最新版本开始的所有版本
 	if localVersionIndex == -1 {
-		log.Printf("本地版本 %s 在历史记录中未找到，检查所有版本", localVersion)
-		for _, version := range remoteConfig.History {
-			if version.ForceUpdate {
-				log.Printf("发现跨版本强制更新: %s", version.Version)
-				return true
-			}
-		}
+		// 远端历史可能滞后或被裁剪；在无法定位本地版本时，不能安全推断历史强更是否适用。
+		// 这类场景只信 latest/manifest 的直接强更标记，避免旧版本遗留 force_update 误伤当前版本。
+		log.Printf("本地版本 %s 在历史记录中未找到，跳过跨版本强制更新判断", localVersion)
 		return false
 	}
 
 	// 检查从本地版本之后的所有版本
 	log.Printf("本地版本 %s 在历史记录中的位置: %d", localVersion, localVersionIndex)
 	for i := localVersionIndex - 1; i >= 0; i-- {
-		version := remoteConfig.History[i]
+		version := history[i]
 		if version.ForceUpdate {
 			log.Printf("发现跨版本强制更新: %s (本地版本: %s)", version.Version, localVersion)
 			return true
@@ -524,44 +528,27 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 	localVersion := getLocalVersion()
 
-	// CHANGELOG.json：用于跨版本强制更新判断与更新日志展示。
-	var remoteVersionFromChangelog string
-	var forceUpdateCrossVersion bool
-	var disableUpdateFromChangelog bool
-	remoteConfig, err := getRemoteConfig()
-	if err != nil {
-		log.Printf("检查更新时获取远程配置失败: %v", err)
-	} else if len(remoteConfig.History) > 0 {
-		remoteVersionFromChangelog = remoteConfig.History[0].Version
-		forceUpdateCrossVersion = hasCrossVersionForceUpdate(localVersion, remoteConfig)
-		disableUpdateFromChangelog = remoteConfig.History[0].DisableUpdate
-	}
-
-	// UPDATE_MANIFEST.json：产物更新清单（不依赖 git）。
+	// UPDATE_MANIFEST.json：唯一的运行时更新元数据。
 	var manifestVersion string
 	var forceUpdateFromManifest bool
 	var disableUpdateFromManifest bool
 	manifestReady := false
-	if manifest, err := getRemoteManifest(remoteVersionFromChangelog); err != nil {
+	if manifest, err := getRemoteManifest(); err != nil {
 		log.Printf("检查更新时获取更新清单失败: %v", err)
-	} else if _, err := resolveManifestArtifactForCurrentPlatform(manifest); err != nil {
-		log.Printf("检查更新时更新清单不完整，跳过产物更新入口: %v", err)
 	} else {
-		manifestReady = true
 		manifestVersion = strings.TrimSpace(manifest.Latest.Version)
-		forceUpdateFromManifest = manifest.Latest.ForceUpdate
+		forceUpdateFromManifest = manifest.Latest.ForceUpdate || hasCrossVersionForceUpdate(localVersion, manifest.History)
 		disableUpdateFromManifest = manifest.Latest.DisableUpdate
+		if _, err := resolveManifestArtifactForCurrentPlatform(manifest); err != nil {
+			log.Printf("检查更新时更新清单不完整，跳过产物更新入口: %v", err)
+		} else {
+			manifestReady = true
+		}
 	}
 
-	remoteVersion := remoteVersionFromChangelog
-	if manifestReady && manifestVersion != "" {
-		remoteVersion = manifestVersion
-	} else if remoteVersion == "" {
-		remoteVersion = manifestVersion
-	}
-
-	forceUpdate := forceUpdateCrossVersion || forceUpdateFromManifest
-	disableUpdate := disableUpdateFromChangelog || disableUpdateFromManifest
+	remoteVersion := manifestVersion
+	forceUpdate := forceUpdateFromManifest
+	disableUpdate := disableUpdateFromManifest
 
 	hasUpdate := false
 	if remoteVersion != "" && localVersion != "" {
@@ -721,7 +708,7 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		version = v
 	}
 
-	prepared, err := readPreparedUpdate(version)
+	prepared, err := readPreparedUpdateFn(version)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
@@ -752,9 +739,10 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	err = withInMemoryUpdateFlag(func() error {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()
-		return installPreparedBundle(ctx, prepared)
+		return installPreparedBundleFn(ctx, prepared)
 	})
 	if err != nil {
+		log.Printf("安装更新失败: version=%s err=%v", prepared.Version, err)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
 			"error":   err.Error(),
@@ -766,48 +754,105 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": fmt.Sprintf("成功更新到 %s", prepared.Version),
 	})
+	log.Printf("安装更新成功: version=%s", prepared.Version)
 }
 
 // 获取本地版本
 func getLocalVersion() string {
-	data, err := os.ReadFile(localConfigFile)
+	if version := inferVersionFromCurrentRuntime(); version != "" {
+		return version
+	}
+
+	for _, path := range localVersionConfigCandidates() {
+		version, err := readVersionFromConfig(path)
+		if err == nil {
+			return version
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("读取本地版本配置失败: path=%s err=%v", path, err)
+		}
+	}
+
+	return "unknown"
+}
+
+func localVersionConfigCandidates() []string {
+	candidates := make([]string, 0, 2)
+	for _, path := range []string{localConfigFile, embeddedConfigFile} {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		duplicate := false
+		for _, existing := range candidates {
+			if existing == path {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			candidates = append(candidates, path)
+		}
+	}
+	return candidates
+}
+
+func readVersionFromConfig(path string) (string, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("读取本地配置失败: %v", err)
-		return "unknown"
+		return "", err
 	}
 
 	var config UpdateConfig
 	if err := json.Unmarshal(data, &config); err != nil {
-		log.Printf("解析本地配置失败: %v", err)
-		return "unknown"
+		return "", fmt.Errorf("解析配置失败: %w", err)
 	}
-
-	return config.History[0].Version
+	if len(config.History) == 0 || strings.TrimSpace(config.History[0].Version) == "" {
+		return "", fmt.Errorf("配置缺少 history[0].version")
+	}
+	return strings.TrimSpace(config.History[0].Version), nil
 }
 
-// 新增辅助函数：获取远程配置结构体
-func getRemoteConfig() (*UpdateConfig, error) {
-	config, source, err := fetchJSONFromCandidates[UpdateConfig](context.Background(), changelogCandidates(), 10*time.Second)
+func inferVersionFromCurrentRuntime() string {
+	currentLink := filepath.Join(updateDir, "current")
+	resolvedTarget, err := filepath.EvalSymlinks(currentLink)
 	if err != nil {
-		return nil, fmt.Errorf("获取远程配置失败: %w", err)
-	}
-	log.Printf("获取更新日志成功，使用源: %s", source)
-	return config, nil
-}
-
-// 获取远程版本
-func getRemoteVersion() string {
-	config, err := getRemoteConfig()
-	if err != nil {
-		log.Printf("获取远程配置失败: %v", err)
 		return ""
 	}
 
-	if len(config.History) == 0 {
+	serverBin := filepath.Join(resolvedTarget, "server")
+	if st, err := os.Stat(serverBin); err != nil || st.IsDir() {
 		return ""
 	}
 
-	return config.History[0].Version
+	if !strings.EqualFold(filepath.Base(resolvedTarget), "server") {
+		return ""
+	}
+
+	versionToken := strings.TrimSpace(filepath.Base(filepath.Dir(resolvedTarget)))
+	if !looksLikeVersionToken(versionToken) {
+		return ""
+	}
+	return versionToken
+}
+
+func looksLikeVersionToken(version string) bool {
+	version = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(version), "v"))
+	if version == "" {
+		return false
+	}
+	parts := strings.Split(version, ".")
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // 健康检查
@@ -832,9 +877,9 @@ func getChangelogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config, err := getRemoteConfig()
+	manifest, err := getRemoteManifest()
 	if err != nil {
-		log.Printf("获取远程配置失败: %v", err)
+		log.Printf("获取远程更新历史失败: %v", err)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":   false,
 			"changelog": []string{},
@@ -842,17 +887,17 @@ func getChangelogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("解析成功，history 长度: %d", len(config.History))
-	if len(config.History) > 0 {
-		log.Printf("最新版本: %s, 更新内容数量: %d", config.History[0].Version, len(config.History[0].Changes))
-		for i, change := range config.History[0].Changes {
+	log.Printf("解析更新清单成功，history 长度: %d", len(manifest.History))
+	if len(manifest.History) > 0 {
+		log.Printf("最新版本: %s, 更新内容数量: %d", manifest.History[0].Version, len(manifest.History[0].Changes))
+		for i, change := range manifest.History[0].Changes {
 			log.Printf("更新内容 %d: %s", i+1, change)
 		}
 	}
 
 	// 检查 history 是否为空
-	if len(config.History) == 0 {
-		log.Printf("远程 CHANGELOG.json 中 history 数组为空")
+	if len(manifest.History) == 0 {
+		log.Printf("远程 UPDATE_MANIFEST.json 中 history 数组为空")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":   false,
 			"changelog": []string{},
@@ -862,8 +907,8 @@ func getChangelogHandler(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":   true,
-		"changelog": config.History[0].Changes,
-		"history":   config.History,
+		"changelog": manifest.History[0].Changes,
+		"history":   manifest.History,
 	})
 }
 

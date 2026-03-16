@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -24,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -45,6 +47,18 @@ type artifactProbeResult struct {
 	Latency time.Duration
 	Err     error
 }
+
+var (
+	supervisorctlRunner = runSupervisorctl
+	createSymlinkFn     = os.Symlink
+	replaceSymlinkFn    = os.Rename
+	removeSymlinkFn     = os.Remove
+	updateSymlinkFn     = updateSymlinkAtomic
+	ensureRuntimeFn     = ensureRuntimeSymlinks
+	stopServerFn        = stopServerProcess
+	startServerFn       = startServerProcess
+	rollbackRuntimeFn   = rollbackRuntime
+)
 
 func sanitizePathToken(v string) string {
 	v = strings.TrimSpace(v)
@@ -681,43 +695,214 @@ func readPreparedUpdate(version string) (*PreparedUpdate, error) {
 	return &prepared, nil
 }
 
-func supervisorctl(args ...string) error {
+func runSupervisorctl(ctx context.Context, args ...string) (string, error) {
 	bin, err := exec.LookPath("supervisorctl")
 	if err != nil {
-		return err
+		return "", err
 	}
 
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	cfg := getEnv("SUPERVISOR_CONF", "/app/supervisord.conf")
 	cmdArgs := []string{"-c", cfg}
 	cmdArgs = append(cmdArgs, args...)
-	cmd := exec.Command(bin, cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	cmd := exec.CommandContext(ctx, bin, cmdArgs...)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	outputParts := make([]string, 0, 2)
+	if trimmed := strings.TrimSpace(stdout.String()); trimmed != "" {
+		outputParts = append(outputParts, trimmed)
+	}
+	if trimmed := strings.TrimSpace(stderr.String()); trimmed != "" {
+		outputParts = append(outputParts, trimmed)
+	}
+	return strings.Join(outputParts, "\n"), err
 }
 
-func stopServerProcess() {
-	name := getEnv("SUPERVISOR_SERVER_NAME", "server")
-	if err := supervisorctl("stop", name); err == nil {
-		return
+func formatLogOutput(output string) string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return "<empty>"
 	}
+	return strings.ReplaceAll(output, "\n", " | ")
+}
+
+func parseSupervisorProgramState(name, output string) (string, error) {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		rawName := strings.TrimSuffix(fields[0], ":")
+		if rawName == name {
+			return strings.ToUpper(strings.TrimSpace(fields[1])), nil
+		}
+	}
+	return "", fmt.Errorf("无法从 supervisor 输出解析服务状态: %s", formatLogOutput(output))
+}
+
+func waitForSupervisorState(ctx context.Context, name string, timeout time.Duration) (string, string, error) {
+	if timeout <= 0 {
+		timeout = 25 * time.Second
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	var lastState string
+	var lastOutput string
+	var lastErr error
+
+	checkStatus := func() (string, string, error) {
+		output, err := supervisorctlRunner(waitCtx, "status", name)
+		if strings.TrimSpace(output) != "" {
+			state, parseErr := parseSupervisorProgramState(name, output)
+			if parseErr != nil {
+				return "", output, parseErr
+			}
+			return state, output, err
+		}
+		if err != nil {
+			return "", "", err
+		}
+		return "", "", fmt.Errorf("supervisor status 输出为空")
+	}
+
+	for {
+		state, output, err := checkStatus()
+		if err == nil && state == "RUNNING" {
+			return state, output, nil
+		}
+		if output != "" {
+			lastState = state
+			lastOutput = output
+			switch state {
+			case "BACKOFF", "FATAL", "EXITED":
+				if err == nil {
+					err = fmt.Errorf("supervisor 进入失败状态: %s", state)
+				}
+				return state, output, err
+			}
+		}
+		if err != nil {
+			lastErr = err
+		}
+
+		select {
+		case <-waitCtx.Done():
+			if lastErr != nil {
+				return lastState, lastOutput, fmt.Errorf("等待 supervisor 进入 RUNNING 超时: %w", lastErr)
+			}
+			return lastState, lastOutput, fmt.Errorf("等待 supervisor 进入 RUNNING 超时")
+		case <-ticker.C:
+		}
+	}
+}
+
+func stopServerProcess() error {
+	name := getEnv("SUPERVISOR_SERVER_NAME", "server")
+	log.Printf("安装更新步骤: 尝试停止服务 program=%s", name)
+	commandCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	output, err := supervisorctlRunner(commandCtx, "stop", name)
+	if err == nil {
+		log.Printf("安装更新步骤: supervisor 停止服务完成 program=%s output=%s", name, formatLogOutput(output))
+		return nil
+	}
+
+	log.Printf("安装更新步骤: supervisor 停止服务失败，准备回退到 pkill program=%s output=%s err=%v", name, formatLogOutput(output), err)
 
 	// Fallback: best-effort kill by command path.
 	baseDir := getEnv("PTNEXUS_BASE_DIR", "/app/server")
-	_ = exec.Command("pkill", "-TERM", "-f", filepath.Join(baseDir, "server")).Run()
-	_ = exec.Command("pkill", "-TERM", "-f", "pt-nexus-go").Run()
+	killErrs := make([]string, 0, 2)
+	if pkillErr := exec.Command("pkill", "-TERM", "-f", filepath.Join(baseDir, "server")).Run(); pkillErr != nil {
+		killErrs = append(killErrs, fmt.Sprintf("pkill server=%v", pkillErr))
+	}
+	if pkillErr := exec.Command("pkill", "-TERM", "-f", "pt-nexus-go").Run(); pkillErr != nil {
+		killErrs = append(killErrs, fmt.Sprintf("pkill pt-nexus-go=%v", pkillErr))
+	}
 	time.Sleep(2 * time.Second)
+
+	if len(killErrs) > 0 {
+		return fmt.Errorf("停止服务失败: supervisor_err=%w, fallback=%s", err, strings.Join(killErrs, "; "))
+	}
+	log.Printf("安装更新步骤: 已通过 pkill 后备停止服务 program=%s", name)
+	return fmt.Errorf("supervisor 停止服务失败，已使用 pkill 后备处理: output=%s err=%w", formatLogOutput(output), err)
 }
 
-func startServerProcess() error {
+func startServerProcess(ctx context.Context) error {
 	name := getEnv("SUPERVISOR_SERVER_NAME", "server")
-	if err := supervisorctl("start", name); err == nil {
-		return nil
+	log.Printf("安装更新步骤: 尝试启动服务 program=%s", name)
+
+	commandCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	startOutput, startErr := supervisorctlRunner(commandCtx, "start", name)
+	if startErr != nil {
+		log.Printf("安装更新步骤: supervisor start 失败 program=%s output=%s err=%v", name, formatLogOutput(startOutput), startErr)
+		restartOutput, restartErr := supervisorctlRunner(commandCtx, "restart", name)
+		if restartErr != nil {
+			return fmt.Errorf(
+				"启动服务失败: start_output=%s start_err=%v restart_output=%s restart_err=%w",
+				formatLogOutput(startOutput),
+				startErr,
+				formatLogOutput(restartOutput),
+				restartErr,
+			)
+		}
+		log.Printf("安装更新步骤: supervisor restart 已提交 program=%s output=%s", name, formatLogOutput(restartOutput))
+	} else {
+		log.Printf("安装更新步骤: supervisor start 已提交 program=%s output=%s", name, formatLogOutput(startOutput))
 	}
-	if err := supervisorctl("restart", name); err == nil {
-		return nil
+
+	state, output, err := waitForSupervisorState(ctx, name, 25*time.Second)
+	if err != nil {
+		return fmt.Errorf("等待服务启动失败: state=%s output=%s err=%w", state, formatLogOutput(output), err)
 	}
-	return fmt.Errorf("无法启动服务 %s（supervisorctl 不可用或执行失败）", name)
+	log.Printf("安装更新步骤: supervisor 状态已进入 RUNNING program=%s output=%s", name, formatLogOutput(output))
+	return nil
+}
+
+func rollbackRuntime(ctx context.Context, currentLink, prevTarget string) error {
+	if strings.TrimSpace(prevTarget) == "" {
+		return errors.New("缺少旧版本运行时目标，无法回滚")
+	}
+
+	log.Printf("安装更新步骤: 开始回滚到旧版本 target=%s", prevTarget)
+	if err := stopServerFn(); err != nil {
+		log.Printf("安装更新步骤: 回滚前停止服务出现异常 err=%v", err)
+	}
+	if err := updateSymlinkFn(currentLink, prevTarget); err != nil {
+		return fmt.Errorf("切换回旧版本失败: %w", err)
+	}
+	if err := startServerFn(ctx); err != nil {
+		return fmt.Errorf("回滚后启动旧版本失败: %w", err)
+	}
+	log.Printf("安装更新步骤: 回滚完成 target=%s", prevTarget)
+	return nil
+}
+
+func isCrossDeviceRenameErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EXDEV) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "cross-device link")
 }
 
 func updateSymlinkAtomic(linkPath, target string) error {
@@ -737,15 +922,43 @@ func updateSymlinkAtomic(linkPath, target string) error {
 	}
 
 	tmp := fmt.Sprintf("%s.tmp.%d", linkPath, time.Now().UnixNano())
-	_ = os.Remove(tmp)
-	if err := os.Symlink(target, tmp); err != nil {
+	_ = removeSymlinkFn(tmp)
+	if err := createSymlinkFn(target, tmp); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, linkPath); err != nil {
-		_ = os.Remove(tmp)
-		return err
+	if err := replaceSymlinkFn(tmp, linkPath); err != nil {
+		_ = removeSymlinkFn(tmp)
+		if !isCrossDeviceRenameErr(err) {
+			return err
+		}
+
+		log.Printf("安装更新步骤: 软链切换遇到跨设备限制，改用删除后重建 link=%s target=%s err=%v", linkPath, target, err)
+		if st, statErr := os.Lstat(linkPath); statErr == nil {
+			if st.IsDir() && st.Mode()&os.ModeSymlink == 0 {
+				return fmt.Errorf("%s 是目录，拒绝覆盖", linkPath)
+			}
+			if removeErr := removeSymlinkFn(linkPath); removeErr != nil {
+				return fmt.Errorf("删除旧软链失败: %w", removeErr)
+			}
+		} else if !os.IsNotExist(statErr) {
+			return statErr
+		}
+		if err := createSymlinkFn(target, linkPath); err != nil {
+			return fmt.Errorf("跨设备 fallback 创建软链失败: %w", err)
+		}
+		log.Printf("安装更新步骤: 软链切换已通过跨设备 fallback 完成 link=%s target=%s", linkPath, target)
 	}
 	return nil
+}
+
+func rollbackBootstrappedBaseDir(baseDir, legacy string, cause error) error {
+	if removeErr := os.Remove(baseDir); removeErr != nil && !os.IsNotExist(removeErr) {
+		return fmt.Errorf("%w; 删除失败的 baseDir 软链失败: %v", cause, removeErr)
+	}
+	if renameErr := os.Rename(legacy, baseDir); renameErr != nil {
+		return fmt.Errorf("%w; 恢复 baseDir 失败: %v", cause, renameErr)
+	}
+	return cause
 }
 
 func ensureRuntimeSymlinks() (baseDir, currentLink, currentTarget string, err error) {
@@ -766,7 +979,7 @@ func ensureRuntimeSymlinks() (baseDir, currentLink, currentTarget string, err er
 			if rerr != nil {
 				return "", "", "", rerr
 			}
-			if err := updateSymlinkAtomic(currentLink, target); err != nil {
+			if err := updateSymlinkFn(currentLink, target); err != nil {
 				return "", "", "", err
 			}
 		} else {
@@ -775,13 +988,13 @@ func ensureRuntimeSymlinks() (baseDir, currentLink, currentTarget string, err er
 			if err := os.Rename(baseDir, legacy); err != nil {
 				return "", "", "", fmt.Errorf("迁移 baseDir 失败: %w", err)
 			}
-			if err := updateSymlinkAtomic(baseDir, currentLink); err != nil {
+			if err := updateSymlinkFn(baseDir, currentLink); err != nil {
 				// Best-effort rollback.
 				_ = os.Rename(legacy, baseDir)
 				return "", "", "", err
 			}
-			if err := updateSymlinkAtomic(currentLink, legacy); err != nil {
-				return "", "", "", err
+			if err := updateSymlinkFn(currentLink, legacy); err != nil {
+				return "", "", "", rollbackBootstrappedBaseDir(baseDir, legacy, err)
 			}
 		}
 	}
@@ -794,7 +1007,7 @@ func ensureRuntimeSymlinks() (baseDir, currentLink, currentTarget string, err er
 			if err := os.Rename(baseDir, legacy); err != nil {
 				return "", "", "", fmt.Errorf("迁移 baseDir 失败: %w", err)
 			}
-			if err := updateSymlinkAtomic(baseDir, currentLink); err != nil {
+			if err := updateSymlinkFn(baseDir, currentLink); err != nil {
 				_ = os.Rename(legacy, baseDir)
 				return "", "", "", err
 			}
@@ -812,9 +1025,13 @@ func waitForServerHealthy(ctx context.Context) error {
 	deadline := time.Now().Add(30 * time.Second)
 	urlStr := fmt.Sprintf("http://127.0.0.1:%s/health", serverPort)
 	client := &http.Client{Timeout: 3 * time.Second}
+	var lastErr string
 
 	for {
 		if time.Now().After(deadline) {
+			if strings.TrimSpace(lastErr) != "" {
+				return fmt.Errorf("健康检查超时: %s (last=%s)", urlStr, lastErr)
+			}
 			return fmt.Errorf("健康检查超时: %s", urlStr)
 		}
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
@@ -823,8 +1040,12 @@ func waitForServerHealthy(ctx context.Context) error {
 			_, _ = io.ReadAll(io.LimitReader(resp.Body, 512))
 			_ = resp.Body.Close()
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				log.Printf("安装更新步骤: 健康检查通过 url=%s status=%d", urlStr, resp.StatusCode)
 				return nil
 			}
+			lastErr = fmt.Sprintf("status=%d", resp.StatusCode)
+		} else {
+			lastErr = err.Error()
 		}
 		time.Sleep(1 * time.Second)
 	}
@@ -849,61 +1070,66 @@ func installPreparedBundle(ctx context.Context, prepared *PreparedUpdate) error 
 	if st, err := os.Stat(stagingServerDir); err != nil || !st.IsDir() {
 		return fmt.Errorf("staging 缺少 server/ 目录: %s", stagingServerDir)
 	}
+	log.Printf("安装更新步骤: staging 校验通过 version=%s path=%s", version, stagingServerDir)
 
 	// Prevent concurrent install.
 	lockPath := filepath.Join(updateDir, "update.lock")
 	return withFileLock(lockPath, func() error {
-		stopServerProcess()
-
-		_, currentLink, prevTarget, err := ensureRuntimeSymlinks()
+		log.Printf("安装更新步骤: 获取更新锁成功 lock=%s version=%s", lockPath, version)
+		_, currentLink, prevTarget, err := ensureRuntimeFn()
 		if err != nil {
-			return err
+			return fmt.Errorf("初始化运行时软链失败: %w", err)
+		}
+		log.Printf("安装更新步骤: 运行时软链检查完成 current=%s previous=%s", currentLink, prevTarget)
+		if err := stopServerFn(); err != nil {
+			log.Printf("安装更新步骤: 停止服务返回异常 err=%v", err)
 		}
 
 		versionToken := sanitizePathToken(version)
 		releaseServerDir := filepath.Join(updateDir, "releases", versionToken, "server")
 		_ = os.RemoveAll(releaseServerDir)
 		ensureDir(filepath.Dir(releaseServerDir))
+		log.Printf("安装更新步骤: 准备写入新版本目录 target=%s", releaseServerDir)
 
 		if err := os.Rename(stagingServerDir, releaseServerDir); err != nil {
 			return fmt.Errorf("移动新版本目录失败: %w", err)
 		}
+		log.Printf("安装更新步骤: 新版本目录已就位 target=%s", releaseServerDir)
 
 		// Ensure executable bit.
 		_ = os.Chmod(filepath.Join(releaseServerDir, "server"), 0o755)
 
-		if err := updateSymlinkAtomic(currentLink, releaseServerDir); err != nil {
-			return err
+		if err := updateSymlinkFn(currentLink, releaseServerDir); err != nil {
+			return fmt.Errorf("切换 current 软链失败: %w", err)
 		}
+		log.Printf("安装更新步骤: current 软链切换完成 current=%s target=%s", currentLink, releaseServerDir)
 
-		if err := startServerProcess(); err != nil {
-			_ = updateSymlinkAtomic(currentLink, prevTarget)
-			_ = startServerProcess()
-			return err
-		}
-
-		if err := waitForServerHealthy(ctx); err != nil {
-			log.Printf("健康检查失败，回滚到旧版本: %s", prevTarget)
-			stopServerProcess()
-			_ = updateSymlinkAtomic(currentLink, prevTarget)
-			_ = startServerProcess()
-			return err
-		}
-
-		// Refresh local version file.
-		remoteCfg, err := getRemoteConfig()
-		if err == nil {
-			if data, mErr := json.MarshalIndent(remoteCfg, "", "  "); mErr == nil {
-				_ = os.WriteFile(localConfigFile, data, 0o644)
-			} else {
-				writeLocalVersionFallback(prepared.Version)
+		if err := startServerFn(ctx); err != nil {
+			rollbackErr := rollbackRuntimeFn(ctx, currentLink, prevTarget)
+			if rollbackErr != nil {
+				return fmt.Errorf("启动新版本失败: %w；回滚失败: %v", err, rollbackErr)
 			}
-		} else {
-			writeLocalVersionFallback(prepared.Version)
+			return fmt.Errorf("启动新版本失败: %w；已回滚到旧版本", err)
 		}
+
+		log.Printf("安装更新步骤: 开始等待健康检查 version=%s url=http://127.0.0.1:%s/health", version, serverPort)
+		if err := waitForServerHealthy(ctx); err != nil {
+			log.Printf("安装更新步骤: 健康检查失败 version=%s previous=%s err=%v", version, prevTarget, err)
+			rollbackErr := rollbackRuntimeFn(ctx, currentLink, prevTarget)
+			if rollbackErr != nil {
+				return fmt.Errorf("健康检查失败: %w；回滚失败: %v", err, rollbackErr)
+			}
+			return fmt.Errorf("健康检查失败: %w；已回滚到旧版本", err)
+		}
+
+		// Refresh local version file used by updater version detection.
+		writeLocalVersionFallback(prepared.Version)
+		log.Printf("安装更新步骤: 本地版本状态已更新 version=%s file=%s", prepared.Version, localConfigFile)
 
 		// Cleanup staging.
 		_ = os.RemoveAll(prepared.StagingDir)
+		log.Printf("安装更新步骤: 清理 staging 完成 path=%s", prepared.StagingDir)
+		log.Printf("安装更新步骤: 安装完成 version=%s runtime=%s", version, releaseServerDir)
 		return nil
 	})
 }
@@ -915,8 +1141,9 @@ func writeLocalVersionFallback(version string) {
 	}
 
 	now := time.Now().Format("2006.01.02")
+	ensureDir(filepath.Dir(localConfigFile))
 
-	// Best effort: update existing CHANGELOG.json structure.
+	// Best effort: update the local version metadata file structure.
 	if data, err := os.ReadFile(localConfigFile); err == nil {
 		var cfg UpdateConfig
 		if json.Unmarshal(data, &cfg) == nil && len(cfg.History) > 0 {

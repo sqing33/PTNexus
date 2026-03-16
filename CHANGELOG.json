@@ -7,7 +7,7 @@
   ],
   "history": [
     {
-      "version": "v4.0.1",
+      "version": "v4.0.0",
       "date": "2026.03.16",
       "changes": [
         "修复：下载器连接测试改为真实握手，解决 Win QB 无法连接",

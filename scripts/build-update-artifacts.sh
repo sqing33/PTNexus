@@ -237,7 +237,7 @@ changelog_path, version, artifacts_jsonl, manifest_path = sys.argv[1:]
 with open(changelog_path, "r", encoding="utf-8") as f:
     changelog = json.load(f)
 
-history = changelog.get("history") or [{}]
+history = changelog.get("history") or []
 latest_log = history[0] if history else {}
 
 artifacts = []
@@ -261,8 +261,9 @@ if latest_log.get("note"):
     latest["note"] = latest_log["note"]
 
 manifest = {
-    "schema": 1,
+    "schema": 2,
     "latest": latest,
+    "history": history,
 }
 
 with open(manifest_path, "w", encoding="utf-8") as f:

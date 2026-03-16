@@ -64,7 +64,7 @@ func loadEnvFiles() []string {
 	}
 	root, found := detectServerGoRoot(cwd)
 	if !found {
-		messages = append(messages, fmt.Sprintf("未检测到 server 根目录（cwd=%s），将仅使用系统环境变量", cwd))
+		messages = append(messages, fmt.Sprintf("未检测到 .env 文件，将使用系统环境变量（cwd=%s）", cwd))
 		return messages
 	}
 

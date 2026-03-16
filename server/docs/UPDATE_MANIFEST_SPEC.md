@@ -6,7 +6,7 @@
 
 updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变，在线更新主链路为：
 
-- `/update/check`：基于 `CHANGELOG.json + UPDATE_MANIFEST.json` 计算版本、强更与禁更状态。
+- `/update/check`：基于 `UPDATE_MANIFEST.json` 计算版本、强更与禁更状态。
 - `/update/pull`：按平台下载构建产物（artifact），校验 SHA256，解压到 staging。
 - `/update/install`：切换到新版本目录并重启服务，健康检查失败时自动回滚。
 
@@ -21,7 +21,7 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "latest": {
     "version": "v3.6.4",
     "date": "2026.02.21",
@@ -41,13 +41,26 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
         "format": "tar.gz"
       }
     ]
-  }
+  },
+  "history": [
+    {
+      "version": "v3.6.4",
+      "date": "2026.02.21",
+      "force_update": false,
+      "disable_update": false,
+      "note": "可选说明",
+      "changes": [
+        "变更项"
+      ]
+    }
+  ]
 }
 ```
 
 字段约束：
 
-- `schema`、`latest.version`、`latest.artifacts` 必填。
+- `schema`、`latest.version`、`latest.artifacts`、`history` 必填。
+- `history[0].version` 必须与 `latest.version` 一致。
 - `artifacts[*].url` 与 `artifacts[*].mirror_urls` 至少要有一个可用下载地址。
 - `artifacts[*].sha256` 必填（除非显式开启跳过校验）。
 - `format` 支持 `tar.gz` 与 `zip`（默认按文件名推断）。
@@ -98,6 +111,6 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
 1. 只维护 `CHANGELOG.json`：更新 `history[0]` 与顶层 `artifact_sources`。
 2. 构建前端：`cd webui && pnpm run build`。
 3. 构建 server 二进制（按目标架构）。
-4. 执行 `scripts/build-update-artifacts.sh` 自动生成产物与 `UPDATE_MANIFEST.json`。
+4. 执行 `scripts/build-update-artifacts.sh` 自动生成产物与包含完整 `history` 的 `UPDATE_MANIFEST.json`。
 5. 上传 `dist/updates/<version>/` 下产物到 Release/对象存储。
 6. 将最终 `UPDATE_MANIFEST.json` 发布到 GitHub/Gitee 对应路径。

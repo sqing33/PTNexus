@@ -9,16 +9,12 @@ import (
 )
 
 const (
-	githubChangelogURL = "https://raw.githubusercontent.com/sqing33/PTNexus/main/CHANGELOG.json"
-	giteeChangelogURL  = "https://gitee.com/sqing33/PTNexus/raw/main/CHANGELOG.json"
 	// Manifest is expected to be published as a Release asset.
-	// Keep latest/raw URLs as backward-compatible fallbacks.
+	// Runtime metadata is served only from Release assets.
 	githubManifestReleaseURLTemplate = "https://github.com/sqing33/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
 	giteeManifestReleaseURLTemplate  = "https://gitee.com/sqing33/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
 	githubManifestReleaseLatestURL   = "https://github.com/sqing33/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
 	giteeManifestReleaseLatestURL    = "https://gitee.com/sqing33/PTNexus/releases/download/latest/UPDATE_MANIFEST.json"
-	githubManifestRawURL             = "https://raw.githubusercontent.com/sqing33/PTNexus/main/UPDATE_MANIFEST.json"
-	giteeManifestRawURL              = "https://gitee.com/sqing33/PTNexus/raw/main/UPDATE_MANIFEST.json"
 )
 
 func normalizeURLCandidates(urls ...string) []string {
@@ -38,12 +34,6 @@ func normalizeURLCandidates(urls ...string) []string {
 	return out
 }
 
-func changelogCandidates() []string {
-	// Allow explicit override for deployments that publish changelog in another repo/location.
-	override := strings.TrimSpace(getEnv("UPDATE_CHANGELOG_URL", ""))
-	return normalizeURLCandidates(override, githubChangelogURL, giteeChangelogURL)
-}
-
 func manifestReleaseCandidatesForVersion(version string) []string {
 	clean := strings.TrimSpace(version)
 	if clean == "" {
@@ -58,9 +48,9 @@ func manifestReleaseCandidatesForVersion(version string) []string {
 }
 
 func manifestCandidates(versionHints ...string) []string {
-	// Backward compatibility for existing deployments that explicitly override manifest URL.
+	// Allow explicit override for deployments that publish manifest in another location.
 	override := strings.TrimSpace(getEnv("UPDATE_MANIFEST_URL", ""))
-	candidates := make([]string, 0, 1+len(versionHints)*2+4)
+	candidates := make([]string, 0, 1+len(versionHints)*2+2)
 	candidates = append(candidates, override)
 	for _, hint := range versionHints {
 		candidates = append(candidates, manifestReleaseCandidatesForVersion(hint)...)
@@ -68,8 +58,6 @@ func manifestCandidates(versionHints ...string) []string {
 	candidates = append(candidates,
 		githubManifestReleaseLatestURL,
 		giteeManifestReleaseLatestURL,
-		githubManifestRawURL,
-		giteeManifestRawURL,
 	)
 	return normalizeURLCandidates(candidates...)
 }

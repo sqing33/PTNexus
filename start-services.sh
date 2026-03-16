@@ -15,6 +15,62 @@ log_bootstrap() {
   echo "[bootstrap] $*"
 }
 
+update_symlink_atomic() {
+  local link_path="$1"
+  local target="$2"
+  local tmp="${link_path}.tmp.$$"
+
+  mkdir -p "$(dirname "$link_path")"
+  rm -f "$tmp"
+  ln -s "$target" "$tmp"
+  mv -Tf "$tmp" "$link_path"
+}
+
+restore_updated_runtime() {
+  local base_dir="${PTNEXUS_BASE_DIR:-/app/server}"
+  local update_root="${UPDATE_DIR:-/app/data/updates}"
+  local current_link="${update_root}/current"
+
+  if [ ! -L "$current_link" ]; then
+    return 0
+  fi
+
+  local resolved_target
+  resolved_target="$(readlink -f "$current_link" 2>/dev/null || true)"
+  if [ -z "$resolved_target" ] || [ ! -x "${resolved_target}/server" ]; then
+    log_bootstrap "检测到持久化更新入口无效，继续使用镜像内运行时: ${current_link}"
+    return 0
+  fi
+
+  if [ -L "$base_dir" ]; then
+    local current_target=""
+    current_target="$(readlink -f "$base_dir" 2>/dev/null || true)"
+    if [ "$current_target" = "$resolved_target" ]; then
+      log_bootstrap "已使用持久化更新版本运行时: ${resolved_target}"
+      return 0
+    fi
+  fi
+
+  local backup_dir=""
+  if [ -e "$base_dir" ] && [ ! -L "$base_dir" ]; then
+    backup_dir="${base_dir}.image.$(date +%Y%m%d-%H%M%S)"
+    mv "$base_dir" "$backup_dir"
+  fi
+
+  if ! update_symlink_atomic "$base_dir" "$current_link"; then
+    if [ -n "$backup_dir" ] && [ ! -e "$base_dir" ]; then
+      mv "$backup_dir" "$base_dir"
+    fi
+    echo "恢复持久化更新运行时失败：${base_dir} -> ${current_link}" >&2
+    return 1
+  fi
+
+  if [ -n "$backup_dir" ]; then
+    log_bootstrap "已切换为持久化更新版本运行时，镜像内运行时备份到: ${backup_dir}"
+  fi
+  log_bootstrap "已恢复在线更新版本运行时: ${resolved_target}"
+}
+
 find_supervisord() {
   if command -v supervisord >/dev/null 2>&1; then
     command -v supervisord
@@ -162,6 +218,7 @@ ensure_python_deps() {
 
 ensure_system_deps
 ensure_python_deps
+restore_updated_runtime
 
 echo "启动 supervisord（Go 版）进行多服务编排..."
 SUPERVISORD_BIN="$(find_supervisord)" || {

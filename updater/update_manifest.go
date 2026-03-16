@@ -17,8 +17,9 @@ import (
 // Phase 1 goal: map "latest" -> downloadable runtime bundle (artifact) per OS/ARCH.
 // This allows online update without git.
 type UpdateManifest struct {
-	Schema int            `json:"schema"`
-	Latest ManifestLatest `json:"latest"`
+	Schema  int            `json:"schema"`
+	Latest  ManifestLatest `json:"latest"`
+	History []VersionInfo  `json:"history"`
 }
 
 type ManifestLatest struct {
@@ -84,6 +85,26 @@ func fetchJSON(urlStr string, dst any) error {
 	return fetchJSONWithContext(context.Background(), urlStr, dst, 15*time.Second)
 }
 
+func validateUpdateManifest(manifest *UpdateManifest) error {
+	if manifest == nil {
+		return fmt.Errorf("更新清单为空")
+	}
+	if strings.TrimSpace(manifest.Latest.Version) == "" {
+		return fmt.Errorf("UPDATE_MANIFEST.json 缺少 latest.version")
+	}
+	if len(manifest.History) == 0 {
+		return fmt.Errorf("UPDATE_MANIFEST.json 缺少 history")
+	}
+	latestHistory := manifest.History[0]
+	if strings.TrimSpace(latestHistory.Version) == "" {
+		return fmt.Errorf("UPDATE_MANIFEST.json 缺少 history[0].version")
+	}
+	if strings.TrimSpace(latestHistory.Version) != strings.TrimSpace(manifest.Latest.Version) {
+		return fmt.Errorf("UPDATE_MANIFEST.json latest.version 与 history[0].version 不一致")
+	}
+	return nil
+}
+
 func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {
 	cleanHints := make([]string, 0, len(versionHints))
 	for _, hint := range versionHints {
@@ -92,23 +113,12 @@ func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {
 		}
 	}
 
-	// 未显式提供版本提示时，尝试先从 CHANGELOG 读取最新版本，拼出 release/tag 地址。
-	if len(cleanHints) == 0 {
-		if cfg, err := getRemoteConfig(); err == nil && len(cfg.History) > 0 {
-			if v := strings.TrimSpace(cfg.History[0].Version); v != "" {
-				cleanHints = append(cleanHints, v)
-			}
-		} else if err != nil {
-			log.Printf("获取更新清单前读取远程版本失败，继续尝试默认地址: %v", err)
-		}
-	}
-
 	manifest, source, err := fetchJSONFromCandidates[UpdateManifest](context.Background(), manifestCandidates(cleanHints...), 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败: %w", err)
 	}
-	if strings.TrimSpace(manifest.Latest.Version) == "" {
-		return nil, fmt.Errorf("UPDATE_MANIFEST.json 缺少 latest.version")
+	if err := validateUpdateManifest(manifest); err != nil {
+		return nil, err
 	}
 	log.Printf("获取更新清单成功，使用源: %s", source)
 	return manifest, nil
