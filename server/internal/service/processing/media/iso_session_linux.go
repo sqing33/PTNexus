@@ -57,7 +57,7 @@ func openISOSession(isoPath string, scene string) (*MediaSession, error) {
 		if text == "" {
 			text = err.Error()
 		}
-		return nil, fmt.Errorf("ISO 挂载失败，请确认当前进程具备 mount 权限且容器已开启 SYS_ADMIN/loop 设备支持: %s", text)
+		return nil, fmt.Errorf("ISO 挂载失败，请确认当前进程具备 mount 权限；%s；底层错误: %s", buildLinuxDockerISOMountHint(), text)
 	}
 
 	logx.Infof(isoSessionLogModule, "挂载成功 scene=%s iso=%s mount_dir=%s elapsed_ms=%d", scene, trimmedISOPath, mountDir, time.Since(startedAt).Milliseconds())

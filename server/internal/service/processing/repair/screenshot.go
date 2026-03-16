@@ -96,7 +96,7 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 	logx.PlainInfof("开始在路径 '%s' 中查找目标视频文件...", fullVideoPath)
 	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "截图生成")
 	if err != nil {
-		logx.PlainWarnf("错误：在指定路径中未找到视频文件。")
+		logx.PlainWarnf("错误：在指定路径中未找到视频文件: %v", err)
 		return nil, err
 	}
 	defer func() {
@@ -105,7 +105,7 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 		}
 	}()
 	targetVideoFile := targetResult.TargetFile
-	logx.PlainInfof("找到唯一的视频文件: %s", targetVideoFile)
+	logx.PlainInfof("找到目标媒体文件: source=%s target=%s", targetResult.SourcePath, targetVideoFile)
 
 	mpvPath, err := resolveBinary("mpv", "PTNEXUS_MPV_PATH")
 	if err != nil {

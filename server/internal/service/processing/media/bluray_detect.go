@@ -15,50 +15,52 @@ const blurayDetectLogModule = "蓝光判定"
 // 失败场景：savePath 为空时返回 false 与空路径。
 // 副作用：读取文件系统并输出蓝光判定日志。
 func DetectBlurayDiscByCandidates(savePath, torrentName, contentName string) (bool, string) {
-	trimmedSavePath := strings.TrimSpace(savePath)
-	if trimmedSavePath == "" {
-		logx.Warnf(blurayDetectLogModule, "参数异常：save_path 为空")
-		return false, ""
+	return DetectBlurayDiscByRoots([]string{savePath}, torrentName, contentName)
+}
+
+// DetectBlurayDiscByRoots 按多个保存路径根探测是否为蓝光原盘目录。
+// 参数/返回：savePaths 为按优先级排列的保存路径根；torrentName/contentName 为候选子路径；返回是否命中及最终命中的路径。
+// 失败场景：savePaths 全为空时返回 false 与空路径。
+// 副作用：读取文件系统并输出蓝光判定日志。
+func DetectBlurayDiscByRoots(savePaths []string, torrentName, contentName string) (bool, string) {
+	candidates := buildMediaPathCandidates(savePaths, torrentName, contentName)
+	fallbackPath := firstNonEmptyMediaRoot(savePaths)
+	if len(candidates) == 0 {
+		logx.Warnf(blurayDetectLogModule, "参数异常：save_paths 为空")
+		return false, fallbackPath
 	}
-	candidates := BuildMediaPathCandidates(trimmedSavePath, torrentName, contentName)
 	logx.Infof(
 		blurayDetectLogModule,
-		"候选路径生成：save_path=%s torrent_name=%s content_name=%s candidates=%v",
-		trimmedSavePath, strings.TrimSpace(torrentName), strings.TrimSpace(contentName), candidates,
+		"候选路径生成：save_paths=%v torrent_name=%s content_name=%s candidates=%s",
+		savePaths, strings.TrimSpace(torrentName), strings.TrimSpace(contentName), formatMediaPathCandidatesForLog(candidates),
 	)
 
-	seen := map[string]struct{}{}
 	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if _, exists := seen[candidate]; exists {
-			logx.Debugf(blurayDetectLogModule, "跳过重复候选：candidate=%s", candidate)
-			continue
-		}
-		seen[candidate] = struct{}{}
-		logx.Infof(blurayDetectLogModule, "检测候选路径：candidate=%s", candidate)
-		access, err := ResolveMediaAccessForPath(candidate, "蓝光判定")
+		logx.Infof(
+			blurayDetectLogModule,
+			"检测候选路径：source=%s candidate=%s allow_dir_scan=%t",
+			normalizeMediaCandidateSource(candidate.Source), candidate.Path, candidate.AllowDirScan,
+		)
+		access, err := resolveMediaAccessForCandidate(candidate, "蓝光判定")
 		if err != nil {
-			logx.Warnf(blurayDetectLogModule, "解析候选路径失败：candidate=%s err=%v", candidate, err)
+			logx.Warnf(blurayDetectLogModule, "解析候选路径失败：source=%s candidate=%s err=%v", normalizeMediaCandidateSource(candidate.Source), candidate.Path, err)
 			continue
 		}
 		root := FindBlurayRootPath(access.ResolvedPath)
 		closeErr := access.Close()
 		if closeErr != nil {
-			logx.Warnf(blurayDetectLogModule, "关闭候选路径访问会话失败：candidate=%s err=%v", candidate, closeErr)
+			logx.Warnf(blurayDetectLogModule, "关闭候选路径访问会话失败：candidate=%s err=%v", candidate.Path, closeErr)
 		}
 		if root != "" {
-			logx.Warnf(blurayDetectLogModule, "命中原盘目录：candidate=%s source=%s root=%s", candidate, access.SourcePath, root)
+			logx.Warnf(blurayDetectLogModule, "命中原盘目录：candidate=%s source=%s root=%s", candidate.Path, access.SourcePath, root)
 			if strings.TrimSpace(access.SourcePath) != "" {
 				return true, access.SourcePath
 			}
-			return true, candidate
+			return true, candidate.Path
 		}
 	}
-	logx.Infof(blurayDetectLogModule, "未命中原盘目录：fallback_path=%s", trimmedSavePath)
-	return false, trimmedSavePath
+	logx.Infof(blurayDetectLogModule, "未命中原盘目录：fallback_path=%s", fallbackPath)
+	return false, fallbackPath
 }
 
 // FindBlurayRootPath 从给定路径向上回溯蓝光根目录。
@@ -141,4 +143,14 @@ func detectBlurayDiscAtPath(rawPath string) bool {
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+func firstNonEmptyMediaRoot(paths []string) string {
+	for _, path := range paths {
+		trimmed := strings.TrimSpace(path)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

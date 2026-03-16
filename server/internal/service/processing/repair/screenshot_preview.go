@@ -71,6 +71,7 @@ func ShouldUseScreenshotPreview(input ScreenshotGenerateInput) (bool, error) {
 		}
 	}()
 	targetVideoFile := targetResult.TargetFile
+	logx.Infof(screenshotPreviewLogModule, "预览判定命中目标媒体 source=%s target=%s", targetResult.SourcePath, targetVideoFile)
 	ffprobePath, err := resolveBinary("ffprobe", "PTNEXUS_FFPROBE_PATH")
 	if err != nil {
 		return false, err
@@ -172,6 +173,7 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 		}
 	}()
 	targetVideoFile := targetResult.TargetFile
+	logx.Infof(screenshotPreviewLogModule, "预览生成命中目标媒体 source=%s target=%s", targetResult.SourcePath, targetVideoFile)
 	ffmpegPath, err := resolveBinary("ffmpeg", "PTNEXUS_FFMPEG_PATH")
 	if err != nil {
 		return nil, err
@@ -291,7 +293,7 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 	logx.PlainInfof("开始在路径 '%s' 中查找目标视频文件...", fullVideoPath)
 	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "正式截图生成")
 	if err != nil {
-		logx.PlainWarnf("错误：在指定路径中未找到视频文件。")
+		logx.PlainWarnf("错误：在指定路径中未找到视频文件: %v", err)
 		return nil, err
 	}
 	defer func() {
@@ -300,7 +302,7 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 		}
 	}()
 	targetVideoFile := targetResult.TargetFile
-	logx.PlainInfof("找到唯一的视频文件: %s", targetVideoFile)
+	logx.PlainInfof("找到目标媒体文件: source=%s target=%s", targetResult.SourcePath, targetVideoFile)
 
 	mpvPath, err := resolveBinary("mpv", "PTNEXUS_MPV_PATH")
 	if err != nil {

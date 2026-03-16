@@ -46,6 +46,12 @@ type ResolvedMediaTarget struct {
 	TargetFile   string
 }
 
+type mediaPathCandidate struct {
+	Path         string
+	Source       string
+	AllowDirScan bool
+}
+
 // Close 结束本地媒体访问会话。
 // 参数/返回：无；返回底层卸载/清理错误。
 // 失败场景：ISO 卸载失败或临时目录清理失败时返回错误。
@@ -105,21 +111,37 @@ func OpenMediaSession(rawPath string, scene string) (*MediaSession, error) {
 // 失败场景：无。
 // 副作用：无。
 func BuildMediaPathCandidates(savePath, torrentName, contentName string) []string {
-	trimmedSavePath := strings.TrimSpace(savePath)
-	trimmedTorrentName := strings.TrimSpace(torrentName)
-	trimmedContentName := strings.TrimSpace(contentName)
+	return BuildMediaPathCandidatesForRoots([]string{savePath}, torrentName, contentName)
+}
 
-	candidates := make([]string, 0, 3)
-	if trimmedSavePath != "" && trimmedTorrentName != "" {
-		candidates = append(candidates, filepath.Join(trimmedSavePath, trimmedTorrentName))
+// BuildMediaPathCandidatesForRoots 为多组保存路径生成媒体访问候选路径列表。
+// 参数/返回：savePaths 为按优先级排列的保存路径根；torrentName/contentName 为候选子路径；返回去重后的候选路径顺序列表。
+// 失败场景：无。
+// 副作用：无。
+func BuildMediaPathCandidatesForRoots(savePaths []string, torrentName, contentName string) []string {
+	candidates := buildMediaPathCandidates(savePaths, torrentName, contentName)
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, candidate.Path)
 	}
-	if trimmedSavePath != "" && trimmedContentName != "" && !strings.EqualFold(trimmedContentName, trimmedTorrentName) {
-		candidates = append(candidates, filepath.Join(trimmedSavePath, trimmedContentName))
-	}
-	if trimmedSavePath != "" {
-		candidates = append(candidates, trimmedSavePath)
-	}
-	return candidates
+	return out
+}
+
+// ResolveMediaAccessByCandidates 按候选路径顺序解析本地可访问媒体路径。
+// 参数/返回：savePath/torrentName/contentName 用于生成候选路径；scene 用于日志标记；返回首个可访问结果。
+// 失败场景：所有候选均不存在或无法访问时返回聚合错误。
+// 副作用：可能调用系统挂载命令并创建临时挂载点。
+func ResolveMediaAccessByCandidates(savePath, torrentName, contentName, scene string) (*LocalMediaAccess, error) {
+	return ResolveMediaAccessByRoots([]string{savePath}, torrentName, contentName, scene)
+}
+
+// ResolveMediaAccessByRoots 按多个保存路径根解析首个可访问的本地媒体路径。
+// 参数/返回：savePaths 为按优先级排列的保存路径根；torrentName/contentName 为候选子路径；scene 用于日志标记；返回首个可访问结果。
+// 失败场景：所有候选均不存在、目录扫描被禁止或 ISO 挂载失败时返回聚合错误。
+// 副作用：可能调用系统挂载命令并创建临时挂载点。
+func ResolveMediaAccessByRoots(savePaths []string, torrentName, contentName, scene string) (*LocalMediaAccess, error) {
+	candidates := buildMediaPathCandidates(savePaths, torrentName, contentName)
+	return resolveMediaAccessByCandidateList(candidates, scene)
 }
 
 // ResolveMediaAccessForPath 解析单个候选路径，必要时自动挂载 ISO。
@@ -127,11 +149,89 @@ func BuildMediaPathCandidates(savePath, torrentName, contentName string) []strin
 // 失败场景：候选路径不存在、目录内未找到可访问媒体、ISO 挂载失败时返回错误。
 // 副作用：可能调用系统挂载命令并创建临时挂载点。
 func ResolveMediaAccessForPath(candidate string, scene string) (*LocalMediaAccess, error) {
-	trimmed := strings.TrimSpace(candidate)
+	return resolveMediaAccessForCandidate(mediaPathCandidate{
+		Path:         candidate,
+		Source:       "manual",
+		AllowDirScan: true,
+	}, scene)
+}
+
+// ResolveMediaTargetByCandidates 按候选路径顺序定位实际可分析的媒体文件。
+// 参数/返回：savePath/torrentName/contentName 用于生成候选路径；scene 用于日志标记；返回包含目标文件与会话的解析结果。
+// 失败场景：所有候选均无法解析出真实媒体文件时返回错误。
+// 副作用：可能调用系统挂载命令并创建临时挂载点。
+func ResolveMediaTargetByCandidates(savePath, torrentName, contentName, scene string) (*ResolvedMediaTarget, error) {
+	return ResolveMediaTargetByRoots([]string{savePath}, torrentName, contentName, scene)
+}
+
+// ResolveMediaTargetByRoots 按多个保存路径根定位可分析的真实媒体文件。
+// 参数/返回：savePaths 为按优先级排列的保存路径根；torrentName/contentName 为候选子路径；scene 用于日志标记；返回包含目标文件与会话的解析结果。
+// 失败场景：所有候选均无法解析出真实媒体文件时返回聚合错误。
+// 副作用：可能调用系统挂载命令并创建临时挂载点。
+func ResolveMediaTargetByRoots(savePaths []string, torrentName, contentName, scene string) (*ResolvedMediaTarget, error) {
+	candidates := buildMediaPathCandidates(savePaths, torrentName, contentName)
+	return resolveMediaTargetByCandidateList(candidates, scene)
+}
+
+// ResolveMediaTargetForPath 解析单个路径对应的真实媒体文件。
+// 参数/返回：path 为单个候选路径；scene 用于日志标记；返回目标文件与会话信息。
+// 失败场景：路径不存在、媒体文件定位失败、ISO 挂载失败时返回错误。
+// 副作用：可能调用系统挂载命令并创建临时挂载点。
+func ResolveMediaTargetForPath(path string, scene string) (*ResolvedMediaTarget, error) {
+	return resolveMediaTargetForCandidate(mediaPathCandidate{
+		Path:         path,
+		Source:       "manual",
+		AllowDirScan: true,
+	}, scene)
+}
+
+func resolveMediaAccessByCandidateList(candidates []mediaPathCandidate, scene string) (*LocalMediaAccess, error) {
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("未找到可访问的媒体路径")
+	}
+	logx.Infof(isoSessionLogModule, "媒体候选列表 scene=%s candidates=%s", normalizeMediaScene(scene), formatMediaPathCandidatesForLog(candidates))
+
+	errorsList := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		access, err := resolveMediaAccessForCandidate(candidate, scene)
+		if err != nil {
+			errorsList = append(errorsList, fmt.Sprintf("%s => %v", formatMediaPathCandidateLabel(candidate), err))
+			continue
+		}
+		return access, nil
+	}
+	return nil, fmt.Errorf("未找到可访问的媒体路径: %s", strings.Join(errorsList, "；"))
+}
+
+func resolveMediaTargetByCandidateList(candidates []mediaPathCandidate, scene string) (*ResolvedMediaTarget, error) {
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("未找到可用于分析的媒体文件")
+	}
+	logx.Infof(isoSessionLogModule, "媒体目标候选列表 scene=%s candidates=%s", normalizeMediaScene(scene), formatMediaPathCandidatesForLog(candidates))
+
+	errorsList := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		target, err := resolveMediaTargetForCandidate(candidate, scene)
+		if err != nil {
+			errorsList = append(errorsList, fmt.Sprintf("%s => %v", formatMediaPathCandidateLabel(candidate), err))
+			continue
+		}
+		return target, nil
+	}
+	return nil, fmt.Errorf("未找到可用于分析的媒体文件: %s", strings.Join(errorsList, "；"))
+}
+
+func resolveMediaAccessForCandidate(candidate mediaPathCandidate, scene string) (*LocalMediaAccess, error) {
+	trimmed := strings.TrimSpace(candidate.Path)
 	if trimmed == "" {
 		return nil, errors.New("候选路径为空")
 	}
 
+	logx.Infof(
+		isoSessionLogModule,
+		"尝试解析候选 scene=%s source=%s path=%s allow_dir_scan=%t",
+		normalizeMediaScene(scene), normalizeMediaCandidateSource(candidate.Source), trimmed, candidate.AllowDirScan,
+	)
 	info, err := os.Stat(trimmed)
 	if err != nil {
 		return nil, fmt.Errorf("访问候选路径失败: %w", err)
@@ -157,11 +257,19 @@ func ResolveMediaAccessForPath(candidate string, scene string) (*LocalMediaAcces
 			ResolvedPath: session.ResolvedPath,
 		}, nil
 	}
+	if !candidate.AllowDirScan {
+		return nil, fmt.Errorf("候选目录存在，但当前场景禁止在目录内回退扫描媒体文件: %s", trimmed)
+	}
 
 	leafPath, pickErr := pickMediaEntry(trimmed, true)
 	if pickErr != nil {
 		return nil, pickErr
 	}
+	logx.Infof(
+		isoSessionLogModule,
+		"目录候选命中叶子节点 scene=%s source=%s base=%s leaf=%s",
+		normalizeMediaScene(scene), normalizeMediaCandidateSource(candidate.Source), trimmed, leafPath,
+	)
 	session, openErr := OpenMediaSession(leafPath, scene)
 	if openErr != nil {
 		return nil, openErr
@@ -173,78 +281,8 @@ func ResolveMediaAccessForPath(candidate string, scene string) (*LocalMediaAcces
 	}, nil
 }
 
-// ResolveMediaAccessByCandidates 按候选路径顺序解析本地可访问媒体路径。
-// 参数/返回：savePath/torrentName/contentName 用于生成候选路径；scene 用于日志标记；返回首个可访问结果。
-// 失败场景：所有候选均不存在或无法访问时返回聚合错误。
-// 副作用：可能调用系统挂载命令并创建临时挂载点。
-func ResolveMediaAccessByCandidates(savePath, torrentName, contentName, scene string) (*LocalMediaAccess, error) {
-	candidates := BuildMediaPathCandidates(savePath, torrentName, contentName)
-	seen := map[string]struct{}{}
-	errorsList := make([]string, 0)
-
-	for _, candidate := range candidates {
-		trimmed := strings.TrimSpace(candidate)
-		if trimmed == "" {
-			continue
-		}
-		if _, exists := seen[trimmed]; exists {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-
-		access, err := ResolveMediaAccessForPath(trimmed, scene)
-		if err != nil {
-			errorsList = append(errorsList, fmt.Sprintf("%s => %v", trimmed, err))
-			continue
-		}
-		return access, nil
-	}
-
-	if len(errorsList) == 0 {
-		return nil, fmt.Errorf("未找到可访问的媒体路径")
-	}
-	return nil, fmt.Errorf("未找到可访问的媒体路径: %s", strings.Join(errorsList, "；"))
-}
-
-// ResolveMediaTargetByCandidates 按候选路径顺序定位实际可分析的媒体文件。
-// 参数/返回：savePath/torrentName/contentName 用于生成候选路径；scene 用于日志标记；返回包含目标文件与会话的解析结果。
-// 失败场景：所有候选均无法解析出真实媒体文件时返回错误。
-// 副作用：可能调用系统挂载命令并创建临时挂载点。
-func ResolveMediaTargetByCandidates(savePath, torrentName, contentName, scene string) (*ResolvedMediaTarget, error) {
-	candidates := BuildMediaPathCandidates(savePath, torrentName, contentName)
-	seen := map[string]struct{}{}
-	errorsList := make([]string, 0)
-
-	for _, candidate := range candidates {
-		trimmed := strings.TrimSpace(candidate)
-		if trimmed == "" {
-			continue
-		}
-		if _, exists := seen[trimmed]; exists {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-
-		target, err := ResolveMediaTargetForPath(trimmed, scene)
-		if err != nil {
-			errorsList = append(errorsList, fmt.Sprintf("%s => %v", trimmed, err))
-			continue
-		}
-		return target, nil
-	}
-
-	if len(errorsList) == 0 {
-		return nil, fmt.Errorf("未找到可用于分析的媒体文件")
-	}
-	return nil, fmt.Errorf("未找到可用于分析的媒体文件: %s", strings.Join(errorsList, "；"))
-}
-
-// ResolveMediaTargetForPath 解析单个路径对应的真实媒体文件。
-// 参数/返回：path 为单个候选路径；scene 用于日志标记；返回目标文件与会话信息。
-// 失败场景：路径不存在、媒体文件定位失败、ISO 挂载失败时返回错误。
-// 副作用：可能调用系统挂载命令并创建临时挂载点。
-func ResolveMediaTargetForPath(path string, scene string) (*ResolvedMediaTarget, error) {
-	access, err := ResolveMediaAccessForPath(path, scene)
+func resolveMediaTargetForCandidate(candidate mediaPathCandidate, scene string) (*ResolvedMediaTarget, error) {
+	access, err := resolveMediaAccessForCandidate(candidate, scene)
 	if err != nil {
 		return nil, err
 	}
@@ -263,6 +301,109 @@ func ResolveMediaTargetForPath(path string, scene string) (*ResolvedMediaTarget,
 		ResolvedPath: access.ResolvedPath,
 		TargetFile:   targetFile,
 	}, nil
+}
+
+func buildMediaPathCandidates(savePaths []string, torrentName, contentName string) []mediaPathCandidate {
+	trimmedTorrentName := strings.TrimSpace(torrentName)
+	trimmedContentName := strings.TrimSpace(contentName)
+
+	candidates := make([]mediaPathCandidate, 0, len(savePaths)*3)
+	indexByPath := map[string]int{}
+	for _, savePath := range savePaths {
+		trimmedSavePath := strings.TrimSpace(savePath)
+		if trimmedSavePath == "" {
+			continue
+		}
+		allowSavePathDirScan := shouldAllowSavePathDirScan(trimmedSavePath, trimmedTorrentName, trimmedContentName)
+		if trimmedTorrentName != "" {
+			appendMediaPathCandidate(&candidates, indexByPath, mediaPathCandidate{
+				Path:         filepath.Join(trimmedSavePath, trimmedTorrentName),
+				Source:       "torrent_name",
+				AllowDirScan: true,
+			})
+		}
+		if trimmedContentName != "" && !strings.EqualFold(trimmedContentName, trimmedTorrentName) {
+			appendMediaPathCandidate(&candidates, indexByPath, mediaPathCandidate{
+				Path:         filepath.Join(trimmedSavePath, trimmedContentName),
+				Source:       "content_name",
+				AllowDirScan: true,
+			})
+		}
+		appendMediaPathCandidate(&candidates, indexByPath, mediaPathCandidate{
+			Path:         trimmedSavePath,
+			Source:       "save_path",
+			AllowDirScan: allowSavePathDirScan,
+		})
+	}
+	return candidates
+}
+
+func shouldAllowSavePathDirScan(savePath, torrentName, contentName string) bool {
+	if torrentName == "" && contentName == "" {
+		return true
+	}
+	baseName := strings.TrimSpace(filepath.Base(strings.TrimSpace(savePath)))
+	if baseName == "" {
+		return false
+	}
+	if torrentName != "" && strings.EqualFold(baseName, torrentName) {
+		return true
+	}
+	if contentName != "" && strings.EqualFold(baseName, contentName) {
+		return true
+	}
+	return false
+}
+
+func appendMediaPathCandidate(candidates *[]mediaPathCandidate, indexByPath map[string]int, candidate mediaPathCandidate) {
+	candidate.Path = strings.TrimSpace(candidate.Path)
+	if candidate.Path == "" {
+		return
+	}
+	if idx, exists := indexByPath[candidate.Path]; exists {
+		current := (*candidates)[idx]
+		if mediaCandidateSourcePriority(candidate.Source) > mediaCandidateSourcePriority(current.Source) {
+			current.Source = candidate.Source
+		}
+		current.AllowDirScan = current.AllowDirScan || candidate.AllowDirScan
+		(*candidates)[idx] = current
+		return
+	}
+	indexByPath[candidate.Path] = len(*candidates)
+	*candidates = append(*candidates, candidate)
+}
+
+func mediaCandidateSourcePriority(source string) int {
+	switch normalizeMediaCandidateSource(source) {
+	case "torrent_name":
+		return 3
+	case "content_name":
+		return 2
+	case "save_path":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func formatMediaPathCandidatesForLog(candidates []mediaPathCandidate) string {
+	parts := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		parts = append(parts, fmt.Sprintf("%s{%s scan=%t}", normalizeMediaCandidateSource(candidate.Source), candidate.Path, candidate.AllowDirScan))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatMediaPathCandidateLabel(candidate mediaPathCandidate) string {
+	return fmt.Sprintf("%s[%s]", normalizeMediaCandidateSource(candidate.Source), strings.TrimSpace(candidate.Path))
+}
+
+func normalizeMediaCandidateSource(source string) string {
+	trimmed := strings.TrimSpace(source)
+	if trimmed == "" {
+		return "unknown"
+	}
+	return trimmed
 }
 
 func newPassthroughMediaSession(path string) *MediaSession {
@@ -375,4 +516,8 @@ func resolveISOMountRoot() string {
 		return filepath.Join(filepath.Clean(dataDir), "tmp", "iso-mounts")
 	}
 	return filepath.Join(os.TempDir(), "ptnexus", "iso-mounts")
+}
+
+func buildLinuxDockerISOMountHint() string {
+	return "若运行在原生 Linux Docker，请设置 PTNEXUS_ISO_MOUNT_ROOT=/app/data/tmp/iso-mounts，并为容器增加 cap_add: [SYS_ADMIN]、devices: /dev/loop-control 与 /dev/loop0..3；Docker Desktop / WSL 不支持容器内自动挂载 ISO"
 }
