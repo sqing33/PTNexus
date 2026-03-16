@@ -156,6 +156,7 @@ func defaultConfig() map[string]any {
 			"key":          "",
 			"e2e_password": "",
 		},
+		"network_proxy": DefaultNetworkProxyConfig().ToMap(),
 		"cross_seed": map[string]any{
 			"image_hoster":                     "pixhost",
 			"seedvault_email":                  "",

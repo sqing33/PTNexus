@@ -145,6 +145,56 @@
         </div>
       </div>
 
+      <div
+        class="settings-card glass-card glass-rounded glass-transparent-header glass-transparent-body"
+      >
+        <div class="card-header">
+          <div class="header-content">
+            <el-icon class="header-icon">
+              <Link />
+            </el-icon>
+            <h3>网络代理</h3>
+          </div>
+          <el-button
+            type="primary"
+            :loading="savingNetworkProxy"
+            @click="saveNetworkProxySettings"
+            size="small"
+          >
+            保存
+          </el-button>
+        </div>
+
+        <div class="card-content">
+          <el-form :model="networkProxyForm" label-position="top" class="settings-form">
+            <el-form-item label="代理 URL" class="form-item">
+              <el-input
+                v-model="networkProxyForm.proxy_url"
+                placeholder="例如 http://127.0.0.1:7890"
+                clearable
+              />
+            </el-form-item>
+
+            <el-form-item label="NO_PROXY" class="form-item">
+              <el-input
+                v-model="networkProxyForm.no_proxy"
+                placeholder="例如 localhost,127.0.0.1,::1,192.168.0.0/16"
+                clearable
+              />
+            </el-form-item>
+
+            <div class="form-spacer"></div>
+
+            <el-text type="info" size="small" class="proxy-hint">
+              <el-icon size="12">
+                <InfoFilled />
+              </el-icon>
+              填写后后续新请求立即使用该代理；留空则回退 HTTP_PROXY / HTTPS_PROXY / NO_PROXY 环境变量；qB/TR/NAS 等内网地址请写入 NO_PROXY。
+            </el-text>
+          </el-form>
+        </div>
+      </div>
+
       <!-- IYUU设置卡片 -->
       <div
         class="settings-card glass-card glass-rounded glass-transparent-header glass-transparent-body"
@@ -1011,6 +1061,14 @@ const savingBackground = ref(false)
 const backgroundForm = reactive({
   background_url: '',
 })
+const savingNetworkProxy = ref(false)
+const networkProxyForm = reactive<{
+  proxy_url: string
+  no_proxy: string
+}>({
+  proxy_url: '',
+  no_proxy: '',
+})
 const isDesktopRuntime = ref(false)
 const databaseConfigFilePath = ref('')
 
@@ -1247,6 +1305,16 @@ const fetchSettings = async () => {
     // 获取背景设置
     if (config.ui_settings && config.ui_settings.background_url) {
       backgroundForm.background_url = config.ui_settings.background_url
+    }
+
+    // 获取网络代理设置
+    if (config.network_proxy) {
+      networkProxyForm.proxy_url =
+        config.network_proxy.proxy_url ||
+        config.network_proxy.http_proxy ||
+        config.network_proxy.https_proxy ||
+        ''
+      networkProxyForm.no_proxy = config.network_proxy.no_proxy || ''
     }
 
     // 获取上传设置
@@ -1498,6 +1566,26 @@ const saveBackgroundSettings = async () => {
     ElMessage.error(errorMessage)
   } finally {
     savingBackground.value = false
+  }
+}
+
+const saveNetworkProxySettings = async () => {
+  if (savingNetworkProxy.value) return
+
+  savingNetworkProxy.value = true
+  try {
+    await axios.post('/api/settings', {
+      network_proxy: {
+        proxy_url: networkProxyForm.proxy_url.trim(),
+        no_proxy: networkProxyForm.no_proxy.trim(),
+      },
+    })
+    ElMessage.success('网络代理设置已保存，后续新请求将使用新配置。')
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error, '保存失败。')
+    ElMessage.error(errorMessage)
+  } finally {
+    savingNetworkProxy.value = false
   }
 }
 

@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/pt-nexus/server/internal/platform/netproxy"
 )
 
 const (
@@ -244,7 +246,6 @@ func appendUploadRawResponse(detailLines *[]string, bodyText string) {
 
 func newUploadHTTPClient() *http.Client {
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
@@ -253,6 +254,7 @@ func newUploadHTTPClient() *http.Client {
 		ExpectContinueTimeout: 1 * time.Second,
 		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
 	}
+	netproxy.ConfigureTransport(transport)
 	return &http.Client{
 		Timeout:   uploadRequestTimeout,
 		Transport: transport,

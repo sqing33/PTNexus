@@ -67,6 +67,7 @@ func (s *SettingsService) GetSettingsMasked() map[string]any {
 		cookieCloud["e2e_password"] = ""
 		current["cookiecloud"] = cookieCloud
 	}
+	current["network_proxy"] = config.ParseNetworkProxyConfig(current["network_proxy"]).ToMap()
 
 	// Align with Python behavior: do not leak Go-side default merges into UI settings output.
 	if ui, ok := current["ui_settings"].(map[string]any); ok {
@@ -81,6 +82,14 @@ func (s *SettingsService) GetSettingsMasked() map[string]any {
 
 func (s *SettingsService) UpdateSettings(newConfig map[string]any) error {
 	current := s.cfg.Get()
+
+	if rawProxy, exists := newConfig["network_proxy"]; exists {
+		normalizedProxy, err := normalizeNetworkProxyValue(rawProxy)
+		if err != nil {
+			return err
+		}
+		newConfig["network_proxy"] = normalizedProxy.ToMap()
+	}
 
 	if rawDownloaders, exists := newConfig["downloaders"]; exists {
 		updated := toSlice(rawDownloaders)
@@ -119,7 +128,14 @@ func (s *SettingsService) UpdateSettings(newConfig map[string]any) error {
 		current[key] = value
 	}
 
-	return s.cfg.Save(current)
+	if err := s.cfg.Save(current); err != nil {
+		return err
+	}
+
+	if err := applyNetworkProxyRuntime(config.ParseNetworkProxyConfig(current["network_proxy"])); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *SettingsService) DownloadersList(enabledOnly bool) []map[string]any {

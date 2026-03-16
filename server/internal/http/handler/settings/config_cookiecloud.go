@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/service"
 )
 
 const settingsUpdateModule = "设置-保存配置"
@@ -27,6 +28,10 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	if err := h.settings.UpdateSettings(payload); err != nil {
+		if service.IsInvalidSettingsError(err) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法保存配置到文件。"})
 		return
 	}

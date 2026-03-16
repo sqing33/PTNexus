@@ -41,19 +41,14 @@ type UpdateArtifact struct {
 }
 
 func newUpdateHTTPClient(timeout time.Duration) *http.Client {
-	// By default we keep the legacy behavior: do not use proxy to avoid proxy cache issues.
-	// If you really need proxy (e.g. GitHub is blocked), set UPDATE_USE_PROXY=true.
-	useProxy := isTruthy(getEnv("UPDATE_USE_PROXY", "false"))
-
-	tr := &http.Transport{}
-	if useProxy {
-		tr.Proxy = http.ProxyFromEnvironment
-	} else {
-		tr.Proxy = func(req *http.Request) (*url.URL, error) {
+	proxyFunc, err := buildUpdaterProxyFunc(loadUpdaterNetworkProxyConfig())
+	if err != nil {
+		log.Printf("网络代理配置无效，更新模块回退直连 err=%v", err)
+		proxyFunc = func(req *http.Request) (*url.URL, error) {
 			return nil, nil
 		}
 	}
-
+	tr := &http.Transport{Proxy: proxyFunc}
 	return &http.Client{Timeout: timeout, Transport: tr}
 }
 

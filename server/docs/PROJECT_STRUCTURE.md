@@ -53,12 +53,14 @@
 | `internal/config/manager.go` | 读取/写入 `config.json`，处理默认值与认证配置 |
 | `internal/config/runtime_paths.go` | 运行目录解析（base/data/static/logs 等） |
 | `internal/config/database_config.go` | 数据库配置结构与读取辅助 |
+| `internal/config/network_proxy.go` | 应用级网络代理配置结构、解析与校验 |
 
 ### 3.3 `internal/platform/logx`
 
 | 文件 | 说明 |
 |---|---|
 | `internal/platform/logx/logx.go` | 统一中文日志输出、级别控制、滚动日志 |
+| `internal/platform/netproxy/netproxy.go` | 应用级 HTTP 代理管理器，支持运行时热更新与 transport 接管 |
 
 ### 3.4 `internal/repository`
 

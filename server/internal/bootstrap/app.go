@@ -16,6 +16,7 @@ import (
 	migratehandler "github.com/pt-nexus/server/internal/http/handler/migrate"
 	"github.com/pt-nexus/server/internal/http/middleware"
 	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/platform/netproxy"
 	"github.com/pt-nexus/server/internal/repository"
 	"github.com/pt-nexus/server/internal/service"
 	migrationflow "github.com/pt-nexus/server/internal/service/migrationflow"
@@ -33,6 +34,9 @@ func NewApp() (*App, error) {
 	cfgManager, err := config.NewManager(paths)
 	if err != nil {
 		return nil, fmt.Errorf("初始化配置管理器失败: %w", err)
+	}
+	if err := netproxy.Install(cfgManager.NetworkProxyConfig()); err != nil {
+		return nil, fmt.Errorf("初始化网络代理失败: %w", err)
 	}
 
 	store, err := repository.NewStore(paths)
