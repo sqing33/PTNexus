@@ -17,7 +17,7 @@ FROM golang:1.23-bookworm AS updater-builder
 
 WORKDIR /src/updater
 
-COPY ./updater/go.mod ./
+COPY ./updater/go.mod ./updater/go.sum ./
 RUN go mod download
 
 COPY ./updater/*.go ./
@@ -66,6 +66,7 @@ RUN apt-get update && \
     ffmpeg \
     mpv \
     mediainfo \
+    util-linux \
     fonts-noto-cjk \
     supervisor \
     && apt-get clean \

@@ -94,11 +94,17 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 	logx.PlainInfof("处理视频路径: %s", fullVideoPath)
 
 	logx.PlainInfof("开始在路径 '%s' 中查找目标视频文件...", fullVideoPath)
-	targetVideoFile, err := ResolveMediaTargetFile(translatedSavePath, torrentName, contentName)
+	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "截图生成")
 	if err != nil {
 		logx.PlainWarnf("错误：在指定路径中未找到视频文件。")
 		return nil, err
 	}
+	defer func() {
+		if closeErr := targetResult.Close(); closeErr != nil {
+			logx.Warnf(screenshotValidateLogModule, "关闭本地媒体访问会话失败 scene=%s source_path=%s err=%v", "截图生成", targetResult.SourcePath, closeErr)
+		}
+	}()
+	targetVideoFile := targetResult.TargetFile
 	logx.PlainInfof("找到唯一的视频文件: %s", targetVideoFile)
 
 	mpvPath, err := resolveBinary("mpv", "PTNEXUS_MPV_PATH")
@@ -454,53 +460,9 @@ func divmod(a, b int) (int, int) {
 	return a / b, a % b
 }
 
-// ResolveMediaTargetFile 在保存路径候选中选取最适合的媒体文件路径。
-func ResolveMediaTargetFile(savePath, torrentName, contentName string) (string, error) {
-	candidates := make([]string, 0, 3)
-	trimmedSavePath := strings.TrimSpace(savePath)
-	trimmedTorrentName := strings.TrimSpace(torrentName)
-	trimmedContentName := strings.TrimSpace(contentName)
-
-	if trimmedSavePath != "" && trimmedTorrentName != "" {
-		candidates = append(candidates, filepath.Join(trimmedSavePath, trimmedTorrentName))
-	}
-	if trimmedSavePath != "" && trimmedContentName != "" && !strings.EqualFold(trimmedContentName, trimmedTorrentName) {
-		candidates = append(candidates, filepath.Join(trimmedSavePath, trimmedContentName))
-	}
-	if trimmedSavePath != "" {
-		candidates = append(candidates, trimmedSavePath)
-	}
-
-	checked := map[string]struct{}{}
-	errors := make([]string, 0)
-	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if _, exists := checked[candidate]; exists {
-			continue
-		}
-		checked[candidate] = struct{}{}
-
-		if _, err := os.Stat(candidate); err != nil {
-			errors = append(errors, fmt.Sprintf("路径不存在: %s", candidate))
-			continue
-		}
-		target, err := processingmedia.PickMediaTarget(candidate)
-		if err != nil {
-			errors = append(errors, err.Error())
-			continue
-		}
-		if strings.TrimSpace(target) != "" {
-			return target, nil
-		}
-	}
-
-	if len(errors) == 0 {
-		return "", fmt.Errorf("未找到可用于截图的视频文件")
-	}
-	return "", fmt.Errorf("未找到可用于截图的视频文件: %s", strings.Join(errors, "；"))
+func resolveLocalMediaTargetResult(rootConfig map[string]any, downloaderID, savePath, torrentName, contentName, scene string) (*processingmedia.ResolvedMediaTarget, error) {
+	translatedSavePath := TranslateDownloaderPath(rootConfig, downloaderID, savePath)
+	return processingmedia.ResolveMediaTargetByCandidates(translatedSavePath, torrentName, contentName, scene)
 }
 
 func sanitizeCommandErrForLog(err error) string {

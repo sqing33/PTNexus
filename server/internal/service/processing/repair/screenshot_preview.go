@@ -61,11 +61,16 @@ func ShouldUseScreenshotPreview(input ScreenshotGenerateInput) (bool, error) {
 		return false, dErr
 	}
 
-	translatedSavePath := TranslateDownloaderPath(input.RootConfig, downloaderID, savePath)
-	targetVideoFile, err := ResolveMediaTargetFile(translatedSavePath, torrentName, contentName)
+	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "截图预览判定")
 	if err != nil {
 		return false, err
 	}
+	defer func() {
+		if closeErr := targetResult.Close(); closeErr != nil {
+			logx.Warnf(screenshotPreviewLogModule, "关闭本地媒体访问会话失败 scene=%s source_path=%s err=%v", "截图预览判定", targetResult.SourcePath, closeErr)
+		}
+	}()
+	targetVideoFile := targetResult.TargetFile
 	ffprobePath, err := resolveBinary("ffprobe", "PTNEXUS_FFPROBE_PATH")
 	if err != nil {
 		return false, err
@@ -157,11 +162,16 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 		logx.Warnf(screenshotPreviewLogModule, "盒子代理候选截图跳过：读取下载器配置失败 downloader_id=%s err=%v", downloaderID, dErr)
 	}
 
-	translatedSavePath := TranslateDownloaderPath(input.RootConfig, downloaderID, savePath)
-	targetVideoFile, err := ResolveMediaTargetFile(translatedSavePath, torrentName, contentName)
+	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "截图预览生成")
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if closeErr := targetResult.Close(); closeErr != nil {
+			logx.Warnf(screenshotPreviewLogModule, "关闭本地媒体访问会话失败 scene=%s source_path=%s err=%v", "截图预览生成", targetResult.SourcePath, closeErr)
+		}
+	}()
+	targetVideoFile := targetResult.TargetFile
 	ffmpegPath, err := resolveBinary("ffmpeg", "PTNEXUS_FFMPEG_PATH")
 	if err != nil {
 		return nil, err
@@ -279,11 +289,17 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 	logx.PlainInfof("处理视频路径: %s", fullVideoPath)
 
 	logx.PlainInfof("开始在路径 '%s' 中查找目标视频文件...", fullVideoPath)
-	targetVideoFile, err := ResolveMediaTargetFile(translatedSavePath, torrentName, contentName)
+	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "正式截图生成")
 	if err != nil {
 		logx.PlainWarnf("错误：在指定路径中未找到视频文件。")
 		return nil, err
 	}
+	defer func() {
+		if closeErr := targetResult.Close(); closeErr != nil {
+			logx.Warnf(screenshotPreviewLogModule, "关闭本地媒体访问会话失败 scene=%s source_path=%s err=%v", "正式截图生成", targetResult.SourcePath, closeErr)
+		}
+	}()
+	targetVideoFile := targetResult.TargetFile
 	logx.PlainInfof("找到唯一的视频文件: %s", targetVideoFile)
 
 	mpvPath, err := resolveBinary("mpv", "PTNEXUS_MPV_PATH")
