@@ -271,10 +271,13 @@
 
 ### `processing/media`
 
-负责 MediaInfo/BDInfo 内容识别、标准化和刷新。
+负责 MediaInfo/BDInfo 内容识别、标准化、ISO 本地访问和刷新。
 
 | 文件 | 说明 |
 |---|---|
+| `internal/service/processing/media/iso_session.go` | 本地媒体访问会话、候选路径解析与 ISO 会话收口 |
+| `internal/service/processing/media/iso_session_linux.go` | Linux 本地 / 原生 Docker ISO 自动挂载实现 |
+| `internal/service/processing/media/iso_session_windows.go` | Windows 原生 ISO 自动挂载实现（PowerShell） |
 | `internal/service/processing/media/parser_pythonish.go` | Python 风格兼容的媒体信息解析 |
 | `internal/service/processing/media/validate.go` | 媒体格式判定（MediaInfo/BDInfo） |
 | `internal/service/processing/media/bluray_detect.go` | 蓝光原盘目录识别 |

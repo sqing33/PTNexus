@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -14,49 +13,14 @@ import (
 // 失败场景：路径不存在、目录里没有可识别视频文件时返回错误。
 // 副作用：会遍历目录文件系统。
 func PickMediaTarget(savePath string) (string, error) {
-	trimmed := strings.TrimSpace(savePath)
-	if trimmed == "" {
-		return "", errors.New("保存路径为空")
-	}
-
-	info, err := os.Stat(trimmed)
+	target, err := pickMediaEntry(savePath, false)
 	if err != nil {
-		return "", fmt.Errorf("访问保存路径失败: %w", err)
+		return "", err
 	}
-	if !info.IsDir() {
-		return trimmed, nil
+	if isISOPath(target) {
+		return "", errors.New("ISO 路径必须先完成挂载后再解析媒体文件")
 	}
-
-	allowedExt := map[string]struct{}{
-		".mkv": {}, ".mp4": {}, ".m2ts": {}, ".ts": {}, ".avi": {}, ".iso": {},
-	}
-	largest := ""
-	largestSize := int64(0)
-	walkErr := filepath.WalkDir(trimmed, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil || d == nil || d.IsDir() {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(d.Name()))
-		if _, ok := allowedExt[ext]; !ok {
-			return nil
-		}
-		stat, statErr := d.Info()
-		if statErr != nil {
-			return nil
-		}
-		if stat.Size() > largestSize {
-			largestSize = stat.Size()
-			largest = path
-		}
-		return nil
-	})
-	if walkErr != nil {
-		return "", walkErr
-	}
-	if largest == "" {
-		return "", fmt.Errorf("目录中未找到可分析的视频文件: %s", trimmed)
-	}
-	return largest, nil
+	return target, nil
 }
 
 // ExtractMediaInfo 使用系统工具提取媒体文本信息，优先 mediainfo，回退 ffprobe。

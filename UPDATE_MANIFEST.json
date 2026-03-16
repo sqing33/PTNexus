@@ -1,31 +1,25 @@
 {
   "schema": 1,
   "latest": {
-    "version": "v4.0.0",
+    "version": "v4.0.1",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz",
-        "sha256": "81b27d5768e9d8b8a69fc3a87ab8b1331a8fbe5a45ae8fe681efabf3b2f19dea",
-        "size": 10999309,
-        "format": "tar.gz",
-        "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz"
-        ]
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-amd64.tar.gz",
+        "sha256": "",
+        "size": 11101280,
+        "format": "tar.gz"
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz",
-        "sha256": "67b3f187861ac7284cc97febe0c4fd53bf62a1371f04a28b37fbae250cf396e4",
-        "size": 9949830,
-        "format": "tar.gz",
-        "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz"
-        ]
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-arm64.tar.gz",
+        "sha256": "",
+        "size": 10043174,
+        "format": "tar.gz"
       }
     ],
-    "date": "2099.13.32"
+    "date": "2026.03.16"
   }
 }

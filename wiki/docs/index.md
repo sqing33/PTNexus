@@ -121,9 +121,33 @@
 
 # 更新日志
 
-### v4.0.0（2099.13.32）
+### v4.0.1（2026.03.16）
 
-- 宇宙坍缩了，重启了一个新的宇宙，版本号从 v4.0.0 开始计数
+- 修复：下载器连接测试改为真实握手，解决 Win QB 无法连接
+- 修复：更新 proxy 安装脚本下载路径
+- 修改：合并发布工作流，并将公共发布器收敛为固定上传入口
+- 优化：公共发布器失败日志补充完整响应，修复多站队列发布假成功判定与匿名发布失效
+- 新增：截图候选预览与手动选择流程，并补齐批量获取截图待确认状态与确认流程
+- 修复：补回 PTerClub 上传描述的 MediaInfo/BDInfo 标签，并按 Base64 限制肉丝图片上传大小
+- 修复：统一刷新媒体信息与标题重解析的标准参数，忽略媒体信息 Description 字段并统一前后端校验
+- 优化：调整数据页批量转种入口与筛选文案
+- 新增：转种目标站点-唐门
+- 新增：分集标签判定，并在命中禁转、限转、分集时跳过后续自动修复
+- 修复：完善标题解析 FRDS 特殊制作组提取、详情页标签提取、彩虹岛标签提取，并清理彩虹岛标题尾部限时文本
+- 修复：补全肉丝站点发布标签映射
+- 修复：标题多处参数提取错误，并统一转种源站 ID 解析
+
+### v4.0.0（2026.03.05）
+
+> **宇宙坍缩了，重启了一个新的宇宙，版本号从 v4.0.0 开始计数，已重构后端为 GO 语言，需要重新下载镜像进行更新，会自动迁移。**
+
+- 新增：种子编辑功能
+- 新增：通过浏览器插件一键获取 cookie
+- 新增：发种队列与发种日志
+- 修改：批量转种记录合并到发种日志，一站多种批量转种改为批量入队并统一队列预检查
+- 修改：下载器设置新增颜色字段并统一标签配色，并修复下载器残留显示
+- 重构：在线更新切换为 Artifact 流程，支持双源探测、回滚控制与产物回退下载
+- 修复：多盘结构误判为普通媒体文件目录，并支持 ISO 挂载识别、提取 MediaInfo 与 BDInfo 截图
 
 ### v3.6.4（2026.02.21）
 
@@ -145,7 +169,7 @@
 ### v3.6.1（2026.02.10）
 
 > **注：Win 版本正在测试ing...
-盒子端需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+盒子端需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 新增：转种目标站点-爱萝莉
 - 新增：出种限速功能
@@ -159,7 +183,7 @@
 
 ### v3.6.0（2026.01.29）
 
-> **注：(可选)盒子端修改获取截图和 MediaInfo 和 BDInfo 的超时时间需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+> **注：(可选)盒子端修改获取截图和 MediaInfo 和 BDInfo 的超时时间需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 新增：修改了下载进度的计算逻辑，对于拆包下载作种的种子添加了一个‘部分做种’的状态
 - 新增：基于媒介（medium）规范视频编码 AVC / HEVC、H.264 / H.265、x264/x265
@@ -170,7 +194,7 @@
 
 ### v3.5.9（2026.01.27）
 
-> **注：盒子端修复截图上传功能需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+> **注：盒子端修复截图上传功能需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 修复：pixhost 图床更换 img1 直链为 img2 导致新发图片无法显示
 
@@ -204,7 +228,7 @@
 
 ### v3.5.3（2026.01.13）
 
-> **注：盒子端新增自动选择中文字幕流功能需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+> **注：盒子端新增自动选择中文字幕流功能需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 新增：禁转规则-空官组禁转至 ub
 - 新增：自动选择中文字幕流，盒子端需要一同更新
@@ -235,7 +259,7 @@
 
 > **注：修改 Github 仓库地址为 'https://github.com/sqing33/PTNexus'，因为 'pt-nexus' 缺失横杠无法搜索到，以至于有人在安装的时候安装到了 'nexusphp'。
 结算画面： 'https://img1.pixhost.to/images/11481/682419724_4ba3b6c6-d528-471d-b898-c05c88ea4332.png' 
-新的盒子端安装地址为 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash**
+新的盒子端安装地址为 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash**
 
 - 修改：从 mediainfo 与 bdinfo 获取音频编码的选择
 - 修改：Github 仓库地址为 'https://github.com/sqing33/PTNexus'
@@ -282,7 +306,7 @@
 
 ### v3.3.4（2025.12.25）
 
-> **注：修复盒子端获取原盘的截图有概率会报错失败的问题需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+> **注：修复盒子端获取原盘的截图有概率会报错失败的问题需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 新增：转种目标站点-劳改所
 - 修复：部分站点丢失 HDR 标签
@@ -309,7 +333,7 @@
 
 > **注:若报错“ModuleNotFoundError: No module named 'PIL'”则需要重新下载镜像进行更新，如仍然报错则删除 data 目录下的 updates 文件夹。
 13City限速12.5MB/s，代码不会修改非0的限速，需要手动修改。
-盒子获取 bdinfo 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+盒子获取 bdinfo 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 修复：“ModuleNotFoundError: No module named 'PIL'”报错
 - 修复：青蛙、三月传媒主标题出现重复制作组的问题
@@ -322,7 +346,7 @@
 
 ### v3.2.4（2025.12.11）
 
-> **注：盒子优化截图速度需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+> **注：盒子优化截图速度需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 优化：截图速度，截图名称用时间点命名
 - 新增：转种目标站点-PTSkit
@@ -330,7 +354,7 @@
 ### v3.2.3（2025.12.11）
 
 > **注：（需要更新 docker 镜像）新增环境变量 UPDATE_SOURCE，可选值 github 或 gitee，默认为 gitee，用于选择更新的源。
-盒子截图 png 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+盒子截图 png 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 修复：数据库迁移错误
 - 修复：标题参数 DTS 无法正确识别

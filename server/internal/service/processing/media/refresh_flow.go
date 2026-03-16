@@ -30,7 +30,6 @@ type RefreshMediainfoDeps struct {
 	FetchProxyMediaInfo func(downloaderID, remotePath, contentName string) ProxyMediaInfoProbe
 
 	TranslateDownloaderPath func(downloaderID string, savePath string) string
-	ResolveMediaTargetFile  func(translatedSavePath string, torrentName string, contentName string) (string, error)
 
 	AfterPersist func(hash, torrentID, siteName string, row map[string]any, savePath string, torrentName string, mediainfo string)
 }
@@ -221,24 +220,30 @@ func RefreshMediainfoAsync(payload map[string]any, repo RefreshMediainfoRepo, de
 	}
 	logx.Infof(logModule, "蓝光判定未命中：seed_id=%s resolved_path=%s action=提取MediaInfo", seedID, detectedPath)
 
-	if deps.ResolveMediaTargetFile == nil {
-		return map[string]any{"success": false, "message": "媒体目标解析器未注册"}, 500
-	}
-	targetFile, err := deps.ResolveMediaTargetFile(translatedSavePath, torrentName, contentName)
+	targetResult, err := ResolveMediaTargetByCandidates(translatedSavePath, torrentName, contentName, logModule)
 	if err != nil {
 		logx.Errorf(logModule, "定位媒体文件失败：seed_id=%s translated_save_path=%s err=%v", seedID, translatedSavePath, err)
 		return map[string]any{"success": false, "message": err.Error()}, 400
 	}
+	defer func() {
+		if closeErr := targetResult.Close(); closeErr != nil {
+			logx.Warnf(logModule, "关闭本地媒体访问会话失败：seed_id=%s source_path=%s err=%v", seedID, targetResult.SourcePath, closeErr)
+		}
+	}()
 
-	mediainfoText, err := ExtractMediaInfo(targetFile)
+	mediainfoText, err := ExtractMediaInfo(targetResult.TargetFile)
 	if err != nil {
-		logx.Errorf(logModule, "提取MediaInfo失败：seed_id=%s target_file=%s err=%v", seedID, targetFile, err)
+		logx.Errorf(logModule, "提取MediaInfo失败：seed_id=%s target_file=%s err=%v", seedID, targetResult.TargetFile, err)
 		return map[string]any{"success": false, "message": err.Error()}, 500
 	}
 
 	_, seedUpdatesValue := persistMediainfoAndCollectUpdates(seedID, parseErr, repo, deps, hash, torrentID, siteName, savePath, torrentName, mediainfoText, logModule)
 
-	logx.Infof(logModule, "刷新结束：seed_id=%s route=MediaInfo target_file=%s output_bytes=%d", seedID, targetFile, len(mediainfoText))
+	resolvedPath := detectedPath
+	if strings.TrimSpace(targetResult.SourcePath) != "" {
+		resolvedPath = strings.TrimSpace(targetResult.SourcePath)
+	}
+	logx.Infof(logModule, "刷新结束：seed_id=%s route=MediaInfo target_file=%s output_bytes=%d", seedID, targetResult.TargetFile, len(mediainfoText))
 	return map[string]any{
 		"success":             true,
 		"mediainfo":           mediainfoText,
@@ -248,7 +253,7 @@ func RefreshMediainfoAsync(payload map[string]any, repo RefreshMediainfoRepo, de
 		"message":             "MediaInfo 更新完成",
 		"detected_by":         "path_structure",
 		"detected_media_type": "mediainfo",
-		"resolved_path":       detectedPath,
+		"resolved_path":       resolvedPath,
 		"bdinfo_async": map[string]any{
 			"bdinfo_status":  "skipped",
 			"bdinfo_task_id": nil,

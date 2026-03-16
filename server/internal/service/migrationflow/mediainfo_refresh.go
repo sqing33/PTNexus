@@ -10,7 +10,6 @@ import (
 	"github.com/pt-nexus/server/internal/service/downloaderclient"
 	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
-	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 )
 
 const (
@@ -78,7 +77,6 @@ func (s *MigrateService) refreshMediainfoAsync(payload map[string]any) (map[stri
 			TranslateDownloaderPath: func(downloaderID string, savePath string) string {
 				return strings.TrimSpace(downloaderclient.TranslateDownloaderPath(rootConfig, downloaderID, savePath))
 			},
-			ResolveMediaTargetFile: processingrepair.ResolveMediaTargetFile,
 			AfterPersist: func(hash, torrentID, siteName string, row map[string]any, savePath string, torrentName string, mediainfo string) {
 				now := time.Now()
 				seedID := processingpersist.ComposeSeedID(hash, torrentID, siteName)

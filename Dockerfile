@@ -66,6 +66,7 @@ RUN apt-get update && \
     ffmpeg \
     mpv \
     mediainfo \
+    util-linux \
     fonts-noto-cjk \
     supervisor \
     && apt-get clean \

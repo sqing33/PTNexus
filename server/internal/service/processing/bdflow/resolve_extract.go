@@ -65,59 +65,80 @@ func ResolveAndExtractForBDInfo(input ResolveAndExtractForBDInfoInput) (ResolveA
 		PathCandidates: pathCandidates,
 	}
 
-	blurayRoot := ""
 	for _, candidate := range pathCandidates {
-		root := FindBlurayRootPath(candidate)
+		access, accessErr := processingmedia.ResolveMediaAccessForPath(candidate, "BDInfo提取")
+		if accessErr != nil {
+			logx.Warnf(bdinfoToolLogModule, "解析候选路径失败 task_id=%s candidate=%s err=%v", strings.TrimSpace(input.TaskID), candidate, accessErr)
+			continue
+		}
+		root := processingmedia.FindBlurayRootPath(access.ResolvedPath)
 		if root != "" {
-			blurayRoot = root
-			logx.Warnf(bdinfoToolLogModule, "识别到蓝光根目录 task_id=%s candidate=%s root=%s", strings.TrimSpace(input.TaskID), candidate, root)
-			break
+			logx.Warnf(bdinfoToolLogModule, "识别到蓝光根目录 task_id=%s candidate=%s source=%s root=%s", strings.TrimSpace(input.TaskID), candidate, access.SourcePath, root)
+			bdinfoText, bdinfoErr := ExtractBDInfo(root)
+			closeErr := access.Close()
+			if bdinfoErr != nil {
+				if closeErr != nil {
+					logx.Warnf(bdinfoToolLogModule, "关闭蓝光访问会话失败 task_id=%s candidate=%s err=%v", strings.TrimSpace(input.TaskID), candidate, closeErr)
+				}
+				return result, bdinfoErr
+			}
+			if closeErr != nil {
+				return result, closeErr
+			}
+			result.UsedBDInfo = true
+			result.DetectedBluray = root
+			if strings.TrimSpace(access.SourcePath) != "" {
+				result.CurrentFileLabel = filepath.Base(access.SourcePath)
+			} else {
+				result.CurrentFileLabel = filepath.Base(root)
+			}
+			result.MediaInfoText = bdinfoText
+			logx.Infof(bdinfoToolLogModule, "BDInfo提取完成 task_id=%s root=%s bytes=%d", strings.TrimSpace(input.TaskID), root, len(result.MediaInfoText))
+			return result, nil
+		}
+		if closeErr := access.Close(); closeErr != nil {
+			logx.Warnf(bdinfoToolLogModule, "关闭候选路径访问会话失败 task_id=%s candidate=%s err=%v", strings.TrimSpace(input.TaskID), candidate, closeErr)
 		}
 		logx.Infof(bdinfoToolLogModule, "候选路径未发现蓝光根目录 task_id=%s candidate=%s", strings.TrimSpace(input.TaskID), candidate)
 	}
-	if blurayRoot != "" {
-		bdinfoText, bdinfoErr := ExtractBDInfo(blurayRoot)
-		if bdinfoErr != nil {
-			return result, bdinfoErr
-		}
-		result.UsedBDInfo = true
-		result.DetectedBluray = blurayRoot
-		result.CurrentFileLabel = filepath.Base(blurayRoot)
-		result.MediaInfoText = bdinfoText
-		logx.Infof(bdinfoToolLogModule, "BDInfo提取完成 task_id=%s root=%s bytes=%d", strings.TrimSpace(input.TaskID), blurayRoot, len(result.MediaInfoText))
-		return result, nil
-	}
 
-	targetFile := ""
-	pickErrors := make([]string, 0)
+	var (
+		targetResult *processingmedia.ResolvedMediaTarget
+		pickErrors   []string
+	)
 	for _, candidate := range pathCandidates {
 		logx.Infof(bdinfoToolLogModule, "尝试选择媒体目标 task_id=%s candidate=%s", strings.TrimSpace(input.TaskID), candidate)
-		picked, pickErr := processingmedia.PickMediaTarget(candidate)
+		picked, pickErr := processingmedia.ResolveMediaTargetForPath(candidate, "BDInfo提取")
 		if pickErr != nil {
 			logx.Warnf(bdinfoToolLogModule, "选择媒体目标失败 task_id=%s path=%s err=%v", strings.TrimSpace(input.TaskID), candidate, pickErr)
 			pickErrors = append(pickErrors, fmt.Sprintf("%s => %v", candidate, pickErr))
 			continue
 		}
-		targetFile = picked
-		logx.Infof(bdinfoToolLogModule, "已选定媒体目标 task_id=%s target_file=%s", strings.TrimSpace(input.TaskID), targetFile)
+		targetResult = picked
+		logx.Infof(bdinfoToolLogModule, "已选定媒体目标 task_id=%s target_file=%s", strings.TrimSpace(input.TaskID), targetResult.TargetFile)
 		break
 	}
-	if targetFile == "" {
+	if targetResult == nil {
 		errMsg := fmt.Sprintf("无法定位媒体文件: downloader_id=%s, save_path=%s, mapped_save_path=%s", downloaderID, savePath, mappedSavePath)
 		if len(pickErrors) > 0 {
 			errMsg = errMsg + " | " + strings.Join(pickErrors, " ; ")
 		}
 		return result, fmt.Errorf("%s", errMsg)
 	}
+	defer func() {
+		if closeErr := targetResult.Close(); closeErr != nil {
+			logx.Warnf(bdinfoToolLogModule, "关闭媒体访问会话失败 task_id=%s source_path=%s err=%v", strings.TrimSpace(input.TaskID), targetResult.SourcePath, closeErr)
+		}
+	}()
 
-	mediaInfoText, extractErr := processingmedia.ExtractMediaInfo(targetFile)
+	mediaInfoText, extractErr := processingmedia.ExtractMediaInfo(targetResult.TargetFile)
 	if extractErr != nil {
 		return result, extractErr
 	}
 	result.UsedBDInfo = false
-	result.SelectedMedia = targetFile
-	result.CurrentFileLabel = filepath.Base(targetFile)
+	result.SelectedMedia = targetResult.TargetFile
+	result.CurrentFileLabel = filepath.Base(targetResult.TargetFile)
 	result.MediaInfoText = mediaInfoText
-	logx.Warnf(bdinfoToolLogModule, "未识别蓝光目录，回退MediaInfo提取 task_id=%s file=%s bytes=%d", strings.TrimSpace(input.TaskID), targetFile, len(result.MediaInfoText))
+	logx.Warnf(bdinfoToolLogModule, "未识别蓝光目录，回退MediaInfo提取 task_id=%s file=%s bytes=%d", strings.TrimSpace(input.TaskID), targetResult.TargetFile, len(result.MediaInfoText))
 	return result, nil
 }
