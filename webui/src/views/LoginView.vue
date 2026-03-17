@@ -87,9 +87,9 @@ const onSubmit = async () => {
     }
   } catch (error: unknown) {
     const msg = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string } | undefined)?.message ||
+      ? (error.response?.data as { message?: string } | undefined)?.message ||
         error.message ||
-        '登录失败')
+        '登录失败'
       : error instanceof Error
         ? error.message || '登录失败'
         : '登录失败'
@@ -105,7 +105,8 @@ const onSubmit = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100vh;
+  min-height: 100%;
+  box-sizing: border-box;
 }
 .login-card {
   width: 420px;

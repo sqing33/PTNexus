@@ -19,6 +19,12 @@ export type DesktopSSESubscription = {
   eventName: string
 }
 
+export type WailsEnvironmentInfo = {
+  buildType: string
+  platform: string
+  arch: string
+}
+
 export interface DesktopBridge {
   DesktopRequest: (req: DesktopRequest) => Promise<DesktopResponse>
   DesktopSSESubscribe: (url: string) => Promise<DesktopSSESubscription>
@@ -32,6 +38,11 @@ export interface DesktopBridge {
 export interface WailsRuntime {
   EventsOn: (eventName: string, callback: (data: unknown) => void) => void
   EventsOff: (eventName: string) => unknown
+  Environment?: () => Promise<WailsEnvironmentInfo>
+  WindowHide?: () => void
+  WindowIsMaximised?: () => Promise<boolean>
+  WindowMinimise?: () => void
+  WindowToggleMaximise?: () => void
 }
 
 type DesktopRuntimeWindow = Window & {

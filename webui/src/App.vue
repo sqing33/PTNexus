@@ -1,30 +1,59 @@
 <!-- src/App.vue -->
 <template>
-  <div v-if="!isLoginPage" class="app-nav-wrapper">
-    <el-menu
-      v-if="!isMobile"
-      :default-active="activeRoute"
-      class="main-nav glass-nav"
-      mode="horizontal"
-      router
-    >
-      <div class="brand-block">
-        <img src="/favicon.ico" alt="Logo" height="32" class="brand-logo" />
-        PT Nexus
+  <div
+    v-if="showDesktopCompactTitleBar"
+    class="desktop-titlebar glass-nav desktop-drag-region"
+    @dblclick="handleWindowMaximiseToggle"
+  >
+    <div class="desktop-titlebar__brand">
+      <img src="/favicon.ico" alt="Logo" height="24" class="brand-logo desktop-titlebar__logo" />
+      <div class="desktop-titlebar__text">
+        <span class="desktop-titlebar__title">PT Nexus</span>
+        <span class="desktop-titlebar__subtitle">{{ desktopCompactSubtitle }}</span>
       </div>
-      <el-menu-item index="/">首页</el-menu-item>
-      <el-menu-item index="/info">流量统计</el-menu-item>
-      <el-menu-item index="/torrents">一种多站</el-menu-item>
-      <el-menu-item index="/data">一站多种</el-menu-item>
-      <el-menu-item index="/publish-logs">发种日志</el-menu-item>
-      <el-menu-item index="/sites">做种检索</el-menu-item>
-      <el-menu-item index="/settings">设置</el-menu-item>
-      <div class="right-buttons-container">
+    </div>
+    <div class="desktop-titlebar__spacer" />
+    <DesktopWindowControls
+      class="desktop-titlebar__controls desktop-no-drag"
+      compact
+      :is-maximised="isMaximised"
+      @minimise="minimiseWindow"
+      @toggle-maximise="handleWindowMaximiseToggle"
+      @close="hideWindowToTray"
+    />
+  </div>
+
+  <div v-if="!isLoginPage" class="app-nav-wrapper">
+    <div v-if="!showMobileNav" class="desktop-main-nav">
+      <el-menu
+        :default-active="activeRoute"
+        class="main-nav glass-nav desktop-drag-region"
+        mode="horizontal"
+        :ellipsis="false"
+        router
+        @dblclick="handleDesktopNavDoubleClick"
+      >
+        <div class="brand-block desktop-no-drag">
+          <img src="/favicon.ico" alt="Logo" height="32" class="brand-logo" />
+          PT Nexus
+        </div>
+        <el-menu-item index="/">首页</el-menu-item>
+        <el-menu-item index="/info">流量统计</el-menu-item>
+        <el-menu-item index="/torrents">一种多站</el-menu-item>
+        <el-menu-item index="/data">一站多种</el-menu-item>
+        <el-menu-item index="/publish-logs">发种日志</el-menu-item>
+        <el-menu-item index="/sites">做种检索</el-menu-item>
+        <el-menu-item index="/settings">设置</el-menu-item>
+      </el-menu>
+      <div
+        class="right-buttons-container desktop-no-drag"
+        :class="{ 'right-buttons-container--with-window-controls': showDesktopWindowControlsInNav }"
+      >
         <el-link
           href="https://ptn-wiki.sqing33.dpdns.org"
           target="_blank"
           :underline="false"
-          style="margin-right: 8px"
+          class="desktop-link-action"
         >
           <el-icon><Link /></el-icon>
           Wiki
@@ -33,14 +62,14 @@
           href="https://github.com/sqing33/PTNexus"
           target="_blank"
           :underline="false"
-          style="margin-right: 8px"
+          class="desktop-link-action"
         >
           <el-icon><Link /></el-icon>
           GitHub
         </el-link>
-        <el-tag size="small" style="cursor: pointer; margin-right: 15px" @click="showVersionDialog">
-          {{ currentVersion }}
-        </el-tag>
+        <el-tag size="small" class="version-tag" @click="showVersionDialog">{{
+          currentVersion
+        }}</el-tag>
         <el-button
           type="primary"
           plain
@@ -54,7 +83,6 @@
           href="https://github.com/sqing33/PTNexus/issues"
           target="_blank"
           :underline="false"
-          style="margin-right: 8px"
         >
           <el-button type="primary" plain>反馈</el-button>
         </el-link>
@@ -68,7 +96,15 @@
           刷新
         </el-button>
       </div>
-    </el-menu>
+      <DesktopWindowControls
+        v-if="showDesktopWindowControlsInNav"
+        class="main-nav__window-controls desktop-no-drag"
+        :is-maximised="isMaximised"
+        @minimise="minimiseWindow"
+        @toggle-maximise="handleWindowMaximiseToggle"
+        @close="hideWindowToTray"
+      />
+    </div>
 
     <div v-else class="mobile-nav glass-nav">
       <div class="mobile-brand">
@@ -104,7 +140,9 @@
     >
       <div class="drawer-header">
         <div class="drawer-title">PT Nexus 导航</div>
-        <el-tag size="small" style="cursor: pointer" @click="showVersionDialog">{{ currentVersion }}</el-tag>
+        <el-tag size="small" style="cursor: pointer" @click="showVersionDialog">{{
+          currentVersion
+        }}</el-tag>
       </div>
 
       <el-menu
@@ -132,7 +170,13 @@
       </el-menu>
 
       <div class="drawer-actions">
-        <el-button type="primary" plain :icon="Download" :loading="exportingLogs" @click="handleExportLogs">
+        <el-button
+          type="primary"
+          plain
+          :icon="Download"
+          :loading="exportingLogs"
+          @click="handleExportLogs"
+        >
           导出后端日志
         </el-button>
         <el-button
@@ -152,14 +196,24 @@
           <el-icon><Link /></el-icon>
           GitHub
         </el-link>
-        <el-link href="https://github.com/sqing33/PTNexus/issues" target="_blank" :underline="false">
+        <el-link
+          href="https://github.com/sqing33/PTNexus/issues"
+          target="_blank"
+          :underline="false"
+        >
           <el-button type="primary" plain>反馈</el-button>
         </el-link>
       </div>
     </el-drawer>
   </div>
 
-  <main :class="['main-content', isLoginPage ? 'no-nav' : '', isMobile && !isLoginPage ? 'mobile-nav-content' : '']">
+  <main
+    :class="[
+      'main-content',
+      isLoginPage ? 'no-nav' : '',
+      showMobileNav && !isLoginPage ? 'mobile-nav-content' : '',
+    ]"
+  >
     <router-view v-slot="{ Component }">
       <component :is="Component" @ready="handleComponentReady" />
     </router-view>
@@ -174,10 +228,20 @@ import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Download, Link, Menu } from '@element-plus/icons-vue'
 import axios from 'axios'
+import DesktopWindowControls from '@/components/desktop/DesktopWindowControls.vue'
+import { useDesktopWindowControls } from '@/desktop/windowControls'
 import VersionUpdate from '@/components/VersionUpdate.vue'
 import { ElMessage } from '@/utils/uiNotify'
 
 const route = useRoute()
+const {
+  hideWindowToTray,
+  isDesktopShell,
+  isMaximised,
+  isWindowsDesktop,
+  minimiseWindow,
+  toggleWindowMaximise,
+} = useDesktopWindowControls()
 
 // 背景图片
 const backgroundUrl = ref('https://pic.pting.club/i/2025/10/07/68e4fbfe9be93.jpg')
@@ -209,6 +273,12 @@ const activeRoute = computed(() => {
 })
 
 const currentRouteTitle = computed(() => routeTitleMap[activeRoute.value] || '导航')
+const desktopCompactSubtitle = computed(() =>
+  isLoginPage.value ? '登录' : currentRouteTitle.value,
+)
+const showMobileNav = computed(() => isMobile.value && !isDesktopShell.value)
+const showDesktopCompactTitleBar = computed(() => isWindowsDesktop.value && isLoginPage.value)
+const showDesktopWindowControlsInNav = computed(() => isWindowsDesktop.value && !isLoginPage.value)
 
 const isRefreshing = ref(false)
 const exportingLogs = ref(false)
@@ -260,7 +330,7 @@ const handleGlobalRefresh = async () => {
     ElMessage.success('数据已刷新！')
   } catch (error: unknown) {
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string } | undefined)?.message || error.message)
+      ? (error.response?.data as { message?: string } | undefined)?.message || error.message
       : error instanceof Error
         ? error.message
         : '数据更新失败'
@@ -422,6 +492,22 @@ const showVersionDialog = () => {
   }
 }
 
+const handleWindowMaximiseToggle = () => {
+  void toggleWindowMaximise()
+}
+
+const handleDesktopNavDoubleClick = (event: MouseEvent) => {
+  if (!showDesktopWindowControlsInNav.value) {
+    return
+  }
+
+  if (event.target !== event.currentTarget) {
+    return
+  }
+
+  handleWindowMaximiseToggle()
+}
+
 const updateIsMobile = () => {
   isMobile.value = window.innerWidth <= MOBILE_BREAKPOINT
 }
@@ -453,8 +539,11 @@ onUnmounted(() => {
 
 <style>
 #app {
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
   position: relative;
   background-image: url('https://pic.pting.club/i/2025/10/07/68e4fbfe9be93.jpg');
   background-size: cover;
@@ -493,6 +582,18 @@ body {
 </style>
 
 <style scoped>
+.app-nav-wrapper {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.desktop-main-nav {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
 .main-nav {
   border-bottom: solid 1px var(--el-menu-border-color);
   flex-shrink: 0;
@@ -501,6 +602,15 @@ body {
   align-items: center;
   position: relative;
   z-index: 1;
+}
+
+.main-nav :deep(.el-menu-item),
+.main-nav :deep(.el-sub-menu) {
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  --wails-draggable: no-drag;
 }
 
 .brand-block {
@@ -515,6 +625,95 @@ body {
   vertical-align: middle;
 }
 
+.right-buttons-container {
+  position: absolute;
+  right: 20px;
+  top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 2;
+}
+
+.right-buttons-container--with-window-controls {
+  right: 150px;
+}
+
+.desktop-link-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.version-tag {
+  cursor: pointer;
+}
+
+.main-nav__window-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  z-index: 3;
+}
+
+.desktop-titlebar {
+  flex-shrink: 0;
+  height: 38px;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid rgba(209, 218, 229, 0.8);
+  position: relative;
+  z-index: 1;
+}
+
+.desktop-titlebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.desktop-titlebar__logo {
+  margin-right: 0;
+}
+
+.desktop-titlebar__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.05;
+}
+
+.desktop-titlebar__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #243347;
+}
+
+.desktop-titlebar__subtitle {
+  font-size: 11px;
+  color: #6f8094;
+}
+
+.desktop-titlebar__spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.desktop-titlebar__controls {
+  margin-left: auto;
+}
+
+.desktop-drag-region {
+  --wails-draggable: drag;
+}
+
+.desktop-no-drag {
+  --wails-draggable: no-drag;
+}
+
 .mobile-nav {
   height: 52px;
   display: flex;
@@ -522,6 +721,8 @@ body {
   justify-content: space-between;
   padding: 0 12px;
   border-bottom: 1px solid var(--el-menu-border-color);
+  flex-shrink: 0;
+  z-index: 1;
 }
 
 .mobile-brand {
@@ -558,7 +759,7 @@ body {
 }
 
 .mobile-nav-content {
-  height: calc(100% - 52px);
+  overflow: auto;
 }
 
 .drawer-header {
@@ -600,26 +801,17 @@ body {
 }
 
 .main-content {
-  flex-grow: 1;
+  flex: 1 1 auto;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  height: calc(100% - 40px);
+  min-height: 0;
   position: relative;
   z-index: 1;
 }
 
 .main-content.no-nav {
-  height: 100%;
-}
-
-.right-buttons-container {
-  position: absolute;
-  right: 20px;
-  top: 3px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  overflow: auto;
 }
 
 @media (max-width: 768px) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	goruntime "runtime"
 
 	"github.com/pt-nexus/server/desktop/internal/desktopapp"
 
@@ -22,9 +23,10 @@ func main() {
 	})
 
 	err := wails.Run(&options.App{
-		Title:  "PT Nexus",
-		Width:  1024,
-		Height: 768,
+		Title:     "PT Nexus",
+		Width:     1024,
+		Height:    768,
+		Frameless: goruntime.GOOS == "windows",
 		// 桌面端默认启动即最大化，避免首次进入时视口过小影响引导流程。
 		WindowStartState: options.Maximised,
 		// 关闭窗口时仅隐藏，应用留在后台（通过托盘菜单“退出”真正结束）。
