@@ -59,6 +59,10 @@ var (
 	reMediaInfoSectionStartLine = regexp.MustCompile(`(?im)^\s*(General|Video|Audio|Text(?:\s*#\d+)?|Menu|Chapters)\s*$`)
 	reBDInfoDiscAnchor          = regexp.MustCompile(`(?is)\bDISC INFO\b`)
 	reBDInfoSectionStartLine    = regexp.MustCompile(`(?im)^\s*(DISC INFO|PLAYLIST REPORT|QUICK SUMMARY|FILES:|CHAPTERS:|DISC SIZE)\s*$`)
+	reTVSeriesEpisodeToken      = regexp.MustCompile(`(?i)\bS\d{1,2}\s*E\d{1,3}\b|\bE[Pp]?(?:ISODE)?\s*0?\d{1,3}\b|第\s*\d{1,4}\s*[集话話期]\b`)
+	reTVSeriesSeasonToken       = regexp.MustCompile(`(?i)\bSEASON\s*(?:\d{1,2}|[IVX]+)\b|\bS\d{1,2}\b`)
+	reTVSeriesPackToken         = regexp.MustCompile(`(?i)\b(?:COMPLETE|全集|全季|全\d{1,4}集|PACK)\b`)
+	reTVSeriesWordToken         = regexp.MustCompile(`(?i)\bTV[\s._-]*SERIES\b|\bTV[\s._-]*PACK\b|\bTV[\s._-]*EPISODE\b|剧集|电视剧`)
 )
 
 var movieIntroQuotePatterns = []*regexp.Regexp{
@@ -102,6 +106,10 @@ type reviewExtractedData struct {
 }
 
 func extractReviewDataFromHTML(pageHTML, fallbackTitle string) reviewExtractedData {
+	return extractReviewDataFromHTMLWithSite(pageHTML, fallbackTitle, "")
+}
+
+func extractReviewDataFromHTMLWithSite(pageHTML, fallbackTitle string, siteCode string) reviewExtractedData {
 	result := reviewExtractedData{}
 	page := strings.TrimSpace(pageHTML)
 	if page == "" {
@@ -144,14 +152,18 @@ func extractReviewDataFromHTML(pageHTML, fallbackTitle string) reviewExtractedDa
 		result.TMDbLink = tmdb
 	}
 
+	basicInfo := extractMappedBasicInfoFromPage(page, siteCode)
 	inferred := inferStandardizedValues(result.Title, result.Mediainfo, result.Body)
-	result.Type = inferred["type"]
 	result.Medium = inferred["medium"]
 	result.VideoCodec = inferred["video_codec"]
 	result.AudioCodec = inferred["audio_codec"]
 	result.Resolution = inferred["resolution"]
 	result.Team = inferred["team"]
-	if teamFromPage := extractTeamFromPage(page); teamFromPage != "" {
+	result.Type = strings.TrimSpace(basicInfo.Standard["type"])
+
+	applyFallbackBasicInfo(&result, basicInfo.Standard)
+	if teamFromPage := extractTeamFromPage(page); teamFromPage != "" &&
+		(strings.TrimSpace(result.Team) == "" || strings.TrimSpace(result.Team) == "team.other") {
 		teamKey := normalizeTeamKey(teamFromPage)
 		if teamKey != "" && teamKey != "team.other" {
 			result.Team = teamKey
@@ -163,6 +175,49 @@ func extractReviewDataFromHTML(pageHTML, fallbackTitle string) reviewExtractedDa
 	result.Tags = mergeExplicitSourceTags(mergedExtraTags)
 
 	return result
+}
+
+func applyFallbackBasicInfo(result *reviewExtractedData, values map[string]string) {
+	if result == nil || len(values) == 0 {
+		return
+	}
+	if value := strings.TrimSpace(values["medium"]); value != "" &&
+		shouldUseFallbackBasicInfo(result.Medium, "medium.other") {
+		result.Medium = value
+	}
+	if value := strings.TrimSpace(values["video_codec"]); value != "" &&
+		shouldUseFallbackBasicInfo(result.VideoCodec, "video.other") {
+		result.VideoCodec = value
+	}
+	if value := strings.TrimSpace(values["audio_codec"]); value != "" &&
+		shouldUseFallbackBasicInfo(result.AudioCodec, "audio.other") {
+		result.AudioCodec = value
+	}
+	if value := strings.TrimSpace(values["resolution"]); value != "" &&
+		shouldUseFallbackBasicInfo(result.Resolution, "resolution.other") {
+		result.Resolution = value
+	}
+	if value := strings.TrimSpace(values["team"]); value != "" &&
+		shouldUseFallbackBasicInfo(result.Team, "team.other") {
+		result.Team = value
+	}
+	if value := strings.TrimSpace(values["source"]); value != "" &&
+		shouldUseFallbackBasicInfo(result.Source, "source.other") {
+		result.Source = value
+	}
+}
+
+func shouldUseFallbackBasicInfo(current string, fallbackValues ...string) bool {
+	trimmed := strings.TrimSpace(current)
+	if trimmed == "" {
+		return true
+	}
+	for _, fallback := range fallbackValues {
+		if strings.EqualFold(trimmed, strings.TrimSpace(fallback)) {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeExplicitSourceTags 合并“显式来源”的标签：声明类标签（tag.*）与页面标签字段（原始文本）。
@@ -998,7 +1053,8 @@ func normalizeDetailFieldLabel(text string) string {
 	}
 	normalized = strings.ReplaceAll(normalized, "\u00a0", " ")
 	normalized = strings.ReplaceAll(normalized, "\u3000", " ")
-	return strings.Join(strings.Fields(normalized), "")
+	normalized = strings.Join(strings.Fields(normalized), "")
+	return strings.TrimRight(normalized, ":：")
 }
 
 func extractTeamFromPage(page string) string {
@@ -2248,7 +2304,7 @@ func inferStandardizedValues(title, mediainfo, body string) map[string]string {
 		return false
 	}
 
-	if hasTech("SEASON", "S01", "S02", "EP", "E01", "剧集") {
+	if looksLikeTVSeriesText(upperTech) {
 		values["type"] = "category.tv_series"
 	} else if hasTech("ANIME", "动画") {
 		values["type"] = "category.animation"
@@ -2343,6 +2399,17 @@ func inferStandardizedValues(title, mediainfo, body string) map[string]string {
 	// 对齐 Python：标签补全不在这里基于“正文/全页文本”做推断，避免噪声误判。
 	values["tags_array"] = ""
 	return values
+}
+
+func looksLikeTVSeriesText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	if reTVSeriesEpisodeToken.MatchString(trimmed) || reTVSeriesWordToken.MatchString(trimmed) {
+		return true
+	}
+	return reTVSeriesSeasonToken.MatchString(trimmed) && reTVSeriesPackToken.MatchString(trimmed)
 }
 
 // inferResolutionFromMediainfo 从 MediaInfo 文本提取 Width/Height 并映射标准分辨率键。

@@ -1,40 +1,45 @@
 {
   "schema": 2,
   "latest": {
-    "version": "v4.0.0",
+    "version": "v4.0.1",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz",
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
-        "size": 11129409,
+        "size": 11139727,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz"
+          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-amd64.tar.gz"
         ]
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz",
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
-        "size": 10069528,
+        "size": 10078441,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz"
+          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-arm64.tar.gz"
         ]
       }
     ],
-    "date": "2026.03.19",
-    "disable_update": true,
-    "note": "宇宙坍缩，重启了一个新的宇宙，版本号从 v4.0.0 开始计数，已重构后端为 GO 语言，需要重新下载镜像进行更新，数据会自动迁移。"
+    "date": "2026.03.19"
   },
   "history": [
+    {
+      "version": "v4.0.1",
+      "date": "2026.03.19",
+      "changes": [
+        "修复：视频类别（电影、电视剧）识别错误"
+      ]
+    },
     {
       "version": "v4.0.0",
       "date": "2026.03.19",

@@ -92,6 +92,8 @@ func NewHDDolbySpecialExtractor(public Extractor, runtimeFactory RuntimeFactory)
 
 func toSiteInput(input Input) sites.Input {
 	return sites.Input{
+		SiteCode:      input.SiteCode,
+		SiteNickname:  input.SiteNickname,
 		BaseURL:       input.BaseURL,
 		Cookie:        input.Cookie,
 		TorrentID:     input.TorrentID,

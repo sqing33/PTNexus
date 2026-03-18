@@ -19,6 +19,13 @@
   ],
   "history": [
     {
+      "version": "v4.0.1",
+      "date": "2026.03.19",
+      "changes": [
+        "修复：视频类别（电影、电视剧）识别错误"
+      ]
+    },
+    {
       "version": "v4.0.0",
       "date": "2026.03.19",
       "disable_update": true,

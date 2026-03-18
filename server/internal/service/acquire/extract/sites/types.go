@@ -38,6 +38,8 @@ type SeedData struct {
 
 // Input 表示站点提取器输入上下文。
 type Input struct {
+	SiteCode      string
+	SiteNickname  string
 	BaseURL       string
 	Cookie        string
 	TorrentID     string

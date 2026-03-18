@@ -95,7 +95,7 @@ func IsSSDSufficient(data SeedData) bool {
 }
 
 func defaultPublicExtract(input Input) (SeedData, error) {
-	review := ExtractReviewDataFromHTML(input.PageHTML, input.FallbackTitle)
+	review := extractReviewDataFromHTMLWithSite(input.PageHTML, input.FallbackTitle, input.SiteCode)
 	data := reviewDataToExtractorData(review)
 	data.SourceParams = BuildSourceParamsFromExtractedData(data)
 	return data.NormalizeWithFallback(input.FallbackTitle), nil
@@ -109,6 +109,8 @@ func buildSiteRuntimeForExtractors(public Extractor) sites.Runtime {
 				extractor = NewPublicExtractor(defaultPublicExtract)
 			}
 			data, err := extractor.Extract(Input{
+				SiteCode:      input.SiteCode,
+				SiteNickname:  input.SiteNickname,
 				BaseURL:       input.BaseURL,
 				Cookie:        input.Cookie,
 				TorrentID:     input.TorrentID,
