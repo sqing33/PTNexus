@@ -4,8 +4,9 @@ import "strings"
 
 // PublishFromPayloadInput 定义从前端 payload 发起单站发布的输入。
 type PublishFromPayloadInput struct {
-	Payload     map[string]any
-	TorrentPath string
+	Payload             map[string]any
+	TorrentPath         string
+	DefaultDownloaderID string
 }
 
 // PublishFromPayloadDeps 定义从 payload 发起发布所需依赖。
@@ -39,12 +40,13 @@ func ExecutePublishFromPayload(input PublishFromPayloadInput, deps PublishFromPa
 	uploadData, _ := payload["upload_data"].(map[string]any)
 	return ExecutePublishWithContext(
 		PublishWithContextInput{
-			TargetSite:  strings.TrimSpace(toStringAny(payload["targetSite"], "")),
-			TaskID:      taskID,
-			Payload:     payload,
-			UploadData:  uploadData,
-			Context:     ctx,
-			TorrentPath: strings.TrimSpace(input.TorrentPath),
+			TargetSite:          strings.TrimSpace(toStringAny(payload["targetSite"], "")),
+			TaskID:              taskID,
+			Payload:             payload,
+			UploadData:          uploadData,
+			Context:             ctx,
+			TorrentPath:         strings.TrimSpace(input.TorrentPath),
+			DefaultDownloaderID: strings.TrimSpace(input.DefaultDownloaderID),
 		},
 		PublishWithContextDeps{
 			GetSiteByName:           deps.GetSiteByName,

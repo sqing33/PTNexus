@@ -369,7 +369,7 @@ func collectSeedingLimitGroupStats(subnetID string, downloaders []seedingLimitDo
 }
 
 func evaluateSeedingLimit(stats seedingLimitGroupStats) (bool, string) {
-	if stats.RecentCount > maxRecentAdditions {
+	if stats.RecentCount >= maxRecentAdditions {
 		message := fmt.Sprintf(
 			"网段 %s.x 内的下载器组（%s）在过去24h内添加且活跃/暂停的（做种人数>%d或分享率>%.1f不计算）种子共 %d 个 (上限 %d)。已暂停发布。",
 			stats.SubnetID,

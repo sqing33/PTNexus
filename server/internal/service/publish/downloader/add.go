@@ -26,17 +26,8 @@ type AddToDownloaderRepo interface {
 // 副作用：可能发起网络请求下载 torrent，并向下载器添加任务。
 func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo AddToDownloaderRepo) (map[string]any, int) {
 	rawURL := strings.TrimSpace(processingshared.ToString(payload["url"], ""))
-	savePath := strings.TrimSpace(processingshared.ToString(payload["savePath"], ""))
-	downloaderID := strings.TrimSpace(processingshared.ToString(payload["downloaderId"], ""))
-
-	if processingpersist.BoolFromAny(payload["useDefaultDownloader"]) && rootConfig != nil {
-		if crossSeed, ok := rootConfig["cross_seed"].(map[string]any); ok {
-			defaultID := strings.TrimSpace(processingshared.ToString(crossSeed["default_downloader"], ""))
-			if defaultID != "" {
-				downloaderID = defaultID
-			}
-		}
-	}
+	defaultDownloaderID := resolveDefaultDownloaderID(rootConfig)
+	savePath, downloaderID := ResolveEffectiveTarget(payload, "", "", defaultDownloaderID)
 
 	if rawURL == "" || savePath == "" || downloaderID == "" {
 		return map[string]any{"success": false, "message": "错误：缺少必要参数 (url, savePath, downloaderId)。"}, 400

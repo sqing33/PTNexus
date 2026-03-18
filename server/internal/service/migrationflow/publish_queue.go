@@ -808,12 +808,13 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	startedAt := time.Now()
 	result, status := publishworkflow.ExecutePublishWithContext(
 		publishworkflow.PublishWithContextInput{
-			TargetSite:  targetSite,
-			TaskID:      execTaskID,
-			Payload:     payload,
-			UploadData:  uploadData,
-			Context:     ctx,
-			TorrentPath: "",
+			TargetSite:          targetSite,
+			TaskID:              execTaskID,
+			Payload:             payload,
+			UploadData:          uploadData,
+			Context:             ctx,
+			TorrentPath:         "",
+			DefaultDownloaderID: s.resolveDefaultPublishDownloaderID(),
 		},
 		publishworkflow.PublishWithContextDeps{
 			GetSiteByName: s.repo.GetSiteByName,

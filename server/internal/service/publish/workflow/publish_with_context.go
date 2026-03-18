@@ -4,12 +4,13 @@ import "strings"
 
 // PublishWithContextInput 定义基于迁移上下文的发布执行输入。
 type PublishWithContextInput struct {
-	TargetSite  string
-	TaskID      string
-	Payload     map[string]any
-	UploadData  map[string]any
-	Context     Context
-	TorrentPath string
+	TargetSite          string
+	TaskID              string
+	Payload             map[string]any
+	UploadData          map[string]any
+	Context             Context
+	TorrentPath         string
+	DefaultDownloaderID string
 }
 
 // PublishWithContextDeps 定义基于迁移上下文发布所需依赖。
@@ -68,6 +69,7 @@ func ExecutePublishWithContext(input PublishWithContextInput, deps PublishWithCo
 			Payload:              input.Payload,
 			FallbackSavePath:     input.Context.SavePath,
 			FallbackDownloaderID: input.Context.DownloaderID,
+			DefaultDownloaderID:  input.DefaultDownloaderID,
 		},
 		PublishExecutionDeps{
 			AddToDownloader:         deps.AddToDownloader,

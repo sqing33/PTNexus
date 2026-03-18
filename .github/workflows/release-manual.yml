@@ -72,8 +72,9 @@ jobs:
           if date:
               lines.append(f"发布日期：{date}")
           if note:
+              normalized_note = note if note.startswith("注：") else f"注：{note}"
               lines.append("")
-              lines.append("> " + note.replace("\n", "\n> "))
+              lines.append(normalized_note)
           if changes:
               lines.append("")
               lines.append("### 变更")

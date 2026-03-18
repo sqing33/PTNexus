@@ -15,11 +15,13 @@ func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
 	startedAt := time.Now()
 
 	normalizedPayload := s.normalizePublishPayloadWithCrossSeedDefaults(payload)
+	defaultDownloaderID := s.resolveDefaultPublishDownloaderID()
 
 	result, status := publishworkflow.ExecutePublishFromPayload(
 		publishworkflow.PublishFromPayloadInput{
-			Payload:     normalizedPayload,
-			TorrentPath: "",
+			Payload:             normalizedPayload,
+			TorrentPath:         "",
+			DefaultDownloaderID: defaultDownloaderID,
 		},
 		publishworkflow.PublishFromPayloadDeps{
 			ContextState:            s.contextState,

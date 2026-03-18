@@ -7,6 +7,7 @@ import (
 
 	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 	publishchecker "github.com/pt-nexus/server/internal/service/publish/checker"
+	publishdownloader "github.com/pt-nexus/server/internal/service/publish/downloader"
 	publishguard "github.com/pt-nexus/server/internal/service/publish/guard"
 	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
@@ -24,6 +25,7 @@ type PublishExecutionInput struct {
 
 	FallbackSavePath     string
 	FallbackDownloaderID string
+	DefaultDownloaderID  string
 }
 
 // PublishExecutionDeps 定义单站发布执行依赖。
@@ -58,22 +60,40 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 		}, 200
 	}
 
-	// 🚫 发布前预检查（对齐 Python）：当 payload 提供 downloaderId 时，先检查下载器限制。
-	preCheckDownloaderID := strings.TrimSpace(toStringAny(payload["downloaderId"], toStringAny(payload["downloader_id"], "")))
-	if preCheckDownloaderID != "" {
-		canContinue, limitMessage := publishguard.CheckDownloaderGate(preCheckDownloaderID)
-		if !canContinue {
-			if strings.TrimSpace(limitMessage) == "" {
-				limitMessage = "已触发限制"
-			}
-			return map[string]any{
-				"success":       false,
-				"logs":          fmt.Sprintf("🚫 发布前预检查触发限制: %s", strings.TrimSpace(limitMessage)),
-				"limit_reached": true,
-				"pre_check":     true,
-				"url":           nil,
-			}, 200
+	resolvedSavePath, resolvedDownloaderID := publishdownloader.ResolveEffectiveTarget(
+		payload,
+		strings.TrimSpace(input.FallbackSavePath),
+		strings.TrimSpace(input.FallbackDownloaderID),
+		strings.TrimSpace(input.DefaultDownloaderID),
+	)
+	buildPreCheckFailure := func(reason string) (map[string]any, int) {
+		trimmedReason := strings.TrimSpace(reason)
+		if trimmedReason == "" {
+			trimmedReason = "已触发限制"
 		}
+		message := fmt.Sprintf("🚫 发布前预检查触发限制: %s", trimmedReason)
+		return map[string]any{
+			"success":       false,
+			"logs":          message,
+			"message":       message,
+			"limit_reached": true,
+			"pre_check":     true,
+			"url":           nil,
+		}, 200
+	}
+	if resolvedSavePath == "" {
+		return buildPreCheckFailure("缺少有效 savePath，已停止发布")
+	}
+	if resolvedDownloaderID == "" {
+		return buildPreCheckFailure("缺少有效 downloaderId，已停止发布")
+	}
+
+	canContinue, limitMessage := publishguard.CheckDownloaderGate(resolvedDownloaderID)
+	if !canContinue {
+		if strings.TrimSpace(limitMessage) == "" {
+			limitMessage = "已触发限制"
+		}
+		return buildPreCheckFailure(limitMessage)
 	}
 
 	publishURL, directDownloadURL, logs, isExistingTorrent, uploadFormFields, publishErr := PublishTorrentToTarget(
@@ -229,13 +249,11 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 	useDefaultDownloader := boolFromAny(payload["useDefaultDownloader"]) || boolFromAny(payload["use_default_downloader"])
 	autoAddResult := map[string]any{"success": false, "message": "未启用自动添加到下载器"}
 	if autoAdd {
-		savePath := strings.TrimSpace(toStringAny(payload["savePath"], toStringAny(payload["save_path"], strings.TrimSpace(input.FallbackSavePath))))
-		downloaderID := strings.TrimSpace(toStringAny(payload["downloaderId"], toStringAny(payload["downloader_id"], strings.TrimSpace(input.FallbackDownloaderID))))
 		if isExistingTorrent && !autoAddExistingToDownloader {
 			autoAddResult = map[string]any{"success": false, "message": "检测到目标站点种子已存在，按设置跳过自动添加"}
-		} else if savePath == "" {
+		} else if resolvedSavePath == "" {
 			autoAddResult = map[string]any{"success": false, "message": "自动添加已跳过：缺少 savePath"}
-		} else if downloaderID == "" && !useDefaultDownloader {
+		} else if resolvedDownloaderID == "" && !useDefaultDownloader {
 			autoAddResult = map[string]any{"success": false, "message": "自动添加已跳过：缺少 downloaderId"}
 		} else if deps.AddToDownloader == nil {
 			autoAddResult = map[string]any{"success": false, "message": "自动添加已跳过：服务未注册 AddToDownloader 回调"}
@@ -246,13 +264,13 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 			}
 			addPayload := map[string]any{
 				"url":      downloadURLForDownloader,
-				"savePath": savePath,
+				"savePath": resolvedSavePath,
 			}
 			if targetNickname != "" {
 				addPayload["siteNickname"] = targetNickname
 			}
-			if downloaderID != "" {
-				addPayload["downloaderId"] = downloaderID
+			if resolvedDownloaderID != "" {
+				addPayload["downloaderId"] = resolvedDownloaderID
 			}
 			if raw, exists := payload["useDefaultDownloader"]; exists {
 				addPayload["useDefaultDownloader"] = raw

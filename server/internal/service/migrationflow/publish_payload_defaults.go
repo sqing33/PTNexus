@@ -51,10 +51,27 @@ func (s *MigrateService) normalizePublishPayloadWithCrossSeedDefaults(payload ma
 	}
 
 	// 对齐 Python：当 cross_seed.default_downloader 有值时，发布后自动添加优先使用该下载器。
-	if defaultID := strings.TrimSpace(processingshared.ToString(crossSeed["default_downloader"], "")); defaultID != "" {
+	if defaultID := s.resolveDefaultPublishDownloaderID(); defaultID != "" {
 		normalizedPayload["useDefaultDownloader"] = true
 		normalizedPayload["use_default_downloader"] = true
 	}
 
 	return normalizedPayload
+}
+
+func (s *MigrateService) resolveDefaultPublishDownloaderID() string {
+	rootConfig := map[string]any{}
+	if s != nil && s.cfg != nil {
+		rootConfig = s.cfg.Get()
+	}
+	if len(rootConfig) == 0 {
+		return ""
+	}
+
+	crossSeed, ok := rootConfig["cross_seed"].(map[string]any)
+	if !ok || crossSeed == nil {
+		return ""
+	}
+
+	return strings.TrimSpace(processingshared.ToString(crossSeed["default_downloader"], ""))
 }

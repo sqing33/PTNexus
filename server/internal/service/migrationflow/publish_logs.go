@@ -11,6 +11,7 @@ import (
 	"github.com/pt-nexus/server/internal/repository"
 	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
+	publishdownloader "github.com/pt-nexus/server/internal/service/publish/downloader"
 )
 
 const (
@@ -155,7 +156,15 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 
 	targetSite := strings.TrimSpace(processingshared.ToString(payload["targetSite"], ""))
 	sourceSite := s.normalizePublishLogSourceSite(processingshared.ToString(payload["sourceSite"], processingshared.ToString(payload["source_site"], "")))
-	downloaderID := strings.TrimSpace(processingshared.ToString(payload["downloaderId"], processingshared.ToString(payload["downloader_id"], "")))
+	fallbackSavePath := ""
+	fallbackDownloaderID := ""
+	if ctxTaskID != "" && s.contextState != nil {
+		if ctx, ok := s.contextState.Get(ctxTaskID); ok {
+			fallbackSavePath = strings.TrimSpace(ctx.SavePath)
+			fallbackDownloaderID = strings.TrimSpace(ctx.DownloaderID)
+		}
+	}
+	_, downloaderID := publishdownloader.ResolveEffectiveTarget(payload, fallbackSavePath, fallbackDownloaderID, s.resolveDefaultPublishDownloaderID())
 
 	uploadData, _ := payload["upload_data"].(map[string]any)
 	if uploadData == nil {
