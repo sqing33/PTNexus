@@ -371,6 +371,11 @@ func updateLastRunTime(now time.Time) {
 func runAutoUpdate() {
 	log.Println("开始执行自动更新检查...")
 
+	if isWindowsDesktopRuntime() {
+		log.Println("当前为 Windows 桌面模式，自动更新改为下载安装包，跳过定时安装流程")
+		return
+	}
+
 	localVersion := getLocalVersion()
 
 	manifest, err := getRemoteManifest()
@@ -527,22 +532,38 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	localVersion := getLocalVersion()
+	updateMode := updateModeRuntimeInstall
+	if isWindowsDesktopRuntime() {
+		updateMode = updateModeInstallerDownload
+	}
 
 	// UPDATE_MANIFEST.json：唯一的运行时更新元数据。
 	var manifestVersion string
 	var forceUpdateFromManifest bool
 	var disableUpdateFromManifest bool
 	manifestReady := false
+	var desktopInstaller *DesktopInstallerAsset
 	if manifest, err := getRemoteManifest(); err != nil {
 		log.Printf("检查更新时获取更新清单失败: %v", err)
 	} else {
 		manifestVersion = strings.TrimSpace(manifest.Latest.Version)
 		forceUpdateFromManifest = manifest.Latest.ForceUpdate || hasCrossVersionForceUpdate(localVersion, manifest.History)
 		disableUpdateFromManifest = manifest.Latest.DisableUpdate
-		if _, err := resolveManifestArtifactForCurrentPlatform(manifest); err != nil {
-			log.Printf("检查更新时更新清单不完整，跳过产物更新入口: %v", err)
+
+		if updateMode == updateModeInstallerDownload {
+			installer, err := resolveDesktopInstallerForCurrentPlatform(manifest)
+			if err != nil {
+				log.Printf("检查更新时桌面安装包信息不完整，跳过安装包下载入口: %v", err)
+			} else {
+				manifestReady = true
+				desktopInstaller = &installer
+			}
 		} else {
-			manifestReady = true
+			if _, err := resolveManifestArtifactForCurrentPlatform(manifest); err != nil {
+				log.Printf("检查更新时更新清单不完整，跳过产物更新入口: %v", err)
+			} else {
+				manifestReady = true
+			}
 		}
 	}
 
@@ -558,10 +579,16 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	// 没有新版本时，不应对前端暴露强制更新标志，避免“本地更高版本”场景误导 UI。
 	if !hasUpdate {
 		forceUpdate = false
+		disableUpdate = false
 	}
 
-	// 无可用产物时禁用“在线更新”，避免 UI 出现“有更新但无法安装”的误导操作。
-	if hasUpdate && !manifestReady {
+	// 桌面模式下，“disable_update”代表是否提供可下载安装包；不沿用 runtime 的禁更标志。
+	if updateMode == updateModeInstallerDownload {
+		if hasUpdate {
+			disableUpdate = !manifestReady
+		}
+	} else if hasUpdate && !manifestReady {
+		// 无可用产物时禁用“在线更新”，避免 UI 出现“有更新但无法安装”的误导操作。
 		disableUpdate = true
 	}
 
@@ -571,10 +598,12 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 这里不再做任何自动更新的触发逻辑，只返回数据
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":        true,
-		"has_update":     hasUpdate,
-		"local_version":  localVersion,
-		"remote_version": remoteVersion,
+		"success":           true,
+		"has_update":        hasUpdate,
+		"local_version":     localVersion,
+		"remote_version":    remoteVersion,
+		"update_mode":       updateMode,
+		"desktop_installer": desktopInstaller,
 		"update_control": map[string]interface{}{
 			"force_update":   forceUpdate,
 			"disable_update": disableUpdate,
@@ -651,6 +680,61 @@ func pullUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isWindowsDesktopRuntime() {
+		var downloaded *PreparedDesktopInstaller
+		err := withInMemoryUpdateFlag(func() error {
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+			defer cancel()
+
+			manifest, err := getRemoteManifest()
+			if err != nil {
+				return err
+			}
+
+			prepared, err := downloadLatestDesktopInstaller(ctx, manifest)
+			if err != nil {
+				return err
+			}
+			downloaded = prepared
+			return nil
+		})
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		message := "完整安装包下载完成"
+		if downloaded == nil || strings.TrimSpace(downloaded.FilePath) == "" {
+			message = "当前已是最新版本"
+		} else if downloaded.Kind == desktopInstallerKindPatch {
+			message = "更新安装包下载完成"
+		}
+
+		downloadedVersion := ""
+		downloadedKind := ""
+		downloadedFilePath := ""
+		downloadedFileName := ""
+		if downloaded != nil {
+			downloadedVersion = downloaded.Version
+			downloadedKind = downloaded.Kind
+			downloadedFilePath = downloaded.FilePath
+			downloadedFileName = downloaded.FileName
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":   true,
+			"message":   message,
+			"version":   downloadedVersion,
+			"kind":      downloadedKind,
+			"file_path": downloadedFilePath,
+			"file_name": downloadedFileName,
+		})
+		return
+	}
+
 	// 新链路：基于 UPDATE_MANIFEST.json 下载构建产物（artifact），完全不依赖 git。
 	// 仍保留 /update/pull + /update/install 的交互语义，前端无需改动。
 	err := withInMemoryUpdateFlag(func() error {
@@ -690,6 +774,14 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if isWindowsDesktopRuntime() {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Windows 桌面版不支持应用内安装，请手动运行已下载安装包完成升级",
+		})
 		return
 	}
 

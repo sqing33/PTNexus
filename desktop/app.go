@@ -7,8 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -82,7 +85,7 @@ func (a *App) OpenDatabaseConfigFile() error {
 	desktopapp.EnsureDesktopRuntimeEnv()
 	desktopapp.EnsureDatabaseConfigFile()
 	path := desktopapp.DatabaseConfigFilePath()
-	return openWithSystemDefault(path)
+	return openLocalPathWithSystemDefault(path)
 }
 
 // OpenExternalURL 使用系统默认浏览器打开外部链接。
@@ -102,6 +105,60 @@ func (a *App) OpenExternalURL(rawURL string) error {
 	}
 
 	return openWithSystemDefault(target)
+}
+
+// OpenPath 使用系统默认行为打开本地文件或目录。
+func (a *App) OpenPath(target string) error {
+	trimmed := strings.TrimSpace(target)
+	if trimmed == "" {
+		return fmt.Errorf("missing path")
+	}
+
+	absTarget, err := filepath.Abs(trimmed)
+	if err == nil {
+		trimmed = absTarget
+	}
+	if _, err := os.Stat(trimmed); err != nil {
+		return err
+	}
+
+	return openLocalPathWithSystemDefault(trimmed)
+}
+
+// LaunchInstaller 直接启动本地安装器，并附带当前运行实例信息供安装器快速关闭。
+func (a *App) LaunchInstaller(target string) error {
+	trimmed := strings.TrimSpace(target)
+	if trimmed == "" {
+		return fmt.Errorf("missing installer path")
+	}
+
+	absTarget, err := filepath.Abs(trimmed)
+	if err == nil {
+		trimmed = absTarget
+	}
+
+	info, err := os.Stat(trimmed)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("installer path is directory")
+	}
+
+	env := desktopapp.EnsureDesktopRuntimeEnv()
+	cmd := buildInstallerLaunchCommand(trimmed, buildInstallerLaunchArgs(
+		strings.TrimSpace(env.ResourceDir),
+		os.Getpid(),
+		a.serverProcessID(),
+		a.updaterProcessID(),
+	))
+	cmd.Dir = filepath.Dir(trimmed)
+	return cmd.Start()
+}
+
+// RevealPath 使用系统文件管理器定位本地文件或目录。
+func (a *App) RevealPath(target string) error {
+	return revealPathWithSystemDefault(target)
 }
 
 // DesktopRequest 通过 Wails 原生绑定代理 /api 与 /update 请求到本地 sidecar。
@@ -161,6 +218,24 @@ func (a *App) ctxOrBackground() context.Context {
 		return a.ctx
 	}
 	return context.Background()
+}
+
+func (a *App) serverProcessID() int {
+	a.sidecarMu.Lock()
+	defer a.sidecarMu.Unlock()
+	if a.server == nil {
+		return 0
+	}
+	return a.server.ProcessID()
+}
+
+func (a *App) updaterProcessID() int {
+	a.sidecarMu.Lock()
+	defer a.sidecarMu.Unlock()
+	if a.updater == nil {
+		return 0
+	}
+	return a.updater.ProcessID()
 }
 
 func (a *App) ensureSidecarsForURL(env desktopapp.DesktopRuntimeEnv, rawURL string) error {
@@ -356,6 +431,91 @@ func openWithSystemDefault(target string) error {
 	default:
 		cmd = exec.Command("xdg-open", target)
 	}
+	configureCommandForPlatform(cmd)
+	return cmd.Start()
+}
+
+func openLocalPathWithSystemDefault(target string) error {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return fmt.Errorf("missing path")
+	}
+
+	absTarget, err := filepath.Abs(target)
+	if err == nil {
+		target = absTarget
+	}
+	if _, err := os.Stat(target); err != nil {
+		return err
+	}
+
+	cmd := buildLocalOpenCommandForPlatform(goruntime.GOOS, target)
+	configureCommandForPlatform(cmd)
+	return cmd.Start()
+}
+
+func buildLocalOpenCommandForPlatform(goos, target string) *exec.Cmd {
+	switch goos {
+	case "windows":
+		return exec.Command("cmd.exe", "/c", "start", "", target)
+	case "darwin":
+		return exec.Command("open", target)
+	default:
+		return exec.Command("xdg-open", target)
+	}
+}
+
+func buildInstallerLaunchArgs(installDir string, mainPID, serverPID, updaterPID int) []string {
+	args := make([]string, 0, 4)
+	if strings.TrimSpace(installDir) != "" {
+		args = append(args, "/PTNEXUS_INSTALL_DIR="+installDir)
+	}
+	if mainPID > 0 {
+		args = append(args, "/PTNEXUS_MAIN_PID="+strconv.Itoa(mainPID))
+	}
+	if serverPID > 0 {
+		args = append(args, "/PTNEXUS_SERVER_PID="+strconv.Itoa(serverPID))
+	}
+	if updaterPID > 0 {
+		args = append(args, "/PTNEXUS_UPDATER_PID="+strconv.Itoa(updaterPID))
+	}
+	return args
+}
+
+func buildInstallerLaunchCommand(installerPath string, args []string) *exec.Cmd {
+	return exec.Command(installerPath, args...)
+}
+
+func revealPathWithSystemDefault(target string) error {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return fmt.Errorf("missing path")
+	}
+
+	absTarget, err := filepath.Abs(target)
+	if err == nil {
+		target = absTarget
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		return err
+	}
+
+	var cmd *exec.Cmd
+	switch goruntime.GOOS {
+	case "windows":
+		cmd = exec.Command("explorer.exe", "/select,", target)
+	case "darwin":
+		cmd = exec.Command("open", "-R", target)
+	default:
+		dir := target
+		if !info.IsDir() {
+			dir = filepath.Dir(target)
+		}
+		cmd = exec.Command("xdg-open", dir)
+	}
+
 	configureCommandForPlatform(cmd)
 	return cmd.Start()
 }

@@ -20,6 +20,14 @@ type Sidecar struct {
 	cmd     *exec.Cmd
 }
 
+// ProcessID 返回 sidecar 进程 PID；若当前进程不是由桌面端拉起，则返回 0。
+func (s *Sidecar) ProcessID() int {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		return 0
+	}
+	return s.cmd.Process.Pid
+}
+
 // Stop 尝试停止 sidecar 子进程（若由当前进程启动）。
 func (s *Sidecar) Stop() {
 	if s == nil || s.cmd == nil || s.cmd.Process == nil {

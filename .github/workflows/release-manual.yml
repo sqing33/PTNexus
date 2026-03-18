@@ -320,7 +320,35 @@ jobs:
         run: |
           bash scripts/package-desktop.sh
 
-      - name: 9. 上传桌面端发布产物
+      - name: 9. 生成桌面端安装包元数据
+        if: ${{ inputs.build_desktop_windows }}
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          FULL_INSTALLER_PATH="desktop/build/bin/pt-nexus-${VERSION}-amd64-installer.exe"
+          PATCH_INSTALLER_PATH="desktop/build/bin/pt-nexus-${VERSION}-amd64-update.exe"
+          FULL_OUTPUT_PATH="dist/desktop-installers/${VERSION}/installer-amd64-full.json"
+          PATCH_OUTPUT_PATH="dist/desktop-installers/${VERSION}/installer-amd64-patch.json"
+
+          python3 scripts/build-desktop-installer-metadata.py \
+            --installer "$FULL_INSTALLER_PATH" \
+            --changelog CHANGELOG.json \
+            --version "$VERSION" \
+            --kind full \
+            --arch amd64 \
+            --output "$FULL_OUTPUT_PATH"
+
+          python3 scripts/build-desktop-installer-metadata.py \
+            --installer "$PATCH_INSTALLER_PATH" \
+            --changelog CHANGELOG.json \
+            --version "$VERSION" \
+            --kind patch \
+            --arch amd64 \
+            --output "$PATCH_OUTPUT_PATH"
+
+          ls -lh "$FULL_INSTALLER_PATH" "$PATCH_INSTALLER_PATH" "$FULL_OUTPUT_PATH" "$PATCH_OUTPUT_PATH"
+
+      - name: 10. 上传桌面端发布产物
         if: ${{ inputs.build_desktop_windows }}
         uses: actions/upload-artifact@v4
         with:
@@ -328,6 +356,15 @@ jobs:
           path: |
             desktop/build/bin/pt-nexus.exe
             desktop/build/bin/pt-nexus-*-amd64-installer.exe
+            desktop/build/bin/pt-nexus-*-amd64-update.exe
+          if-no-files-found: error
+
+      - name: 11. 上传桌面端安装包元数据
+        if: ${{ inputs.build_desktop_windows }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-installer-metadata-${{ needs.meta.outputs.version }}
+          path: dist/desktop-installers/${{ needs.meta.outputs.version }}/*.json
           if-no-files-found: error
 
   proxy:
@@ -422,38 +459,81 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 1. 创建 Release 产物目录
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
+
+      - name: 2. 创建 Release 产物目录
         run: |
           mkdir -p "dist/release-assets/${{ needs.meta.outputs.version }}"
+          mkdir -p "dist/desktop-installer-metadata/${{ needs.meta.outputs.version }}"
 
-      - name: 2. 下载 Runtime 产物
+      - name: 3. 下载 Runtime 产物
         if: ${{ inputs.build_runtime }}
         uses: actions/download-artifact@v4
         with:
           name: runtime-release-${{ needs.meta.outputs.version }}
           path: dist/release-assets/${{ needs.meta.outputs.version }}
 
-      - name: 3. 下载桌面端产物
+      - name: 4. 下载桌面端产物
         if: ${{ inputs.build_desktop_windows }}
         uses: actions/download-artifact@v4
         with:
           name: desktop-release-${{ needs.meta.outputs.version }}
           path: dist/release-assets/${{ needs.meta.outputs.version }}
 
-      - name: 4. 下载 Proxy 产物
+      - name: 5. 下载桌面端安装包元数据
+        if: ${{ inputs.build_desktop_windows }}
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-installer-metadata-${{ needs.meta.outputs.version }}
+          path: dist/desktop-installer-metadata/${{ needs.meta.outputs.version }}
+
+      - name: 6. 下载 Proxy 产物
         if: ${{ inputs.build_proxy }}
         uses: actions/download-artifact@v4
         with:
           name: proxy-release-${{ needs.meta.outputs.version }}
           path: dist/release-assets/${{ needs.meta.outputs.version }}
 
+      - name: 7. 合并 UPDATE_MANIFEST.json
+        if: ${{ inputs.build_runtime || inputs.build_desktop_windows }}
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          MANIFEST_PATH="dist/release-assets/${VERSION}/UPDATE_MANIFEST.json"
+          DESKTOP_METADATA_DIR="dist/desktop-installer-metadata/${VERSION}"
+          DESKTOP_ARGS=()
+          if [[ -d "$DESKTOP_METADATA_DIR" ]]; then
+            while IFS= read -r -d '' item; do
+              DESKTOP_ARGS+=("--desktop-installer" "$item")
+            done < <(find "$DESKTOP_METADATA_DIR" -maxdepth 1 -type f -name '*.json' -print0 | sort -z)
+          fi
 
-      - name: 5. 校验待发布文件
+          if [[ "${#DESKTOP_ARGS[@]}" -eq 0 && ! -f "$MANIFEST_PATH" ]]; then
+            echo "No runtime manifest or desktop installer metadata found, skip manifest merge."
+            exit 0
+          fi
+
+          MANIFEST_INPUT=()
+          if [[ -f "$MANIFEST_PATH" ]]; then
+            MANIFEST_INPUT=(--manifest "$MANIFEST_PATH")
+          fi
+
+          python3 scripts/merge-update-manifest.py \
+            --changelog CHANGELOG.json \
+            --version "$VERSION" \
+            --output "$MANIFEST_PATH" \
+            "${MANIFEST_INPUT[@]}" \
+            "${DESKTOP_ARGS[@]}"
+          test -f "$MANIFEST_PATH"
+          ls -lh "$MANIFEST_PATH"
+
+      - name: 8. 校验待发布文件
         run: |
           find "dist/release-assets/${{ needs.meta.outputs.version }}" -maxdepth 1 -type f -printf '%f\n' | sort
           test -n "$(find "dist/release-assets/${{ needs.meta.outputs.version }}" -maxdepth 1 -type f | head -n 1)"
 
-      - name: 6. 发布版本 GitHub Release
+      - name: 9. 发布版本 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.meta.outputs.version }}

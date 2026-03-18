@@ -1,5 +1,6 @@
 # Build outputs
 build/bin/
+build/.package-cache/
 build/windows/installer/tmp/
 build/windows/installer/wails_tools.nsh
 build/windows/sidecar/

@@ -23,12 +23,13 @@ type UpdateManifest struct {
 }
 
 type ManifestLatest struct {
-	Version       string           `json:"version"`
-	Date          string           `json:"date,omitempty"`
-	ForceUpdate   bool             `json:"force_update,omitempty"`
-	DisableUpdate bool             `json:"disable_update,omitempty"`
-	Note          string           `json:"note,omitempty"`
-	Artifacts     []UpdateArtifact `json:"artifacts"`
+	Version           string                  `json:"version"`
+	Date              string                  `json:"date,omitempty"`
+	ForceUpdate       bool                    `json:"force_update,omitempty"`
+	DisableUpdate     bool                    `json:"disable_update,omitempty"`
+	Note              string                  `json:"note,omitempty"`
+	Artifacts         []UpdateArtifact        `json:"artifacts"`
+	DesktopInstallers []DesktopInstallerAsset `json:"desktop_installers,omitempty"`
 }
 
 type UpdateArtifact struct {
@@ -39,6 +40,17 @@ type UpdateArtifact struct {
 	SHA256     string   `json:"sha256"`
 	Size       int64    `json:"size,omitempty"`
 	Format     string   `json:"format,omitempty"` // "tar.gz" (default) | "zip"
+}
+
+type DesktopInstallerAsset struct {
+	Platform   string   `json:"platform,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	Arch       string   `json:"arch"`
+	FileName   string   `json:"file_name,omitempty"`
+	URL        string   `json:"url"`
+	MirrorURLs []string `json:"mirror_urls,omitempty"`
+	SHA256     string   `json:"sha256"`
+	Size       int64    `json:"size,omitempty"`
 }
 
 func newUpdateHTTPClient(timeout time.Duration) *http.Client {

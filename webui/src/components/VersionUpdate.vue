@@ -4,9 +4,9 @@
     v-model="updateDialogVisible"
     title="PT Nexus 版本更新"
     width="800px"
-    :close-on-click-modal="!isForceUpdate"
-    :close-on-press-escape="!isForceUpdate"
-    :show-close="!isForceUpdate"
+    :close-on-click-modal="!isBlockingForceUpdate"
+    :close-on-press-escape="!isBlockingForceUpdate"
+    :show-close="!isBlockingForceUpdate"
     class="update-dialog"
   >
     <el-card shadow="never" class="update-card">
@@ -35,7 +35,7 @@
           style="color: #f56c6c; background: #fef0f0; border-color: #fde2e2"
         >
           <el-icon color="#f56c6c" size="18"><WarningFilled /></el-icon>
-          <span>检测到关键更新，系统将自动执行升级流程，请勿关闭页面。</span>
+          <span>{{ forceUpdateNoticeText }}</span>
         </div>
 
         <div
@@ -43,7 +43,7 @@
           class="force-update-notice"
         >
           <el-icon color="#e6a23c" size="18"><WarningFilled /></el-icon>
-          <span>此版本需要更新Docker镜像，请手动更新镜像后使用</span>
+          <span>{{ disableUpdateNoticeText }}</span>
         </div>
 
         <!-- All Versions Timeline -->
@@ -112,7 +112,7 @@
         <div class="button-group">
           <!-- 修复：如果是强制更新且没被禁用，才隐藏取消按钮 -->
           <el-button
-            v-if="!isForceUpdate || updateInfo.updateControl.disable_update"
+            v-if="!isBlockingForceUpdate || updateInfo.updateControl.disable_update"
             @click="updateDialogVisible = false"
             :disabled="isUpdating"
           >
@@ -126,13 +126,9 @@
             @click="performUpdate"
             :loading="isUpdating"
             :disabled="isUpdating || updateInfo.updateControl.disable_update"
-            :title="
-              updateInfo.updateControl.disable_update
-                ? '当前版本需要更新镜像，请手动更新Docker镜像'
-                : ''
-            "
+            :title="disableUpdateButtonTitle"
           >
-            {{ isUpdating ? '更新中...' : '立即更新' }}
+            {{ primaryActionLabel }}
           </el-button>
         </div>
       </div>
@@ -145,6 +141,7 @@ import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { SuccessFilled, WarningFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
 import { ElMessage } from '@/utils/uiNotify'
+import { getDesktopBridge } from '@/desktop/bridge'
 
 // 更新状态
 const isUpdating = ref(false)
@@ -180,6 +177,8 @@ const updateInfo = reactive({
       last_run: null as string | null,
     },
   },
+  updateMode: 'runtime_install' as UpdateMode,
+  desktopInstaller: null as DesktopInstallerData | null,
 })
 
 type UpdateControlSchedule = {
@@ -195,15 +194,82 @@ type UpdateControlData = {
   schedule?: UpdateControlSchedule
 }
 
+type UpdateMode = 'runtime_install' | 'installer_download'
+
+type DesktopInstallerData = {
+  platform?: string
+  kind?: string
+  arch?: string
+  file_name?: string
+  url?: string
+  mirror_urls?: string[]
+  sha256?: string
+  size?: number
+}
+
 type UpdateCheckData = {
   remote_version?: string
   update_control?: UpdateControlData
+  update_mode?: string
+  desktop_installer?: DesktopInstallerData | null
   [key: string]: unknown
 }
 
 // 计算属性：判断是否为强制更新
 const isForceUpdate = computed(() => {
   return updateInfo.updateControl.force_update
+})
+
+const isInstallerDownloadMode = computed(() => {
+  return updateInfo.updateMode === 'installer_download'
+})
+
+const normalizeDesktopInstallerKind = (kind?: string): 'patch' | 'full' => {
+  return String(kind || '').trim().toLowerCase() === 'patch' ? 'patch' : 'full'
+}
+
+const getDesktopInstallerLabel = (kind?: string): string => {
+  return normalizeDesktopInstallerKind(kind) === 'patch' ? '更新安装包' : '完整安装包'
+}
+
+const desktopInstallerLabel = computed(() => {
+  return getDesktopInstallerLabel(updateInfo.desktopInstaller?.kind)
+})
+
+const isBlockingForceUpdate = computed(() => {
+  return (
+    isForceUpdate.value &&
+    !updateInfo.updateControl.disable_update &&
+    !isInstallerDownloadMode.value
+  )
+})
+
+const forceUpdateNoticeText = computed(() => {
+  return isInstallerDownloadMode.value
+    ? `检测到关键更新，请下载${desktopInstallerLabel.value}并手动完成升级。`
+    : '检测到关键更新，系统将自动执行升级流程，请勿关闭页面。'
+})
+
+const disableUpdateNoticeText = computed(() => {
+  return isInstallerDownloadMode.value
+    ? '当前版本未提供可用 Windows 安装包，请稍后重试'
+    : '此版本需要更新Docker镜像，请手动更新镜像后使用'
+})
+
+const disableUpdateButtonTitle = computed(() => {
+  if (!updateInfo.updateControl.disable_update) {
+    return ''
+  }
+  return isInstallerDownloadMode.value
+    ? '当前版本未提供 Windows 安装包'
+    : '当前版本需要更新Docker镜像，请手动更新镜像'
+})
+
+const primaryActionLabel = computed(() => {
+  if (isUpdating.value) {
+    return isInstallerDownloadMode.value ? `${desktopInstallerLabel.value}下载中...` : '更新中...'
+  }
+  return isInstallerDownloadMode.value ? `下载${desktopInstallerLabel.value}` : '立即更新'
 })
 
 const compareVersions = (v1: string, v2: string): number => {
@@ -332,6 +398,7 @@ const loadVersionInfo = async () => {
         hasUpdate: isReallyHasUpdate,
         isLocalNewer: isLocalNewer, // 调试看是否识别为本地更新
         forceUpdate: data.update_control?.force_update,
+        updateMode: data.update_mode,
       })
 
       // 核心修复：
@@ -347,7 +414,8 @@ const loadVersionInfo = async () => {
           data.update_control &&
           data.update_control.force_update &&
           !data.update_control.disable_update &&
-          !isLocalNewer // 再次确保本地较新时不自动更新
+          !isLocalNewer && // 再次确保本地较新时不自动更新
+          data.update_mode !== 'installer_download'
         ) {
           console.log('检测到强制更新，自动触发更新流程...')
           nextTick(() => {
@@ -381,12 +449,16 @@ const showUpdateDialog = async (preLoadedData: UpdateCheckData | null = null) =>
     const compareResult = compareVersions(versionData.remote_version || '', currentVersion.value)
     // 如果 compareResult < 0，说明本地版本比远程新
     const isLocalNewer = compareResult < 0
+    const updateMode: UpdateMode =
+      versionData.update_mode === 'installer_download' ? 'installer_download' : 'runtime_install'
 
     updateInfo.hasUpdate = compareResult > 0
     updateInfo.currentVersion = currentVersion.value
     updateInfo.remoteVersion = versionData.remote_version || ''
     updateInfo.changelog = changelogData.changelog || []
     updateInfo.history = changelogData.history || []
+    updateInfo.updateMode = updateMode
+    updateInfo.desktopInstaller = versionData.desktop_installer || null
 
     const schedule = versionData.update_control?.schedule
     updateInfo.updateControl = {
@@ -416,7 +488,7 @@ const showUpdateDialog = async (preLoadedData: UpdateCheckData | null = null) =>
 const performUpdate = async () => {
   // 防卫：如果已经禁止更新，直接返回
   if (updateInfo.updateControl.disable_update) {
-    ElMessage.warning('当前版本需要更新Docker镜像，不支持在线热更新')
+    ElMessage.warning(disableUpdateNoticeText.value)
     return
   }
 
@@ -435,6 +507,96 @@ const performUpdate = async () => {
       ElMessage.error('下载更新失败: ' + pullResponse.data.error)
       isUpdating.value = false
       updateProgress.value = 0
+      return
+    }
+
+    if (isInstallerDownloadMode.value) {
+      const filePath = String(pullResponse.data.file_path || '').trim()
+      const installerLabel = getDesktopInstallerLabel(String(pullResponse.data.kind || updateInfo.desktopInstaller?.kind || ''))
+      updateProgress.value = 100
+      updateStatus.value = filePath
+        ? `${installerLabel}已下载，正在打开安装程序`
+        : '当前已是最新版本'
+
+      let successMessage = String(pullResponse.data.message || '').trim() || updateStatus.value
+      if (filePath) {
+        const desktopBridge = getDesktopBridge()
+        if (desktopBridge && typeof desktopBridge.LaunchInstaller === 'function') {
+          try {
+            await desktopBridge.LaunchInstaller(filePath)
+            updateStatus.value = `${installerLabel}已打开，请按安装向导完成升级`
+            successMessage = `${installerLabel}已打开。继续安装时若检测到 PT Nexus 正在运行，安装器会提示关闭后再继续`
+          } catch (launchError) {
+            console.error('启动安装包失败:', launchError)
+            if (desktopBridge && typeof desktopBridge.OpenPath === 'function') {
+              try {
+                await desktopBridge.OpenPath(filePath)
+                updateStatus.value = `${installerLabel}已打开，请按安装向导完成升级`
+                successMessage = `${installerLabel}已打开。继续安装时若检测到 PT Nexus 正在运行，安装器会提示关闭后再继续`
+              } catch (openError) {
+                console.error('打开安装包失败:', openError)
+                if (desktopBridge && typeof desktopBridge.RevealPath === 'function') {
+                  try {
+                    await desktopBridge.RevealPath(filePath)
+                    successMessage = `${installerLabel}已下载，启动安装程序失败，已为你定位到文件。请手动运行安装程序完成升级`
+                  } catch (revealError) {
+                    console.error('定位安装包失败:', revealError)
+                    successMessage = `${installerLabel}已下载到：${filePath}。自动打开失败，请手动运行安装程序完成升级`
+                  }
+                } else {
+                  successMessage = `${installerLabel}已下载到：${filePath}。自动打开失败，请手动运行安装程序完成升级`
+                }
+              }
+            } else if (desktopBridge && typeof desktopBridge.RevealPath === 'function') {
+              try {
+                await desktopBridge.RevealPath(filePath)
+                successMessage = `${installerLabel}已下载，启动安装程序失败，已为你定位到文件。请手动运行安装程序完成升级`
+              } catch (revealError) {
+                console.error('定位安装包失败:', revealError)
+                successMessage = `${installerLabel}已下载到：${filePath}。自动打开失败，请手动运行安装程序完成升级`
+              }
+            } else {
+              successMessage = `${installerLabel}已下载到：${filePath}。自动打开失败，请手动运行安装程序完成升级`
+            }
+          }
+        } else if (desktopBridge && typeof desktopBridge.OpenPath === 'function') {
+          try {
+            await desktopBridge.OpenPath(filePath)
+            updateStatus.value = `${installerLabel}已打开，请按安装向导完成升级`
+            successMessage = `${installerLabel}已打开。继续安装时若检测到 PT Nexus 正在运行，安装器会提示关闭后再继续`
+          } catch (openError) {
+            console.error('打开安装包失败:', openError)
+            if (desktopBridge && typeof desktopBridge.RevealPath === 'function') {
+              try {
+                await desktopBridge.RevealPath(filePath)
+                successMessage = `${installerLabel}已下载，打开安装程序失败，已为你定位到文件。请手动运行安装程序完成升级`
+              } catch (revealError) {
+                console.error('定位安装包失败:', revealError)
+                successMessage = `${installerLabel}已下载到：${filePath}。自动打开失败，请手动运行安装程序完成升级`
+              }
+            } else {
+              successMessage = `${installerLabel}已下载到：${filePath}。自动打开失败，请手动运行安装程序完成升级`
+            }
+          }
+        } else if (desktopBridge && typeof desktopBridge.RevealPath === 'function') {
+          try {
+            await desktopBridge.RevealPath(filePath)
+            successMessage = `${installerLabel}已下载，当前桌面桥接不支持自动打开，已为你定位到文件。请手动运行安装程序完成升级`
+          } catch (error) {
+            console.error('定位安装包失败:', error)
+            successMessage = `${installerLabel}已下载到：${filePath}。请手动运行安装程序完成升级`
+          }
+        } else {
+          successMessage = `${installerLabel}已下载到：${filePath}。请手动运行安装程序完成升级`
+        }
+      }
+
+      ElMessage.success({
+        message: successMessage,
+        duration: 4000,
+      })
+      isUpdating.value = false
+      updateDialogVisible.value = false
       return
     }
 

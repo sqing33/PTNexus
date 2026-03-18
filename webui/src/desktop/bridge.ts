@@ -23,7 +23,10 @@ export interface DesktopBridge {
   DesktopRequest: (req: DesktopRequest) => Promise<DesktopResponse>
   DesktopSSESubscribe: (url: string) => Promise<DesktopSSESubscription>
   DesktopSSEUnsubscribe: (id: string) => Promise<void>
+  LaunchInstaller?: (path: string) => Promise<void>
   OpenExternalURL?: (url: string) => Promise<void>
+  OpenPath?: (path: string) => Promise<void>
+  RevealPath?: (path: string) => Promise<void>
 }
 
 export interface WailsRuntime {
@@ -53,4 +56,5 @@ export const getWailsRuntime = (): WailsRuntime | null => {
   return runtime as WailsRuntime
 }
 
-export const isDesktopRuntime = (): boolean => getDesktopBridge() !== null && getWailsRuntime() !== null
+export const isDesktopRuntime = (): boolean =>
+  getDesktopBridge() !== null && getWailsRuntime() !== null

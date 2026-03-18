@@ -53,11 +53,20 @@ var (
 	createSymlinkFn     = os.Symlink
 	replaceSymlinkFn    = os.Rename
 	removeSymlinkFn     = os.Remove
+	renameFileFn        = os.Rename
+	removeFileFn        = os.Remove
 	updateSymlinkFn     = updateSymlinkAtomic
 	ensureRuntimeFn     = ensureRuntimeSymlinks
 	stopServerFn        = stopServerProcess
 	startServerFn       = startServerProcess
 	rollbackRuntimeFn   = rollbackRuntime
+	fileOpRetrySleepFn  = time.Sleep
+	fileOpRetryEnabled  = runtime.GOOS == "windows"
+)
+
+const (
+	windowsFileOpRetryMaxAttempts = 6
+	windowsFileOpRetryBaseDelay   = 150 * time.Millisecond
 )
 
 func sanitizePathToken(v string) string {
@@ -290,21 +299,95 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+func shouldRetryWindowsFileOp(err error) bool {
+	if !fileOpRetryEnabled {
+		return false
+	}
+
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		err = linkErr.Err
+	}
+
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		err = pathErr.Err
+	}
+
+	errno, ok := err.(syscall.Errno)
+	if !ok {
+		return false
+	}
+
+	switch errno {
+	case 5, 32, 33: // ERROR_ACCESS_DENIED / ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+		return true
+	default:
+		return false
+	}
+}
+
+func retryWindowsFileOp(opDesc string, fn func() error) error {
+	var lastErr error
+	for attempt := 1; attempt <= windowsFileOpRetryMaxAttempts; attempt++ {
+		lastErr = fn()
+		if lastErr == nil {
+			return nil
+		}
+		if !shouldRetryWindowsFileOp(lastErr) || attempt == windowsFileOpRetryMaxAttempts {
+			break
+		}
+		log.Printf("Windows 文件操作失败，准备重试: op=%s attempt=%d/%d err=%v", opDesc, attempt, windowsFileOpRetryMaxAttempts, lastErr)
+		fileOpRetrySleepFn(time.Duration(attempt) * windowsFileOpRetryBaseDelay)
+	}
+
+	if lastErr == nil {
+		return nil
+	}
+	if shouldRetryWindowsFileOp(lastErr) {
+		return fmt.Errorf("%s 失败，已重试 %d 次: %w", opDesc, windowsFileOpRetryMaxAttempts, lastErr)
+	}
+	return lastErr
+}
+
+func removeFileWithRetry(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	return retryWindowsFileOp(fmt.Sprintf("remove %s", path), func() error {
+		err := removeFileFn(path)
+		if err != nil && os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	})
+}
+
+func renameFileWithRetry(srcPath, dstPath string) error {
+	return retryWindowsFileOp(fmt.Sprintf("rename %s -> %s", srcPath, dstPath), func() error {
+		return renameFileFn(srcPath, dstPath)
+	})
+}
+
 func downloadWithSHA256(ctx context.Context, urlStr, dstPath, expectedSHA256 string, timeout, idleTimeout time.Duration) (string, error) {
 	expected := strings.ToLower(strings.TrimSpace(expectedSHA256))
-	if expected != "" {
-		if _, err := os.Stat(dstPath); err == nil {
+	if _, err := os.Stat(dstPath); err == nil {
+		if expected != "" {
 			got, err := sha256File(dstPath)
 			if err == nil && strings.EqualFold(got, expected) {
 				return got, nil
 			}
-			_ = os.Remove(dstPath)
+		}
+		if err := removeFileWithRetry(dstPath); err != nil {
+			return "", fmt.Errorf("清理旧下载文件失败: %w", err)
 		}
 	}
 
 	ensureDir(filepath.Dir(dstPath))
 	tmpPath := dstPath + ".tmp"
-	_ = os.Remove(tmpPath)
+	if err := removeFileWithRetry(tmpPath); err != nil {
+		return "", fmt.Errorf("清理临时下载文件失败: %w", err)
+	}
 
 	if idleTimeout <= 0 {
 		idleTimeout = defaultDownloadIdleTimeout
@@ -337,7 +420,17 @@ func downloadWithSHA256(ctx context.Context, urlStr, dstPath, expectedSHA256 str
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	fileClosed := false
+	closeTempFile := func() error {
+		if fileClosed {
+			return nil
+		}
+		fileClosed = true
+		return f.Close()
+	}
+	defer func() {
+		_ = closeTempFile()
+	}()
 
 	var h hash.Hash = sha256.New()
 	var lastProgress atomic.Int64
@@ -364,7 +457,10 @@ func downloadWithSHA256(ctx context.Context, urlStr, dstPath, expectedSHA256 str
 		select {
 		case copyErr := <-copyDone:
 			if copyErr != nil {
-				_ = os.Remove(tmpPath)
+				if closeErr := closeTempFile(); closeErr != nil {
+					log.Printf("关闭临时下载文件失败: path=%s err=%v", tmpPath, closeErr)
+				}
+				_ = removeFileWithRetry(tmpPath)
 				return "", copyErr
 			}
 			goto verify
@@ -372,24 +468,29 @@ func downloadWithSHA256(ctx context.Context, urlStr, dstPath, expectedSHA256 str
 			last := time.Unix(0, lastProgress.Load())
 			if time.Since(last) > idleTimeout {
 				cancel()
-				_ = os.Remove(tmpPath)
+				_ = removeFileWithRetry(tmpPath)
 				return "", fmt.Errorf("下载进度停滞超过 %s", idleTimeout)
 			}
 		case <-reqCtx.Done():
-			_ = os.Remove(tmpPath)
+			_ = removeFileWithRetry(tmpPath)
 			return "", fmt.Errorf("下载失败: %w", reqCtx.Err())
 		}
 	}
 
 verify:
+	if err := closeTempFile(); err != nil {
+		_ = removeFileWithRetry(tmpPath)
+		return "", fmt.Errorf("关闭临时下载文件失败: %w", err)
+	}
+
 	got := hex.EncodeToString(h.Sum(nil))
 	if expected != "" && !strings.EqualFold(got, expected) {
-		_ = os.Remove(tmpPath)
+		_ = removeFileWithRetry(tmpPath)
 		return "", fmt.Errorf("SHA256 校验失败: want=%s got=%s", expected, got)
 	}
 
-	if err := os.Rename(tmpPath, dstPath); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := renameFileWithRetry(tmpPath, dstPath); err != nil {
+		_ = removeFileWithRetry(tmpPath)
 		return "", err
 	}
 
