@@ -57,14 +57,15 @@ func FindBlurayRootPath(rawPath string) string {
 }
 
 // ExtractBDInfo 调用系统 BDInfo 工具提取蓝光盘信息文本。
-// 参数/返回：blurayRoot 为蓝光根目录；返回 BDInfo 文本输出。
+// 参数/返回：blurayRoot 为蓝光根目录；返回经过 BDInfoDataSubstractor 清洗后的 BDInfo 文本输出。
 // 失败场景：找不到 BDInfo 可执行文件、执行失败、输出为空时返回错误。
-// 副作用：调用外部命令并创建临时文件。
+// 副作用：调用外部命令并创建临时文件；二次提取失败时会记录告警并回退原始 BDInfo。
 func ExtractBDInfo(blurayRoot string) (string, error) {
 	bdinfoBin, err := resolveBDInfoBinaryPath()
 	if err != nil {
 		return "", err
 	}
+	substractorBin := resolveBDInfoDataSubstractorPath(bdinfoBin)
 
 	tmpFile, err := os.CreateTemp("", "ptnexus-bdinfo-*.txt")
 	if err != nil {
@@ -91,17 +92,25 @@ func ExtractBDInfo(blurayRoot string) (string, error) {
 		logx.Warnf(bdinfoToolLogModule, "检测到 ICU 依赖缺失，已使用 invariant 模式执行 BDInfo")
 	}
 
-	data, readErr := os.ReadFile(tmpPath)
-	if readErr != nil {
+	postProcessResult, processErr := postProcessBDInfoOutput(tmpPath, substractorBin)
+	if processErr != nil {
 		if outputText != "" {
 			return outputText, nil
 		}
-		return "", fmt.Errorf("读取 BDInfo 输出失败: %w", readErr)
+		return "", processErr
+	}
+	if postProcessResult.UsedInvariant {
+		logx.Warnf(bdinfoToolLogModule, "检测到 ICU 依赖缺失，已使用 invariant 模式执行 BDInfoDataSubstractor path=%s", strings.TrimSpace(substractorBin))
+	}
+	if postProcessResult.UsedSubstractor {
+		logx.Infof(bdinfoToolLogModule, "BDInfoDataSubstractor 处理成功 path=%s", strings.TrimSpace(substractorBin))
+	} else if strings.TrimSpace(postProcessResult.FallbackReason) != "" {
+		logx.Warnf(bdinfoToolLogModule, "BDInfoDataSubstractor 不可用，回退原始 BDInfo bdinfo_path=%s substractor_path=%s reason=%s", bdinfoBin, strings.TrimSpace(substractorBin), strings.TrimSpace(postProcessResult.FallbackReason))
 	}
 
-	text := strings.TrimSpace(string(data))
+	text := strings.TrimSpace(postProcessResult.Content)
 	if text == "" && outputText != "" {
-		text = outputText
+		text = strings.TrimSpace(outputText)
 	}
 	if strings.TrimSpace(text) == "" {
 		return "", fmt.Errorf("BDInfo 输出为空")
