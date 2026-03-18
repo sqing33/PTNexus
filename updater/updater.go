@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +10,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -159,16 +156,10 @@ func isTruthy(v string) bool {
 	}
 }
 
-func fileSHA256(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
-}
-
 func ensureDir(path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
 	_ = os.MkdirAll(path, 0755)
 }
 
@@ -196,89 +187,6 @@ func withFileLock(lockPath string, fn func() error) error {
 
 		return err
 	}
-}
-
-func getPipSyncMode() string {
-	mode := strings.ToLower(strings.TrimSpace(getEnv("UPDATE_PIP_SYNC_MODE", "always")))
-	switch mode {
-	case "always", "changed", "never":
-		return mode
-	default:
-		return "always"
-	}
-}
-
-func syncPythonDepsAfterUpdate() error {
-	// 只在“在线更新/热更新”场景执行：让更新完成后启动服务前把依赖补齐。
-	if !isTruthy(getEnv("UPDATE_INSTALL_DEPS", "true")) {
-		log.Println("依赖同步已关闭（UPDATE_INSTALL_DEPS=false），跳过依赖安装。")
-		return nil
-	}
-
-	mode := getPipSyncMode()
-	if mode == "never" {
-		log.Println("依赖同步已关闭（UPDATE_PIP_SYNC_MODE=never），跳过 pip 依赖安装。")
-		return nil
-	}
-
-	reqFile := getEnv("REQUIREMENTS_FILE", "/app/requirements.txt")
-	if _, err := os.Stat(reqFile); err != nil {
-		log.Printf("未找到 requirements 文件（%s），跳过 pip 依赖安装。", reqFile)
-		return nil
-	}
-
-	bootstrapDir := "/app/data/.bootstrap"
-	ensureDir(bootstrapDir)
-	hashFile := filepath.Join(bootstrapDir, "requirements.sha256")
-
-	newHash, err := fileSHA256(reqFile)
-	if err != nil {
-		log.Printf("计算 requirements 哈希失败，仍尝试执行 pip install（%v）", err)
-	} else if mode == "changed" {
-		oldHash, _ := os.ReadFile(hashFile)
-		if strings.TrimSpace(string(oldHash)) == newHash {
-			log.Println("requirements 未变化（UPDATE_PIP_SYNC_MODE=changed），跳过 pip 依赖安装。")
-			return nil
-		}
-	}
-
-	timeoutStr := getEnv("PIP_INSTALL_TIMEOUT", "10m")
-	timeout, err := time.ParseDuration(timeoutStr)
-	if err != nil || timeout <= 0 {
-		timeout = 10 * time.Minute
-	}
-
-	log.Printf("开始安装/更新 pip 依赖（mode=%s, timeout=%s）：%s", mode, timeout.String(), reqFile)
-
-	return withFileLock(filepath.Join(bootstrapDir, "pip.lock"), func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		py := "python3"
-		if _, err := exec.LookPath(py); err != nil {
-			py = "python"
-		}
-
-		args := []string{"-m", "pip", "install", "-r", reqFile}
-		if isTruthy(getEnv("PIP_NO_CACHE", "false")) {
-			args = append(args, "--no-cache-dir")
-		}
-
-		cmd := exec.CommandContext(ctx, py, args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Env = os.Environ()
-
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("pip install 失败: %w", err)
-		}
-
-		if newHash != "" {
-			_ = os.WriteFile(hashFile, []byte(newHash), 0644)
-		}
-		log.Println("pip 依赖安装完成")
-		return nil
-	})
 }
 
 type UpdateConfig struct {

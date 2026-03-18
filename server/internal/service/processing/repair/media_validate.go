@@ -27,7 +27,7 @@ func ValidateMediaPayload(payload map[string]any, rootConfig map[string]any, csp
 	switch mediaType {
 	case "screenshot_preview":
 		previewCount := parsePreviewCountAny(payload["preview_count"])
-		candidates, previewErr := GenerateScreenshotPreviewCandidates(ScreenshotGenerateInput{
+		previewBundle, previewErr := GenerateScreenshotPreviewCandidates(ScreenshotGenerateInput{
 			Payload:     payload,
 			SourceInfo:  sourceInfo,
 			ContentName: contentName,
@@ -37,9 +37,12 @@ func ValidateMediaPayload(payload map[string]any, rootConfig map[string]any, csp
 			return map[string]any{"success": false, "error": previewErr.Error()}, 400
 		}
 		return map[string]any{
-			"success":         true,
-			"candidates":      candidates,
-			"selection_limit": screenshotPreviewSelectCount,
+			"success":              true,
+			"candidates":           previewBundle.Candidates,
+			"selection_limit":      previewBundle.SelectionLimit,
+			"subtitle_state":       previewBundle.SubtitleState,
+			"subtitle_streams":     previewBundle.SubtitleStreams,
+			"current_subtitle_sid": previewBundle.CurrentSubtitleSID,
 		}, 200
 
 	case "screenshot_finalize":
@@ -71,7 +74,7 @@ func ValidateMediaPayload(payload map[string]any, rootConfig map[string]any, csp
 		}
 		if usePreview {
 			previewCount := parsePreviewCountAny(payload["preview_count"])
-			candidates, previewErr := GenerateScreenshotPreviewCandidates(ScreenshotGenerateInput{
+			previewBundle, previewErr := GenerateScreenshotPreviewCandidates(ScreenshotGenerateInput{
 				Payload:     payload,
 				SourceInfo:  sourceInfo,
 				ContentName: contentName,
@@ -81,10 +84,13 @@ func ValidateMediaPayload(payload map[string]any, rootConfig map[string]any, csp
 				return map[string]any{"success": false, "error": previewErr.Error()}, 400
 			}
 			return map[string]any{
-				"success":          true,
-				"preview_required": true,
-				"candidates":       candidates,
-				"selection_limit":  screenshotPreviewSelectCount,
+				"success":              true,
+				"preview_required":     true,
+				"candidates":           previewBundle.Candidates,
+				"selection_limit":      previewBundle.SelectionLimit,
+				"subtitle_state":       previewBundle.SubtitleState,
+				"subtitle_streams":     previewBundle.SubtitleStreams,
+				"current_subtitle_sid": previewBundle.CurrentSubtitleSID,
 			}, 200
 		}
 

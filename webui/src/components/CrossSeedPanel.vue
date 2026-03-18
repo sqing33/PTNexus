@@ -41,8 +41,33 @@
     destroy-on-close
     @closed="resetScreenshotPreviewState"
   >
-    <div class="screenshot-preview-dialog__hint">
-      只有在未找到字幕流时，才会生成低清候选图供手动选择；点击左侧缩略图可在右侧放大查看。
+    <div class="screenshot-preview-dialog__hint">{{ screenshotPreviewDialogHint }}</div>
+    <div class="screenshot-preview-dialog__subtitle-bar">
+      <span class="screenshot-preview-dialog__subtitle-label">字幕流</span>
+      <div class="screenshot-preview-dialog__subtitle-options">
+        <button
+          v-for="subtitleStream in screenshotPreviewSubtitleOptions"
+          :key="subtitleStream.subtitleSID"
+          type="button"
+          class="screenshot-preview-dialog__subtitle-chip"
+          :class="{
+            'is-active': currentScreenshotPreviewSubtitleSid === subtitleStream.subtitleSID,
+          }"
+          :disabled="isRefreshingScreenshots || isFinalizingScreenshotPreview"
+          @click="switchScreenshotPreviewSubtitle(subtitleStream.subtitleSID)"
+        >
+          <span>{{ subtitleStream.displayName }}</span>
+          <span v-if="subtitleStream.isDefault" class="screenshot-preview-dialog__subtitle-tag">
+            默认
+          </span>
+          <span
+            v-if="subtitleStream.isConfidentChinese"
+            class="screenshot-preview-dialog__subtitle-tag"
+          >
+            中文
+          </span>
+        </button>
+      </div>
     </div>
     <div class="screenshot-preview-dialog__toolbar">
       <span
@@ -51,7 +76,9 @@
         }}
         张</span
       >
-      <span class="screenshot-preview-dialog__toolbar-tip">左侧滚动浏览，右侧查看大图</span>
+      <span class="screenshot-preview-dialog__toolbar-tip">
+        当前预览：{{ screenshotPreviewCurrentSubtitleLabel }}
+      </span>
     </div>
     <div class="screenshot-preview-dialog__layout">
       <div class="screenshot-preview-dialog__sidebar">
@@ -63,6 +90,7 @@
           :class="{
             'is-active': activeScreenshotPreviewId === candidate.id,
             'is-selected': isScreenshotPreviewSelected(candidate.id),
+            'is-recommended': candidate.recommended,
           }"
           @click="setActiveScreenshotPreview(candidate.id)"
         >
@@ -81,12 +109,21 @@
               选择
             </el-checkbox>
           </div>
+          <div v-if="candidate.recommended" class="screenshot-preview-dialog__item-badge">推荐</div>
         </button>
       </div>
       <div class="screenshot-preview-dialog__viewer">
         <template v-if="activeScreenshotPreviewCandidate">
           <div class="screenshot-preview-dialog__viewer-header">
-            <span>{{ activeScreenshotPreviewCandidate.timeLabel }}</span>
+            <div class="screenshot-preview-dialog__viewer-meta">
+              <span>{{ activeScreenshotPreviewCandidate.timeLabel }}</span>
+              <span
+                v-if="activeScreenshotPreviewSubtitleLabel"
+                class="screenshot-preview-dialog__viewer-subtitle"
+              >
+                {{ activeScreenshotPreviewSubtitleLabel }}
+              </span>
+            </div>
             <el-button
               size="small"
               :type="
@@ -289,16 +326,7 @@ const parseBBCode = (text?: string | null): string => {
 }
 
 const handleApiError = (error: unknown, defaultMessage: string) => {
-  const message = axios.isAxiosError(error)
-    ? (error.response?.data as { logs?: string; error?: string; message?: string } | undefined)
-        ?.logs ||
-      (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
-      (error.response?.data as { error?: string; message?: string } | undefined)?.message ||
-      error.message ||
-      defaultMessage
-    : error instanceof Error
-      ? error.message || defaultMessage
-      : defaultMessage
+  const message = extractApiErrorMessage(error, defaultMessage)
   ElNotification.error({ title: '操作失败', message, duration: 0, showClose: true })
 }
 
@@ -318,6 +346,28 @@ interface ScreenshotPreviewCandidateItem {
   timeSeconds: number
   timeLabel: string
   previewData: string
+  recommended?: boolean
+}
+
+type ScreenshotSubtitleState = 'confirmed_chinese' | 'usable_but_unconfirmed' | 'no_usable_subtitle'
+
+interface ScreenshotPreviewSubtitleStreamItem {
+  subtitleSID: number
+  streamIndex: number
+  codecName: string
+  language: string
+  title: string
+  displayName: string
+  isConfidentChinese: boolean
+  isDefault: boolean
+}
+
+interface ScreenshotPreviewCacheEntry {
+  candidates: ScreenshotPreviewCandidateItem[]
+  selectionLimit: number
+  subtitleState: ScreenshotSubtitleState
+  subtitleStreams: ScreenshotPreviewSubtitleStreamItem[]
+  currentSubtitleSID: number
 }
 
 const props = defineProps({
@@ -702,11 +752,16 @@ const screenshotPreviewCandidates = ref<ScreenshotPreviewCandidateItem[]>([])
 const activeScreenshotPreviewId = ref('')
 const selectedScreenshotPreviewIds = ref<string[]>([])
 const screenshotPreviewSelectionLimit = ref(5)
+const screenshotPreviewSubtitleState = ref<ScreenshotSubtitleState>('no_usable_subtitle')
+const screenshotPreviewSubtitleStreams = ref<ScreenshotPreviewSubtitleStreamItem[]>([])
+const currentScreenshotPreviewSubtitleSID = ref(0)
+const screenshotPreviewCache = ref<Record<string, ScreenshotPreviewCacheEntry>>({})
 const isRefreshingIntro = ref(false)
 const isRefreshingMediainfo = ref(false)
 const isRefreshingPosters = ref(false)
 const isHandlingScreenshotError = ref(false) // 防止重复处理截图错误
 const screenshotValid = ref(true) // 跟踪截图是否有效
+const screenshotMediaValidateTimeoutMs = 600000
 const logContent = ref('')
 const showLogCard = ref(false)
 const downloaderList = ref<{ id: string; name: string }[]>([])
@@ -797,6 +852,99 @@ const buildScreenshotPayload = (type: string, extra: Record<string, unknown> = {
   ...extra,
 })
 
+const postScreenshotValidateRequest = (payload: Record<string, unknown>) =>
+  axios.post('/api/media/validate', payload, {
+    timeout: screenshotMediaValidateTimeoutMs,
+  })
+
+const extractApiErrorMessage = (error: unknown, defaultMessage: string) =>
+  axios.isAxiosError(error)
+    ? (error.response?.data as { logs?: string; error?: string; message?: string } | undefined)
+        ?.logs ||
+      (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+      (error.response?.data as { error?: string; message?: string } | undefined)?.message ||
+      error.message ||
+      defaultMessage
+    : error instanceof Error
+      ? error.message || defaultMessage
+      : defaultMessage
+
+const isTimeoutLikeApiError = (error: unknown) => {
+  if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
+    return true
+  }
+
+  const rawMessage = extractApiErrorMessage(error, '')
+  return /timeout|timed out|deadline exceeded|context deadline exceeded/i.test(rawMessage)
+}
+
+const getScreenshotValidateErrorMessage = (error: unknown, defaultMessage: string) => {
+  if (isTimeoutLikeApiError(error)) {
+    return '截图生成超时，请稍后重试或检查本地性能、ISO 挂载速度。'
+  }
+  return extractApiErrorMessage(error, defaultMessage)
+}
+
+const normalizeScreenshotSubtitleState = (value: unknown): ScreenshotSubtitleState => {
+  if (typeof value !== 'string') return 'no_usable_subtitle'
+  const normalized = value.trim().toLowerCase()
+  if (
+    normalized === 'confirmed_chinese' ||
+    normalized === 'usable_but_unconfirmed' ||
+    normalized === 'no_usable_subtitle'
+  ) {
+    return normalized
+  }
+  return 'no_usable_subtitle'
+}
+
+const normalizeScreenshotPreviewSubtitleStreams = (
+  value: unknown,
+): ScreenshotPreviewSubtitleStreamItem[] => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const stream = item as Record<string, unknown>
+      const subtitleSID =
+        typeof stream.subtitle_sid === 'number'
+          ? stream.subtitle_sid
+          : typeof stream.subtitle_sid === 'string'
+            ? Number(stream.subtitle_sid)
+            : 0
+      const streamIndex =
+        typeof stream.stream_index === 'number'
+          ? stream.stream_index
+          : typeof stream.stream_index === 'string'
+            ? Number(stream.stream_index)
+            : -1
+      return {
+        subtitleSID,
+        streamIndex,
+        codecName: typeof stream.codec_name === 'string' ? stream.codec_name.trim() : '',
+        language: typeof stream.language === 'string' ? stream.language.trim() : '',
+        title: typeof stream.title === 'string' ? stream.title.trim() : '',
+        displayName:
+          typeof stream.display_name === 'string' && stream.display_name.trim()
+            ? stream.display_name.trim()
+            : `字幕 ${subtitleSID || '?'}`,
+        isConfidentChinese: Boolean(stream.is_confident_chinese),
+        isDefault: Boolean(stream.is_default),
+      }
+    })
+    .filter((stream) => Number.isFinite(stream.subtitleSID) && stream.subtitleSID > 0)
+}
+
+const normalizeScreenshotPreviewCurrentSubtitleSID = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+const buildScreenshotPreviewCacheKey = (subtitleSID: number) => String(subtitleSID)
+
 const normalizeScreenshotPreviewCandidates = (value: unknown): ScreenshotPreviewCandidateItem[] => {
   if (!Array.isArray(value)) return []
   return value
@@ -817,35 +965,145 @@ const normalizeScreenshotPreviewCandidates = (value: unknown): ScreenshotPreview
           ? candidate.time_label.trim()
           : '--:--:--'
       const previewData = typeof candidate.preview_data === 'string' ? candidate.preview_data : ''
-      return { id, timeSeconds, timeLabel, previewData }
+      return {
+        id,
+        timeSeconds,
+        timeLabel,
+        previewData,
+        recommended: Boolean(candidate.recommended),
+      }
     })
     .filter((candidate) => candidate.previewData)
+}
+
+const screenshotPreviewSubtitleOptions = computed(() => {
+  const options = [...screenshotPreviewSubtitleStreams.value]
+  const hasNoSubtitleOption = options.some((stream) => stream.subtitleSID === 0)
+  if (!hasNoSubtitleOption) {
+    options.unshift({
+      subtitleSID: 0,
+      streamIndex: -1,
+      codecName: '',
+      language: '',
+      title: '',
+      displayName: '无字幕',
+      isConfidentChinese: false,
+      isDefault: screenshotPreviewSubtitleState.value === 'no_usable_subtitle',
+    })
+  }
+  return options
+})
+
+const screenshotPreviewHintText = computed(() => {
+  switch (screenshotPreviewSubtitleState.value) {
+    case 'usable_but_unconfirmed':
+      return '检测到可用字幕流，但暂时无法确认是否为中文字幕。可切换不同字幕流重新生成候选图，再选择有中文的时间点。'
+    case 'confirmed_chinese':
+      return '已定位到明确的中文字幕流。若仍需人工挑选时间点，可继续在当前字幕流下选择候选图。'
+    default:
+      return '未检测到可用字幕流，将按无字幕画面生成候选图；点击左侧缩略图可在右侧放大查看。'
+  }
+})
+
+const screenshotPreviewCurrentSubtitleLabel = computed(() => {
+  return (
+    screenshotPreviewSubtitleOptions.value.find(
+      (stream) => stream.subtitleSID === currentScreenshotPreviewSubtitleSID.value,
+    )?.displayName || '无字幕'
+  )
+})
+
+const screenshotPreviewDialogHint = screenshotPreviewHintText
+const currentScreenshotPreviewSubtitleSid = currentScreenshotPreviewSubtitleSID
+const activeScreenshotPreviewSubtitleLabel = screenshotPreviewCurrentSubtitleLabel
+
+const buildScreenshotPreviewDialogMessage = (subtitleState: ScreenshotSubtitleState) => {
+  switch (subtitleState) {
+    case 'usable_but_unconfirmed':
+      return '当前字幕流可用但未能确认是中文，可切换字幕流重新生成候选图。'
+    case 'confirmed_chinese':
+      return '已定位到明确的中文字幕流，可直接挑选更合适的时间点。'
+    default:
+      return '当前未检测到可用字幕流，请直接在候选列表中选择 5 张截图。'
+  }
+}
+
+const applyCachedScreenshotPreview = (subtitleSID: number) => {
+  const cached = screenshotPreviewCache.value[buildScreenshotPreviewCacheKey(subtitleSID)]
+  if (!cached) {
+    return false
+  }
+  setScreenshotPreviewBundle(
+    cached.candidates,
+    cached.selectionLimit,
+    cached.subtitleState,
+    cached.subtitleStreams,
+    cached.currentSubtitleSID,
+  )
+  return true
+}
+
+const setScreenshotPreviewBundle = (
+  candidates: ScreenshotPreviewCandidateItem[],
+  selectionLimit: number,
+  subtitleState: ScreenshotSubtitleState,
+  subtitleStreams: ScreenshotPreviewSubtitleStreamItem[],
+  currentSubtitleSID: number,
+) => {
+  screenshotPreviewCandidates.value = candidates
+  activeScreenshotPreviewId.value = candidates[0]?.id || ''
+  selectedScreenshotPreviewIds.value = []
+  screenshotPreviewSelectionLimit.value = selectionLimit > 0 ? selectionLimit : 5
+  screenshotPreviewSubtitleState.value = subtitleState
+  screenshotPreviewSubtitleStreams.value = subtitleStreams
+  currentScreenshotPreviewSubtitleSID.value = currentSubtitleSID
+  torrentData.value.screenshot_review_status = 'pending'
+  showScreenshotPreviewDialog.value = true
+
+  screenshotPreviewCache.value[buildScreenshotPreviewCacheKey(currentSubtitleSID)] = {
+    candidates,
+    selectionLimit: screenshotPreviewSelectionLimit.value,
+    subtitleState,
+    subtitleStreams,
+    currentSubtitleSID,
+  }
 }
 
 const applyScreenshotPreviewCandidates = (
   rawCandidates: unknown,
   rawSelectionLimit: unknown,
-  notification?: { title: string; message: string; type?: 'success' | 'info' },
+  options?: {
+    notification?: { title: string; message: string; type?: 'success' | 'info' }
+    subtitleState?: unknown
+    subtitleStreams?: unknown
+    currentSubtitleSID?: unknown
+  },
 ) => {
   const candidates = normalizeScreenshotPreviewCandidates(rawCandidates)
   const selectionLimit =
-    typeof rawSelectionLimit === 'number'
-      ? rawSelectionLimit
-      : Number(rawSelectionLimit || 5)
+    typeof rawSelectionLimit === 'number' ? rawSelectionLimit : Number(rawSelectionLimit || 5)
   if (candidates.length === 0) {
     return false
   }
 
-  screenshotPreviewCandidates.value = candidates
-  activeScreenshotPreviewId.value = candidates[0]?.id || ''
-  screenshotPreviewSelectionLimit.value = selectionLimit > 0 ? selectionLimit : 5
-  torrentData.value.screenshot_review_status = 'pending'
-  showScreenshotPreviewDialog.value = true
+  const subtitleState = normalizeScreenshotSubtitleState(options?.subtitleState)
+  const subtitleStreams = normalizeScreenshotPreviewSubtitleStreams(options?.subtitleStreams)
+  const currentSubtitleSID = normalizeScreenshotPreviewCurrentSubtitleSID(
+    options?.currentSubtitleSID,
+  )
 
-  if (notification) {
-    ElNotification[notification.type || 'info']({
-      title: notification.title,
-      message: notification.message,
+  setScreenshotPreviewBundle(
+    candidates,
+    selectionLimit,
+    subtitleState,
+    subtitleStreams,
+    currentSubtitleSID,
+  )
+
+  if (options?.notification) {
+    ElNotification[options.notification.type || 'info']({
+      title: options.notification.title,
+      message: options.notification.message,
     })
   }
   return true
@@ -856,15 +1114,15 @@ const openFetchedScreenshotPreview = async () => {
   if (isRefreshingScreenshots.value || isFinalizingScreenshotPreview.value) return
 
   isRefreshingScreenshots.value = true
+  screenshotPreviewCache.value = {}
   ElNotification.info({
     title: '正在生成候选截图',
-    message: '抓取过程中未检测到字幕流，正在生成候选截图供选择...',
+    message: '正在分析字幕流并生成候选截图...',
     duration: 0,
   })
 
   try {
-    const response = await axios.post(
-      '/api/media/validate',
+    const response = await postScreenshotValidateRequest(
       buildScreenshotPayload('screenshot_preview', {
         preview_count: 12,
       }),
@@ -873,9 +1131,16 @@ const openFetchedScreenshotPreview = async () => {
     if (
       response.data.success &&
       applyScreenshotPreviewCandidates(response.data.candidates, response.data.selection_limit, {
-        title: '请选择截图候选',
-        message: '当前未检测到字幕流，请直接在候选列表中选择 5 张截图。',
-        type: 'success',
+        subtitleState: response.data.subtitle_state,
+        subtitleStreams: response.data.subtitle_streams,
+        currentSubtitleSID: response.data.current_subtitle_sid,
+        notification: {
+          title: '请选择截图候选',
+          message: buildScreenshotPreviewDialogMessage(
+            normalizeScreenshotSubtitleState(response.data.subtitle_state),
+          ),
+          type: 'success',
+        },
       })
     ) {
       return
@@ -887,16 +1152,71 @@ const openFetchedScreenshotPreview = async () => {
     })
   } catch (error: unknown) {
     ElNotification.closeAll()
-    const errorMsg = axios.isAxiosError(error)
-      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
-        (error.response?.data as { message?: string } | undefined)?.message ||
-        error.message ||
-        '未能生成候选截图，请查看后台日志。'
-      : error instanceof Error
-        ? error.message || '未能生成候选截图，请查看后台日志。'
-        : '未能生成候选截图，请查看后台日志。'
+    const errorMsg = getScreenshotValidateErrorMessage(
+      error,
+      '未能生成候选截图，请查看后台日志。',
+    )
     ElNotification.error({
       title: '候选生成失败',
+      message: errorMsg,
+    })
+  } finally {
+    isRefreshingScreenshots.value = false
+  }
+}
+
+const switchScreenshotPreviewSubtitle = async (subtitleSID: number) => {
+  if (isRefreshingScreenshots.value || isFinalizingScreenshotPreview.value) {
+    return
+  }
+  if (currentScreenshotPreviewSubtitleSID.value === subtitleSID) {
+    return
+  }
+  if (applyCachedScreenshotPreview(subtitleSID)) {
+    return
+  }
+
+  isRefreshingScreenshots.value = true
+  ElNotification.info({
+    title: '正在切换字幕流',
+    message:
+      subtitleSID > 0
+        ? '正在按所选字幕流重新生成候选截图...'
+        : '正在切换为无字幕模式并重新生成候选截图...',
+    duration: 0,
+  })
+
+  try {
+    const response = await postScreenshotValidateRequest(
+      buildScreenshotPayload('screenshot_preview', {
+        preview_count: 12,
+        selected_subtitle_sid: subtitleSID,
+      }),
+    )
+    ElNotification.closeAll()
+    if (
+      response.data.success &&
+      applyScreenshotPreviewCandidates(response.data.candidates, response.data.selection_limit, {
+        subtitleState: response.data.subtitle_state,
+        subtitleStreams: response.data.subtitle_streams,
+        currentSubtitleSID: response.data.current_subtitle_sid,
+      })
+    ) {
+      return
+    }
+
+    ElNotification.error({
+      title: '字幕流切换失败',
+      message: response.data.error || '未能根据所选字幕流生成候选截图，请查看后台日志。',
+    })
+  } catch (error: unknown) {
+    ElNotification.closeAll()
+    const errorMsg = getScreenshotValidateErrorMessage(
+      error,
+      '未能根据所选字幕流生成候选截图，请查看后台日志。',
+    )
+    ElNotification.error({
+      title: '字幕流切换失败',
       message: errorMsg,
     })
   } finally {
@@ -909,6 +1229,10 @@ const resetScreenshotPreviewState = () => {
   activeScreenshotPreviewId.value = ''
   selectedScreenshotPreviewIds.value = []
   screenshotPreviewSelectionLimit.value = 5
+  screenshotPreviewSubtitleState.value = 'no_usable_subtitle'
+  screenshotPreviewSubtitleStreams.value = []
+  currentScreenshotPreviewSubtitleSID.value = 0
+  screenshotPreviewCache.value = {}
 }
 
 const activeScreenshotPreviewCandidate = computed(
@@ -968,10 +1292,10 @@ const confirmScreenshotPreviewSelection = async () => {
   })
 
   try {
-    const response = await axios.post(
-      '/api/media/validate',
+    const response = await postScreenshotValidateRequest(
       buildScreenshotPayload('screenshot_finalize', {
         selected_times: selectedTimes,
+        selected_subtitle_sid: currentScreenshotPreviewSubtitleSID.value,
       }),
     )
     ElNotification.closeAll()
@@ -994,14 +1318,10 @@ const confirmScreenshotPreviewSelection = async () => {
     })
   } catch (error: unknown) {
     ElNotification.closeAll()
-    const errorMsg = axios.isAxiosError(error)
-      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
-        (error.response?.data as { message?: string } | undefined)?.message ||
-        error.message ||
-        '未能生成正式截图，请查看后台日志。'
-      : error instanceof Error
-        ? error.message || '未能生成正式截图，请查看后台日志。'
-        : '未能生成正式截图，请查看后台日志。'
+    const errorMsg = getScreenshotValidateErrorMessage(
+      error,
+      '未能生成正式截图，请查看后台日志。',
+    )
     ElNotification.error({
       title: '正式截图生成失败',
       message: errorMsg,
@@ -1341,9 +1661,7 @@ const applyInferredStandardizedParams = (
   return changed
 }
 
-const formatCorrectedStandardParams = (
-  keys: Array<keyof InferredStandardizedParams>,
-): string => {
+const formatCorrectedStandardParams = (keys: Array<keyof InferredStandardizedParams>): string => {
   const uniqueKeys = [...new Set(keys)]
   if (uniqueKeys.length === 0) return ''
   return uniqueKeys.map((key) => standardParamLabels[key]).join('、')
@@ -1402,15 +1720,15 @@ const refreshScreenshots = async () => {
   }
 
   isRefreshingScreenshots.value = true
+  screenshotPreviewCache.value = {}
   ElNotification.info({
     title: '正在重新获取截图',
-    message: '正在检查字幕流；若未找到字幕流，将生成候选截图供手动选择...',
+    message: '正在检查字幕流；若无法确认中文字幕，将生成候选截图供手动选择...',
     duration: 0,
   })
 
   try {
-    const response = await axios.post(
-      '/api/media/validate',
+    const response = await postScreenshotValidateRequest(
       buildScreenshotPayload('screenshot', {
         preview_count: 12,
       }),
@@ -1428,9 +1746,16 @@ const refreshScreenshots = async () => {
     } else if (
       response.data.success &&
       applyScreenshotPreviewCandidates(response.data.candidates, response.data.selection_limit, {
-        title: '候选已生成',
-        message: '未检测到字幕流，请手动选择 5 张截图后再生成正式截图。',
-        type: 'success',
+        subtitleState: response.data.subtitle_state,
+        subtitleStreams: response.data.subtitle_streams,
+        currentSubtitleSID: response.data.current_subtitle_sid,
+        notification: {
+          title: '候选已生成',
+          message: buildScreenshotPreviewDialogMessage(
+            normalizeScreenshotSubtitleState(response.data.subtitle_state),
+          ),
+          type: 'success',
+        },
       })
     ) {
       return
@@ -1442,14 +1767,10 @@ const refreshScreenshots = async () => {
     }
   } catch (error: unknown) {
     ElNotification.closeAll()
-    const errorMsg = axios.isAxiosError(error)
-      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
-        (error.response?.data as { message?: string } | undefined)?.message ||
-        error.message ||
-        '未能生成候选截图，请查看后台日志。'
-      : error instanceof Error
-        ? error.message || '未能生成候选截图，请查看后台日志。'
-        : '未能生成候选截图，请查看后台日志。'
+    const errorMsg = getScreenshotValidateErrorMessage(
+      error,
+      '未能生成候选截图，请查看后台日志。',
+    )
     ElNotification.error({
       title: '候选生成失败',
       message: errorMsg,
@@ -2033,7 +2354,10 @@ const handleImageError = async (url: string, type: 'poster' | 'screenshot', inde
   }
 
   try {
-    const response = await axios.post('/api/media/validate', payload)
+    const response =
+      type === 'screenshot'
+        ? await postScreenshotValidateRequest(payload)
+        : await axios.post('/api/media/validate', payload)
     if (response.data.success) {
       if (type === 'screenshot' && response.data.screenshots) {
         torrentData.value.intro.screenshots = response.data.screenshots
@@ -2046,9 +2370,16 @@ const handleImageError = async (url: string, type: 'poster' | 'screenshot', inde
       } else if (
         type === 'screenshot' &&
         applyScreenshotPreviewCandidates(response.data.candidates, response.data.selection_limit, {
-          title: '需要手动选择截图',
-          message: '当前未检测到字幕流，请在候选列表中选择 5 张截图。',
-          type: 'info',
+          subtitleState: response.data.subtitle_state,
+          subtitleStreams: response.data.subtitle_streams,
+          currentSubtitleSID: response.data.current_subtitle_sid,
+          notification: {
+            title: '需要手动选择截图',
+            message: buildScreenshotPreviewDialogMessage(
+              normalizeScreenshotSubtitleState(response.data.subtitle_state),
+            ),
+            type: 'info',
+          },
         })
       ) {
         return
@@ -2071,15 +2402,11 @@ const handleImageError = async (url: string, type: 'poster' | 'screenshot', inde
       })
     }
   } catch (error: unknown) {
-    const errorMsg = axios.isAxiosError(error)
-      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
-        (error.response?.data as { message?: string } | undefined)?.message ||
-        error.message ||
-        `发送失效${type === 'poster' ? '海报' : '截图'}信息请求时发生错误，请查看后台日志。`
-      : error instanceof Error
-        ? error.message ||
-          `发送失效${type === 'poster' ? '海报' : '截图'}信息请求时发生错误，请查看后台日志。`
-        : `发送失效${type === 'poster' ? '海报' : '截图'}信息请求时发生错误，请查看后台日志。`
+    const defaultMessage = `发送失效${type === 'poster' ? '海报' : '截图'}信息请求时发生错误，请查看后台日志。`
+    const errorMsg =
+      type === 'screenshot'
+        ? getScreenshotValidateErrorMessage(error, defaultMessage)
+        : extractApiErrorMessage(error, defaultMessage)
     console.error('发送失效图片信息请求时发生错误:', error)
     ElNotification.error({
       title: '操作失败',

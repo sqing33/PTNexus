@@ -48,15 +48,17 @@ echo "将使用端口: $PORT_INPUT"
 echo "[1/4] 正在检查并安装依赖 (需要 sudo 权限)..."
 
 # 定义需要的依赖列表
-# [核心修改] 在依赖列表中加入了 mpv 和中文字体支持
-DEPS="ffmpeg mediainfo mpv fonts-noto-cjk libicu-dev"
+# [核心修改] 在依赖列表中加入了 mpv、中文字体和 ICU 支持
+APT_DEPS="ffmpeg mediainfo mpv fonts-noto-cjk libicu-dev"
+RPM_DEPS="ffmpeg mediainfo mpv fonts-noto-cjk"
+RPM_ICU_CANDIDATES="libicu icu icu-libs"
 
 # 检测包管理器
 if command -v apt-get &> /dev/null; then
     echo "检测到 Debian/Ubuntu (apt-get)..."
     sudo apt-get update -y
     # 使用循环安装，更清晰
-    for pkg in $DEPS; do
+    for pkg in $APT_DEPS; do
         if ! dpkg -s "$pkg" &> /dev/null; then
             echo "正在安装 $pkg..."
             sudo apt-get install -y "$pkg"
@@ -84,9 +86,21 @@ elif command -v yum &> /dev/null; then
         sudo yum localinstall --nogpgcheck https://download1.rpmfusion.org/free/el/rpmfusion-free-release-$(rpm -E %rhel).noarch.rpm https://download1.rpmfusion.org/nonfree/el/rpmfusion-nonfree-release-$(rpm -E %rhel).noarch.rpm -y
     fi
     
-    sudo yum install -y $DEPS
+    sudo yum install -y $RPM_DEPS
+
+    ICU_INSTALLED=false
+    for pkg in $RPM_ICU_CANDIDATES; do
+        if sudo yum install -y "$pkg"; then
+            ICU_INSTALLED=true
+            break
+        fi
+    done
+
+    if [ "$ICU_INSTALLED" != "true" ]; then
+        echo "警告: 未能自动安装 ICU 依赖，请手动安装 libicu / icu / icu-libs。"
+    fi
 else
-    echo "警告: 无法检测到 apt-get 或 yum。请手动安装 '$DEPS'。"
+    echo "警告: 无法检测到 apt-get 或 yum。请手动安装 '$APT_DEPS' 或等价 ICU 运行库。"
 fi
 
 echo "依赖检查完成。"

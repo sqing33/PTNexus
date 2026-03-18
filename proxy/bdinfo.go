@@ -283,28 +283,56 @@ func scanCROrLF(data []byte, atEOF bool) (advance int, token []byte, err error) 
 
 // executeBDInfoWithProgressMonitoring 执行BDInfo命令并监控进度
 func executeBDInfoWithProgressMonitoring(bdinfoPath string, args []string, taskID string, callbackURL string) error {
+	outputText, err := executeBDInfoWithProgressMonitoringOnce(bdinfoPath, args, taskID, callbackURL, nil)
+	if err == nil {
+		return nil
+	}
+	if !bdinfoNeedsInvariantMode(outputText, err) {
+		return err
+	}
+
+	fmt.Println("检测到 BDInfo 缺少 ICU 依赖，使用 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 重试...")
+	_, retryErr := executeBDInfoWithProgressMonitoringOnce(
+		bdinfoPath,
+		args,
+		taskID,
+		callbackURL,
+		[]string{"DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1"},
+	)
+	if retryErr == nil {
+		return nil
+	}
+	return retryErr
+}
+
+func executeBDInfoWithProgressMonitoringOnce(bdinfoPath string, args []string, taskID string, callbackURL string, extraEnv []string) (string, error) {
 	cmd := exec.Command(bdinfoPath, args...)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("创建stdout管道失败: %v", err)
+		return "", fmt.Errorf("创建stdout管道失败: %v", err)
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("创建stderr管道失败: %v", err)
+		return "", fmt.Errorf("创建stderr管道失败: %v", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("启动BDInfo命令失败: %v", err)
+		return "", fmt.Errorf("启动BDInfo命令失败: %v", err)
 	}
 
+	streamDone := make(chan string, 1)
 	go func() {
 		defer stdout.Close()
 		defer stderr.Close()
 
 		reader := io.MultiReader(stdout, stderr)
 		scanner := bufio.NewScanner(reader)
+		var outputBuf bytes.Buffer
 
 		// 使用自定义的分割函数，支持识别 \r
 		scanner.Split(scanCROrLF)
@@ -323,6 +351,8 @@ func executeBDInfoWithProgressMonitoring(bdinfoPath string, args []string, taskI
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
+			outputBuf.WriteString(line)
+			outputBuf.WriteByte('\n')
 
 			// 解析Disc Size (保持原样，这个只出现一次)
 			discMatch := discSizePattern.FindStringSubmatch(line)
@@ -390,6 +420,7 @@ func executeBDInfoWithProgressMonitoring(bdinfoPath string, args []string, taskI
 		if lastLineWasProgress {
 			fmt.Println()
 		}
+		streamDone <- strings.TrimSpace(outputBuf.String())
 	}()
 
 	done := make(chan error, 1)
@@ -399,14 +430,27 @@ func executeBDInfoWithProgressMonitoring(bdinfoPath string, args []string, taskI
 
 	select {
 	case <-time.After(60 * time.Minute):
-		cmd.Process.Kill()
-		return fmt.Errorf("BDInfo执行超时")
+		_ = cmd.Process.Kill()
+		<-done
+		output := <-streamDone
+		return output, fmt.Errorf("BDInfo执行超时")
 	case err := <-done:
+		output := <-streamDone
 		if err != nil {
-			return fmt.Errorf("BDInfo命令执行失败: %v", err)
+			return output, fmt.Errorf("BDInfo命令执行失败: %v", err)
 		}
-		return nil
+		return output, nil
 	}
+}
+
+func bdinfoNeedsInvariantMode(output string, err error) bool {
+	text := strings.ToLower(strings.TrimSpace(output))
+	if err != nil {
+		text = text + "\n" + strings.ToLower(strings.TrimSpace(err.Error()))
+	}
+	return strings.Contains(text, "couldn't find a valid icu package") ||
+		strings.Contains(text, "system.globalization") ||
+		strings.Contains(text, "dotnet-missing-libicu")
 }
 
 // sendProgressCallback 发送进度回调
@@ -629,9 +673,12 @@ func BDInfoDataSubstractor(inputFile string) (string, error) {
 	}
 
 	cmd := exec.Command(substractorPath, inputFile)
-	output, err := cmd.CombinedOutput()
+	output, err, usedInvariant := runDotnetToolWithICUFallback(cmd)
 	if err != nil {
 		return "", fmt.Errorf("BDInfoDataSubstractor 执行失败: %v, 输出: %s", err, string(output))
+	}
+	if usedInvariant {
+		fmt.Println("检测到 BDInfoDataSubstractor 缺少 ICU 依赖，已使用 invariant 模式执行。")
 	}
 
 	baseWithoutExt := strings.TrimSuffix(inputFile, filepath.Ext(inputFile))
@@ -657,6 +704,18 @@ func BDInfoDataSubstractor(inputFile string) (string, error) {
 	}()
 
 	return string(content), nil
+}
+
+func runDotnetToolWithICUFallback(cmd *exec.Cmd) ([]byte, error, bool) {
+	output, err := cmd.CombinedOutput()
+	if err == nil || !bdinfoNeedsInvariantMode(string(output), err) {
+		return output, err, false
+	}
+
+	retryCmd := exec.Command(cmd.Path, cmd.Args[1:]...)
+	retryCmd.Env = append(os.Environ(), "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1")
+	retryOutput, retryErr := retryCmd.CombinedOutput()
+	return retryOutput, retryErr, true
 }
 
 // filterEmptyLines 过滤连续3个及以上换行符为2个

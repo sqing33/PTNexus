@@ -91,11 +91,12 @@ type qbHTTPClient struct {
 	IsLoggedIn bool
 }
 type ScreenshotRequest struct {
-	RemotePath    string    `json:"remote_path"`
-	ContentName   string    `json:"content_name,omitempty"`
-	Mode          string    `json:"mode,omitempty"`
-	PreviewCount  int       `json:"preview_count,omitempty"`
-	SelectedTimes []float64 `json:"selected_times,omitempty"`
+	RemotePath          string    `json:"remote_path"`
+	ContentName         string    `json:"content_name,omitempty"`
+	Mode                string    `json:"mode,omitempty"`
+	PreviewCount        int       `json:"preview_count,omitempty"`
+	SelectedTimes       []float64 `json:"selected_times,omitempty"`
+	SelectedSubtitleSID *int      `json:"selected_subtitle_sid,omitempty"`
 }
 type ScreenshotPreviewCandidate struct {
 	ID          string  `json:"id"`
@@ -104,12 +105,32 @@ type ScreenshotPreviewCandidate struct {
 	PreviewData string  `json:"preview_data"`
 	Recommended bool    `json:"recommended"`
 }
+type ScreenshotSubtitleState string
+
+const (
+	ScreenshotSubtitleStateConfirmedChinese     ScreenshotSubtitleState = "confirmed_chinese"
+	ScreenshotSubtitleStateUsableButUnconfirmed ScreenshotSubtitleState = "usable_but_unconfirmed"
+	ScreenshotSubtitleStateNoUsableSubtitle     ScreenshotSubtitleState = "no_usable_subtitle"
+)
+
+type ScreenshotSubtitleStream struct {
+	SubtitleSID        int    `json:"subtitle_sid"`
+	StreamIndex        int    `json:"stream_index"`
+	CodecName          string `json:"codec_name"`
+	Language           string `json:"language,omitempty"`
+	Title              string `json:"title,omitempty"`
+	DisplayName        string `json:"display_name"`
+	IsConfidentChinese bool   `json:"is_confident_chinese"`
+	IsDefault          bool   `json:"is_default"`
+}
 type ScreenshotResponse struct {
-	Success           bool                         `json:"success"`
-	Message           string                       `json:"message"`
-	BBCode            string                       `json:"bbcode,omitempty"`
-	HasSubtitleStream bool                         `json:"has_subtitle_stream,omitempty"`
-	PreviewCandidates []ScreenshotPreviewCandidate `json:"preview_candidates,omitempty"`
+	Success            bool                         `json:"success"`
+	Message            string                       `json:"message"`
+	BBCode             string                       `json:"bbcode,omitempty"`
+	SubtitleState      string                       `json:"subtitle_state,omitempty"`
+	SubtitleStreams    []ScreenshotSubtitleStream   `json:"subtitle_streams,omitempty"`
+	CurrentSubtitleSID int                          `json:"current_subtitle_sid,omitempty"`
+	PreviewCandidates  []ScreenshotPreviewCandidate `json:"preview_candidates,omitempty"`
 }
 type MediaInfoRequest struct {
 	RemotePath  string `json:"remote_path"`
@@ -188,6 +209,29 @@ type UploadLimitBatchResponse struct {
 type SubtitleEvent struct {
 	StartTime float64
 	EndTime   float64
+}
+
+type subtitleStreamCandidate struct {
+	SubtitleSID        int
+	StreamIndex        int
+	StreamOrdinal      int
+	CodecName          string
+	Language           string
+	Title              string
+	DisplayName        string
+	ConfidenceScore    int
+	IsConfidentChinese bool
+	IsDefault          bool
+	IsNormal           bool
+	IsSupported        bool
+}
+
+type subtitleInspectionResult struct {
+	State                ScreenshotSubtitleState
+	Streams              []ScreenshotSubtitleStream
+	Candidates           []subtitleStreamCandidate
+	CurrentSubtitleSID   int
+	ConfirmedSubtitleSID int
 }
 
 var isoMountMutex sync.Mutex
@@ -702,6 +746,53 @@ func getVideoDuration(videoPath string) (float64, error) {
 
 func findBestChineseSubtitleStream(videoPath string) (int, int, string, error) {
 	log.Printf("正在智能分析中文字幕流: %s", filepath.Base(videoPath))
+	inspection, err := inspectSubtitleStreams(videoPath)
+	if err != nil {
+		return 0, -1, "", err
+	}
+	if inspection.ConfirmedSubtitleSID <= 0 {
+		log.Println("   ℹ️ 未检测到明确的中文字幕。")
+		return 0, -1, "", nil
+	}
+
+	for _, candidate := range inspection.Candidates {
+		if candidate.SubtitleSID != inspection.ConfirmedSubtitleSID {
+			continue
+		}
+		log.Printf(
+			"   🎯 自动选中字幕: Track #%d (Global %d) [%s] %s (Score: %d)",
+			candidate.SubtitleSID,
+			candidate.StreamIndex,
+			candidate.Language,
+			candidate.Title,
+			candidate.ConfidenceScore,
+		)
+		return candidate.SubtitleSID, candidate.StreamIndex, candidate.CodecName, nil
+	}
+	return 0, -1, "", nil
+}
+
+func findFirstSubtitleStream(videoPath string) (int, string, error) {
+	log.Printf("正在为视频 '%s' 探测字幕流...", filepath.Base(videoPath))
+	inspection, err := inspectSubtitleStreams(videoPath)
+	if err != nil {
+		return -1, "", err
+	}
+	if inspection.CurrentSubtitleSID <= 0 {
+		log.Printf("视频中未发现可切换字幕流。")
+		return -1, "", nil
+	}
+	for _, candidate := range inspection.Candidates {
+		if candidate.SubtitleSID != inspection.CurrentSubtitleSID {
+			continue
+		}
+		log.Printf("   ✅ 找到默认字幕流 sid=%d index=%d codec=%s", candidate.SubtitleSID, candidate.StreamIndex, candidate.CodecName)
+		return candidate.StreamIndex, candidate.CodecName, nil
+	}
+	return -1, "", nil
+}
+
+func inspectSubtitleStreams(videoPath string) (subtitleInspectionResult, error) {
 	args := []string{
 		"-v", "quiet",
 		"-print_format", "json",
@@ -711,155 +802,298 @@ func findBestChineseSubtitleStream(videoPath string) (int, int, string, error) {
 	}
 	output, err := executeCommand("ffprobe", args...)
 	if err != nil {
-		return 0, -1, "", fmt.Errorf("ffprobe 字幕探测失败: %v", err)
+		return subtitleInspectionResult{}, fmt.Errorf("ffprobe 字幕探测失败: %v", err)
 	}
 
 	var probeResult struct {
 		Streams []struct {
-			Index     int    `json:"index"`
-			CodecName string `json:"codec_name"`
-			Tags      struct {
-				Language string `json:"language"`
-				Title    string `json:"title"`
-			} `json:"tags"`
+			Index       int               `json:"index"`
+			CodecName   string            `json:"codec_name"`
+			Disposition map[string]any    `json:"disposition"`
+			Tags        map[string]string `json:"tags"`
 		} `json:"streams"`
 	}
-
 	if err := json.Unmarshal([]byte(output), &probeResult); err != nil {
-		return 0, -1, "", fmt.Errorf("解析字幕JSON失败: %v", err)
+		return subtitleInspectionResult{}, fmt.Errorf("解析字幕 JSON 失败: %v", err)
 	}
 
-	if len(probeResult.Streams) == 0 {
-		return 0, -1, "", nil
-	}
-
-	type candidate struct {
-		MpvSid      int
-		GlobalIndex int
-		Codec       string
-		Score       int
-		Title       string
-		Lang        string
-	}
-
-	var candidates []candidate
-
+	candidates := make([]subtitleStreamCandidate, 0, len(probeResult.Streams))
 	for i, stream := range probeResult.Streams {
-		mpvSid := i + 1
-		score := 0
-		lang := strings.ToLower(stream.Tags.Language)
-		title := strings.ToLower(stream.Tags.Title)
-
-		if lang == "chi" || lang == "zho" || lang == "zh" {
-			score += 10
+		language := normalizeSubtitleLanguage(stream.Tags["language"])
+		title := strings.TrimSpace(stream.Tags["title"])
+		score := subtitleChineseScore(language, title)
+		candidate := subtitleStreamCandidate{
+			SubtitleSID:        i + 1,
+			StreamIndex:        stream.Index,
+			StreamOrdinal:      i,
+			CodecName:          strings.ToLower(strings.TrimSpace(stream.CodecName)),
+			Language:           language,
+			Title:              title,
+			ConfidenceScore:    score,
+			IsConfidentChinese: score > 0,
+			IsNormal: !(toBool(stream.Disposition["comment"]) ||
+				toBool(stream.Disposition["hearing_impaired"]) ||
+				toBool(stream.Disposition["visual_impaired"])),
 		}
+		candidate.IsSupported = isSupportedSubtitleCodec(candidate.CodecName)
+		candidate.DisplayName = buildSubtitleDisplayName(candidate)
+		candidates = append(candidates, candidate)
+	}
 
-		if strings.Contains(title, "简") || strings.Contains(title, "chs") || strings.Contains(title, "sc") {
-			score += 5
-		} else if strings.Contains(title, "繁") || strings.Contains(title, "cht") || strings.Contains(title, "tc") {
-			score += 3
-		} else if strings.Contains(title, "中") || strings.Contains(title, "chinese") {
-			score += 2
-		}
-
-		if strings.Contains(title, "双语") {
-			score += 1
-		}
-
-		if score > 0 {
-			candidates = append(candidates, candidate{
-				MpvSid:      mpvSid,
-				GlobalIndex: stream.Index,
-				Codec:       stream.CodecName,
-				Score:       score,
-				Title:       stream.Tags.Title,
-				Lang:        lang,
-			})
+	if defaultCandidate, ok := selectDefaultSubtitleCandidate(candidates); ok {
+		for i := range candidates {
+			candidates[i].IsDefault = candidates[i].SubtitleSID == defaultCandidate.SubtitleSID
+			candidates[i].DisplayName = buildSubtitleDisplayName(candidates[i])
 		}
 	}
 
-	if len(candidates) > 0 {
-		sort.Slice(candidates, func(i, j int) bool {
-			if candidates[i].Score != candidates[j].Score {
-				return candidates[i].Score > candidates[j].Score
-			}
-			return candidates[i].MpvSid < candidates[j].MpvSid
+	streams := make([]ScreenshotSubtitleStream, 0, len(candidates))
+	for _, candidate := range candidates {
+		streams = append(streams, ScreenshotSubtitleStream{
+			SubtitleSID:        candidate.SubtitleSID,
+			StreamIndex:        candidate.StreamIndex,
+			CodecName:          candidate.CodecName,
+			Language:           candidate.Language,
+			Title:              candidate.Title,
+			DisplayName:        candidate.DisplayName,
+			IsConfidentChinese: candidate.IsConfidentChinese,
+			IsDefault:          candidate.IsDefault,
 		})
-		best := candidates[0]
-		log.Printf("   🎯 自动选中字幕: Track #%d (Global %d) [%s] %s (Score: %d)", best.MpvSid, best.GlobalIndex, best.Lang, best.Title, best.Score)
-		return best.MpvSid, best.GlobalIndex, best.Codec, nil
 	}
 
-	log.Println("   ℹ️ 未检测到明确的中文字幕。")
-	return 0, -1, "", nil
+	result := subtitleInspectionResult{
+		State:      ScreenshotSubtitleStateNoUsableSubtitle,
+		Streams:    streams,
+		Candidates: candidates,
+	}
+	if bestChinese, ok := selectBestChineseSubtitleCandidate(candidates); ok {
+		result.State = ScreenshotSubtitleStateConfirmedChinese
+		result.CurrentSubtitleSID = bestChinese.SubtitleSID
+		result.ConfirmedSubtitleSID = bestChinese.SubtitleSID
+		return result, nil
+	}
+	if defaultCandidate, ok := selectDefaultSubtitleCandidate(candidates); ok {
+		result.State = ScreenshotSubtitleStateUsableButUnconfirmed
+		result.CurrentSubtitleSID = defaultCandidate.SubtitleSID
+	}
+	return result, nil
 }
 
-func findFirstSubtitleStream(videoPath string) (int, string, error) {
-	log.Printf("正在为视频 '%s' 探测字幕流...", filepath.Base(videoPath))
-	args := []string{"-v", "quiet", "-print_format", "json", "-show_entries", "stream=index,codec_name,codec_type,disposition", "-select_streams", "s", videoPath}
-	output, err := executeCommand("ffprobe", args...)
+func resolveSubtitleCandidate(videoPath string, requestedSID *int) (subtitleInspectionResult, subtitleStreamCandidate, bool, int, error) {
+	inspection, err := inspectSubtitleStreams(videoPath)
 	if err != nil {
-		return -1, "", fmt.Errorf("ffprobe 探测字幕失败: %v", err)
+		return subtitleInspectionResult{}, subtitleStreamCandidate{}, false, 0, err
 	}
-	var probeResult struct {
-		Streams []struct {
-			Index       int    `json:"index"`
-			CodecName   string `json:"codec_name"`
-			Disposition struct {
-				Comment         int `json:"comment"`
-				HearingImpaired int `json:"hearing_impaired"`
-				VisualImpaired  int `json:"visual_impaired"`
-			} `json:"disposition"`
-		} `json:"streams"`
-	}
-	if err := json.Unmarshal([]byte(output), &probeResult); err != nil {
-		log.Printf("警告: 解析 ffprobe 的字幕 JSON 输出失败: %v。将不带字幕截图。", err)
-		return -1, "", nil
-	}
-	if len(probeResult.Streams) == 0 {
-		log.Printf("视频中未发现内嵌字幕流。")
-		return -1, "", nil
-	}
-	type SubtitleChoice struct {
-		Index     int
-		CodecName string
-	}
-	var bestASS, bestSRT, bestPGS SubtitleChoice
-	bestASS.Index, bestSRT.Index, bestPGS.Index = -1, -1, -1
-	for _, stream := range probeResult.Streams {
-		isNormal := stream.Disposition.Comment == 0 && stream.Disposition.HearingImpaired == 0 && stream.Disposition.VisualImpaired == 0
-		if isNormal {
-			switch stream.CodecName {
-			case "ass":
-				if bestASS.Index == -1 {
-					bestASS = SubtitleChoice{Index: stream.Index, CodecName: stream.CodecName}
-				}
-			case "subrip":
-				if bestSRT.Index == -1 {
-					bestSRT = SubtitleChoice{Index: stream.Index, CodecName: stream.CodecName}
-				}
-			case "hdmv_pgs_subtitle":
-				if bestPGS.Index == -1 {
-					bestPGS = SubtitleChoice{Index: stream.Index, CodecName: stream.CodecName}
-				}
+
+	currentSubtitleSID := inspection.CurrentSubtitleSID
+	if requestedSID != nil {
+		currentSubtitleSID = *requestedSID
+		if *requestedSID > 0 {
+			if candidate, ok := findSubtitleCandidateBySID(inspection.Candidates, *requestedSID); ok {
+				return inspection, candidate, true, *requestedSID, nil
 			}
+			return inspection, subtitleStreamCandidate{}, false, 0, fmt.Errorf("所选字幕流不存在: sid=%d", *requestedSID)
+		} else {
+			return inspection, subtitleStreamCandidate{}, false, *requestedSID, nil
 		}
 	}
-	if bestASS.Index != -1 {
-		log.Printf("   ✅ 找到最优字幕流 (ASS)，流索引: %d, 格式: %s", bestASS.Index, bestASS.CodecName)
-		return bestASS.Index, bestASS.CodecName, nil
+
+	if currentSubtitleSID > 0 {
+		if candidate, ok := findSubtitleCandidateBySID(inspection.Candidates, currentSubtitleSID); ok {
+			return inspection, candidate, true, currentSubtitleSID, nil
+		}
 	}
-	if bestSRT.Index != -1 {
-		log.Printf("   ✅ 找到可用字幕流 (SRT)，流索引: %d, 格式: %s", bestSRT.Index, bestSRT.CodecName)
-		return bestSRT.Index, bestSRT.CodecName, nil
+	return inspection, subtitleStreamCandidate{}, false, currentSubtitleSID, nil
+}
+
+func findSubtitleCandidateBySID(candidates []subtitleStreamCandidate, sid int) (subtitleStreamCandidate, bool) {
+	for _, candidate := range candidates {
+		if candidate.SubtitleSID == sid {
+			return candidate, true
+		}
 	}
-	if bestPGS.Index != -1 {
-		log.Printf("   ✅ 找到可用字幕流 (PGS)，流索引: %d, 格式: %s", bestPGS.Index, bestPGS.CodecName)
-		return bestPGS.Index, bestPGS.CodecName, nil
+	return subtitleStreamCandidate{}, false
+}
+
+func selectBestChineseSubtitleCandidate(candidates []subtitleStreamCandidate) (subtitleStreamCandidate, bool) {
+	ranked := make([]subtitleStreamCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.ConfidenceScore <= 0 {
+			continue
+		}
+		ranked = append(ranked, candidate)
 	}
-	firstStream := probeResult.Streams[0]
-	log.Printf("   ⚠️ 未找到任何“正常”字幕流，将使用第一个字幕流 (索引: %d, 格式: %s)", firstStream.Index, firstStream.CodecName)
-	return firstStream.Index, firstStream.CodecName, nil
+	if len(ranked) == 0 {
+		return subtitleStreamCandidate{}, false
+	}
+
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].ConfidenceScore != ranked[j].ConfidenceScore {
+			return ranked[i].ConfidenceScore > ranked[j].ConfidenceScore
+		}
+		if ranked[i].IsNormal != ranked[j].IsNormal {
+			return ranked[i].IsNormal
+		}
+		if subtitleCodecPriority(ranked[i].CodecName) != subtitleCodecPriority(ranked[j].CodecName) {
+			return subtitleCodecPriority(ranked[i].CodecName) < subtitleCodecPriority(ranked[j].CodecName)
+		}
+		return ranked[i].SubtitleSID < ranked[j].SubtitleSID
+	})
+	return ranked[0], true
+}
+
+func selectDefaultSubtitleCandidate(candidates []subtitleStreamCandidate) (subtitleStreamCandidate, bool) {
+	if len(candidates) == 0 {
+		return subtitleStreamCandidate{}, false
+	}
+
+	tryPick := func(match func(subtitleStreamCandidate) bool) (subtitleStreamCandidate, bool) {
+		best := subtitleStreamCandidate{}
+		found := false
+		for _, candidate := range candidates {
+			if !match(candidate) {
+				continue
+			}
+			if !found {
+				best = candidate
+				found = true
+				continue
+			}
+			if subtitleCodecPriority(candidate.CodecName) < subtitleCodecPriority(best.CodecName) {
+				best = candidate
+				continue
+			}
+			if subtitleCodecPriority(candidate.CodecName) == subtitleCodecPriority(best.CodecName) &&
+				candidate.SubtitleSID < best.SubtitleSID {
+				best = candidate
+			}
+		}
+		return best, found
+	}
+
+	if candidate, ok := tryPick(func(item subtitleStreamCandidate) bool {
+		return item.IsNormal && item.IsSupported
+	}); ok {
+		return candidate, true
+	}
+	if candidate, ok := tryPick(func(item subtitleStreamCandidate) bool {
+		return item.IsSupported
+	}); ok {
+		return candidate, true
+	}
+	if candidate, ok := tryPick(func(item subtitleStreamCandidate) bool {
+		return item.IsNormal
+	}); ok {
+		return candidate, true
+	}
+
+	best := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if candidate.SubtitleSID < best.SubtitleSID {
+			best = candidate
+		}
+	}
+	return best, true
+}
+
+func subtitleChineseScore(language string, title string) int {
+	score := 0
+	lang := strings.ToLower(strings.TrimSpace(language))
+	titleText := strings.ToLower(strings.TrimSpace(title))
+
+	switch {
+	case lang == "chi", lang == "zho", lang == "zh", lang == "cmn":
+		score += 10
+	case strings.HasPrefix(lang, "zh-"), strings.HasPrefix(lang, "zh_"):
+		score += 10
+	}
+
+	switch {
+	case strings.Contains(titleText, "简体"),
+		strings.Contains(titleText, "简中"),
+		strings.Contains(titleText, "chs"),
+		strings.Contains(titleText, "sc"),
+		strings.Contains(titleText, "simplified"):
+		score += 5
+	case strings.Contains(titleText, "繁体"),
+		strings.Contains(titleText, "繁中"),
+		strings.Contains(titleText, "cht"),
+		strings.Contains(titleText, "tc"),
+		strings.Contains(titleText, "traditional"):
+		score += 3
+	case strings.Contains(titleText, "中文"),
+		strings.Contains(titleText, "中字"),
+		strings.Contains(titleText, "chinese"):
+		score += 2
+	}
+
+	if strings.Contains(titleText, "双语") || strings.Contains(titleText, "bilingual") {
+		score++
+	}
+	return score
+}
+
+func normalizeSubtitleLanguage(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func subtitleCodecPriority(codec string) int {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "ass":
+		return 0
+	case "subrip":
+		return 1
+	case "hdmv_pgs_subtitle":
+		return 2
+	default:
+		return 9
+	}
+}
+
+func isSupportedSubtitleCodec(codec string) bool {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "ass", "subrip", "hdmv_pgs_subtitle":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildSubtitleDisplayName(candidate subtitleStreamCandidate) string {
+	parts := make([]string, 0, 5)
+	parts = append(parts, fmt.Sprintf("字幕 %d", candidate.SubtitleSID))
+	if candidate.IsDefault {
+		parts = append(parts, "默认")
+	}
+	if candidate.IsConfidentChinese {
+		parts = append(parts, "疑似中文")
+	}
+	if candidate.CodecName != "" {
+		parts = append(parts, strings.ToUpper(candidate.CodecName))
+	}
+	if candidate.Language != "" {
+		parts = append(parts, candidate.Language)
+	}
+	if candidate.Title != "" {
+		parts = append(parts, candidate.Title)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func toBool(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case float64:
+		return typed != 0
+	case int:
+		return typed != 0
+	case string:
+		text := strings.ToLower(strings.TrimSpace(typed))
+		return text == "1" || text == "true" || text == "yes"
+	default:
+		return false
+	}
 }
 
 func takeScreenshot(videoPath, outputPath string, timePoint float64, subtitleSID int) error {
@@ -947,30 +1181,83 @@ func takePreviewScreenshot(videoPath, outputPath string, timePoint float64, isHD
 	return nil
 }
 
-func buildSmartScreenshotPointsForPreview(videoPath string, duration float64, count int) []float64 {
+func takePreviewScreenshotWithSubtitle(videoPath, outputPath string, timePoint float64, subtitleSID int) error {
+	tmpDir, err := os.MkdirTemp("", "ptnexus-proxy-preview-raw-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	rawPNG := filepath.Join(tmpDir, "preview_raw.png")
+	if err := takeScreenshot(videoPath, rawPNG, timePoint, subtitleSID); err != nil {
+		return err
+	}
+
+	isHDR := false
+	output, probeErr := executeCommand("ffprobe", "-v", "error", "-show_streams", rawPNG)
+	if probeErr == nil {
+		text := strings.ToLower(output)
+		isHDR = strings.Contains(text, "smpte2084") || strings.Contains(text, "bt2020")
+	}
+
+	vfFilter := "scale='min(640,iw)':-2,format=yuv420p"
+	if isHDR {
+		vfFilter = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,scale='min(640,iw)':-2,format=yuv420p"
+	}
+	args := []string{
+		"-y",
+		"-v", "error",
+		"-i", rawPNG,
+		"-frames:v", "1",
+		"-vf", vfFilter,
+		"-q:v", "14",
+		outputPath,
+	}
+	_, stderrStr, err := executeCommandWithTimeoutAndStderr(180*time.Second, "ffmpeg", args...)
+	if err != nil {
+		return fmt.Errorf("ffmpeg 预览截图失败: %v, 错误: %s", err, stderrStr)
+	}
+	if stat, statErr := os.Stat(outputPath); statErr != nil || stat.Size() == 0 {
+		return fmt.Errorf("预览截图文件未生成")
+	}
+	return nil
+}
+
+func buildSmartScreenshotPointsForPreview(
+	videoPath string,
+	duration float64,
+	count int,
+	currentSubtitleSID int,
+	candidate subtitleStreamCandidate,
+	hasCandidate bool,
+) []float64 {
 	if count <= 0 {
 		return nil
 	}
-	_, subtitleIndex, subtitleCodec, err := findBestChineseSubtitleStream(videoPath)
-	if err != nil {
-		log.Printf("警告: 预览模式探测中文字幕流失败: %v", err)
-	}
-	if subtitleIndex < 0 {
-		fallbackIndex, fallbackCodec, fallbackErr := findFirstSubtitleStream(videoPath)
-		if fallbackErr == nil && fallbackIndex >= 0 {
-			subtitleIndex = fallbackIndex
-			subtitleCodec = fallbackCodec
-		}
-	}
-	if subtitleIndex < 0 {
+	if currentSubtitleSID <= 0 {
 		return nil
 	}
+	if !hasCandidate {
+		return nil
+	}
+	if !candidate.IsSupported {
+		log.Printf("   -> 当前字幕流格式 %s 不支持智能事件分析，将回退到均匀选点。", strings.ToUpper(candidate.CodecName))
+		return nil
+	}
+	log.Printf(
+		"   ✅ 选中字幕流用于智能分析 sid=%d index=%d format=%s title=%s",
+		candidate.SubtitleSID,
+		candidate.StreamIndex,
+		strings.ToUpper(candidate.CodecName),
+		candidate.Title,
+	)
 
 	var subtitleEvents []SubtitleEvent
-	if subtitleCodec == "subrip" || subtitleCodec == "ass" {
-		subtitleEvents, err = findSubtitleEvents(videoPath, subtitleIndex, duration)
-	} else if subtitleCodec == "hdmv_pgs_subtitle" {
-		subtitleEvents, err = findSubtitleEventsForPGS(videoPath, subtitleIndex, duration)
+	var err error
+	if candidate.CodecName == "subrip" || candidate.CodecName == "ass" {
+		subtitleEvents, err = findSubtitleEvents(videoPath, candidate.StreamIndex, duration)
+	} else if candidate.CodecName == "hdmv_pgs_subtitle" {
+		subtitleEvents, err = findSubtitleEventsForPGS(videoPath, candidate.StreamIndex, duration)
 	}
 	if err != nil || len(subtitleEvents) == 0 {
 		return nil
@@ -1137,13 +1424,20 @@ func markRecommendedPreviewCandidates(candidates []ScreenshotPreviewCandidate, w
 	}
 }
 
-func generatePreviewCandidates(videoPath string, duration float64, previewCount int) ([]ScreenshotPreviewCandidate, error) {
+func generatePreviewCandidates(
+	videoPath string,
+	duration float64,
+	previewCount int,
+	currentSubtitleSID int,
+	candidate subtitleStreamCandidate,
+	hasCandidate bool,
+) ([]ScreenshotPreviewCandidate, error) {
 	previewCount = normalizeScreenshotPreviewCount(previewCount)
 	smartCount := previewCount
 	if smartCount > screenshotPreviewSelectCount {
 		smartCount = screenshotPreviewSelectCount
 	}
-	smartPoints := buildSmartScreenshotPointsForPreview(videoPath, duration, smartCount)
+	smartPoints := buildSmartScreenshotPointsForPreview(videoPath, duration, smartCount, currentSubtitleSID, candidate, hasCandidate)
 	points := mergePreviewPoints(smartPoints, buildUniformPreviewPoints(duration, previewCount), previewCount, duration)
 	if len(points) == 0 {
 		return nil, fmt.Errorf("未找到可用的候选截图时间点")
@@ -1158,7 +1452,13 @@ func generatePreviewCandidates(videoPath string, duration float64, previewCount 
 	candidates := make([]ScreenshotPreviewCandidate, 0, len(points))
 	for i, point := range points {
 		filePath := filepath.Join(tempDir, fmt.Sprintf("preview_%02d.jpg", i+1))
-		if err := takePreviewScreenshot(videoPath, filePath, point, isHDR); err != nil {
+		var err error
+		if currentSubtitleSID > 0 {
+			err = takePreviewScreenshotWithSubtitle(videoPath, filePath, point, currentSubtitleSID)
+		} else {
+			err = takePreviewScreenshot(videoPath, filePath, point, isHDR)
+		}
+		if err != nil {
 			log.Printf("警告: 生成候选截图失败 point=%.2f err=%v", point, err)
 			continue
 		}
@@ -1177,6 +1477,7 @@ func generatePreviewCandidates(videoPath string, duration float64, previewCount 
 	if len(candidates) < screenshotPreviewMinCount {
 		return nil, fmt.Errorf("可用候选截图不足，仅生成 %d 张", len(candidates))
 	}
+	markRecommendedPreviewCandidates(candidates, screenshotPreviewSelectCount)
 	return candidates, nil
 }
 
@@ -1981,58 +2282,77 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if mode == "preview" {
-			candidates, previewErr := generatePreviewCandidates(videoPath, duration, reqData.PreviewCount)
+			inspection, selectedCandidate, hasSelectedCandidate, currentSubtitleSID, inspectErr := resolveSubtitleCandidate(videoPath, reqData.SelectedSubtitleSID)
+			if inspectErr != nil {
+				statusCode = http.StatusInternalServerError
+				response = ScreenshotResponse{Success: false, Message: inspectErr.Error()}
+				return inspectErr
+			}
+			candidates, previewErr := generatePreviewCandidates(
+				videoPath,
+				duration,
+				reqData.PreviewCount,
+				currentSubtitleSID,
+				selectedCandidate,
+				hasSelectedCandidate,
+			)
 			if previewErr != nil {
 				statusCode = http.StatusInternalServerError
 				response = ScreenshotResponse{Success: false, Message: previewErr.Error()}
 				return previewErr
 			}
 			response = ScreenshotResponse{
-				Success:           true,
-				Message:           fmt.Sprintf("成功生成 %d 张候选截图", len(candidates)),
-				PreviewCandidates: candidates,
+				Success:            true,
+				Message:            fmt.Sprintf("成功生成 %d 张候选截图", len(candidates)),
+				SubtitleState:      string(inspection.State),
+				SubtitleStreams:    inspection.Streams,
+				CurrentSubtitleSID: currentSubtitleSID,
+				PreviewCandidates:  candidates,
 			}
 			return nil
 		}
 
 		if mode == "inspect" {
-			_, subtitleIndex, _, subtitleErr := findBestChineseSubtitleStream(videoPath)
-			if subtitleErr != nil {
-				log.Printf("警告: 探测中文字幕流时发生错误: %v", subtitleErr)
-			}
-			hasSubtitleStream := subtitleIndex >= 0
-			if !hasSubtitleStream {
-				fallbackIndex, _, fallbackErr := findFirstSubtitleStream(videoPath)
-				if fallbackErr != nil {
-					statusCode = http.StatusInternalServerError
-					response = ScreenshotResponse{Success: false, Message: fallbackErr.Error()}
-					return fallbackErr
-				}
-				hasSubtitleStream = fallbackIndex >= 0
+			inspection, inspectErr := inspectSubtitleStreams(videoPath)
+			if inspectErr != nil {
+				statusCode = http.StatusInternalServerError
+				response = ScreenshotResponse{Success: false, Message: inspectErr.Error()}
+				return inspectErr
 			}
 			response = ScreenshotResponse{
-				Success:           true,
-				HasSubtitleStream: hasSubtitleStream,
+				Success:            true,
+				SubtitleState:      string(inspection.State),
+				SubtitleStreams:    inspection.Streams,
+				CurrentSubtitleSID: inspection.CurrentSubtitleSID,
 				Message: func() string {
-					if hasSubtitleStream {
-						return "检测到可用字幕流"
+					switch inspection.State {
+					case ScreenshotSubtitleStateConfirmedChinese:
+						return "检测到明确的中文字幕流"
+					case ScreenshotSubtitleStateUsableButUnconfirmed:
+						return "检测到可用字幕流，但未能确认是中文"
+					default:
+						return "未检测到可用字幕流"
 					}
-					return "未检测到可用字幕流"
 				}(),
 			}
 			return nil
 		}
 
-		chineseSubtitleSID, _, _, subtitleErr := findBestChineseSubtitleStream(videoPath)
-		if subtitleErr != nil {
-			log.Printf("警告: 探测中文字幕流时发生错误: %v", subtitleErr)
+		inspection, selectedCandidate, hasSelectedCandidate, subtitleSID, inspectErr := resolveSubtitleCandidate(videoPath, reqData.SelectedSubtitleSID)
+		if inspectErr != nil {
+			statusCode = http.StatusInternalServerError
+			response = ScreenshotResponse{Success: false, Message: inspectErr.Error()}
+			return inspectErr
 		}
-		subtitleSID := 0
-		if chineseSubtitleSID > 0 {
-			subtitleSID = chineseSubtitleSID
-			log.Printf("   ✅ 找到中文字幕，将挂载字幕截图")
-		} else {
-			log.Printf("   ℹ️ 未检测到明确的中文字幕，将截取无字幕画面。")
+		switch {
+		case subtitleSID <= 0:
+			log.Printf("   ℹ️ 当前选择为无字幕，将截取无字幕画面。")
+		case reqData.SelectedSubtitleSID != nil && hasSelectedCandidate:
+			log.Printf("   ✅ 已按用户选择的字幕流截图 sid=%d title=%s", subtitleSID, selectedCandidate.Title)
+		case inspection.State == ScreenshotSubtitleStateConfirmedChinese:
+			log.Printf("   ✅ 找到明确中文字幕，将挂载字幕截图 sid=%d", subtitleSID)
+		default:
+			log.Printf("   ✅ 使用当前预览字幕流截图 sid=%d", subtitleSID)
 		}
 
 		screenshotPoints := make([]float64, 0, 5)
@@ -2045,7 +2365,14 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 				return fmt.Errorf("selected_times 不能为空")
 			}
 		} else {
-			screenshotPoints = buildSmartScreenshotPointsForPreview(videoPath, duration, numScreenshots)
+			screenshotPoints = buildSmartScreenshotPointsForPreview(
+				videoPath,
+				duration,
+				numScreenshots,
+				subtitleSID,
+				selectedCandidate,
+				hasSelectedCandidate,
+			)
 			if len(screenshotPoints) < numScreenshots {
 				log.Printf("警告: 智能截图不足，回退到按百分比截图。")
 				percentages := []float64{0.15, 0.30, 0.50, 0.70, 0.85}

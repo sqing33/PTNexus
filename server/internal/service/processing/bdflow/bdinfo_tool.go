@@ -74,14 +74,21 @@ func ExtractBDInfo(blurayRoot string) (string, error) {
 	_ = tmpFile.Close()
 	defer os.Remove(tmpPath)
 
-	cmd := exec.Command(bdinfoBin, "-p", blurayRoot, "-o", tmpPath, "-m")
-	output, execErr := cmd.CombinedOutput()
+	output, execErr, usedInvariant := runBDInfoCommandWithICUFallback(
+		bdinfoBin,
+		"-p", blurayRoot,
+		"-o", tmpPath,
+		"-m",
+	)
 	outputText := strings.TrimSpace(string(output))
 	if execErr != nil {
 		if outputText == "" {
 			outputText = execErr.Error()
 		}
 		return "", fmt.Errorf("BDInfo 执行失败: %s", outputText)
+	}
+	if usedInvariant {
+		logx.Warnf(bdinfoToolLogModule, "检测到 ICU 依赖缺失，已使用 invariant 模式执行 BDInfo")
 	}
 
 	data, readErr := os.ReadFile(tmpPath)
@@ -106,6 +113,29 @@ func ExtractBDInfo(blurayRoot string) (string, error) {
 		}
 	}
 	return text, nil
+}
+
+func runBDInfoCommandWithICUFallback(bin string, args ...string) ([]byte, error, bool) {
+	output, err := exec.Command(bin, args...).CombinedOutput()
+	if err == nil || !bdinfoNeedsInvariantMode(output, err) {
+		return output, err, false
+	}
+
+	logx.Warnf(bdinfoToolLogModule, "检测到 BDInfo 缺少 ICU 依赖，使用 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 重试 path=%s", bin)
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(os.Environ(), "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1")
+	retryOutput, retryErr := cmd.CombinedOutput()
+	return retryOutput, retryErr, true
+}
+
+func bdinfoNeedsInvariantMode(output []byte, err error) bool {
+	text := strings.ToLower(strings.TrimSpace(string(output)))
+	if err != nil {
+		text = text + "\n" + strings.ToLower(strings.TrimSpace(err.Error()))
+	}
+	return strings.Contains(text, "couldn't find a valid icu package") ||
+		strings.Contains(text, "system.globalization") ||
+		strings.Contains(text, "dotnet-missing-libicu")
 }
 
 func resolveBDInfoBinaryPath() (string, error) {

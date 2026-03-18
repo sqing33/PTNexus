@@ -26,6 +26,7 @@ const screenshotTotalCount = 5
 func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, error) {
 	payload := input.Payload
 	sourceInfo := input.SourceInfo
+	selectedSubtitleSID, selectedSubtitleProvided := parseSelectedSubtitleSIDAny(payload["selected_subtitle_sid"])
 
 	logx.PlainInfof("开始执行截图和上传任务 (智能 HDR/SDR + 自动中文字幕)...")
 	hoster := "pixhost"
@@ -51,7 +52,11 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName)
 		var lastErr error
 		for _, remoteCandidate := range remoteCandidates {
-			bbcode, err := downloader.FetchScreenshotsByProxy(remoteCandidate, contentName)
+			bbcode, err := downloader.FetchScreenshotsByProxy(
+				remoteCandidate,
+				contentName,
+				buildSelectedSubtitleSIDPointer(selectedSubtitleSID, selectedSubtitleProvided),
+			)
 			if err == nil && strings.TrimSpace(bbcode) != "" {
 				urls := ExtractImageURLsFromText(bbcode)
 				if len(urls) > 0 {
@@ -142,9 +147,26 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 
 	// 自动检测中文字幕轨道（mpv sid）。
 	logx.PlainInfof("正在分析字幕流...")
-	subtitleSID := getBestChineseSubtitleSID(ffprobePath, targetVideoFile)
-	if subtitleSID <= 0 {
-		logx.PlainInfof("   未检测到明确的中文字幕，将截取无字幕画面。")
+	inspection, selectedCandidate, hasSelectedCandidate, err := resolveLocalSubtitleCandidate(ffprobePath, targetVideoFile, selectedSubtitleSID)
+	if err != nil {
+		return nil, err
+	}
+	subtitleSID := inspection.CurrentSubtitleSID
+	if selectedSubtitleProvided {
+		subtitleSID = selectedSubtitleSID
+		if selectedSubtitleSID > 0 && !hasSelectedCandidate {
+			subtitleSID = inspection.CurrentSubtitleSID
+		}
+	}
+	switch {
+	case subtitleSID <= 0:
+		logx.PlainInfof("   当前选择为无字幕，将截取无字幕画面。")
+	case selectedSubtitleProvided && hasSelectedCandidate:
+		logx.PlainInfof("   已按用户选择的字幕流截图 sid=%d title=%s", subtitleSID, strings.TrimSpace(selectedCandidate.Title))
+	case inspection.State == ScreenshotSubtitleStateConfirmedChinese:
+		logx.PlainInfof("   已检测到明确中文字幕，将自动挂载字幕截图 sid=%d", subtitleSID)
+	default:
+		logx.PlainInfof("   将使用当前预览字幕流截图 sid=%d", subtitleSID)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "ptnexus-screens-*")

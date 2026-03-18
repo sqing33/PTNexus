@@ -620,12 +620,12 @@ func repairScreenshotsDuringFetch(
 			} else {
 				reviewData.Screens = ""
 			}
-			logx.Warnf(fetchRepairScreenshotLogModule, "未检测到可用字幕流，单条抓取改走候选截图选择 task_id=%s", taskID)
-			emitLog(deps, taskID, "修复截图", "未检测到字幕流，等待前端候选截图选择", "warning")
+			logx.Warnf(fetchRepairScreenshotLogModule, "字幕未被明确识别为中文字幕，单条抓取改走候选截图选择 task_id=%s", taskID)
+			emitLog(deps, taskID, "修复截图", "字幕未被明确识别为中文字幕，等待前端候选截图选择", "warning")
 			return reviewStatus, previewRequired
 		}
-		logx.Warnf(fetchRepairScreenshotLogModule, "未检测到可用字幕流，本次截图将标记为待人工确认 task_id=%s", taskID)
-		emitLog(deps, taskID, "修复截图", "未检测到字幕流，将自动生成截图并标记为待人工确认", "warning")
+		logx.Warnf(fetchRepairScreenshotLogModule, "字幕未被明确识别为中文字幕，本次截图将标记为待人工确认 task_id=%s", taskID)
+		emitLog(deps, taskID, "修复截图", "字幕未被明确识别为中文字幕，将自动生成截图并标记为待人工确认", "warning")
 	}
 	generatedURLs, err := GenerateAndUploadScreenshots(ScreenshotGenerateInput{
 		Payload:     payload,

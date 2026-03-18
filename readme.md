@@ -199,11 +199,9 @@ services:
 
 > 通过 Docker 部署的 PT Nexus 支持在线更新：updater 会读取 `UPDATE_MANIFEST.json`，下载对应平台的构建产物（artifact），完成校验后原子切换并重启服务。整个流程不依赖 git 拉取源码。
 
-> **提示：** 若使用“在线更新”把新代码同步进旧镜像，可能会出现依赖缺失（例如 `supervisord`）导致无法启动。新版启动脚本会在启动时自动检测并尝试安装缺失的系统依赖与 Python 依赖（需要容器以 root 运行且可联网）。如需关闭：
+> **提示：** 若使用“在线更新”把新代码同步进旧镜像，可能会出现依赖缺失（例如 `supervisord`、`libicu`）导致无法启动。新版启动脚本会在启动时自动检测并尝试安装缺失的系统依赖（需要容器以 root 运行且可联网）。如需关闭：
 >
 > - `AUTO_INSTALL_SYSTEM_DEPS=false`（不自动安装系统依赖）
-> - `AUTO_INSTALL_PIP_DEPS=false`（不自动执行 `pip install -r /app/requirements.txt`）
-> - `AUTO_PIP_SYNC_MODE=changed`（仅当 requirements 变化时才执行 pip；默认 `always`）
 
 ![更新](https://img1.pixhost.to/images/10201/661470654_79517501-6fc3-4d37-9f44-440ef15b7ac7.png)
 

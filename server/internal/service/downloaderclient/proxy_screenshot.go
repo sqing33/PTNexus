@@ -15,11 +15,12 @@ import (
 const proxyScreenshotLogModule = "盒子代理-截图"
 
 type proxyScreenshotRequest struct {
-	RemotePath    string    `json:"remote_path"`
-	ContentName   string    `json:"content_name,omitempty"`
-	Mode          string    `json:"mode,omitempty"`
-	PreviewCount  int       `json:"preview_count,omitempty"`
-	SelectedTimes []float64 `json:"selected_times,omitempty"`
+	RemotePath          string    `json:"remote_path"`
+	ContentName         string    `json:"content_name,omitempty"`
+	Mode                string    `json:"mode,omitempty"`
+	PreviewCount        int       `json:"preview_count,omitempty"`
+	SelectedTimes       []float64 `json:"selected_times,omitempty"`
+	SelectedSubtitleSID *int      `json:"selected_subtitle_sid,omitempty"`
 }
 
 // ProxyScreenshotPreviewCandidate 描述盒子代理返回的低清截图候选。
@@ -31,20 +32,57 @@ type ProxyScreenshotPreviewCandidate struct {
 	Recommended bool    `json:"recommended"`
 }
 
+type ProxyScreenshotSubtitleState string
+
+const (
+	ProxyScreenshotSubtitleStateConfirmedChinese     ProxyScreenshotSubtitleState = "confirmed_chinese"
+	ProxyScreenshotSubtitleStateUsableButUnconfirmed ProxyScreenshotSubtitleState = "usable_but_unconfirmed"
+	ProxyScreenshotSubtitleStateNoUsableSubtitle     ProxyScreenshotSubtitleState = "no_usable_subtitle"
+)
+
+// ProxyScreenshotSubtitleStream 描述盒子代理返回的字幕流信息。
+type ProxyScreenshotSubtitleStream struct {
+	SubtitleSID        int    `json:"subtitle_sid"`
+	StreamIndex        int    `json:"stream_index"`
+	CodecName          string `json:"codec_name"`
+	Language           string `json:"language,omitempty"`
+	Title              string `json:"title,omitempty"`
+	DisplayName        string `json:"display_name"`
+	IsConfidentChinese bool   `json:"is_confident_chinese"`
+	IsDefault          bool   `json:"is_default"`
+}
+
 type proxyScreenshotResponse struct {
-	Success           bool                              `json:"success"`
-	Message           string                            `json:"message"`
-	BBCode            string                            `json:"bbcode,omitempty"`
-	HasSubtitleStream bool                              `json:"has_subtitle_stream,omitempty"`
-	PreviewCandidates []ProxyScreenshotPreviewCandidate `json:"preview_candidates,omitempty"`
+	Success            bool                              `json:"success"`
+	Message            string                            `json:"message"`
+	BBCode             string                            `json:"bbcode,omitempty"`
+	SubtitleState      string                            `json:"subtitle_state,omitempty"`
+	SubtitleStreams    []ProxyScreenshotSubtitleStream   `json:"subtitle_streams,omitempty"`
+	CurrentSubtitleSID int                               `json:"current_subtitle_sid,omitempty"`
+	PreviewCandidates  []ProxyScreenshotPreviewCandidate `json:"preview_candidates,omitempty"`
+}
+
+// ProxyScreenshotInspectResult 描述代理返回的字幕探测结果。
+type ProxyScreenshotInspectResult struct {
+	SubtitleState      ProxyScreenshotSubtitleState
+	SubtitleStreams    []ProxyScreenshotSubtitleStream
+	CurrentSubtitleSID int
+}
+
+// ProxyScreenshotPreviewResult 描述代理返回的候选截图与字幕上下文。
+type ProxyScreenshotPreviewResult struct {
+	Candidates         []ProxyScreenshotPreviewCandidate
+	SubtitleState      ProxyScreenshotSubtitleState
+	SubtitleStreams    []ProxyScreenshotSubtitleStream
+	CurrentSubtitleSID int
 }
 
 // FetchScreenshotsByProxy 通过盒子代理远程截图并上传图床，返回截图 BBCode 文本。
 // 参数/返回：remotePath 为盒子上的实际路径（通常是下载器返回的 save_path 或其子目录）；contentName 用于多文件时辅助选取目标视频；返回截图 BBCode。
 // 失败场景：代理不可达、HTTP 返回异常、代理返回 success=false、响应解析失败、BBCode 为空。
 // 副作用：会向盒子代理服务发起 HTTP 请求。
-func (d Downloader) FetchScreenshotsByProxy(remotePath, contentName string) (string, error) {
-	resp, err := d.requestProxyScreenshots(remotePath, contentName, "", 0, nil)
+func (d Downloader) FetchScreenshotsByProxy(remotePath, contentName string, selectedSubtitleSID *int) (string, error) {
+	resp, err := d.requestProxyScreenshots(remotePath, contentName, "", 0, nil, selectedSubtitleSID)
 	if err != nil {
 		return "", err
 	}
@@ -64,8 +102,13 @@ func (d Downloader) FetchScreenshotsByProxy(remotePath, contentName string) (str
 // 参数/返回：selectedTimes 为前端选中的时间点（秒）；返回正式截图 BBCode。
 // 失败场景：时间点为空、代理不可达、代理未返回有效截图。
 // 副作用：会向盒子代理服务发起 HTTP 请求。
-func (d Downloader) FetchSelectedScreenshotsByProxy(remotePath, contentName string, selectedTimes []float64) (string, error) {
-	resp, err := d.requestProxyScreenshots(remotePath, contentName, "finalize", 0, selectedTimes)
+func (d Downloader) FetchSelectedScreenshotsByProxy(
+	remotePath string,
+	contentName string,
+	selectedTimes []float64,
+	selectedSubtitleSID *int,
+) (string, error) {
+	resp, err := d.requestProxyScreenshots(remotePath, contentName, "finalize", 0, selectedTimes, selectedSubtitleSID)
 	if err != nil {
 		return "", err
 	}
@@ -80,43 +123,88 @@ func (d Downloader) FetchSelectedScreenshotsByProxy(remotePath, contentName stri
 	return bbcode, nil
 }
 
-// HasUsableSubtitleStreamByProxy 通过盒子代理探测目标视频是否存在可用字幕流。
-// 参数/返回：返回 true 表示存在可用于原始截图流程的字幕流；false 表示应走候选截图选择。
+// InspectScreenshotByProxy 通过盒子代理探测目标视频的字幕状态与可切换字幕流。
 // 失败场景：代理不可达、路径不存在、响应解析失败时返回错误。
 // 副作用：会向盒子代理服务发起 HTTP 请求。
-func (d Downloader) HasUsableSubtitleStreamByProxy(remotePath, contentName string) (bool, error) {
-	resp, err := d.requestProxyScreenshots(remotePath, contentName, "inspect", 0, nil)
+func (d Downloader) InspectScreenshotByProxy(remotePath, contentName string) (ProxyScreenshotInspectResult, error) {
+	resp, err := d.requestProxyScreenshots(remotePath, contentName, "inspect", 0, nil, nil)
 	if err != nil {
-		return false, err
+		return ProxyScreenshotInspectResult{}, err
 	}
-	return resp.HasSubtitleStream, nil
+	return ProxyScreenshotInspectResult{
+		SubtitleState:      ProxyScreenshotSubtitleState(strings.TrimSpace(resp.SubtitleState)),
+		SubtitleStreams:    resp.SubtitleStreams,
+		CurrentSubtitleSID: resp.CurrentSubtitleSID,
+	}, nil
 }
 
 // FetchScreenshotPreviewsByProxy 通过盒子代理生成低清截图候选，供前端人工挑选。
-// 参数/返回：previewCount 为候选数量；返回带 data URI 的候选截图列表。
+// 参数/返回：previewCount 为候选数量；返回候选截图及当前字幕状态。
 // 失败场景：代理不可达、HTTP 返回异常、代理返回 success=false、未返回候选。
 // 副作用：会向盒子代理服务发起 HTTP 请求。
-func (d Downloader) FetchScreenshotPreviewsByProxy(remotePath, contentName string, previewCount int) ([]ProxyScreenshotPreviewCandidate, error) {
-	resp, err := d.requestProxyScreenshots(remotePath, contentName, "preview", previewCount, nil)
+func (d Downloader) fetchScreenshotPreviewResponse(
+	remotePath string,
+	contentName string,
+	previewCount int,
+	selectedSubtitleSID *int,
+) (proxyScreenshotResponse, error) {
+	resp, err := d.requestProxyScreenshots(remotePath, contentName, "preview", previewCount, nil, selectedSubtitleSID)
 	if err != nil {
-		return nil, err
+		return proxyScreenshotResponse{}, err
 	}
 	if len(resp.PreviewCandidates) == 0 {
 		msg := strings.TrimSpace(resp.Message)
 		if msg == "" {
 			msg = "代理未返回可用候选截图"
 		}
-		return nil, &ProxyAPIError{StatusCode: 500, Message: msg}
+		return proxyScreenshotResponse{}, &ProxyAPIError{StatusCode: 500, Message: msg}
 	}
-	return resp.PreviewCandidates, nil
+	return resp, nil
 }
 
-func (d Downloader) requestProxyScreenshots(remotePath, contentName, mode string, previewCount int, selectedTimes []float64) (proxyScreenshotResponse, error) {
+func (d Downloader) FetchScreenshotPreviewsByProxy(
+	remotePath string,
+	contentName string,
+	previewCount int,
+	selectedSubtitleSID *int,
+) (ProxyScreenshotPreviewResult, error) {
+	resp, err := d.fetchScreenshotPreviewResponse(remotePath, contentName, previewCount, selectedSubtitleSID)
+	if err != nil {
+		return ProxyScreenshotPreviewResult{}, err
+	}
+	return ProxyScreenshotPreviewResult{
+		Candidates:         resp.PreviewCandidates,
+		SubtitleState:      ProxyScreenshotSubtitleState(strings.TrimSpace(resp.SubtitleState)),
+		SubtitleStreams:    resp.SubtitleStreams,
+		CurrentSubtitleSID: resp.CurrentSubtitleSID,
+	}, nil
+}
+
+func (d Downloader) requestProxyScreenshots(
+	remotePath string,
+	contentName string,
+	mode string,
+	previewCount int,
+	selectedTimes []float64,
+	selectedSubtitleSID *int,
+) (proxyScreenshotResponse, error) {
 	trimmedPath := strings.TrimSpace(remotePath)
 	if trimmedPath == "" {
 		return proxyScreenshotResponse{}, &ProxyAPIError{StatusCode: 400, Message: "remote_path 不能为空"}
 	}
-	logx.Infof(proxyScreenshotLogModule, "开始请求截图 remote_path=%s mode=%s preview_count=%d selected=%d", compactProxyBody(trimmedPath), strings.TrimSpace(mode), previewCount, len(selectedTimes))
+	currentSubtitleSID := 0
+	if selectedSubtitleSID != nil {
+		currentSubtitleSID = *selectedSubtitleSID
+	}
+	logx.Infof(
+		proxyScreenshotLogModule,
+		"开始请求截图 remote_path=%s mode=%s preview_count=%d selected=%d subtitle_sid=%d",
+		compactProxyBody(trimmedPath),
+		strings.TrimSpace(mode),
+		previewCount,
+		len(selectedTimes),
+		currentSubtitleSID,
+	)
 
 	proxyPort := d.ProxyPort
 	if proxyPort <= 0 {
@@ -136,11 +224,12 @@ func (d Downloader) requestProxyScreenshots(remotePath, contentName, mode string
 	}
 
 	requestPayload := proxyScreenshotRequest{
-		RemotePath:    trimmedPath,
-		ContentName:   strings.TrimSpace(contentName),
-		Mode:          strings.TrimSpace(mode),
-		PreviewCount:  previewCount,
-		SelectedTimes: selectedTimes,
+		RemotePath:          trimmedPath,
+		ContentName:         strings.TrimSpace(contentName),
+		Mode:                strings.TrimSpace(mode),
+		PreviewCount:        previewCount,
+		SelectedTimes:       selectedTimes,
+		SelectedSubtitleSID: selectedSubtitleSID,
 	}
 	payloadBytes, err := json.Marshal(requestPayload)
 	if err != nil {
@@ -183,6 +272,15 @@ func (d Downloader) requestProxyScreenshots(remotePath, contentName, mode string
 		return proxyScreenshotResponse{}, &ProxyAPIError{StatusCode: 500, Message: msg}
 	}
 
-	logx.Infof(proxyScreenshotLogModule, "请求截图成功 remote_path=%s mode=%s bbcode_len=%d preview_count=%d", compactProxyBody(trimmedPath), strings.TrimSpace(mode), len([]rune(strings.TrimSpace(resp.BBCode))), len(resp.PreviewCandidates))
+	logx.Infof(
+		proxyScreenshotLogModule,
+		"请求截图成功 remote_path=%s mode=%s bbcode_len=%d preview_count=%d subtitle_state=%s current_sid=%d",
+		compactProxyBody(trimmedPath),
+		strings.TrimSpace(mode),
+		len([]rune(strings.TrimSpace(resp.BBCode))),
+		len(resp.PreviewCandidates),
+		strings.TrimSpace(resp.SubtitleState),
+		resp.CurrentSubtitleSID,
+	)
 	return resp, nil
 }

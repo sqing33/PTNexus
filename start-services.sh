@@ -89,6 +89,20 @@ ensure_bootstrap_dir() {
   mkdir -p /app/data/.bootstrap 2>/dev/null || true
 }
 
+has_icu_runtime() {
+  if command -v ldconfig >/dev/null 2>&1; then
+    if ldconfig -p 2>/dev/null | grep -Eq 'libicu(uc|i18n|data)\.so'; then
+      return 0
+    fi
+  fi
+
+  if find /usr/lib /lib -type f -name 'libicuuc.so*' -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+
+  return 1
+}
+
 ensure_system_deps() {
   if ! is_truthy "${AUTO_INSTALL_SYSTEM_DEPS:-true}"; then
     return 0
@@ -99,6 +113,7 @@ ensure_system_deps() {
   for cmd in supervisord ffmpeg mpv mediainfo; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
+  has_icu_runtime || missing+=("libicu-dev")
 
   if [ ${#missing[@]} -eq 0 ]; then
     return 0
@@ -151,73 +166,8 @@ rm -rf /var/lib/apt/lists/* || true
   find_supervisord >/dev/null 2>&1
 }
 
-hash_file_sha256() {
-  local file="$1"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$file" | awk '{print $1}'
-    return 0
-  fi
-  python3 - "$file" <<'PY'
-import hashlib, sys
-p = sys.argv[1]
-h = hashlib.sha256()
-with open(p, "rb") as f:
-    for chunk in iter(lambda: f.read(1024 * 1024), b""):
-        h.update(chunk)
-print(h.hexdigest())
-PY
-}
-
-ensure_python_deps() {
-  if ! is_truthy "${AUTO_INSTALL_PIP_DEPS:-true}"; then
-    log_bootstrap "pip 依赖同步已关闭（AUTO_INSTALL_PIP_DEPS=false）"
-    return 0
-  fi
-
-  local req="/app/requirements.txt"
-  if [ ! -f "$req" ]; then
-    return 0
-  fi
-
-  local mode="${AUTO_PIP_SYNC_MODE:-always}"
-  log_bootstrap "pip 依赖同步检查（mode=${mode}, req=${req}）"
-
-  ensure_bootstrap_dir
-  local hash_file="/app/data/.bootstrap/requirements.sha256"
-  local new_hash
-  new_hash="$(hash_file_sha256 "$req" 2>/dev/null || true)"
-  if [ "$mode" = "changed" ]; then
-    if [ -z "$new_hash" ]; then
-      echo "计算 requirements.txt 哈希失败，跳过 pip 依赖同步（mode=changed）。" >&2
-      return 0
-    fi
-
-    local old_hash=""
-    if [ -f "$hash_file" ]; then
-      old_hash="$(cat "$hash_file" 2>/dev/null || true)"
-    fi
-
-    if [ "$new_hash" = "$old_hash" ]; then
-      log_bootstrap "requirements 未变化（mode=changed），跳过 pip 依赖同步。"
-      return 0
-    fi
-  fi
-
-  log_bootstrap "开始安装/更新 pip 依赖..."
-  if command -v flock >/dev/null 2>&1; then
-    local pip_lock="/app/data/.bootstrap/pip.lock"
-    flock -w 300 "$pip_lock" python3 -m pip install --no-cache-dir -r "$req"
-  else
-    python3 -m pip install --no-cache-dir -r "$req"
-  fi
-  if [ -n "$new_hash" ]; then
-    echo "$new_hash" > "$hash_file"
-  fi
-}
-
 
 ensure_system_deps
-ensure_python_deps
 restore_updated_runtime
 
 echo "启动 supervisord（Go 版）进行多服务编排..."

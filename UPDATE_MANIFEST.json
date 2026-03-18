@@ -8,7 +8,7 @@
         "arch": "amd64",
         "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
-        "size": 10035584,
+        "size": 10035415,
         "format": "tar.gz"
       },
       {
@@ -16,7 +16,7 @@
         "arch": "arm64",
         "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
-        "size": 8977171,
+        "size": 8977151,
         "format": "tar.gz"
       }
     ],

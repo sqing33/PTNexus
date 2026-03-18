@@ -38,6 +38,10 @@ type subtitleEvent struct {
 
 // getSmartScreenshotPoints 复刻 Python 版 _get_smart_screenshot_points：优先基于字幕 packet 选点，失败回退由调用方处理。
 func getSmartScreenshotPoints(ffprobePath string, videoPath string, want int) []float64 {
+	return getSmartScreenshotPointsForSubtitle(ffprobePath, videoPath, want, 0, false)
+}
+
+func getSmartScreenshotPointsForSubtitle(ffprobePath string, videoPath string, want int, selectedSID int, hasSelected bool) []float64 {
 	logx.PlainInfof("")
 	logx.PlainInfof("--- 开始智能截图时间点分析 (快速扫描模式) ---")
 	if strings.TrimSpace(ffprobePath) == "" {
@@ -52,34 +56,40 @@ func getSmartScreenshotPoints(ffprobePath string, videoPath string, want int) []
 	}
 	logx.PlainInfof("视频总时长: %.2f 秒", duration)
 
-	probeCmd := exec.Command(
-		ffprobePath,
-		"-v", "quiet",
-		"-print_format", "json",
-		"-show_entries", "stream=index,codec_name,disposition",
-		"-select_streams", "s",
-		videoPath,
-	)
-	out, err := probeCmd.CombinedOutput()
+	inspection, chosenStream, err := resolveScreenshotSubtitleSelection(ffprobePath, videoPath, selectedSID, hasSelected)
 	if err != nil {
-		logx.PlainWarnf("探测字幕流失败: %s", strings.TrimSpace(string(out)))
+		logx.PlainWarnf("探测字幕流失败: %v", err)
+		return nil
+	}
+	if hasSelected && selectedSID == 0 {
+		logx.PlainInfof("   -> 当前选择无字幕模式，回退到均匀选点。")
+		return nil
+	}
+	if chosenStream == nil {
+		if inspection.SubtitleState == ScreenshotSubtitleStateNoUsableSubtitle {
+			logx.PlainInfof("未找到合适的字幕流。")
+		}
+		return nil
+	}
+	if !chosenStream.SupportsEventExtraction {
+		logx.PlainInfof("   -> 当前字幕流格式 %s 不支持智能事件分析，将回退到均匀选点。", strings.ToUpper(chosenStream.CodecName))
 		return nil
 	}
 
-	var subData subtitleStreamProbe
-	if jsonErr := json.Unmarshal(out, &subData); jsonErr != nil {
-		logx.PlainWarnf("探测字幕流失败: %v", jsonErr)
-		return nil
+	if hasSelected {
+		logx.PlainInfof("   ✅ 已切换到字幕流 SID=%d (格式: %s)，流索引: %d", chosenStream.SubtitleSID, strings.ToUpper(chosenStream.CodecName), chosenStream.StreamIndex)
+	} else {
+		logx.PlainInfof("   ✅ 找到最优字幕流 (格式: %s)，流索引: %d", strings.ToUpper(chosenStream.CodecName), chosenStream.StreamIndex)
 	}
 
-	chosenIndex, chosenCodec, chosenOrdinal, ok := pickBestSubtitleStream(subData.Streams)
-	if !ok {
-		logx.PlainInfof("未找到合适的正常字幕流。")
-		return nil
-	}
-	logx.PlainInfof("   ✅ 找到最优字幕流 (格式: %s)，流索引: %d", strings.ToUpper(chosenCodec), chosenIndex)
-
-	events := extractSubtitleEventsByReadIntervals(ffprobePath, videoPath, duration, chosenIndex, chosenOrdinal, chosenCodec)
+	events := extractSubtitleEventsByReadIntervals(
+		ffprobePath,
+		videoPath,
+		duration,
+		chosenStream.StreamIndex,
+		chosenStream.StreamOrdinal,
+		chosenStream.CodecName,
+	)
 	if len(events) == 0 {
 		return nil
 	}
@@ -123,54 +133,6 @@ func getSmartScreenshotPoints(ffprobePath string, videoPath string, want int) []
 	}
 	sort.Float64s(points)
 	return points
-}
-
-func pickBestSubtitleStream(streams []subtitleProbeStream) (index int, codec string, ordinal int, ok bool) {
-	bestASS := -1
-	bestSRT := -1
-	bestPGS := -1
-	ordinalASS := -1
-	ordinalSRT := -1
-	ordinalPGS := -1
-
-	ord := 0
-	for _, s := range streams {
-		disp := s.Disposition
-		isNormal := !(toBoolAny(disp["comment"]) || toBoolAny(disp["hearing_impaired"]) || toBoolAny(disp["visual_impaired"]))
-		if !isNormal {
-			ord++
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(s.CodecName)) {
-		case "ass":
-			if bestASS < 0 {
-				bestASS = s.Index
-				ordinalASS = ord
-			}
-		case "subrip":
-			if bestSRT < 0 {
-				bestSRT = s.Index
-				ordinalSRT = ord
-			}
-		case "hdmv_pgs_subtitle":
-			if bestPGS < 0 {
-				bestPGS = s.Index
-				ordinalPGS = ord
-			}
-		}
-		ord++
-	}
-
-	switch {
-	case bestASS >= 0:
-		return bestASS, "ass", ordinalASS, true
-	case bestSRT >= 0:
-		return bestSRT, "subrip", ordinalSRT, true
-	case bestPGS >= 0:
-		return bestPGS, "hdmv_pgs_subtitle", ordinalPGS, true
-	default:
-		return 0, "", 0, false
-	}
 }
 
 func extractSubtitleEventsByReadIntervals(ffprobePath, videoPath string, duration float64, streamIndex int, streamOrdinal int, codec string) []subtitleEvent {

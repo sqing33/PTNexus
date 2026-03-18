@@ -26,22 +26,50 @@ const (
 
 const screenshotPreviewLogModule = "媒体校验-截图预览"
 
+type localSubtitleInspection struct {
+	State              ScreenshotSubtitleState
+	Streams            []ScreenshotSubtitleStream
+	CurrentSubtitleSID int
+}
+
+type subtitleStreamCandidate struct {
+	SubtitleSID   int
+	StreamIndex   int
+	StreamOrdinal int
+	CodecName     string
+	Title         string
+	IsSupported   bool
+}
+
 // ShouldUseScreenshotPreview 判断当前视频是否需要进入候选截图选择流程。
-// 参数/返回：input 为截图上下文；返回 true 表示未找到可用字幕流，应展示候选截图。
+// 参数/返回：input 为截图上下文；返回 true 表示字幕未被明确识别为中文，应展示候选截图。
 // 失败场景：探测字幕流过程中发生错误时返回 false 与错误，由调用方决定是否回退直出。
 // 副作用：会读取视频文件；启用盒子代理时会向代理发起字幕流探测请求。
 func ShouldUseScreenshotPreview(input ScreenshotGenerateInput) (bool, error) {
+	inspection, err := InspectScreenshotSubtitles(input)
+	if err != nil {
+		return false, err
+	}
+	return inspection.SubtitleState != ScreenshotSubtitleStateConfirmedChinese, nil
+}
+
+func InspectScreenshotSubtitles(input ScreenshotGenerateInput) (ScreenshotSubtitleInspection, error) {
 	payload := input.Payload
 	sourceInfo := input.SourceInfo
 	savePath, downloaderID, torrentName, contentName := parseScreenshotSourceParams(payload, sourceInfo, input.ContentName)
+
 	downloader, decision, dErr := downloaderclient.DecideProxy(input.RootConfig, downloaderID)
 	if decision.Enabled {
 		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName)
 		var lastErr error
 		for _, remoteCandidate := range remoteCandidates {
-			hasSubtitleStream, err := downloader.HasUsableSubtitleStreamByProxy(remoteCandidate, contentName)
+			inspection, err := downloader.InspectScreenshotByProxy(remoteCandidate, contentName)
 			if err == nil {
-				return !hasSubtitleStream, nil
+				return ScreenshotSubtitleInspection{
+					SubtitleState:      ScreenshotSubtitleState(inspection.SubtitleState),
+					SubtitleStreams:    mapProxySubtitleStreams(inspection.SubtitleStreams),
+					CurrentSubtitleSID: inspection.CurrentSubtitleSID,
+				}, nil
 			}
 			if apiErr, ok := err.(*downloaderclient.ProxyAPIError); ok && apiErr != nil {
 				lastErr = err
@@ -54,71 +82,47 @@ func ShouldUseScreenshotPreview(input ScreenshotGenerateInput) (bool, error) {
 			break
 		}
 		if lastErr != nil {
-			return false, lastErr
+			return ScreenshotSubtitleInspection{}, lastErr
 		}
-		return false, nil
+		return ScreenshotSubtitleInspection{}, nil
 	} else if dErr != nil && strings.TrimSpace(decision.Reason) == "config_error" {
-		return false, dErr
+		return ScreenshotSubtitleInspection{}, dErr
 	}
 
 	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "截图预览判定")
 	if err != nil {
-		return false, err
+		return ScreenshotSubtitleInspection{}, err
 	}
 	defer func() {
 		if closeErr := targetResult.Close(); closeErr != nil {
 			logx.Warnf(screenshotPreviewLogModule, "关闭本地媒体访问会话失败 scene=%s source_path=%s err=%v", "截图预览判定", targetResult.SourcePath, closeErr)
 		}
 	}()
-	targetVideoFile := targetResult.TargetFile
-	logx.Infof(screenshotPreviewLogModule, "预览判定命中目标媒体 source=%s target=%s", targetResult.SourcePath, targetVideoFile)
+
 	ffprobePath, err := resolveBinary("ffprobe", "PTNEXUS_FFPROBE_PATH")
 	if err != nil {
-		return false, err
+		return ScreenshotSubtitleInspection{}, err
 	}
-	hasSubtitleStream, err := hasUsableLocalSubtitleStream(ffprobePath, targetVideoFile)
+	inspection, err := inspectLocalSubtitleStreams(ffprobePath, targetResult.TargetFile)
 	if err != nil {
-		return false, err
+		return ScreenshotSubtitleInspection{}, err
 	}
-	return !hasSubtitleStream, nil
-}
-
-func hasUsableLocalSubtitleStream(ffprobePath, videoPath string) (bool, error) {
-	if strings.TrimSpace(ffprobePath) == "" {
-		return false, fmt.Errorf("ffprobe 不能为空")
-	}
-	cmd := exec.Command(
-		ffprobePath,
-		"-v", "quiet",
-		"-print_format", "json",
-		"-show_entries", "stream=index,codec_name,disposition",
-		"-select_streams", "s",
-		videoPath,
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		text := strings.TrimSpace(string(out))
-		if text == "" {
-			text = err.Error()
-		}
-		return false, fmt.Errorf("探测字幕流失败: %s", text)
-	}
-	var subData subtitleStreamProbe
-	if jsonErr := json.Unmarshal(out, &subData); jsonErr != nil {
-		return false, jsonErr
-	}
-	_, _, _, ok := pickBestSubtitleStream(subData.Streams)
-	return ok, nil
+	return ScreenshotSubtitleInspection{
+		SubtitleState:      inspection.State,
+		SubtitleStreams:    inspection.Streams,
+		CurrentSubtitleSID: inspection.CurrentSubtitleSID,
+	}, nil
 }
 
 // GenerateScreenshotPreviewCandidates 生成低清截图候选，供前端人工挑选正式截图时间点。
-// 参数/返回：input 为截图上下文；previewCount 为候选数量；返回可展示的候选图片与时间点。
+// 参数/返回：input 为截图上下文；previewCount 为候选数量；返回可展示的候选图片、字幕状态与可选字幕流。
 // 失败场景：视频文件无法定位、ffmpeg/ffprobe 缺失、盒子代理不可用或候选不足时返回错误。
 // 副作用：会读取视频文件、执行外部命令；启用盒子代理时会发起代理 HTTP 请求。
-func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewCount int) ([]ScreenshotPreviewCandidate, error) {
+func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewCount int) (ScreenshotPreviewBundle, error) {
 	payload := input.Payload
 	sourceInfo := input.SourceInfo
 	previewCount = normalizeScreenshotPreviewCount(previewCount)
+	selectedSubtitleSID, selectedSubtitleProvided := parseSelectedSubtitleSIDAny(payload["selected_subtitle_sid"])
 
 	savePath, downloaderID, torrentName, contentName := parseScreenshotSourceParams(payload, sourceInfo, input.ContentName)
 	downloader, decision, dErr := downloaderclient.DecideProxy(input.RootConfig, downloaderID)
@@ -126,22 +130,24 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName)
 		var lastErr error
 		for _, remoteCandidate := range remoteCandidates {
-			candidates, err := downloader.FetchScreenshotPreviewsByProxy(remoteCandidate, contentName, previewCount)
-			if err == nil && len(candidates) > 0 {
-				mapped := make([]ScreenshotPreviewCandidate, 0, len(candidates))
-				for _, item := range candidates {
-					mapped = append(mapped, ScreenshotPreviewCandidate{
-						ID:          strings.TrimSpace(item.ID),
-						TimeSeconds: item.TimeSeconds,
-						TimeLabel:   strings.TrimSpace(item.TimeLabel),
-						PreviewData: strings.TrimSpace(item.PreviewData),
-					})
+			previewBundle, err := downloader.FetchScreenshotPreviewsByProxy(
+				remoteCandidate,
+				contentName,
+				previewCount,
+				buildSelectedSubtitleSIDPointer(selectedSubtitleSID, selectedSubtitleProvided),
+			)
+			if err == nil && len(previewBundle.Candidates) > 0 {
+				if len(previewBundle.Candidates) >= screenshotPreviewMinCount {
+					logx.Infof(screenshotPreviewLogModule, "盒子代理候选截图生成成功 remote_path=%s count=%d", remoteCandidate, len(previewBundle.Candidates))
+					return ScreenshotPreviewBundle{
+						Candidates:         mapProxyPreviewCandidates(previewBundle.Candidates),
+						SelectionLimit:     screenshotPreviewSelectCount,
+						SubtitleState:      ScreenshotSubtitleState(previewBundle.SubtitleState),
+						SubtitleStreams:    mapProxySubtitleStreams(previewBundle.SubtitleStreams),
+						CurrentSubtitleSID: previewBundle.CurrentSubtitleSID,
+					}, nil
 				}
-				if len(mapped) >= screenshotPreviewMinCount {
-					logx.Infof(screenshotPreviewLogModule, "盒子代理候选截图生成成功 remote_path=%s count=%d", remoteCandidate, len(mapped))
-					return mapped, nil
-				}
-				lastErr = fmt.Errorf("候选截图数量不足: %d", len(mapped))
+				lastErr = fmt.Errorf("候选截图数量不足: %d", len(previewBundle.Candidates))
 				break
 			}
 			if apiErr, ok := err.(*downloaderclient.ProxyAPIError); ok && apiErr != nil {
@@ -165,41 +171,71 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 
 	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "截图预览生成")
 	if err != nil {
-		return nil, err
+		return ScreenshotPreviewBundle{}, err
 	}
 	defer func() {
 		if closeErr := targetResult.Close(); closeErr != nil {
 			logx.Warnf(screenshotPreviewLogModule, "关闭本地媒体访问会话失败 scene=%s source_path=%s err=%v", "截图预览生成", targetResult.SourcePath, closeErr)
 		}
 	}()
-	targetVideoFile := targetResult.TargetFile
-	logx.Infof(screenshotPreviewLogModule, "预览生成命中目标媒体 source=%s target=%s", targetResult.SourcePath, targetVideoFile)
+
 	ffmpegPath, err := resolveBinary("ffmpeg", "PTNEXUS_FFMPEG_PATH")
 	if err != nil {
-		return nil, err
+		return ScreenshotPreviewBundle{}, err
 	}
 	ffprobePath, err := resolveBinary("ffprobe", "PTNEXUS_FFPROBE_PATH")
 	if err != nil {
-		return nil, err
+		return ScreenshotPreviewBundle{}, err
 	}
 
-	points, err := buildScreenshotPreviewPoints(ffprobePath, targetVideoFile, previewCount)
+	inspection, selectedCandidate, hasSelectedCandidate, err := resolveLocalSubtitleCandidate(ffprobePath, targetResult.TargetFile, selectedSubtitleSID)
 	if err != nil {
-		return nil, err
+		return ScreenshotPreviewBundle{}, err
 	}
-	isHDR := detectHDRFromVideo(ffprobePath, targetVideoFile)
+	currentSubtitleSID := inspection.CurrentSubtitleSID
+	if selectedSubtitleProvided {
+		currentSubtitleSID = selectedSubtitleSID
+	}
+
+	points, err := buildScreenshotPreviewPoints(
+		ffprobePath,
+		targetResult.TargetFile,
+		previewCount,
+		currentSubtitleSID,
+		hasSelectedCandidate,
+		selectedCandidate,
+	)
+	if err != nil {
+		return ScreenshotPreviewBundle{}, err
+	}
+
+	isHDR := detectHDRFromVideo(ffprobePath, targetResult.TargetFile)
+	needSubtitleRender := currentSubtitleSID > 0
+	mpvPath := ""
+	if needSubtitleRender {
+		mpvPath, err = resolveBinary("mpv", "PTNEXUS_MPV_PATH")
+		if err != nil {
+			return ScreenshotPreviewBundle{}, err
+		}
+	}
 
 	tmpDir, err := os.MkdirTemp("", "ptnexus-preview-screens-*")
 	if err != nil {
-		return nil, err
+		return ScreenshotPreviewBundle{}, err
 	}
 	defer os.RemoveAll(tmpDir)
 
 	candidates := make([]ScreenshotPreviewCandidate, 0, len(points))
 	for idx, point := range points {
 		filePath := filepath.Join(tmpDir, fmt.Sprintf("preview_%02d.jpg", idx+1))
-		if err := capturePreviewJPEGWithFFmpeg(ffmpegPath, targetVideoFile, point, filePath, isHDR); err != nil {
-			logx.Warnf(screenshotPreviewLogModule, "生成候选截图失败 index=%d point=%.2f err=%v", idx, point, err)
+		var captureErr error
+		if needSubtitleRender {
+			captureErr = capturePreviewJPEGWithMPV(mpvPath, ffmpegPath, ffprobePath, targetResult.TargetFile, point, filePath, currentSubtitleSID)
+		} else {
+			captureErr = capturePreviewJPEGWithFFmpeg(ffmpegPath, targetResult.TargetFile, point, filePath, isHDR)
+		}
+		if captureErr != nil {
+			logx.Warnf(screenshotPreviewLogModule, "生成候选截图失败 index=%d point=%.2f err=%v", idx, point, captureErr)
 			continue
 		}
 		content, readErr := os.ReadFile(filePath)
@@ -215,9 +251,16 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 		})
 	}
 	if len(candidates) < screenshotPreviewMinCount {
-		return nil, fmt.Errorf("可用候选截图不足，仅生成 %d 张", len(candidates))
+		return ScreenshotPreviewBundle{}, fmt.Errorf("可用候选截图不足，仅生成 %d 张", len(candidates))
 	}
-	return candidates, nil
+	markRecommendedPreviewCandidates(candidates, screenshotPreviewSelectCount)
+	return ScreenshotPreviewBundle{
+		Candidates:         candidates,
+		SelectionLimit:     screenshotPreviewSelectCount,
+		SubtitleState:      inspection.State,
+		SubtitleStreams:    inspection.Streams,
+		CurrentSubtitleSID: currentSubtitleSID,
+	}, nil
 }
 
 // GenerateAndUploadSelectedScreenshots 按用户选择的时间点生成正式截图并上传图床。
@@ -231,6 +274,7 @@ func GenerateAndUploadSelectedScreenshots(input ScreenshotGenerateInput, selecte
 func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selectedTimes []float64, requireSelected bool) ([]string, error) {
 	payload := input.Payload
 	sourceInfo := input.SourceInfo
+	selectedSubtitleSID, selectedSubtitleProvided := parseSelectedSubtitleSIDAny(payload["selected_subtitle_sid"])
 
 	logx.PlainInfof("开始执行截图和上传任务 (智能 HDR/SDR + 自动中文字幕)...")
 	hoster := "pixhost"
@@ -246,9 +290,18 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 			var bbcode string
 			var err error
 			if requireSelected {
-				bbcode, err = downloader.FetchSelectedScreenshotsByProxy(remoteCandidate, contentName, selectedTimes)
+				bbcode, err = downloader.FetchSelectedScreenshotsByProxy(
+					remoteCandidate,
+					contentName,
+					selectedTimes,
+					buildSelectedSubtitleSIDPointer(selectedSubtitleSID, selectedSubtitleProvided),
+				)
 			} else {
-				bbcode, err = downloader.FetchScreenshotsByProxy(remoteCandidate, contentName)
+				bbcode, err = downloader.FetchScreenshotsByProxy(
+					remoteCandidate,
+					contentName,
+					buildSelectedSubtitleSIDPointer(selectedSubtitleSID, selectedSubtitleProvided),
+				)
 			}
 			if err == nil && strings.TrimSpace(bbcode) != "" {
 				urls := ExtractImageURLsFromText(bbcode)
@@ -289,8 +342,8 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 		fullVideoPath = filepath.Join(translatedSavePath, torrentName)
 	}
 	logx.PlainInfof("处理视频路径: %s", fullVideoPath)
-
 	logx.PlainInfof("开始在路径 '%s' 中查找目标视频文件...", fullVideoPath)
+
 	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "正式截图生成")
 	if err != nil {
 		logx.PlainWarnf("错误：在指定路径中未找到视频文件: %v", err)
@@ -301,8 +354,7 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 			logx.Warnf(screenshotPreviewLogModule, "关闭本地媒体访问会话失败 scene=%s source_path=%s err=%v", "正式截图生成", targetResult.SourcePath, closeErr)
 		}
 	}()
-	targetVideoFile := targetResult.TargetFile
-	logx.PlainInfof("找到目标媒体文件: source=%s target=%s", targetResult.SourcePath, targetVideoFile)
+	logx.PlainInfof("找到目标媒体文件: source=%s target=%s", targetResult.SourcePath, targetResult.TargetFile)
 
 	mpvPath, err := resolveBinary("mpv", "PTNEXUS_MPV_PATH")
 	if err != nil {
@@ -320,17 +372,41 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 		return nil, err
 	}
 
-	points, err := resolveFormalScreenshotPoints(ffprobePath, targetVideoFile, selectedTimes, screenshotTotalCount, requireSelected)
+	logx.PlainInfof("正在分析字幕流...")
+	inspection, selectedCandidate, hasSelectedCandidate, err := resolveLocalSubtitleCandidate(ffprobePath, targetResult.TargetFile, selectedSubtitleSID)
+	if err != nil {
+		return nil, err
+	}
+
+	subtitleSID := inspection.CurrentSubtitleSID
+	if selectedSubtitleProvided {
+		subtitleSID = selectedSubtitleSID
+	}
+	switch {
+	case subtitleSID <= 0:
+		logx.PlainInfof("   当前选择为无字幕，将截取无字幕画面。")
+	case selectedSubtitleProvided && hasSelectedCandidate:
+		logx.PlainInfof("   已按用户选择的字幕流截图 sid=%d title=%s", subtitleSID, strings.TrimSpace(selectedCandidate.Title))
+	case inspection.State == ScreenshotSubtitleStateConfirmedChinese:
+		logx.PlainInfof("   已检测到明确中文字幕，将自动挂载字幕截图 sid=%d", subtitleSID)
+	default:
+		logx.PlainInfof("   检测到可用但未确认的字幕流，将使用当前预览字幕流截图 sid=%d", subtitleSID)
+	}
+
+	points, err := resolveFormalScreenshotPoints(
+		ffprobePath,
+		targetResult.TargetFile,
+		selectedTimes,
+		screenshotTotalCount,
+		requireSelected,
+		subtitleSID,
+		hasSelectedCandidate,
+		selectedCandidate,
+	)
 	if err != nil {
 		return nil, err
 	}
 	sort.Float64s(points)
-
-	logx.PlainInfof("正在分析字幕流...")
-	subtitleSID := getBestChineseSubtitleSID(ffprobePath, targetVideoFile)
-	if subtitleSID <= 0 {
-		logx.PlainInfof("   未检测到明确的中文字幕，将截取无字幕画面。")
-	}
 
 	tmpDir, err := os.MkdirTemp("", "ptnexus-screens-*")
 	if err != nil {
@@ -397,7 +473,7 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 		logx.PlainInfof("")
 		logx.PlainInfof("--- 处理第 %d/%d 张截图 (%s) ---", i+1, len(points), timeStr)
 
-		if err := captureRawPNGWithMPV(mpvPath, targetVideoFile, point, rawPNG, subtitleSID); err != nil {
+		if err := captureRawPNGWithMPV(mpvPath, targetResult.TargetFile, point, rawPNG, subtitleSID); err != nil {
 			logx.PlainInfof("❌ mpv 截图失败: %s", sanitizeCommandErrForLog(err))
 			continue
 		}
@@ -516,7 +592,14 @@ func normalizeScreenshotPreviewCount(value int) int {
 	return value
 }
 
-func buildScreenshotPreviewPoints(ffprobePath, videoPath string, previewCount int) ([]float64, error) {
+func buildScreenshotPreviewPoints(
+	ffprobePath,
+	videoPath string,
+	previewCount int,
+	currentSubtitleSID int,
+	hasSelectedCandidate bool,
+	selectedCandidate subtitleStreamCandidate,
+) ([]float64, error) {
 	duration, err := probeDurationSeconds(videoPath)
 	if err != nil || duration <= 0 {
 		return nil, fmt.Errorf("读取视频时长失败: %w", err)
@@ -525,7 +608,7 @@ func buildScreenshotPreviewPoints(ffprobePath, videoPath string, previewCount in
 	if wantSmart > screenshotPreviewSelectCount {
 		wantSmart = screenshotPreviewSelectCount
 	}
-	smartPoints := getSmartScreenshotPoints(ffprobePath, videoPath, wantSmart)
+	smartPoints := buildSmartPointsForSelectedSubtitle(ffprobePath, videoPath, wantSmart, currentSubtitleSID, hasSelectedCandidate, selectedCandidate)
 	fallbackPoints := buildPreviewFallbackPoints(duration, previewCount)
 	merged := mergeScreenshotPointCandidates(smartPoints, fallbackPoints, previewCount, duration)
 	if len(merged) == 0 {
@@ -534,7 +617,16 @@ func buildScreenshotPreviewPoints(ffprobePath, videoPath string, previewCount in
 	return merged, nil
 }
 
-func resolveFormalScreenshotPoints(ffprobePath, targetVideoFile string, selectedPoints []float64, want int, requireSelected bool) ([]float64, error) {
+func resolveFormalScreenshotPoints(
+	ffprobePath,
+	targetVideoFile string,
+	selectedPoints []float64,
+	want int,
+	requireSelected bool,
+	currentSubtitleSID int,
+	hasSelectedCandidate bool,
+	selectedCandidate subtitleStreamCandidate,
+) ([]float64, error) {
 	duration, err := probeDurationSeconds(targetVideoFile)
 	if err != nil || duration <= 0 {
 		return nil, fmt.Errorf("读取视频时长失败: %w", err)
@@ -546,7 +638,7 @@ func resolveFormalScreenshotPoints(ffprobePath, targetVideoFile string, selected
 	if requireSelected {
 		return nil, fmt.Errorf("请选择 %d 张候选截图后再生成正式截图", screenshotPreviewSelectCount)
 	}
-	points := getSmartScreenshotPoints(ffprobePath, targetVideoFile, want)
+	points := buildSmartPointsForSelectedSubtitle(ffprobePath, targetVideoFile, want, currentSubtitleSID, hasSelectedCandidate, selectedCandidate)
 	if len(points) < want {
 		logx.PlainWarnf("警告: 智能分析失败，回退到按百分比截图。")
 		percents := []float64{0.15, 0.30, 0.50, 0.70, 0.85}
@@ -556,6 +648,23 @@ func resolveFormalScreenshotPoints(ffprobePath, targetVideoFile string, selected
 		}
 	}
 	return points, nil
+}
+
+func buildSmartPointsForSelectedSubtitle(
+	ffprobePath,
+	videoPath string,
+	want int,
+	currentSubtitleSID int,
+	hasSelectedCandidate bool,
+	selectedCandidate subtitleStreamCandidate,
+) []float64 {
+	if currentSubtitleSID <= 0 {
+		return nil
+	}
+	if hasSelectedCandidate {
+		return getSmartScreenshotPointsForSubtitle(ffprobePath, videoPath, want, selectedCandidate.SubtitleSID, true)
+	}
+	return getSmartScreenshotPointsForSubtitle(ffprobePath, videoPath, want, currentSubtitleSID, true)
 }
 
 func buildPreviewFallbackPoints(duration float64, count int) []float64 {
@@ -646,6 +755,48 @@ func capturePreviewJPEGWithFFmpeg(ffmpegPath, videoPath string, second float64, 
 			text = err.Error()
 		}
 		return fmt.Errorf("ffmpeg 预览截图失败: %s", text)
+	}
+	if stat, statErr := os.Stat(outputPath); statErr != nil || stat.Size() == 0 {
+		return fmt.Errorf("预览截图文件未生成")
+	}
+	return nil
+}
+
+func capturePreviewJPEGWithMPV(mpvPath, ffmpegPath, ffprobePath, videoPath string, second float64, outputPath string, subtitleSID int) error {
+	rawPNG := filepath.Join(filepath.Dir(outputPath), strings.TrimSuffix(filepath.Base(outputPath), filepath.Ext(outputPath))+"_raw.png")
+	if err := captureRawPNGWithMPV(mpvPath, videoPath, second, rawPNG, subtitleSID); err != nil {
+		return err
+	}
+
+	isHDR := false
+	if hdr, err := detectHDRFromPNG(ffprobePath, rawPNG); err == nil {
+		isHDR = hdr
+	}
+	return compressPreviewJPEGFromPNG(ffmpegPath, rawPNG, outputPath, isHDR)
+}
+
+func compressPreviewJPEGFromPNG(ffmpegPath, srcPNG, outputPath string, isHDR bool) error {
+	vfFilter := "scale='min(640,iw)':-2,format=yuv420p"
+	if isHDR {
+		vfFilter = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,scale='min(640,iw)':-2,format=yuv420p"
+	}
+	cmd := exec.Command(
+		ffmpegPath,
+		"-y",
+		"-v", "error",
+		"-i", srcPNG,
+		"-frames:v", "1",
+		"-vf", vfFilter,
+		"-q:v", "14",
+		outputPath,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(out))
+		if text == "" {
+			text = err.Error()
+		}
+		return fmt.Errorf("ffmpeg 预览压缩失败: %s", text)
 	}
 	if stat, statErr := os.Stat(outputPath); statErr != nil || stat.Size() == 0 {
 		return fmt.Errorf("预览截图文件未生成")
@@ -805,4 +956,99 @@ func markRecommendedPreviewCandidates(candidates []ScreenshotPreviewCandidate, w
 			candidates[idx].Recommended = true
 		}
 	}
+}
+
+func inspectLocalSubtitleStreams(ffprobePath, videoPath string) (localSubtitleInspection, error) {
+	inspection, _, err := resolveScreenshotSubtitleSelection(ffprobePath, videoPath, 0, false)
+	if err != nil {
+		return localSubtitleInspection{}, err
+	}
+	return localSubtitleInspection{
+		State:              inspection.SubtitleState,
+		Streams:            inspection.SubtitleStreams,
+		CurrentSubtitleSID: inspection.CurrentSubtitleSID,
+	}, nil
+}
+
+func resolveLocalSubtitleCandidate(ffprobePath, videoPath string, selectedSubtitleSID int) (localSubtitleInspection, subtitleStreamCandidate, bool, error) {
+	inspection, selectedStream, err := resolveScreenshotSubtitleSelection(ffprobePath, videoPath, selectedSubtitleSID, selectedSubtitleSID > 0)
+	if err != nil {
+		return localSubtitleInspection{}, subtitleStreamCandidate{}, false, err
+	}
+	result := localSubtitleInspection{
+		State:              inspection.SubtitleState,
+		Streams:            inspection.SubtitleStreams,
+		CurrentSubtitleSID: inspection.CurrentSubtitleSID,
+	}
+	if selectedStream == nil {
+		return result, subtitleStreamCandidate{}, false, nil
+	}
+	return result, subtitleStreamCandidate{
+		SubtitleSID:   selectedStream.SubtitleSID,
+		StreamIndex:   selectedStream.StreamIndex,
+		StreamOrdinal: selectedStream.StreamOrdinal,
+		CodecName:     selectedStream.CodecName,
+		Title:         selectedStream.Title,
+		IsSupported:   selectedStream.SupportsEventExtraction,
+	}, true, nil
+}
+
+func parseSelectedSubtitleSIDAny(value any) (int, bool) {
+	if value == nil {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return 0, true
+		}
+		if parsed, ok := parseIntAny(typed); ok {
+			return parsed, true
+		}
+		return 0, true
+	default:
+		if parsed, ok := parseIntAny(typed); ok {
+			return parsed, true
+		}
+		return 0, true
+	}
+}
+
+func buildSelectedSubtitleSIDPointer(selectedSubtitleSID int, provided bool) *int {
+	if !provided {
+		return nil
+	}
+	value := selectedSubtitleSID
+	return &value
+}
+
+func mapProxySubtitleStreams(streams []downloaderclient.ProxyScreenshotSubtitleStream) []ScreenshotSubtitleStream {
+	mapped := make([]ScreenshotSubtitleStream, 0, len(streams))
+	for _, stream := range streams {
+		mapped = append(mapped, ScreenshotSubtitleStream{
+			SubtitleSID:        stream.SubtitleSID,
+			StreamIndex:        stream.StreamIndex,
+			CodecName:          strings.TrimSpace(stream.CodecName),
+			Language:           strings.TrimSpace(stream.Language),
+			Title:              strings.TrimSpace(stream.Title),
+			DisplayName:        strings.TrimSpace(stream.DisplayName),
+			IsConfidentChinese: stream.IsConfidentChinese,
+			IsDefault:          stream.IsDefault,
+		})
+	}
+	return mapped
+}
+
+func mapProxyPreviewCandidates(candidates []downloaderclient.ProxyScreenshotPreviewCandidate) []ScreenshotPreviewCandidate {
+	mapped := make([]ScreenshotPreviewCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		mapped = append(mapped, ScreenshotPreviewCandidate{
+			ID:          strings.TrimSpace(candidate.ID),
+			TimeSeconds: candidate.TimeSeconds,
+			TimeLabel:   strings.TrimSpace(candidate.TimeLabel),
+			PreviewData: strings.TrimSpace(candidate.PreviewData),
+			Recommended: candidate.Recommended,
+		})
+	}
+	return mapped
 }

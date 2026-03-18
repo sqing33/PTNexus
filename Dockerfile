@@ -43,8 +43,8 @@ COPY ./server/internal ./internal
 RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /out/server ./cmd/server
 
 
-# 阶段 4: 最终运行环境（与 Python 原版镜像一致：updater 作为入口，反代到 server）
-FROM python:3.12-slim
+# 阶段 4: 最终运行环境（纯 Go 运行时：updater 作为入口，反代到 server）
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
@@ -52,7 +52,7 @@ WORKDIR /app
 ENV no_proxy="localhost,127.0.0.1,::1"
 ENV NO_PROXY="localhost,127.0.0.1,::1"
 
-# 禁用 updater 的定时自动更新（Go 版容器避免被 Python 版 mappings 覆盖）
+# 禁用 updater 的定时自动更新
 ENV SCHEDULE_ENABLED="false"
 
 # server 运行目录与数据目录（对齐 updater/batch 使用的 /app/data）
@@ -62,12 +62,14 @@ ENV PTNEXUS_BDINFO_DIR="/app/bdinfo/linux"
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    bash \
     ca-certificates \
     ffmpeg \
     mpv \
     mediainfo \
     util-linux \
     fonts-noto-cjk \
+    libicu-dev \
     supervisor \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
