@@ -1,4 +1,4 @@
-name: 手动构建发布产物 / Docker 镜像
+name: 手动/定时构建发布产物 / Docker 镜像
 
 on:
   workflow_dispatch:
@@ -23,6 +23,8 @@ on:
         required: false
         default: true
         type: boolean
+  schedule:
+    - cron: "0 22 * * *" # Asia/Shanghai 06:00
 
 permissions:
   contents: write
@@ -30,7 +32,9 @@ permissions:
 
 env:
   IMAGE_NAME: pt-nexus
-  DEFAULT_TAG: go
+  GITEE_OWNER: sqing33
+  GITEE_REPO: PTNexus
+  BROWSER_EXTENSION_ASSET_NAME: pt-nexus-browser-extension.zip
 
 jobs:
   meta:
@@ -38,6 +42,14 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       body: ${{ steps.meta.outputs.body }}
+      latest_release_version: ${{ steps.meta.outputs.latest_release_version }}
+      run_runtime: ${{ steps.meta.outputs.run_runtime }}
+      run_desktop_windows: ${{ steps.meta.outputs.run_desktop_windows }}
+      run_proxy: ${{ steps.meta.outputs.run_proxy }}
+      run_docker_image: ${{ steps.meta.outputs.run_docker_image }}
+      run_release_assets: ${{ steps.meta.outputs.run_release_assets }}
+      should_run: ${{ steps.meta.outputs.should_run }}
+      skip_reason: ${{ steps.meta.outputs.skip_reason }}
 
     steps:
       - name: 1. 检出代码
@@ -45,15 +57,40 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 2. 解析版本信息（来自 CHANGELOG.json）
+      - name: 2. 解析版本与执行计划
         id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
           import json
           import os
+          import urllib.error
+          import urllib.request
 
-          with open("CHANGELOG.json", "r", encoding="utf-8") as f:
-              data = json.load(f)
+
+          def write_output(name: str, value: str) -> None:
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                  fh.write(f"{name}={value}\n")
+
+
+          def write_multiline_output(name: str, value: str) -> None:
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                  fh.write(f"{name}<<EOF\n{value}\nEOF\n")
+
+
+          def to_bool(value, default: bool) -> bool:
+              if value is None:
+                  return default
+              if isinstance(value, bool):
+                  return value
+              return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+          with open("CHANGELOG.json", "r", encoding="utf-8") as fh:
+              data = json.load(fh)
 
           history = data.get("history") or []
           if not history:
@@ -73,8 +110,7 @@ jobs:
               lines.append(f"发布日期：{date}")
           if note:
               normalized_note = note if note.startswith("注：") else f"注：{note}"
-              lines.append("")
-              lines.append(normalized_note)
+              lines.extend(["", normalized_note])
           if changes:
               lines.append("")
               lines.append("### 变更")
@@ -83,45 +119,115 @@ jobs:
 
           body = "\n".join(lines).strip() or "自动发布。"
 
-          output = os.environ["GITHUB_OUTPUT"]
-          with open(output, "a", encoding="utf-8") as f:
-              f.write(f"version={version}\n")
-              f.write("body<<EOF\n")
-              f.write(body + "\n")
-              f.write("EOF\n")
+          event_name = os.environ["EVENT_NAME"]
+          latest_release_version = ""
+          skip_reason = ""
+
+          if event_name == "schedule":
+              headers = {"User-Agent": "ptnexus-ci"}
+              token = os.environ.get("GITHUB_TOKEN", "").strip()
+              if token:
+                  headers["Authorization"] = f"Bearer {token}"
+
+              url = f"https://api.github.com/repos/{os.environ['REPOSITORY']}/releases/latest"
+              req = urllib.request.Request(url, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      release = json.load(resp)
+              except urllib.error.HTTPError as exc:
+                  if exc.code != 404:
+                      detail = exc.read().decode("utf-8", errors="replace")
+                      raise SystemExit(
+                          f"获取 GitHub 最新 release 失败: HTTP {exc.code}: {detail}"
+                      )
+              else:
+                  latest_release_version = str(release.get("tag_name", "")).strip()
+
+              should_run = version != latest_release_version
+              run_runtime = should_run
+              run_desktop_windows = should_run
+              run_proxy = should_run
+              run_docker_image = should_run
+              if not should_run:
+                  skip_reason = (
+                      f"GitHub latest release {latest_release_version} 与 "
+                      f"CHANGELOG.json 最新版本 {version} 一致，跳过本次定时构建。"
+                  )
+          else:
+              with open(os.environ["GITHUB_EVENT_PATH"], "r", encoding="utf-8") as fh:
+                  event_payload = json.load(fh)
+              inputs = event_payload.get("inputs") or {}
+
+              run_runtime = to_bool(inputs.get("build_runtime"), True)
+              run_desktop_windows = to_bool(inputs.get("build_desktop_windows"), True)
+              run_proxy = to_bool(inputs.get("build_proxy"), True)
+              run_docker_image = to_bool(inputs.get("build_docker_image"), True)
+              should_run = any(
+                  (run_runtime, run_desktop_windows, run_proxy, run_docker_image)
+              )
+              if not should_run:
+                  skip_reason = "手动触发时未选择任何构建项，跳过执行。"
+
+          run_release_assets = any((run_runtime, run_desktop_windows, run_proxy))
+
+          write_output("version", version)
+          write_multiline_output("body", body)
+          write_output("latest_release_version", latest_release_version)
+          write_output("run_runtime", str(run_runtime).lower())
+          write_output("run_desktop_windows", str(run_desktop_windows).lower())
+          write_output("run_proxy", str(run_proxy).lower())
+          write_output("run_docker_image", str(run_docker_image).lower())
+          write_output("run_release_assets", str(run_release_assets).lower())
+          write_output("should_run", str(should_run).lower())
+          write_multiline_output("skip_reason", skip_reason)
           PY
 
+      - name: 3. 输出执行计划
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          LATEST_RELEASE_VERSION: ${{ steps.meta.outputs.latest_release_version }}
+          RUN_RUNTIME: ${{ steps.meta.outputs.run_runtime }}
+          RUN_DESKTOP_WINDOWS: ${{ steps.meta.outputs.run_desktop_windows }}
+          RUN_PROXY: ${{ steps.meta.outputs.run_proxy }}
+          RUN_DOCKER_IMAGE: ${{ steps.meta.outputs.run_docker_image }}
+          SHOULD_RUN: ${{ steps.meta.outputs.should_run }}
+          SKIP_REASON: ${{ steps.meta.outputs.skip_reason }}
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "version=${VERSION}"
+          echo "latest_release_version=${LATEST_RELEASE_VERSION:-<none>}"
+          echo "run_runtime=${RUN_RUNTIME}"
+          echo "run_desktop_windows=${RUN_DESKTOP_WINDOWS}"
+          echo "run_proxy=${RUN_PROXY}"
+          echo "run_docker_image=${RUN_DOCKER_IMAGE}"
+          echo "should_run=${SHOULD_RUN}"
+          if [[ "${SHOULD_RUN}" != "true" && -n "${SKIP_REASON}" ]]; then
+            echo "${SKIP_REASON}"
+          fi
 
   runtime:
     needs: meta
+    if: ${{ needs.meta.outputs.run_runtime == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
-      - name: 跳过 Runtime 构建
-        if: ${{ !inputs.build_runtime }}
-        run: echo "Runtime 构建未启用，跳过。"
-
       - name: 1. 检出代码
-        if: ${{ inputs.build_runtime }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: 2. 设置 Go
-        if: ${{ inputs.build_runtime }}
         uses: actions/setup-go@v5
         with:
           go-version: "1.23.x"
           cache-dependency-path: server/go.sum
 
       - name: 3. 设置 pnpm
-        if: ${{ inputs.build_runtime }}
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
       - name: 4. 设置 Node（启用 pnpm 缓存）
-        if: ${{ inputs.build_runtime }}
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -129,13 +235,11 @@ jobs:
           cache-dependency-path: webui/pnpm-lock.yaml
 
       - name: 5. 安装交叉编译依赖
-        if: ${{ inputs.build_runtime }}
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: 6. 构建 Runtime 产物与 UPDATE_MANIFEST.json
-        if: ${{ inputs.build_runtime }}
         env:
           ARCHES: "amd64 arm64"
         run: |
@@ -145,7 +249,6 @@ jobs:
           ls -lh "dist/updates/${VERSION}"
 
       - name: 7. 上传 Runtime 发布产物
-        if: ${{ inputs.build_runtime }}
         uses: actions/upload-artifact@v4
         with:
           name: runtime-release-${{ needs.meta.outputs.version }}
@@ -156,31 +259,28 @@ jobs:
 
   desktop_windows:
     needs: meta
+    if: ${{ needs.meta.outputs.run_desktop_windows == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
-      - name: 跳过 Windows 桌面端构建
-        if: ${{ !inputs.build_desktop_windows }}
-        run: echo "Windows 桌面端构建未启用，跳过。"
-
       - name: 1. 检出代码
-        if: ${{ inputs.build_desktop_windows }}
         uses: actions/checkout@v4
 
       - name: 2. 设置 Go
-        if: ${{ inputs.build_desktop_windows }}
         uses: actions/setup-go@v5
         with:
           go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            server/go.sum
+            updater/go.sum
 
       - name: 3. 设置 pnpm
-        if: ${{ inputs.build_desktop_windows }}
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
       - name: 4. 设置 Node（启用 pnpm 缓存）
-        if: ${{ inputs.build_desktop_windows }}
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -188,19 +288,66 @@ jobs:
           cache-dependency-path: webui/pnpm-lock.yaml
 
       - name: 5. 安装构建依赖
-        if: ${{ inputs.build_desktop_windows }}
         run: |
           sudo apt-get update
           sudo apt-get install -y nsis p7zip-full unzip
 
       - name: 6. 安装 Wails CLI
-        if: ${{ inputs.build_desktop_windows }}
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
-      - name: 7. 下载 Windows 媒体工具（mpv / ffmpeg / ffprobe / mediainfo）
-        if: ${{ inputs.build_desktop_windows }}
+      - name: 7. 解析 Windows 媒体工具版本
+        id: media-tools-meta
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+
+          def fetch_json(url: str):
+              headers = {"User-Agent": "ptnexus-ci"}
+              token = os.environ.get("GITHUB_TOKEN", "").strip()
+              if token:
+                  headers["Authorization"] = f"Bearer {token}"
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.load(resp)
+
+
+          ff_rel = fetch_json("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest")
+          ffmpeg_release = str(ff_rel.get("tag_name") or ff_rel.get("name") or "").strip()
+          if not ffmpeg_release:
+              raise SystemExit("无法解析 FFmpeg 最新版本号")
+
+          mpv_rel = fetch_json("https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest")
+          mpv_release = str(mpv_rel.get("tag_name") or mpv_rel.get("name") or "").strip()
+          if not mpv_release:
+              raise SystemExit("无法解析 mpv 最新版本号")
+
+          media_rel = fetch_json("https://api.github.com/repos/MediaArea/MediaInfo/releases/latest")
+          mediainfo_version = str(media_rel.get("tag_name", "")).strip().lstrip("v")
+          if not mediainfo_version:
+              raise SystemExit("无法解析 MediaInfo 最新版本号")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"ffmpeg_release={ffmpeg_release}\n")
+              fh.write(f"mpv_release={mpv_release}\n")
+              fh.write(f"mediainfo_version={mediainfo_version}\n")
+          PY
+
+      - name: 8. 恢复 Windows 媒体工具缓存
+        id: desktop-tools-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: desktop/tools/windows
+          key: desktop-windows-tools-${{ runner.os }}-${{ steps.media-tools-meta.outputs.ffmpeg_release }}-${{ steps.media-tools-meta.outputs.mpv_release }}-${{ steps.media-tools-meta.outputs.mediainfo_version }}
+
+      - name: 9. 下载 Windows 媒体工具（mpv / ffmpeg / ffprobe / mediainfo）
+        if: ${{ steps.desktop-tools-cache.outputs.cache-hit != 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash
@@ -316,13 +463,52 @@ jobs:
 
           ls -lah "$TOOLS_DIR"
 
-      - name: 8. 构建桌面端安装包
-        if: ${{ inputs.build_desktop_windows }}
+      - name: 10. 保存 Windows 媒体工具缓存
+        if: ${{ steps.desktop-tools-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: desktop/tools/windows
+          key: ${{ steps.desktop-tools-cache.outputs.cache-primary-key }}
+
+      - name: 11. 恢复桌面端安装包缓存
+        id: desktop-package-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            desktop/build/bin/pt-nexus.exe
+            desktop/build/bin/pt-nexus-${{ needs.meta.outputs.version }}-amd64-installer.exe
+            desktop/build/bin/pt-nexus-${{ needs.meta.outputs.version }}-amd64-update.exe
+          key: desktop-windows-build-${{ runner.os }}-${{ needs.meta.outputs.version }}-${{ steps.media-tools-meta.outputs.ffmpeg_release }}-${{ steps.media-tools-meta.outputs.mpv_release }}-${{ steps.media-tools-meta.outputs.mediainfo_version }}-${{ hashFiles('desktop/go.mod', 'desktop/go.sum', 'desktop/*.go', 'desktop/internal/**', 'desktop/wails.json', 'desktop/build/windows/info.json', 'desktop/build/windows/wails.exe.manifest', 'desktop/build/windows/installer/project.nsi', 'desktop/build/windows/installer/project-update.nsi', 'desktop/build/windows/installer/ptnexus-process-control.nsh', 'webui/package.json', 'webui/pnpm-lock.yaml', 'webui/vite.config.ts', 'webui/index.html', 'webui/env.d.ts', 'webui/src/**', 'webui/public/**', 'webui/tsconfig.json', 'webui/tsconfig.app.json', 'webui/tsconfig.node.json', 'server/go.mod', 'server/go.sum', 'server/cmd/server/**', 'server/internal/**', 'server/sites_data.json', 'server/configs/**', 'server/bdinfo/windows/**', 'updater/go.mod', 'updater/go.sum', 'updater/**/*.go', 'scripts/package-desktop.sh', 'CHANGELOG.json') }}
+
+      - name: 12. 校验桌面端缓存命中产物
+        if: ${{ steps.desktop-package-cache.outputs.cache-hit == 'true' }}
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          test -f "desktop/build/bin/pt-nexus.exe"
+          test -f "desktop/build/bin/pt-nexus-${VERSION}-amd64-installer.exe"
+          test -f "desktop/build/bin/pt-nexus-${VERSION}-amd64-update.exe"
+          ls -lh \
+            "desktop/build/bin/pt-nexus.exe" \
+            "desktop/build/bin/pt-nexus-${VERSION}-amd64-installer.exe" \
+            "desktop/build/bin/pt-nexus-${VERSION}-amd64-update.exe"
+
+      - name: 13. 构建桌面端安装包
+        if: ${{ steps.desktop-package-cache.outputs.cache-hit != 'true' }}
         run: |
           bash scripts/package-desktop.sh
 
-      - name: 9. 生成桌面端安装包元数据
-        if: ${{ inputs.build_desktop_windows }}
+      - name: 14. 保存桌面端安装包缓存
+        if: ${{ steps.desktop-package-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            desktop/build/bin/pt-nexus.exe
+            desktop/build/bin/pt-nexus-${{ needs.meta.outputs.version }}-amd64-installer.exe
+            desktop/build/bin/pt-nexus-${{ needs.meta.outputs.version }}-amd64-update.exe
+          key: ${{ steps.desktop-package-cache.outputs.cache-primary-key }}
+
+      - name: 15. 生成桌面端安装包元数据
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
@@ -349,19 +535,17 @@ jobs:
 
           ls -lh "$FULL_INSTALLER_PATH" "$PATCH_INSTALLER_PATH" "$FULL_OUTPUT_PATH" "$PATCH_OUTPUT_PATH"
 
-      - name: 10. 上传桌面端发布产物
-        if: ${{ inputs.build_desktop_windows }}
+      - name: 16. 上传桌面端发布产物
         uses: actions/upload-artifact@v4
         with:
           name: desktop-release-${{ needs.meta.outputs.version }}
           path: |
             desktop/build/bin/pt-nexus.exe
-            desktop/build/bin/pt-nexus-*-amd64-installer.exe
-            desktop/build/bin/pt-nexus-*-amd64-update.exe
+            desktop/build/bin/pt-nexus-${{ needs.meta.outputs.version }}-amd64-installer.exe
+            desktop/build/bin/pt-nexus-${{ needs.meta.outputs.version }}-amd64-update.exe
           if-no-files-found: error
 
-      - name: 11. 上传桌面端安装包元数据
-        if: ${{ inputs.build_desktop_windows }}
+      - name: 17. 上传桌面端安装包元数据
         uses: actions/upload-artifact@v4
         with:
           name: desktop-installer-metadata-${{ needs.meta.outputs.version }}
@@ -370,25 +554,19 @@ jobs:
 
   proxy:
     needs: meta
+    if: ${{ needs.meta.outputs.run_proxy == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
-      - name: 跳过 Proxy 构建
-        if: ${{ !inputs.build_proxy }}
-        run: echo "Proxy 构建未启用，跳过。"
-
       - name: 1. 检出代码
-        if: ${{ inputs.build_proxy }}
         uses: actions/checkout@v4
 
       - name: 2. 设置 Go
-        if: ${{ inputs.build_proxy }}
         uses: actions/setup-go@v5
         with:
           go-version-file: proxy/go.mod
 
       - name: 3. 构建 Proxy 发布产物
-        if: ${{ inputs.build_proxy }}
         env:
           VERSION: ${{ needs.meta.outputs.version }}
           ARCHES: "amd64 arm64"
@@ -397,7 +575,6 @@ jobs:
           ls -lh "dist/proxy/${VERSION}"
 
       - name: 4. 上传 Proxy 发布产物
-        if: ${{ inputs.build_proxy }}
         uses: actions/upload-artifact@v4
         with:
           name: proxy-release-${{ needs.meta.outputs.version }}
@@ -406,49 +583,61 @@ jobs:
 
   docker_image:
     needs: meta
+    if: ${{ needs.meta.outputs.run_docker_image == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
     steps:
-      - name: 跳过 Docker 镜像构建
-        if: ${{ !inputs.build_docker_image }}
-        run: echo "Docker 镜像构建未启用，跳过。"
-
       - name: 1. 检出代码
-        if: ${{ inputs.build_docker_image }}
         uses: actions/checkout@v4
 
-      - name: 2. 设置 Docker Buildx
-        if: ${{ inputs.build_docker_image }}
+      - name: 2. 设置 QEMU（支持 ARM64）
+        uses: docker/setup-qemu-action@v3
+
+      - name: 3. 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 3. 登录到 GitHub Container Registry (ghcr.io)
-        if: ${{ inputs.build_docker_image }}
+      - name: 4. 登录到 GitHub Container Registry (ghcr.io)
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 4. 准备 Docker 标签
-        if: ${{ inputs.build_docker_image }}
+      - name: 5. 登录到 Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 6. 准备 Docker 标签
         id: prepare-tags
         run: |
           GHCR_REPO="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          GIT_SHA=$(git rev-parse --short HEAD)
-          FULL_TAGS="${GHCR_REPO}:${{ needs.meta.outputs.version }},${GHCR_REPO}:${{ env.DEFAULT_TAG }},${GHCR_REPO}:${{ env.DEFAULT_TAG }}-sha-${GIT_SHA}"
+          FULL_TAGS="${GHCR_REPO}:${{ needs.meta.outputs.version }},${GHCR_REPO}:latest"
+
+          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
+            DOCKERHUB_REPO="${DOCKERHUB_USERNAME}/${{ env.IMAGE_NAME }}"
+            FULL_TAGS="${FULL_TAGS},${DOCKERHUB_REPO}:${{ needs.meta.outputs.version }},${DOCKERHUB_REPO}:latest"
+          else
+            echo "::warning::DOCKERHUB_USERNAME 或 DOCKERHUB_TOKEN 未配置，本次只推送 GHCR。"
+          fi
+
           echo "tags=$FULL_TAGS" >> "$GITHUB_OUTPUT"
 
-      - name: 5. 构建并推送 AMD64 Docker 镜像
-        if: ${{ inputs.build_docker_image }}
+      - name: 7. 构建并推送 AMD64/ARM64 Docker 镜像
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.prepare-tags.outputs.tags }}
-          cache-from: type=gha,scope=go-amd64
-          cache-to: type=gha,mode=max,scope=go-amd64
+          cache-from: type=gha,scope=go-multiarch
+          cache-to: type=gha,mode=max,scope=go-multiarch
 
   release_assets:
     needs:
@@ -456,7 +645,15 @@ jobs:
       - runtime
       - desktop_windows
       - proxy
-    if: ${{ inputs.build_runtime || inputs.build_desktop_windows || inputs.build_proxy }}
+    if: >-
+      ${{
+        always() &&
+        needs.meta.outputs.run_release_assets == 'true' &&
+        needs.meta.result == 'success' &&
+        (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') &&
+        (needs.desktop_windows.result == 'success' || needs.desktop_windows.result == 'skipped') &&
+        (needs.proxy.result == 'success' || needs.proxy.result == 'skipped')
+      }}
     runs-on: ubuntu-latest
 
     steps:
@@ -469,35 +666,68 @@ jobs:
           mkdir -p "dist/desktop-installer-metadata/${{ needs.meta.outputs.version }}"
 
       - name: 3. 下载 Runtime 产物
-        if: ${{ inputs.build_runtime }}
+        if: ${{ needs.meta.outputs.run_runtime == 'true' }}
         uses: actions/download-artifact@v4
         with:
           name: runtime-release-${{ needs.meta.outputs.version }}
           path: dist/release-assets/${{ needs.meta.outputs.version }}
 
       - name: 4. 下载桌面端产物
-        if: ${{ inputs.build_desktop_windows }}
+        if: ${{ needs.meta.outputs.run_desktop_windows == 'true' }}
         uses: actions/download-artifact@v4
         with:
           name: desktop-release-${{ needs.meta.outputs.version }}
           path: dist/release-assets/${{ needs.meta.outputs.version }}
 
       - name: 5. 下载桌面端安装包元数据
-        if: ${{ inputs.build_desktop_windows }}
+        if: ${{ needs.meta.outputs.run_desktop_windows == 'true' }}
         uses: actions/download-artifact@v4
         with:
           name: desktop-installer-metadata-${{ needs.meta.outputs.version }}
           path: dist/desktop-installer-metadata/${{ needs.meta.outputs.version }}
 
       - name: 6. 下载 Proxy 产物
-        if: ${{ inputs.build_proxy }}
+        if: ${{ needs.meta.outputs.run_proxy == 'true' }}
         uses: actions/download-artifact@v4
         with:
           name: proxy-release-${{ needs.meta.outputs.version }}
           path: dist/release-assets/${{ needs.meta.outputs.version }}
 
-      - name: 7. 合并 UPDATE_MANIFEST.json
-        if: ${{ inputs.build_runtime || inputs.build_desktop_windows }}
+      - name: 7. 打包浏览器插件
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          ASSET_NAME: ${{ env.BROWSER_EXTENSION_ASSET_NAME }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import shutil
+          import tempfile
+          import zipfile
+
+          version = os.environ["VERSION"]
+          asset_name = os.environ["ASSET_NAME"]
+          source_dir = pathlib.Path("extension")
+          output_zip = pathlib.Path("dist/release-assets") / version / asset_name
+
+          if not source_dir.is_dir():
+              raise SystemExit(f"extension 目录不存在: {source_dir}")
+
+          with tempfile.TemporaryDirectory() as tmp_dir:
+              staging_root = pathlib.Path(tmp_dir) / "pt-nexus-browser-extension"
+              shutil.copytree(source_dir, staging_root)
+
+              with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                  for path in sorted(staging_root.rglob("*")):
+                      arcname = path.relative_to(staging_root.parent).as_posix()
+                      zf.write(path, arcname)
+
+          print(output_zip)
+          PY
+          ls -lh "dist/release-assets/${VERSION}/${ASSET_NAME}"
+
+      - name: 8. 合并 UPDATE_MANIFEST.json
+        if: ${{ needs.meta.outputs.run_runtime == 'true' || needs.meta.outputs.run_desktop_windows == 'true' }}
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
@@ -529,12 +759,12 @@ jobs:
           test -f "$MANIFEST_PATH"
           ls -lh "$MANIFEST_PATH"
 
-      - name: 8. 校验待发布文件
+      - name: 9. 校验待发布文件
         run: |
           find "dist/release-assets/${{ needs.meta.outputs.version }}" -maxdepth 1 -type f -printf '%f\n' | sort
           test -n "$(find "dist/release-assets/${{ needs.meta.outputs.version }}" -maxdepth 1 -type f | head -n 1)"
 
-      - name: 9. 发布版本 GitHub Release
+      - name: 10. 发布版本 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.meta.outputs.version }}
@@ -544,3 +774,29 @@ jobs:
           files: dist/release-assets/${{ needs.meta.outputs.version }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 11. 发布版本 Gitee Release
+        continue-on-error: true
+        env:
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          RELEASE_BODY: ${{ needs.meta.outputs.body }}
+          TARGET_COMMITISH: ${{ github.ref_name }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          if [[ -z "${GITEE_ACCESS_TOKEN}" ]]; then
+            echo "::warning::GITEE_ACCESS_TOKEN 未配置，跳过 Gitee Release 发布。"
+            exit 0
+          fi
+
+          BODY_FILE="${RUNNER_TEMP}/gitee-release-body.md"
+          printf '%s\n' "${RELEASE_BODY}" > "${BODY_FILE}"
+
+          python3 scripts/publish-gitee-release.py \
+            --owner "${GITEE_OWNER}" \
+            --repo "${GITEE_REPO}" \
+            --tag "${VERSION}" \
+            --target-commitish "${TARGET_COMMITISH}" \
+            --name "${VERSION}" \
+            --body-file "${BODY_FILE}" \
+            --assets-dir "dist/release-assets/${VERSION}" \
+            --token "${GITEE_ACCESS_TOKEN}"

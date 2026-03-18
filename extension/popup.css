@@ -45,6 +45,18 @@ h1 {
   color: #4b5563;
 }
 
+.secondary-hint {
+  margin-top: -4px;
+  line-height: 1.5;
+}
+
+.secondary-hint code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f3f4f6;
+  color: #111827;
+}
+
 .field {
   display: block;
   margin-bottom: 10px;

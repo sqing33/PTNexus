@@ -4,7 +4,6 @@
 > **分支说明（Go 主线）**：本分支（`go`）为当前默认开发主线，后续功能迭代仅在本分支进行。
 > Python 旧实现已迁移到 `python` 分支用于归档。
 
-
 **PT Nexus** 是一款支持 Docker 容器化部署、兼容多下载器与多数据库的 **PT 种子聚合管理平台**，可自动提取标准化种子参数、解析标题组件，智能纠错补充 MediaInfo/截图/简介等内容、适配不同站点发布规范，支持批量转种与自动推送下载器做种，还具备禁转检测、已存在种子智能匹配等机制，搭配本地文件检索、IYUU API 查漏种等辅助功能，大幅简化跨站点转种流程，显著提升 PT 转种与管理效率。
 
 - Wiki：https://ptn-wiki.sqing33.dpdns.org
@@ -71,22 +70,22 @@
 
 #### 环境变量
 
-| 分类       | 参数              | 说明                                            | 示例                      |
-| ---------- | ----------------- | ----------------------------------------------- | ------------------------- |
-| **通用**   | TZ                | 设置容器时区，确保时间与日志准确。              | Asia/Shanghai             |
-|            | http_proxy        | 设置容器代理，确保能正常访问站点与各种服务。    | http://192.168.1.100:7890 |
-|            | https_proxy       | 设置容器代理，确保能正常访问站点与各种服务。    | http://192.168.1.100:7890 |
-| **数据库** | DB_TYPE           | 选择数据库类型。sqlite、mysql 或 postgres。     | sqlite                    |
-|            | MYSQL_HOST        | **(MySQL 专用)** 数据库主机地址。               | 192.168.1.100             |
-|            | MYSQL_PORT        | **(MySQL 专用)** 数据库端口。                   | 3306                      |
-|            | MYSQL_DATABASE    | **(MySQL 专用)** 数据库名称。                   | pt-nexus                  |
-|            | MYSQL_USER        | **(MySQL 专用)** 数据库用户名。                 | root                      |
-|            | MYSQL_PASSWORD    | **(MySQL 专用)** 数据库密码。                   | your_password             |
-|            | POSTGRES_HOST     | **(PostgreSQL 专用)** 数据库主机地址。          | 192.168.1.100             |
-|            | POSTGRES_PORT     | **(PostgreSQL 专用)** 数据库端口。              | 5432                      |
-|            | POSTGRES_DATABASE | **(PostgreSQL 专用)** 数据库名称。              | pt-nexus                  |
-|            | POSTGRES_USER     | **(PostgreSQL 专用)** 数据库用户名。            | root                      |
-|            | POSTGRES_PASSWORD | **(PostgreSQL 专用)** 数据库密码。              | your_password             |
+| 分类       | 参数              | 说明                                         | 示例                      |
+| ---------- | ----------------- | -------------------------------------------- | ------------------------- |
+| **通用**   | TZ                | 设置容器时区，确保时间与日志准确。           | Asia/Shanghai             |
+|            | http_proxy        | 设置容器代理，确保能正常访问站点与各种服务。 | http://192.168.1.100:7890 |
+|            | https_proxy       | 设置容器代理，确保能正常访问站点与各种服务。 | http://192.168.1.100:7890 |
+| **数据库** | DB_TYPE           | 选择数据库类型。sqlite、mysql 或 postgres。  | sqlite                    |
+|            | MYSQL_HOST        | **(MySQL 专用)** 数据库主机地址。            | 192.168.1.100             |
+|            | MYSQL_PORT        | **(MySQL 专用)** 数据库端口。                | 3306                      |
+|            | MYSQL_DATABASE    | **(MySQL 专用)** 数据库名称。                | pt-nexus                  |
+|            | MYSQL_USER        | **(MySQL 专用)** 数据库用户名。              | root                      |
+|            | MYSQL_PASSWORD    | **(MySQL 专用)** 数据库密码。                | your_password             |
+|            | POSTGRES_HOST     | **(PostgreSQL 专用)** 数据库主机地址。       | 192.168.1.100             |
+|            | POSTGRES_PORT     | **(PostgreSQL 专用)** 数据库端口。           | 5432                      |
+|            | POSTGRES_DATABASE | **(PostgreSQL 专用)** 数据库名称。           | pt-nexus                  |
+|            | POSTGRES_USER     | **(PostgreSQL 专用)** 数据库用户名。         | root                      |
+|            | POSTGRES_PASSWORD | **(PostgreSQL 专用)** 数据库密码。           | your_password             |
 
 #### Docker Compose 示例
 
@@ -97,21 +96,21 @@
 > **ISO 自动挂载说明：** 若要在**原生 Linux Docker** 中直接读取 `.iso`，需要为 `pt-nexus` 服务额外补充以下配置：
 >
 > ```yaml
->     environment:
->       - PTNEXUS_ISO_MOUNT_ROOT=/app/data/tmp/iso-mounts
->     cap_add:
->       - SYS_ADMIN
->     devices:
->       - /dev/loop-control:/dev/loop-control
->       - /dev/loop0:/dev/loop0
->       - /dev/loop1:/dev/loop1
->       - /dev/loop2:/dev/loop2
->       - /dev/loop3:/dev/loop3
+> environment:
+>   - PTNEXUS_ISO_MOUNT_ROOT=/app/data/tmp/iso-mounts
+> cap_add:
+>   - SYS_ADMIN
+> devices:
+>   - /dev/loop-control:/dev/loop-control
+>   - /dev/loop0:/dev/loop0
+>   - /dev/loop1:/dev/loop1
+>   - /dev/loop2:/dev/loop2
+>   - /dev/loop3:/dev/loop3
 > ```
 >
 > 宿主机需提前具备可用的 `loop` 设备；若设备数量不足，可继续映射更多 `/dev/loopN`。该能力仅保证原生 Linux Docker，不适用于 Docker Desktop / WSL。
 
-##### 使用 sqlite 数据库
+##### 无需额外部署数据库，开箱即用
 
 ```yaml
 services:
@@ -129,9 +128,18 @@ services:
       - /vol1/1000/Docker/transmission2/torrents:/data/tr_torrents/tr2
     environment:
       - TZ=Asia/Shanghai
-      # - http_proxy=http://192.168.1.100:7890 # 代理服务器
-      # - https_proxy=http://192.168.1.100:7890 # 代理服务器
       - DB_TYPE=sqlite
+      - PTNEXUS_ISO_MOUNT_ROOT=/app/data/tmp/iso-mounts
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/loop-control:/dev/loop-control
+      - /dev/loop0:/dev/loop0
+      - /dev/loop1:/dev/loop1
+      - /dev/loop2:/dev/loop2
+      - /dev/loop3:/dev/loop3
 ```
 
 ##### 使用 MySQL 数据库
@@ -152,14 +160,23 @@ services:
       - /vol1/1000/Docker/transmission2/torrents:/data/tr_torrents/tr2
     environment:
       - TZ=Asia/Shanghai
-      # - http_proxy=http://192.168.1.100:7890 # 代理服务器
-      # - https_proxy=http://192.168.1.100:7890 # 代理服务器
       - DB_TYPE=mysql
       - MYSQL_HOST=192.168.1.100
       - MYSQL_PORT=3306
       - MYSQL_DATABASE=pt_nexus
       - MYSQL_USER=root
       - MYSQL_PASSWORD=your_password
+      - PTNEXUS_ISO_MOUNT_ROOT=/app/data/tmp/iso-mounts
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/loop-control:/dev/loop-control
+      - /dev/loop0:/dev/loop0
+      - /dev/loop1:/dev/loop1
+      - /dev/loop2:/dev/loop2
+      - /dev/loop3:/dev/loop3
 ```
 
 ##### 使用 PostgreSQL 数据库
@@ -180,14 +197,23 @@ services:
       - /vol1/1000/Docker/transmission2/torrents:/data/tr_torrents/tr2
     environment:
       - TZ=Asia/Shanghai
-      # - http_proxy=http://192.168.1.100:7890 # 代理服务器
-      # - https_proxy=http://192.168.1.100:7890 # 代理服务器
       - DB_TYPE=postgresql
       - POSTGRES_HOST=192.168.1.100
       - POSTGRES_PORT=5433
       - POSTGRES_DATABASE=pt-nexus
       - POSTGRES_USER=root
       - POSTGRES_PASSWORD=your_password
+      - PTNEXUS_ISO_MOUNT_ROOT=/app/data/tmp/iso-mounts
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/loop-control:/dev/loop-control
+      - /dev/loop0:/dev/loop0
+      - /dev/loop1:/dev/loop1
+      - /dev/loop2:/dev/loop2
+      - /dev/loop3:/dev/loop3
 ```
 
 2.  在与 `docker-compose.yml` 相同的目录下，运行以下命令启动服务：
@@ -249,7 +275,7 @@ services:
 ### v3.6.1（2026.02.10）
 
 > **注：Win 版本正在测试ing...
-盒子端需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+> 盒子端需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 新增：转种目标站点-爱萝莉
 - 新增：出种限速功能
@@ -338,8 +364,8 @@ services:
 ### v3.4.7（2026.01.08）
 
 > **注：修改 Github 仓库地址为 'https://github.com/sqing33/PTNexus'，因为 'pt-nexus' 缺失横杠无法搜索到，以至于有人在安装的时候安装到了 'nexusphp'。
-结算画面： 'https://img1.pixhost.to/images/11481/682419724_4ba3b6c6-d528-471d-b898-c05c88ea4332.png' 
-新的盒子端安装地址为 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash**
+> 结算画面： 'https://img1.pixhost.to/images/11481/682419724_4ba3b6c6-d528-471d-b898-c05c88ea4332.png'
+> 新的盒子端安装地址为 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash**
 
 - 修改：从 mediainfo 与 bdinfo 获取音频编码的选择
 - 修改：Github 仓库地址为 'https://github.com/sqing33/PTNexus'
@@ -412,8 +438,8 @@ services:
 ### v3.3.0（2025.12.15）
 
 > **注:若报错“ModuleNotFoundError: No module named 'PIL'”则需要重新下载镜像进行更新，如仍然报错则删除 data 目录下的 updates 文件夹。
-13City限速12.5MB/s，代码不会修改非0的限速，需要手动修改。
-盒子获取 bdinfo 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+> 13City限速12.5MB/s，代码不会修改非0的限速，需要手动修改。
+> 盒子获取 bdinfo 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 修复：“ModuleNotFoundError: No module named 'PIL'”报错
 - 修复：青蛙、三月传媒主标题出现重复制作组的问题
@@ -434,7 +460,7 @@ services:
 ### v3.2.3（2025.12.11）
 
 > **注：（需要更新 docker 镜像）新增环境变量 UPDATE_SOURCE，可选值 github 或 gitee，默认为 gitee，用于选择更新的源。
-盒子截图 png 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
+> 盒子截图 png 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/download/latest/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。**
 
 - 修复：数据库迁移错误
 - 修复：标题参数 DTS 无法正确识别
@@ -459,15 +485,15 @@ services:
 ### v3.2.0（2025.11.30）
 
 > **注：QB下载器使用api现成的方法推送种子到下载器，TR下载器需要映射本地种子目录
-下载器设置里从左到右排序，在docker compose映射第一个tr到/data/tr_torrents/tr1，第二个映射到/data/tr_torrents/tr2
-例：- /vol1/1000/Docker/transmission/torrents:/data/tr_torrents/tr1**
+> 下载器设置里从左到右排序，在docker compose映射第一个tr到/data/tr_torrents/tr1，第二个映射到/data/tr_torrents/tr2
+> 例：- /vol1/1000/Docker/transmission/torrents:/data/tr_torrents/tr1**
 
 - 新增：暂停本地种子，然添加到盒子进行下载，用于多站转种。（一站多种-转种-上盒）
 
 ### v3.1.6（2025.11.29）
 
 > **注：杜比发种需要获取 rsskey，在设置-站点管理填写
-杜比作为源站点有时候会因为 2fa 的问题而获取失败，需要浏览器打开站点过一遍 2fa 再尝试（玄学）**
+> 杜比作为源站点有时候会因为 2fa 的问题而获取失败，需要浏览器打开站点过一遍 2fa 再尝试（玄学）**
 
 - 新增：转种目标站点-杜比
 - 优化：通过 passkey 获取 HDtime 的种子推送到下载器
@@ -475,12 +501,12 @@ services:
 ### v3.1.5（2025.11.27）
 
 > **注：月月、彩虹岛、天空种子详情页没有禁转/限转的提示，目前使用的方案是使用搜索功能准确获取种子列表页面提取禁转/限转标签，每个种子会出现至少2次请求。
-因为我堡的每小时请求次数有严格限制，目前仅可作为一种多站的源站点（获取信息后不影响批量转种）**
+> 因为我堡的每小时请求次数有严格限制，目前仅可作为一种多站的源站点（获取信息后不影响批量转种）**
 
 - 修复：ptgen 查询到错误影片，更换了 ptgen 后端
 - 修复：憨憨、家园提取参数错误，补充映射参数
 - 优化：一种多站在获取种子信息的时候出现错误的提示
-（遇到问题找我请携带错误信息截图或者 Docker 日志截图）
+  （遇到问题找我请携带错误信息截图或者 Docker 日志截图）
 - 新增：转种源站点-月月、彩虹岛、天空、我堡
 - 新增：转种目标站点-朱雀
 

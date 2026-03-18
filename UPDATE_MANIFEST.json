@@ -8,16 +8,26 @@
         "arch": "amd64",
         "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
-        "size": 11129604,
-        "format": "tar.gz"
+        "size": 11129409,
+        "format": "tar.gz",
+        "mirror_urls": [
+          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-amd64.tar.gz"
+        ]
       },
       {
         "os": "linux",
         "arch": "arm64",
         "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
-        "size": 10070076,
-        "format": "tar.gz"
+        "size": 10069528,
+        "format": "tar.gz",
+        "mirror_urls": [
+          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.0/ptnexus-runtime-linux-arm64.tar.gz"
+        ]
       }
     ],
     "date": "2026.03.19",

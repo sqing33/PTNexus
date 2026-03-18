@@ -27,3 +27,4 @@
 /.claude/settings.local.json
 /.vscode/*
 !/.vscode/extensions.json
+*/__pycache__

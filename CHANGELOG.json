@@ -3,6 +3,18 @@
     {
       "name": "github",
       "url": "https://github.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+    },
+    {
+      "name": "gitee",
+      "url": "https://gitee.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+    },
+    {
+      "name": "github-proxy",
+      "url": "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+    },
+    {
+      "name": "github-proxy2",
+      "url": "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/{version}/{filename}"
     }
   ],
   "history": [
