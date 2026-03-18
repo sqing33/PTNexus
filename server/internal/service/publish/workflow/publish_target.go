@@ -1,16 +1,21 @@
 package workflow
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	processingtitle "github.com/pt-nexus/server/internal/service/processing/title"
 	publishpublisher "github.com/pt-nexus/server/internal/service/publish/publisher"
 	publishengine "github.com/pt-nexus/server/internal/service/publish/publisher/engine"
 	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
+
+var publishTitleBitDepthPattern = regexp.MustCompile(`(?i)\b(?:8|10|12|16|24)bit\b`)
 
 // PublishTorrentToTarget 将种子文件发布到目标站点，并返回发布 URL 与日志文案。
 // 参数/返回：targetInfo 为目标站配置，uploadData 为发布字段，torrentPath 为本地种子路径。
@@ -39,10 +44,7 @@ func PublishTorrentToTarget(
 	baseURL := acquirefetch.NormalizeSiteBaseURL(toStringAny(targetInfo["base_url"], ""))
 	cookie := strings.TrimSpace(toStringAny(targetInfo["cookie"], ""))
 
-	title := strings.TrimSpace(toStringAny(uploadData["original_main_title"], toStringAny(uploadData["title"], "")))
-	if title == "" {
-		title = strings.TrimSpace(toStringAny(uploadData["name"], filepath.Base(torrentPath)))
-	}
+	title := resolvePublishMainTitle(siteCode, uploadData, torrentPath)
 	subtitle := strings.TrimSpace(toStringAny(uploadData["subtitle"], ""))
 	description := publishuploader.BuildUploadDescription(siteCode, uploadData)
 	imdbLink, doubanLink := resolvePublishExternalLinks(uploadData)
@@ -90,6 +92,113 @@ func PublishTorrentToTarget(
 	}
 	appendLog("--- [步骤2] 任务执行完毕 ---")
 	return result.PublishURL, result.DirectDownloadURL, strings.Join(logLines, "\n"), result.IsExistingTorrent, result.UploadFormFields, nil
+}
+
+// resolvePublishMainTitle 生成目标站点实际发布时使用的主标题。
+// 参数/返回：siteCode 用于应用站点级标题修正；uploadData 为前端传入的发布参数；torrentPath 用于缺失标题时兜底文件名。
+// 失败场景：标题组件缺失或重建失败时回退到当前通用标题取值，不返回错误。
+// 副作用：无。
+func resolvePublishMainTitle(siteCode string, uploadData map[string]any, torrentPath string) string {
+	baseTitle := strings.TrimSpace(toStringAny(uploadData["original_main_title"], toStringAny(uploadData["title"], "")))
+	if baseTitle == "" {
+		baseTitle = strings.TrimSpace(toStringAny(uploadData["name"], filepath.Base(torrentPath)))
+	}
+	if !strings.EqualFold(strings.TrimSpace(siteCode), "qingwapt") {
+		return baseTitle
+	}
+
+	titleComponents := parsePublishTitleComponents(uploadData["title_components"])
+	if len(titleComponents) == 0 {
+		return stripPublishTitleBitDepth(baseTitle)
+	}
+
+	completed := processingtitle.CompleteTitleComponents(titleComponents, baseTitle)
+	filtered := filterPublishTitleComponents(completed, "色深")
+	rebuilt := strings.TrimSpace(processingtitle.BuildPreviewTitleFromTitleComponents(filtered, baseTitle))
+	if rebuilt == "" || rebuilt == "-NOGROUP" {
+		return stripPublishTitleBitDepth(baseTitle)
+	}
+	return rebuilt
+}
+
+// parsePublishTitleComponents 将发布 payload 中的 title_components 统一转换为 []any。
+func parsePublishTitleComponents(raw any) []any {
+	switch typed := raw.(type) {
+	case []any:
+		return typed
+	case []map[string]any:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			items = append(items, item)
+		}
+		return items
+	case []map[string]string:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			converted := map[string]any{}
+			for key, value := range item {
+				converted[key] = value
+			}
+			items = append(items, converted)
+		}
+		return items
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return []any{}
+		}
+		decoded := []any{}
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+			return decoded
+		}
+		return []any{}
+	default:
+		return []any{}
+	}
+}
+
+// filterPublishTitleComponents 过滤标题组件中的指定键，避免站点不需要的参数进入最终标题。
+func filterPublishTitleComponents(items []any, excludedKeys ...string) []any {
+	if len(items) == 0 {
+		return []any{}
+	}
+
+	excluded := make(map[string]struct{}, len(excludedKeys))
+	for _, key := range excludedKeys {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		excluded[trimmed] = struct{}{}
+	}
+	if len(excluded) == 0 {
+		return items
+	}
+
+	filtered := make([]any, 0, len(items))
+	for _, item := range items {
+		component, ok := item.(map[string]any)
+		if !ok {
+			filtered = append(filtered, item)
+			continue
+		}
+		key := strings.TrimSpace(toStringAny(component["key"], ""))
+		if _, skip := excluded[key]; skip {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
+// stripPublishTitleBitDepth 从标题文本中移除独立的色深标记，供缺少标题组件时兜底使用。
+func stripPublishTitleBitDepth(title string) string {
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
+		return ""
+	}
+	stripped := publishTitleBitDepthPattern.ReplaceAllString(trimmed, " ")
+	return strings.Join(strings.Fields(stripped), " ")
 }
 
 func toStringAny(value any, fallback string) string {
