@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pt-nexus/server/internal/platform/logx"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 	publishmapping "github.com/pt-nexus/server/internal/service/publish/mapping"
 	"github.com/pt-nexus/server/internal/service/publish/publisher"
 	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
@@ -98,7 +99,6 @@ func PublishZhuque(input publisher.PublishInput) (publisher.PublishResult, error
 		appendLog(fmt.Sprintf("发布参数已保存到: %s", dumpPath))
 	}
 
-	// 对齐 Python：UPLOAD_TEST_MODE=true 时跳过真实发布，返回模拟的详情页链接。
 	if os.Getenv("UPLOAD_TEST_MODE") == "true" {
 		appendLog("测试模式：跳过实际发布，模拟成功响应")
 		return publisher.PublishResult{
@@ -166,7 +166,7 @@ func BuildZhuqueUploadFields(uploadData map[string]any, title, subtitle, mediain
 
 	anonymousUpload := publisher.ResolveAnonymousUploadEnabled()
 
-	tmdbID, tmdbType := extractZhuqueTMDBInfo(uploadData)
+	tmdbID, tmdbType := extractZhuqueTMDBInfo(uploadData, imdbLink)
 	screenshots := extractZhuqueScreenshots(uploadData)
 	note := buildZhuqueNote(uploadData, imdbLink, doubanLink)
 	tags := mapZhuqueTagIDs(siteCfg, uploadData, standardized)
@@ -530,16 +530,32 @@ func fetchZhuqueTorrentKey(client *http.Client, baseURL string) (string, string)
 	return key, "获取 torrentKey：成功"
 }
 
-func extractZhuqueTMDBInfo(uploadData map[string]any) (string, string) {
+func extractZhuqueTMDBInfo(uploadData map[string]any, imdbLink string) (string, string) {
 	tmdbLink := ""
+	rawIMDbFromUpload := ""
+	rawIMDbAltFromUpload := ""
+	standardized := map[string]any{}
 	if uploadData != nil {
 		tmdbLink = strings.TrimSpace(toStringAny(uploadData["tmdb_link"], ""))
+		rawIMDbFromUpload = toStringAny(uploadData["imdb_link"], "")
+		rawIMDbAltFromUpload = toStringAny(uploadData["imdbLink"], "")
+		if typed, ok := uploadData["standardized_params"].(map[string]any); ok && typed != nil {
+			standardized = typed
+		}
 		if tmdbLink == "" {
 			if intro, ok := uploadData["intro"].(map[string]any); ok && intro != nil {
 				tmdbLink = strings.TrimSpace(toStringAny(intro["tmdb_link"], ""))
 			}
 		}
 	}
+	resolvedIMDb := strings.TrimSpace(firstNonEmpty(
+		strings.TrimSpace(imdbLink),
+		rawIMDbFromUpload,
+		rawIMDbAltFromUpload,
+		toStringAny(standardized["imdb_link"], ""),
+		toStringAny(standardized["imdbLink"], ""),
+	))
+	tmdbLink = processingrepair.ResolveTMDbLinkWithIMDbFallback(tmdbLink, resolvedIMDb, zhuquePublishLogModule, "朱雀发布")
 	if tmdbLink == "" {
 		return "", "0"
 	}

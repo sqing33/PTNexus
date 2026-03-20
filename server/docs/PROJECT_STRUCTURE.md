@@ -388,6 +388,13 @@
 | `internal/service/publish/publisher/public.go` | 公共发布器（表单 takeupload.php/upload.php） |
 | `internal/service/publish/publisher/engine/engine.go` | 发布器路由（按站点选择 public/special 发布器） |
 | `internal/service/publish/publisher/sites/helpers.go` | 特殊发布器公共辅助（字符串/布尔转换等） |
+| `internal/service/publish/publisher/sites/public_site.go` | 公共表单发布器站点模板底座（步骤覆写：描述/额外字段/表单调整） |
+| `internal/service/publish/publisher/sites/baozi.go` | Baozi DIY 原盘媒介修正发布器 |
+| `internal/service/publish/publisher/sites/pterclub.go` | PTerClub 独立 checkbox 标签发布器 |
+| `internal/service/publish/publisher/sites/hddolby.go` | HDDolby TMDb/MediaInfo/截图独立字段发布器 |
+| `internal/service/publish/publisher/sites/hdkyl.go` | HDKyl 年份字段映射发布器 |
+| `internal/service/publish/publisher/sites/luckpt.go` | LuckPT 英语标签过滤发布器 |
+| `internal/service/publish/publisher/sites/ptskit.go` | PTSKit 白名单标签发布器 |
 | `internal/service/publish/publisher/sites/ptlgs.go` | PTLGS 字段分离发布器（封面/截图独立字段） |
 | `internal/service/publish/publisher/sites/hdfans.go` | HDFans 标签/媒介覆盖发布器 |
 | `internal/service/publish/publisher/sites/haidan.go` | 海胆特殊发布器（截图独立字段） |

@@ -13,23 +13,28 @@ import (
 
 const hdfansPublishMappingLogModule = "发布-HDFans"
 
+// 定义 HDFans 站点在公共表单发布流程上的差异步骤。
+type hdfansPublisher struct {
+	publicSiteDefaults
+}
+
 // PublishHdfans 执行 HDFans 站点特殊发布流程（标签/媒介覆盖规则）。
 // 参数/返回：input 提供站点信息、发布数据与通用字段；返回发布详情页 URL、是否疑似“种子已存在”、用于自动编辑的表单字段，以及发布过程日志。
 // 失败场景：同 Public 发布器。
 // 副作用：读取本地种子文件并向目标站点发起上传请求；可选写入 data/tmp/torrents 参数落盘。
 func PublishHdfans(input publisher.PublishInput) (publisher.PublishResult, error) {
-	next := input
-	prevAdjust := input.AdjustFormFields
-	next.AdjustFormFields = func(formFields map[string]string) {
-		if prevAdjust != nil {
-			prevAdjust(formFields)
-		}
-		applyHdfansOverrides(formFields, input.UploadData, strings.TrimSpace(input.SourceSiteNickname), input.FindSiteNicknameByGroup)
-	}
-
-	return publisher.PublishPublic(next)
+	return publishWithPublicSite(input, hdfansPublisher{})
 }
 
+func (hdfansPublisher) LogModule() string {
+	return hdfansPublishMappingLogModule
+}
+
+func (hdfansPublisher) AdjustFormFields(input publisher.PublishInput, formFields map[string]string) {
+	applyHdfansOverrides(formFields, input.UploadData, strings.TrimSpace(input.SourceSiteNickname), input.FindSiteNicknameByGroup)
+}
+
+// 统一执行 HDFans 标签增强与媒介细分覆盖。
 func applyHdfansOverrides(formFields map[string]string, uploadData map[string]any, sourceSiteNickname string, findSiteNicknameByGroup func(releaseGroup string) (string, error)) {
 	if formFields == nil {
 		return
@@ -49,6 +54,7 @@ func applyHdfansOverrides(formFields map[string]string, uploadData map[string]an
 	refineHdfansMedium(formFields, standardized, enhanced)
 }
 
+// 汇总标准化参数和上传数据中的原始标签集合。
 func collectHdfansAllTags(uploadData map[string]any, standardized map[string]any) map[string]struct{} {
 	seen := map[string]struct{}{}
 	for _, tag := range parseHdfansStringSlice(standardized["tags"]) {
@@ -62,6 +68,7 @@ func collectHdfansAllTags(uploadData map[string]any, standardized map[string]any
 	return seen
 }
 
+// 在原始标签基础上补充中英双语和源站转发等站点规则。
 func buildHdfansEnhancedTags(tags map[string]struct{}, uploadData map[string]any, standardized map[string]any, sourceSiteNickname string, findSiteNicknameByGroup func(releaseGroup string) (string, error)) map[string]struct{} {
 	result := map[string]struct{}{}
 	for tag := range tags {
@@ -90,6 +97,7 @@ func buildHdfansEnhancedTags(tags map[string]struct{}, uploadData map[string]any
 	return result
 }
 
+// 将增强后的标签集合重建为 HDFans 最终表单字段。
 func rebuildHdfansTagFields(formFields map[string]string, tags map[string]struct{}) {
 	if formFields == nil {
 		return
@@ -145,6 +153,7 @@ func rebuildHdfansTagFields(formFields map[string]string, tags map[string]struct
 	}
 }
 
+// 按 DIY 与分辨率规则细化 HDFans 的媒介映射值。
 func refineHdfansMedium(formFields map[string]string, standardized map[string]any, tags map[string]struct{}) {
 	if formFields == nil {
 		return

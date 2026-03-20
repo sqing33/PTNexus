@@ -610,6 +610,19 @@ func backfillTMDbByIMDbIfNeeded(currentTMDb, imdb string, attempted *bool, logMo
 	return resolvedTMDb
 }
 
+// ResolveTMDbLinkWithIMDbFallback 规范化现有 TMDb 链接，并在缺失时通过 IMDb 补全。
+// 参数/返回：currentTMDb 为已有 TMDb 链接；imdb 为可选 IMDb 链接；logModule/stage 用于补全日志；返回规范化后的 TMDb 详情页链接。
+// 失败场景：现有链接无法规范化且 IMDb 补全未命中时返回空字符串。
+// 副作用：可能发起 TMDb 查询请求，并打印补全命中/未命中日志。
+func ResolveTMDbLinkWithIMDbFallback(currentTMDb, imdb, logModule, stage string) string {
+	attempted := false
+	normalizedTMDb := NormalizeExternalLink(currentTMDb, reTMDbLink)
+	return firstNonEmpty(
+		normalizedTMDb,
+		backfillTMDbByIMDbIfNeeded(normalizedTMDb, imdb, &attempted, logModule, stage),
+	)
+}
+
 func imdbToTMDb(imdbLink string) string {
 	imdbID := extractIMDbID(imdbLink)
 	if imdbID == "" {

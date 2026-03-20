@@ -1,7 +1,10 @@
 package sites
 
 import (
+	"encoding/json"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -142,4 +145,229 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func removeFormFieldsByPrefix(formFields map[string]string, prefix string) {
+	if formFields == nil {
+		return
+	}
+	trimmedPrefix := strings.TrimSpace(prefix)
+	if trimmedPrefix == "" {
+		return
+	}
+	for key := range formFields {
+		if strings.HasPrefix(strings.TrimSpace(key), trimmedPrefix) {
+			delete(formFields, key)
+		}
+	}
+}
+
+func rebuildIndexedFormFields(formFields map[string]string, base string, values []string) {
+	if formFields == nil {
+		return
+	}
+	trimmedBase := strings.TrimSpace(base)
+	if trimmedBase == "" {
+		return
+	}
+	removeFormFieldsByPrefix(formFields, trimmedBase+"[")
+	for idx, value := range values {
+		trimmedValue := strings.TrimSpace(value)
+		if trimmedValue == "" {
+			continue
+		}
+		formFields[fmt.Sprintf("%s[%d]", trimmedBase, idx)] = trimmedValue
+	}
+}
+
+func resolveSiteCombinedTags(uploadData map[string]any) map[string]struct{} {
+	result := map[string]struct{}{}
+	if uploadData == nil {
+		return result
+	}
+
+	appendValue := func(value any) {
+		for _, tag := range parseFlexibleStringArray(value) {
+			trimmed := strings.TrimSpace(tag)
+			if trimmed == "" {
+				continue
+			}
+			result[trimmed] = struct{}{}
+		}
+	}
+
+	if standardized, ok := uploadData["standardized_params"].(map[string]any); ok && standardized != nil {
+		appendValue(standardized["tags"])
+	}
+	appendValue(uploadData["tags"])
+	if sourceParams, ok := uploadData["source_params"].(map[string]any); ok && sourceParams != nil {
+		appendValue(sourceParams["标签"])
+	}
+
+	return result
+}
+
+func parseFlexibleStringArray(value any) []string {
+	switch typed := value.(type) {
+	case nil:
+		return []string{}
+	case []string:
+		return parseStringArray(typed)
+	case []any:
+		return parseStringArray(typed)
+	case string:
+		text := strings.TrimSpace(typed)
+		if text == "" {
+			return []string{}
+		}
+		if strings.HasPrefix(text, "[") {
+			parsedStrings := []string{}
+			if err := json.Unmarshal([]byte(text), &parsedStrings); err == nil {
+				return parseStringArray(parsedStrings)
+			}
+			parsedAny := []any{}
+			if err := json.Unmarshal([]byte(text), &parsedAny); err == nil {
+				return parseStringArray(parsedAny)
+			}
+		}
+		if strings.Contains(text, ",") {
+			parts := strings.Split(text, ",")
+			out := make([]string, 0, len(parts))
+			for _, part := range parts {
+				trimmed := strings.TrimSpace(part)
+				if trimmed != "" {
+					out = append(out, trimmed)
+				}
+			}
+			return out
+		}
+		return []string{text}
+	default:
+		return parseStringArray(value)
+	}
+}
+
+func hasAnySiteTagLower(tags map[string]struct{}, candidates ...string) bool {
+	if len(tags) == 0 {
+		return false
+	}
+	for tag := range tags {
+		lower := strings.ToLower(strings.TrimSpace(tag))
+		for _, candidate := range candidates {
+			if lower == strings.ToLower(strings.TrimSpace(candidate)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sortedUniqueStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	sort.Strings(result)
+	return result
+}
+
+var reImgTagSource = regexp.MustCompile(`(?is)\[img[^\]]*\](.*?)\[/img\]`)
+var reHTMLImgSource = regexp.MustCompile(`(?is)<img[^>]+src=["']([^"']+)["']`)
+var reMarkdownImgSource = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
+var reRawImageURL = regexp.MustCompile(`https?://[^\s\[\]<>"]+\.(?:png|jpe?g|gif|webp)(?:\?[^\s\[\]<>"]*)?`)
+
+func extractImageURLsFromText(text string) []string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return []string{}
+	}
+	out := make([]string, 0, 8)
+	appendMatches := func(re *regexp.Regexp) {
+		for _, sub := range re.FindAllStringSubmatch(trimmed, -1) {
+			if len(sub) < 2 {
+				continue
+			}
+			if value := strings.TrimSpace(sub[1]); value != "" {
+				out = append(out, value)
+			}
+		}
+	}
+	appendMatches(reImgTagSource)
+	appendMatches(reHTMLImgSource)
+	appendMatches(reMarkdownImgSource)
+	for _, item := range reRawImageURL.FindAllString(trimmed, -1) {
+		if value := strings.TrimSpace(item); value != "" {
+			out = append(out, value)
+		}
+	}
+	return sortedUniqueStrings(out)
+}
+
+func resolveUploadSection(uploadData map[string]any, key string) string {
+	if uploadData == nil {
+		return ""
+	}
+	if fromTop := strings.TrimSpace(toStringAny(uploadData[key], "")); fromTop != "" {
+		return fromTop
+	}
+	intro, _ := uploadData["intro"].(map[string]any)
+	if intro == nil {
+		return ""
+	}
+	return strings.TrimSpace(toStringAny(intro[key], ""))
+}
+
+func parseTitleComponentsLocal(raw any) []map[string]any {
+	switch typed := raw.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		result := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			component, ok := item.(map[string]any)
+			if !ok || component == nil {
+				continue
+			}
+			result = append(result, component)
+		}
+		return result
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return nil
+		}
+		parsed := []map[string]any{}
+		if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+			return parsed
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func findTitleComponentValue(components []map[string]any, key string) string {
+	for _, component := range components {
+		if strings.TrimSpace(toStringAny(component["key"], "")) != strings.TrimSpace(key) {
+			continue
+		}
+		return strings.TrimSpace(toStringAny(component["value"], ""))
+	}
+	return ""
+}
+
+var reFourDigitYear = regexp.MustCompile(`\b(19|20)\d{2}\b`)
+
+func extractFourDigitYear(text string) string {
+	match := reFourDigitYear.FindString(strings.TrimSpace(text))
+	return strings.TrimSpace(match)
 }
