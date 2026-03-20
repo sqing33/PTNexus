@@ -104,19 +104,23 @@
       <el-table-column prop="name" min-width="450" sortable="custom">
         <template #header>
           <div class="name-header-container">
-            <div>种子</div>
-            <el-input
-              v-model="nameSearch"
-              placeholder="搜索名称..."
-              clearable
-              class="search-input"
-              @click.stop
-            />
-            <span @click.stop style="display: flex; align-items: center">
+            <div class="name-header-main">
+              <div class="name-header-title">种子</div>
+              <el-button type="primary" @click="openFilterDialog" plain class="filter-trigger">
+                筛选
+              </el-button>
+              <el-input
+                v-model="nameSearch"
+                placeholder="搜索名称..."
+                clearable
+                class="search-input"
+                @click.stop
+              />
+            </div>
+            <div v-if="hasActiveFilters" class="name-header-filters" @click.stop>
               <div
-                v-if="hasActiveFilters"
                 class="current-filters"
-                style="margin-right: 15px; display: flex; align-items: center"
+                style="display: flex; align-items: center"
               >
                 <el-tag type="info" size="default" effect="plain">{{ currentFilterText }}</el-tag>
                 <el-button
@@ -127,8 +131,7 @@
                   >清除</el-button
                 >
               </div>
-              <el-button type="primary" @click="openFilterDialog" plain>筛选</el-button>
-            </span>
+            </div>
           </div>
         </template>
         <template #default="scope">
@@ -2037,15 +2040,40 @@ watch(nameSearch, () => {
 
 .name-header-container {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 15px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   flex: 1;
 }
 
+.name-header-main {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 15px;
+  width: 100%;
+  min-width: 0;
+}
+
+.name-header-title,
+.filter-trigger {
+  flex: 0 0 auto;
+}
+
 .name-header-container .search-input {
-  width: calc(30vw - 300px);
-  margin: 0 15px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.name-header-filters {
+  width: 100%;
+}
+
+.name-header-container .current-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .expand-content {
@@ -2356,26 +2384,20 @@ watch(nameSearch, () => {
 
 @media (max-width: 768px) {
   .name-header-container {
-    flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .name-header-main {
+    gap: 8px;
+  }
+
+  .name-header-title {
+    white-space: nowrap;
   }
 
   .name-header-container .search-input {
-    width: 100% !important;
-    margin: 0 !important;
-    order: 3;
-  }
-
-  .name-header-container > span {
-    width: 100%;
-    display: flex !important;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: flex-start;
-  }
-
-  .name-header-container .current-filters {
-    margin-right: 0 !important;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .filter-card {
