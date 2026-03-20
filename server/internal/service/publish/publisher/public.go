@@ -30,7 +30,11 @@ func PublishPublic(input PublishInput) (PublishResult, error) {
 	doubanLink := strings.TrimSpace(input.DoubanLink)
 	mediainfo := strings.TrimSpace(input.MediaInfo)
 
-	siteCfg, _ := publishmapping.LoadSitePublishConfig(siteCode)
+	siteCfg, siteCfgErr := publishmapping.LoadSitePublishConfig(siteCode)
+	if siteCfgErr != nil {
+		detail := fmt.Sprintf("发布前校验失败: 加载站点发布配置失败 site=%s err=%v", siteCode, siteCfgErr)
+		return PublishResult{AttemptDetailLog: detail}, fmt.Errorf("加载站点发布配置失败 site=%s err=%w", siteCode, siteCfgErr)
+	}
 	resolveFieldName := func(mappingKey string, fallback string) string {
 		if siteCfg == nil {
 			return fallback
@@ -90,6 +94,7 @@ func PublishPublic(input PublishInput) (PublishResult, error) {
 		logLines = append(logLines, trimmed)
 	}
 	buildDetail := func() string { return strings.Join(logLines, "\n") }
+	appendLog(buildPublishFieldSummary(siteCode, siteCfg, formFields))
 
 	if dumpPath, dumpErr := publishuploader.DumpUploadParametersToTmp(
 		targetName,
@@ -159,4 +164,46 @@ func PublishPublic(input PublishInput) (PublishResult, error) {
 		UploadFormFields:  formFields,
 		AttemptDetailLog:  buildDetail(),
 	}, attemptErr
+}
+
+func buildPublishFieldSummary(siteCode string, siteCfg *publishmapping.SitePublishConfig, formFields map[string]string) string {
+	if siteCfg == nil {
+		return fmt.Sprintf("发布字段摘要: site=%s config=missing", strings.TrimSpace(siteCode))
+	}
+
+	categoryField := "type"
+	if resolved := strings.TrimSpace(siteCfg.FormFields["category"]); resolved != "" {
+		categoryField = resolved
+	}
+	regionField, regionValue := resolveFieldSummary(siteCfg, formFields)
+	tagCount := 0
+	for key := range formFields {
+		if strings.HasPrefix(strings.TrimSpace(key), "tags[") {
+			tagCount++
+		}
+	}
+
+	return fmt.Sprintf(
+		"发布字段摘要: site=%s config=%s category=%s:%s region=%s:%s tags=%d",
+		strings.TrimSpace(siteCode),
+		strings.TrimSpace(siteCfg.SourcePath),
+		categoryField,
+		strings.TrimSpace(formFields[categoryField]),
+		regionField,
+		regionValue,
+		tagCount,
+	)
+}
+
+func resolveFieldSummary(siteCfg *publishmapping.SitePublishConfig, formFields map[string]string) (string, string) {
+	for _, fieldKey := range []string{"source", "processing", "special_processing"} {
+		fieldName := strings.TrimSpace(siteCfg.FormFields[fieldKey])
+		if fieldName == "" {
+			continue
+		}
+		if value := strings.TrimSpace(formFields[fieldName]); value != "" {
+			return fieldName, value
+		}
+	}
+	return "-", "-"
 }

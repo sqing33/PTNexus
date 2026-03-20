@@ -129,7 +129,7 @@ Section
     File /oname=CHANGELOG.json "..\sidecar\CHANGELOG.json"
 
     SetOutPath "$INSTDIR\configs"
-    File /oname=global_mappings.yaml "..\sidecar\configs\global_mappings.yaml"
+    File /r "..\sidecar\configs\*.*"
 
     SetOutPath $INSTDIR
     SetRegView 64

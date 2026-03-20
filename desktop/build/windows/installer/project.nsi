@@ -103,7 +103,7 @@ Section
     File /oname=sites_data.json "..\sidecar\sites_data.json"
     File /oname=CHANGELOG.json "..\sidecar\CHANGELOG.json"
     SetOutPath "$INSTDIR\configs"
-    File /oname=global_mappings.yaml "..\sidecar\configs\global_mappings.yaml"
+    File /r "..\sidecar\configs\*.*"
     !if /FileExists "..\sidecar\tools\*.*"
         SetOutPath "$INSTDIR\tools"
         File /r "..\sidecar\tools\*.*"

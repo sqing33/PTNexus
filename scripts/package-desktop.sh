@@ -417,7 +417,9 @@ build_server_sidecar() {
 }
 
 sync_static_sidecar_files() {
-  mkdir -p "$UPDATER_OUT_DIR" "$SIDECAR_CONFIG_DIR"
+  mkdir -p "$UPDATER_OUT_DIR"
+  rm -rf "$SIDECAR_CONFIG_DIR"
+  mkdir -p "$SIDECAR_CONFIG_DIR"
 
   if [[ -f "$SERVER_ROOT/sites_data.json" ]]; then
     echo "[desktop] syncing sites_data.json -> $SIDECAR_SITE_DATA"
@@ -433,11 +435,11 @@ sync_static_sidecar_files() {
     echo "[desktop] warning: CHANGELOG.json not found at $CHANGELOG_FILE" >&2
   fi
 
-  if [[ -f "$SERVER_ROOT/configs/global_mappings.yaml" ]]; then
-    echo "[desktop] syncing global_mappings.yaml -> $SIDECAR_GLOBAL_MAP"
-    cp "$SERVER_ROOT/configs/global_mappings.yaml" "$SIDECAR_GLOBAL_MAP"
+  if [[ -d "$SERVER_ROOT/configs" ]]; then
+    echo "[desktop] syncing configs directory -> $SIDECAR_CONFIG_DIR"
+    cp -R "$SERVER_ROOT/configs/." "$SIDECAR_CONFIG_DIR/"
   else
-    echo "[desktop] warning: global_mappings.yaml not found at $SERVER_ROOT/configs/global_mappings.yaml" >&2
+    echo "[desktop] warning: configs directory not found at $SERVER_ROOT/configs" >&2
   fi
 }
 
@@ -576,8 +578,8 @@ prepare_sidecars_stage() {
   local -a server_inputs=("$SERVER_ROOT/go.mod" "$SERVER_ROOT/go.sum" "$SERVER_ROOT/cmd/server" "$SERVER_ROOT/internal")
   local -a updater_inputs=("$UPDATER_ROOT/go.mod" "$UPDATER_ROOT/go.sum")
   local -a tools_inputs=()
-  local -a asset_inputs=("$SOURCE_ICON" "$SERVER_ROOT/sites_data.json" "$CHANGELOG_FILE" "$SERVER_ROOT/configs/global_mappings.yaml")
-  local -a asset_outputs=("$SIDECAR_SITE_DATA" "$SIDECAR_CHANGELOG" "$SIDECAR_GLOBAL_MAP" "$TARGET_ICON")
+  local -a asset_inputs=("$SOURCE_ICON" "$SERVER_ROOT/sites_data.json" "$CHANGELOG_FILE" "$SERVER_ROOT/configs")
+  local -a asset_outputs=("$SIDECAR_SITE_DATA" "$SIDECAR_CHANGELOG" "$SIDECAR_CONFIG_DIR" "$TARGET_ICON")
   local -a pids=()
   local -a labels=()
   local bdinfo_source
@@ -809,7 +811,7 @@ build_update_installer_stage() {
     "$SERVER_EXE"
     "$SIDECAR_SITE_DATA"
     "$SIDECAR_CHANGELOG"
-    "$SIDECAR_GLOBAL_MAP"
+    "$SIDECAR_CONFIG_DIR"
     "$TARGET_ICON"
     "$DESKTOP_ROOT/build/windows/installer/project-update.nsi"
     "$UPDATE_WAILS_TOOLS_FILE"

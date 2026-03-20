@@ -37,6 +37,8 @@ func Publish(input publisher.PublishInput) (publisher.PublishResult, error) {
 		return publishsites.PublishPTLGS(input)
 	case "hdfans":
 		return publishsites.PublishHdfans(input)
+	case "crabpt":
+		return publishsites.PublishCrabPT(input)
 	default:
 		return publisher.PublishPublic(input)
 	}

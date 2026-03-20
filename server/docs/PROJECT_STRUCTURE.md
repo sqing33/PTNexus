@@ -395,6 +395,7 @@
 | `internal/service/publish/publisher/sites/hdkyl.go` | HDKyl 年份字段映射发布器 |
 | `internal/service/publish/publisher/sites/luckpt.go` | LuckPT 英语标签过滤发布器 |
 | `internal/service/publish/publisher/sites/ptskit.go` | PTSKit 白名单标签发布器 |
+| `internal/service/publish/publisher/sites/crabpt.go` | CrabPT 普通区发布器（固定普通区表单模式） |
 | `internal/service/publish/publisher/sites/ptlgs.go` | PTLGS 字段分离发布器（封面/截图独立字段） |
 | `internal/service/publish/publisher/sites/hdfans.go` | HDFans 标签/媒介覆盖发布器 |
 | `internal/service/publish/publisher/sites/haidan.go` | 海胆特殊发布器（截图独立字段） |

@@ -43,11 +43,57 @@ func ResolveBasicPublishMappings(siteCode string, uploadData map[string]any) map
 	apply("video_codec", "video_codec", strings.TrimSpace(toStringAnyBasic(standardized["video_codec"], "")), "codec", false)
 	apply("audio_codec", "audio_codec", strings.TrimSpace(toStringAnyBasic(standardized["audio_codec"], "")), "audiocodec", false)
 	apply("resolution", "resolution", strings.TrimSpace(toStringAnyBasic(standardized["resolution"], "")), "standard", false)
-	apply("source", "source", strings.TrimSpace(toStringAnyBasic(standardized["source"], "")), "source", true)
+	applySourceOrProcessing(siteCfg, mapped, strings.TrimSpace(toStringAnyBasic(standardized["source"], "")))
 	apply("team", "team", strings.TrimSpace(toStringAnyBasic(standardized["team"], "")), "team", false)
 
 	applyTags("tag", siteCfg, mapped, uploadData, standardized)
 	return mapped
+}
+
+func applySourceOrProcessing(siteCfg *SitePublishConfig, mapped map[string]string, sourceValue string) {
+	trimmed := strings.TrimSpace(sourceValue)
+	if trimmed == "" || mapped == nil {
+		return
+	}
+
+	if siteCfg == nil {
+		mapped["source"] = trimmed
+		return
+	}
+
+	if fieldName, mappedValue := resolveMappedField(siteCfg, "source", "source", trimmed, "source", false); fieldName != "" && mappedValue != "" {
+		mapped[fieldName] = mappedValue
+		return
+	}
+
+	if fieldName, mappedValue := resolveMappedField(siteCfg, "processing", "processing", trimmed, "processing", true); fieldName != "" && mappedValue != "" {
+		mapped[fieldName] = mappedValue
+	}
+}
+
+func resolveMappedField(siteCfg *SitePublishConfig, mappingKey string, formKey string, value string, fallbackField string, requireConfiguredField bool) (string, string) {
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedValue == "" {
+		return "", ""
+	}
+
+	fieldName := fallbackField
+	mappedValue := trimmedValue
+	if siteCfg != nil {
+		if resolvedField := strings.TrimSpace(siteCfg.FormFields[formKey]); resolvedField != "" {
+			fieldName = resolvedField
+		} else if requireConfiguredField {
+			return "", ""
+		}
+		mappedValue = strings.TrimSpace(PickMappedValueWithFallback(mappingKey, siteCfg.Mappings[mappingKey], trimmedValue))
+	} else if requireConfiguredField {
+		return "", ""
+	}
+
+	if strings.TrimSpace(fieldName) == "" || strings.TrimSpace(mappedValue) == "" {
+		return "", ""
+	}
+	return strings.TrimSpace(fieldName), strings.TrimSpace(mappedValue)
 }
 
 func applyTags(mappingKey string, siteCfg *SitePublishConfig, mapped map[string]string, uploadData map[string]any, standardized map[string]any) {

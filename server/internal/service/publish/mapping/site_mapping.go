@@ -15,6 +15,7 @@ import (
 
 // SitePublishConfig 表示站点发布映射配置。
 type SitePublishConfig struct {
+	SourcePath         string
 	FormFields         map[string]string
 	Mappings           map[string]map[string]string
 	GenreOptionsByType map[string][]string
@@ -71,6 +72,7 @@ func LoadSitePublishConfig(siteCode string) (*SitePublishConfig, error) {
 		return nil, err
 	}
 	cfg := &SitePublishConfig{
+		SourcePath:         strings.TrimSpace(candidatePath(candidates, data)),
 		FormFields:         mapStringMap(raw["form_fields"]),
 		Mappings:           mapStringNestedMap(raw["mappings"]),
 		GenreOptionsByType: mapStringSliceNestedMap(raw["genre_options_by_type"]),
@@ -78,6 +80,21 @@ func LoadSitePublishConfig(siteCode string) (*SitePublishConfig, error) {
 	}
 	publishConfigCache.Store(trimmed, cfg)
 	return cfg, nil
+}
+
+func candidatePath(candidates []string, data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func mapAnonymousConfig(value any) SiteAnonymousConfig {

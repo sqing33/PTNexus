@@ -10,7 +10,7 @@ import (
 // 说明：该结构体用于桌面壳在启动 sidecar 与提供 UI 辅助能力时复用。
 type DesktopRuntimeEnv struct {
 	// ResourceDir 指向“随应用发布”的只读资源目录（通常是安装目录或 repo 的 server 目录）。
-	// 该目录下应包含：sites_data.json、configs/global_mappings.yaml（以及可选 dist）。
+	// 该目录下应包含：sites_data.json、完整的 configs/*.yaml（含 global_mappings.yaml）以及可选 dist。
 	ResourceDir string
 
 	// UserBaseDir 指向“用户可写”目录（默认 %APPDATA%/pt-nexus 或同等位置）。
