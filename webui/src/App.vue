@@ -136,6 +136,7 @@
       direction="ltr"
       size="82%"
       :with-header="false"
+      append-to-body
       class="mobile-nav-drawer"
     >
       <div class="drawer-header">
