@@ -389,6 +389,7 @@
 | `internal/service/publish/publisher/engine/engine.go` | 发布器路由（按站点选择 public/special 发布器） |
 | `internal/service/publish/publisher/sites/helpers.go` | 特殊发布器公共辅助（字符串/布尔转换等） |
 | `internal/service/publish/publisher/sites/public_site.go` | 公共表单发布器站点模板底座（步骤覆写：描述/额外字段/表单调整） |
+| `internal/service/publish/publisher/sites/cbg.go` | CBG 动画/动漫分类分流发布器 |
 | `internal/service/publish/publisher/sites/baozi.go` | Baozi DIY 原盘媒介修正发布器 |
 | `internal/service/publish/publisher/sites/pterclub.go` | PTerClub 独立 checkbox 标签发布器 |
 | `internal/service/publish/publisher/sites/hddolby.go` | HDDolby TMDb/MediaInfo/截图独立字段发布器 |

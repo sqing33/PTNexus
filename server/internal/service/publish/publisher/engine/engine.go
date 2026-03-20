@@ -15,6 +15,8 @@ func Publish(input publisher.PublishInput) (publisher.PublishResult, error) {
 	siteCode := strings.ToLower(strings.TrimSpace(input.SiteCode))
 
 	switch siteCode {
+	case "cbg":
+		return publishsites.PublishCBG(input)
 	case "baozi":
 		return publishsites.PublishBaozi(input)
 	case "hddolby":

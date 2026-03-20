@@ -1,38 +1,48 @@
 {
   "schema": 2,
   "latest": {
-    "version": "v4.0.1",
+    "version": "v4.0.2",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-amd64.tar.gz",
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
-        "size": 11139641,
+        "size": 11163688,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-amd64.tar.gz"
+          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz"
         ]
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-arm64.tar.gz",
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
-        "size": 10077809,
+        "size": 10104478,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.1/ptnexus-runtime-linux-arm64.tar.gz"
+          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz"
         ]
       }
     ],
-    "date": "2026.03.19"
+    "date": "2026.03.21"
   },
   "history": [
+    {
+      "version": "v4.0.2",
+      "date": "2026.03.21",
+      "changes": [
+        "修复：藏宝阁站点区分动画/动漫分类",
+        "修复：windows 版点配置打包",
+        "修复：补全部分站点特殊上传器",
+        "修改：盒子端脚本下载地址"
+      ]
+    },
     {
       "version": "v4.0.1",
       "date": "2026.03.19",
