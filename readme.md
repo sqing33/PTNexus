@@ -221,6 +221,28 @@ services:
 
 3.  服务启动后，通过 `http://<你的服务器IP>:5274` 访问 PT Nexus 界面。
 
+# 盒子
+
+> 用于解决在 NAS 部署 ptn 无法获取到盒子上的视频信息，如截图与 mediainfo 等，使用`go`语言编写。
+
+1. **安装**
+   使用`ssh`连接到盒子上，然后执行如下命令，会自动安装所需的依赖
+
+```bash
+# 使用 curl
+curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash
+# 或使用 wget
+wget -O - https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash
+```
+
+2. **设置端口**  
+   在安装过程中，脚本会提示您输入代理服务需要监听的端口（默认为  9090），您可以直接回车使用默认值，或输入自定义端口后回车。
+
+- **安装目录**：`/opt/pt-nexus-proxy`
+- **启动服务**：`cd /opt/pt-nexus-proxy && sudo ./start.sh`
+- **停止服务**：`cd /opt/pt-nexus-proxy && sudo ./stop.sh`
+- **查看日志**：`tail -f /var/run/pt-nexus-box-proxy.log`
+
 # 更新
 
 > 通过 Docker 部署的 PT Nexus 支持在线更新：updater 会读取 `UPDATE_MANIFEST.json`，下载对应平台的构建产物（artifact），完成校验后原子切换并重启服务。整个流程不依赖 git 拉取源码。
