@@ -219,7 +219,10 @@ func extractBDInfoWithProgress(blurayPath string, taskID string, callbackURL str
 		tempFile.Close()
 		defer os.Remove(tempFile.Name())
 
-		bdinfoPath := "./bdinfo/BDInfo"
+		bdinfoPath, err := resolveBDInfoBinaryPath()
+		if err != nil {
+			return err
+		}
 		args := []string{"-p", resolvedRoot, "-o", tempFile.Name(), "-m"}
 
 		fmt.Printf("开始执行 BDInfo 命令（带进度监控）: %s %v\n", bdinfoPath, args)
@@ -662,23 +665,28 @@ func RegisterBDInfoRoutes() {
 }
 
 // BDInfoDataSubstractor 处理 BDInfo 数据，提取关键信息
+
 func BDInfoDataSubstractor(inputFile string) (string, error) {
 	if _, err := os.Stat(inputFile); os.IsNotExist(err) {
-		return "", fmt.Errorf("输入文件不存在: %s", inputFile)
+		return "", fmt.Errorf("input file does not exist: %s", inputFile)
 	}
 
-	substractorPath := "./bdinfo/BDInfoDataSubstractor"
-	if _, err := os.Stat(substractorPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("BDInfoDataSubstractor 工具不存在: %s", substractorPath)
+	bdinfoPath, err := resolveBDInfoBinaryPath()
+	if err != nil {
+		return "", err
+	}
+	substractorPath := resolveBDInfoDataSubstractorPath(bdinfoPath)
+	if strings.TrimSpace(substractorPath) == "" {
+		return "", fmt.Errorf("BDInfoDataSubstractor executable not found")
 	}
 
 	cmd := exec.Command(substractorPath, inputFile)
 	output, err, usedInvariant := runDotnetToolWithICUFallback(cmd)
 	if err != nil {
-		return "", fmt.Errorf("BDInfoDataSubstractor 执行失败: %v, 输出: %s", err, string(output))
+		return "", fmt.Errorf("BDInfoDataSubstractor execution failed: %v, output: %s", err, string(output))
 	}
 	if usedInvariant {
-		fmt.Println("检测到 BDInfoDataSubstractor 缺少 ICU 依赖，已使用 invariant 模式执行。")
+		fmt.Println("Detected missing ICU for BDInfoDataSubstractor, used invariant mode.")
 	}
 
 	baseWithoutExt := strings.TrimSuffix(inputFile, filepath.Ext(inputFile))
@@ -687,14 +695,14 @@ func BDInfoDataSubstractor(inputFile string) (string, error) {
 	if _, err := os.Stat(outputFile); os.IsNotExist(err) {
 		content, err := os.ReadFile(inputFile)
 		if err != nil {
-			return "", fmt.Errorf("无法读取原始文件: %v", err)
+			return "", fmt.Errorf("cannot read original file: %v", err)
 		}
 		return string(content), nil
 	}
 
 	content, err := os.ReadFile(outputFile)
 	if err != nil {
-		return "", fmt.Errorf("无法读取输出文件: %v", err)
+		return "", fmt.Errorf("cannot read output file: %v", err)
 	}
 
 	defer func() {

@@ -578,7 +578,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: proxy-release-${{ needs.meta.outputs.version }}
-          path: dist/proxy/${{ needs.meta.outputs.version }}/*
+          path: dist/proxy/${{ needs.meta.outputs.version }}
           if-no-files-found: error
 
   docker_image:

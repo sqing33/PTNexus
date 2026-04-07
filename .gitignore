@@ -22,6 +22,14 @@
 /server/**/debug_*.log
 /server-go/**/debug_*.log
 /data/tmp/
+/proxy/runtime/
+
+# Proxy local build outputs
+/proxy/pt-nexus-box-proxy
+/proxy/pt-nexus-box-proxy-amd64
+/proxy/pt-nexus-box-proxy-arm64
+/proxy/pt-nexus-box-proxy-linux-amd64
+/proxy/pt-nexus-box-proxy.exe
 
 # Local IDE/agent private settings
 /.claude/settings.local.json
