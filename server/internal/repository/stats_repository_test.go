@@ -68,7 +68,7 @@ func TestQueryGroupStatsFiltersBySelectedSourceSite(t *testing.T) {
 	mustExecStatsTest(t, store.DB, `INSERT INTO torrents (hash, name, size, sites, "group", downloader_id, is_hidden) VALUES (?, ?, ?, ?, ?, ?, 0)`,
 		"hash-1", "Wanted", 100, "M-Team", "-MTeam", "qb-1")
 	mustExecStatsTest(t, store.DB, `INSERT INTO torrents (hash, name, size, sites, "group", downloader_id, is_hidden) VALUES (?, ?, ?, ?, ?, ?, 0)`,
-		"hash-2", "Leaked", 200, "Other", "-MTeam", "qb-2")
+		"hash-2", "Leaked", 200, "Other", "-Other", "qb-2")
 
 	rows, err := repo.QueryGroupStats("M-Team")
 	if err != nil {
@@ -130,14 +130,15 @@ func TestQueryGroupStatsDeduplicatesByNameAndSizeAndSkipsEmptyNormalizedGroup(t 
 	}
 }
 
-func TestQueryGroupStatsUsesRecognizedSourceSiteWithoutSiteGroupWhitelist(t *testing.T) {
+func TestQueryGroupStatsMapsGroupToOwningSiteRegardlessOfSourceSite(t *testing.T) {
 	store := newStatsRepositoryTestStore(t)
 	repo := NewStatsRepository(store)
 
 	mustExecStatsTest(t, store.DB, `INSERT INTO sites (site, nickname, "group") VALUES (?, ?, ?)`, "mteam", "M-Team", "-MTeam")
+	mustExecStatsTest(t, store.DB, `INSERT INTO sites (site, nickname, "group") VALUES (?, ?, ?)`, "other", "Other", "-Other")
 
 	mustExecStatsTest(t, store.DB, `INSERT INTO torrents (hash, name, size, sites, "group", downloader_id, is_hidden) VALUES (?, ?, ?, ?, ?, ?, 0)`,
-		"hash-1", "Release", 100, "M-Team", "-Unexpected", "qb-1")
+		"hash-1", "Release", 100, "Other", "-MTeam", "qb-1")
 
 	rows, err := repo.QueryGroupStats("M-Team")
 	if err != nil {
@@ -152,8 +153,8 @@ func TestQueryGroupStatsUsesRecognizedSourceSiteWithoutSiteGroupWhitelist(t *tes
 	if row.SiteName != "M-Team" {
 		t.Fatalf("expected site_name M-Team, got %q", row.SiteName)
 	}
-	if row.GroupSuffix != "Unexpected" {
-		t.Fatalf("expected group_suffix Unexpected, got %q", row.GroupSuffix)
+	if row.GroupSuffix != "MTeam" {
+		t.Fatalf("expected group_suffix MTeam, got %q", row.GroupSuffix)
 	}
 	if row.TorrentCount != 1 || row.TotalSize != 100 {
 		t.Fatalf("unexpected row: %#v", row)

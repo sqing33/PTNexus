@@ -1,6 +1,10 @@
-name: 手动/定时构建发布产物 / Docker 镜像
+name: 推送/手动/定时构建发布产物 / Docker 镜像
 
 on:
+  push:
+    branches:
+      - go
+      - main
   workflow_dispatch:
     inputs:
       build_runtime:
@@ -123,7 +127,7 @@ jobs:
           latest_release_version = ""
           skip_reason = ""
 
-          if event_name == "schedule":
+          if event_name in {"schedule", "push"}:
               headers = {"User-Agent": "ptnexus-ci"}
               token = os.environ.get("GITHUB_TOKEN", "").strip()
               if token:
@@ -149,9 +153,10 @@ jobs:
               run_proxy = should_run
               run_docker_image = should_run
               if not should_run:
+                  trigger_name = "定时构建" if event_name == "schedule" else "推送构建"
                   skip_reason = (
                       f"GitHub latest release {latest_release_version} 与 "
-                      f"CHANGELOG.json 最新版本 {version} 一致，跳过本次定时构建。"
+                      f"CHANGELOG.json 最新版本 {version} 一致，跳过本次{trigger_name}。"
                   )
           else:
               with open(os.environ["GITHUB_EVENT_PATH"], "r", encoding="utf-8") as fh:

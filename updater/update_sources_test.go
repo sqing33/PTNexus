@@ -22,7 +22,7 @@ func TestManifestCandidatesDoNotIncludeGiteeByDefault(t *testing.T) {
 	}
 }
 
-func TestGetLocalVersionPrefersRuntimeVersionOverImageVersion(t *testing.T) {
+func TestGetLocalVersionPrefersImageVersionOverRuntimeState(t *testing.T) {
 	oldUpdateDir := updateDir
 	oldLocalConfigFile := localConfigFile
 	oldEmbeddedConfigFile := embeddedConfigFile
@@ -60,7 +60,7 @@ func TestGetLocalVersionPrefersRuntimeVersionOverImageVersion(t *testing.T) {
 	t.Setenv("VERSION_FILE", "")
 
 	version := getLocalVersion()
-	if version != "v4.0.2" {
-		t.Fatalf("expected runtime version v4.0.2, got %s", version)
+	if version != "v4.0.0" {
+		t.Fatalf("expected image version v4.0.0, got %s", version)
 	}
 }
