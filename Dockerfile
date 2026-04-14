@@ -104,7 +104,7 @@ COPY ./CHANGELOG.json /app/CHANGELOG.json
 # Supervisor + 启动脚本（Go 版）
 COPY ./supervisord.conf /app/supervisord.conf
 COPY ./start-services.sh /app/start-services.sh
-RUN chmod +x /app/start-services.sh
+RUN sed -i 's/\r$//' /app/start-services.sh && chmod +x /app/start-services.sh
 
 # 创建数据目录，用于持久化存储（对齐原版镜像路径）
 RUN mkdir -p /app/data /app/data/tmp
