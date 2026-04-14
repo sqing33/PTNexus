@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -634,49 +635,131 @@ func (r *StatsRepository) QuerySiteStats() ([]SiteStatRow, error) {
 
 func (r *StatsRepository) QueryGroupStats(siteName string) ([]GroupStatRow, error) {
 	torrentGroupColumn := r.groupColumnRef("t")
-	siteGroupColumn := r.groupColumnRef("s")
 	normalizedTorrentGroup := r.normalizedGroupExpr(torrentGroupColumn)
-	siteGroupMatchExpr := r.siteGroupMatchExpr("ut.group_suffix", siteGroupColumn)
-	sourceSiteMatchExpr := r.sourceSiteMatchExpr("ut.source_site", "s.nickname", "s.site")
 
-	query := fmt.Sprintf(`
-		SELECT s.nickname AS site_name,
-		       ut.group_suffix AS group_suffix,
-		       COUNT(*) AS torrent_count,
-		       SUM(ut.size) AS total_size
-		FROM (
-			SELECT DISTINCT
-			       t.name AS torrent_name,
-			       %s AS group_suffix,
-			       t.size AS size,
-			       t.sites AS source_site
-			FROM torrents t
-			WHERE %s IS NOT NULL
-			  AND TRIM(%s) != ''
-			  AND TRIM(%s) != ''
-			  AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
-		) AS ut
-		JOIN sites AS s ON %s AND %s
-	`, normalizedTorrentGroup, torrentGroupColumn, torrentGroupColumn, normalizedTorrentGroup, siteGroupMatchExpr, sourceSiteMatchExpr)
-
-	args := make([]any, 0)
-	trimmedSiteName := strings.TrimSpace(siteName)
-	if trimmedSiteName != "" {
-		query += `
-		WHERE LOWER(COALESCE(s.nickname, '')) = LOWER(?) OR LOWER(COALESCE(s.site, '')) = LOWER(?)
-		`
-		args = append(args, trimmedSiteName, trimmedSiteName)
+	type torrentGroupRow struct {
+		SourceSite  string `gorm:"column:source_site"`
+		GroupSuffix string `gorm:"column:group_suffix"`
+		Size        int64  `gorm:"column:size"`
 	}
 
-	query += `
-		GROUP BY s.nickname, ut.group_suffix
-		ORDER BY s.nickname ASC, torrent_count DESC, ut.group_suffix ASC
-	`
-
-	rows := make([]GroupStatRow, 0)
-	if err := r.store.DB.Raw(query, args...).Scan(&rows).Error; err != nil {
+	groupRows := make([]torrentGroupRow, 0)
+	query := fmt.Sprintf(`
+		SELECT DISTINCT
+		       t.sites AS source_site,
+		       %s AS group_suffix,
+		       t.size AS size
+		FROM torrents t
+		WHERE %s IS NOT NULL
+		  AND TRIM(%s) != ''
+		  AND TRIM(%s) != ''
+		  AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
+	`, normalizedTorrentGroup, torrentGroupColumn, torrentGroupColumn, normalizedTorrentGroup)
+	if err := r.store.DB.Raw(query).Scan(&groupRows).Error; err != nil {
 		return nil, err
 	}
+
+	siteRows, err := r.listSiteGroupIdentities()
+	if err != nil {
+		return nil, err
+	}
+
+	aliasToNickname := map[string]string{}
+	groupToNicknames := map[string][]string{}
+	nicknameToAliases := map[string][]string{}
+	for _, row := range siteRows {
+		nickname := strings.TrimSpace(row.Nickname)
+		if nickname == "" {
+			continue
+		}
+
+		aliases := make([]string, 0, 2)
+		for _, raw := range []string{row.Nickname, row.Site} {
+			key := strings.ToLower(strings.TrimSpace(raw))
+			if key == "" {
+				continue
+			}
+			aliasToNickname[key] = nickname
+			aliases = appendUniqueLower(aliases, key)
+		}
+		nicknameToAliases[nickname] = appendUniqueStrings(nicknameToAliases[nickname], aliases...)
+
+		for _, group := range splitNormalizedGroups(row.SiteGroup) {
+			groupToNicknames[group] = appendUniqueStrings(groupToNicknames[group], nickname)
+		}
+	}
+
+	selectedAliases := map[string]struct{}{}
+	selectedNickname := strings.TrimSpace(siteName)
+	if selectedNickname != "" {
+		if resolved := aliasToNickname[strings.ToLower(selectedNickname)]; resolved != "" {
+			selectedNickname = resolved
+		}
+		for _, alias := range nicknameToAliases[selectedNickname] {
+			selectedAliases[alias] = struct{}{}
+		}
+		selectedAliases[strings.ToLower(selectedNickname)] = struct{}{}
+	}
+
+	type statKey struct {
+		Site  string
+		Group string
+	}
+	aggregated := map[statKey]*GroupStatRow{}
+	for _, row := range groupRows {
+		group := strings.TrimSpace(row.GroupSuffix)
+		if group == "" {
+			continue
+		}
+
+		targetSites := make([]string, 0, 1)
+		sourceSite := strings.TrimSpace(row.SourceSite)
+		if sourceSite != "" {
+			resolved := aliasToNickname[strings.ToLower(sourceSite)]
+			if strings.TrimSpace(resolved) == "" {
+				resolved = sourceSite
+			}
+			targetSites = append(targetSites, strings.TrimSpace(resolved))
+		} else {
+			targetSites = append(targetSites, groupToNicknames[group]...)
+		}
+
+		for _, targetSite := range appendUniqueStrings(nil, targetSites...) {
+			if targetSite == "" {
+				continue
+			}
+			if len(selectedAliases) > 0 {
+				if _, ok := selectedAliases[strings.ToLower(targetSite)]; !ok {
+					continue
+				}
+			}
+			key := statKey{Site: targetSite, Group: group}
+			entry, ok := aggregated[key]
+			if !ok {
+				entry = &GroupStatRow{
+					SiteName:    targetSite,
+					GroupSuffix: group,
+				}
+				aggregated[key] = entry
+			}
+			entry.TorrentCount++
+			entry.TotalSize += row.Size
+		}
+	}
+
+	rows := make([]GroupStatRow, 0, len(aggregated))
+	for _, item := range aggregated {
+		rows = append(rows, *item)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].SiteName != rows[j].SiteName {
+			return rows[i].SiteName < rows[j].SiteName
+		}
+		if rows[i].TorrentCount != rows[j].TorrentCount {
+			return rows[i].TorrentCount > rows[j].TorrentCount
+		}
+		return rows[i].GroupSuffix < rows[j].GroupSuffix
+	})
 	return rows, nil
 }
 
@@ -706,45 +789,72 @@ func (r *StatsRepository) normalizedGroupExpr(column string) string {
 	}
 }
 
-func (r *StatsRepository) siteGroupMatchExpr(groupValueExpr string, siteGroupColumn string) string {
-	normalizedSiteGroups := r.normalizedSiteGroupListExpr(siteGroupColumn)
-	switch r.store.DBType {
-	case "mysql":
-		return fmt.Sprintf("FIND_IN_SET(LOWER(%s), %s) > 0", groupValueExpr, normalizedSiteGroups)
-	default:
-		return fmt.Sprintf("(',' || %s || ',') LIKE '%%,' || LOWER(%s) || ',%%'", normalizedSiteGroups, groupValueExpr)
+func (r *StatsRepository) listSiteGroupIdentities() ([]SiteIdentity, error) {
+	rows := make([]SiteIdentity, 0)
+	groupColumn := r.store.GroupColumn()
+	err := r.store.DB.Table("sites").
+		Select("nickname, site, " + groupColumn + " AS site_group").
+		Where("nickname IS NOT NULL AND nickname != ''").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
 	}
+	return rows, nil
 }
 
-func (r *StatsRepository) sourceSiteMatchExpr(sourceSiteExpr string, siteNicknameExpr string, siteFieldExpr string) string {
-	return fmt.Sprintf(
-		"(TRIM(COALESCE(%s, '')) = '' OR LOWER(COALESCE(%s, '')) = LOWER(COALESCE(%s, '')) OR LOWER(COALESCE(%s, '')) = LOWER(COALESCE(%s, '')))",
-		sourceSiteExpr,
-		sourceSiteExpr,
-		siteNicknameExpr,
-		sourceSiteExpr,
-		siteFieldExpr,
-	)
+func splitNormalizedGroups(raw string) []string {
+	parts := strings.Split(strings.TrimSpace(raw), ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(part), "-"))
+		if item == "" {
+			continue
+		}
+		result = appendUniqueStrings(result, item)
+	}
+	return result
 }
 
-func (r *StatsRepository) normalizedSiteGroupListExpr(column string) string {
-	switch r.store.DBType {
-	case "mysql":
-		return fmt.Sprintf(
-			"REPLACE(TRIM(LEADING '-' FROM REPLACE(LOWER(COALESCE(%s, '')), ' ', '')), ',-', ',')",
-			column,
-		)
-	case "postgresql":
-		return fmt.Sprintf(
-			"REPLACE(LTRIM(REPLACE(LOWER(COALESCE(%s, '')), ' ', ''), '-'), ',-', ',')",
-			column,
-		)
-	default:
-		return fmt.Sprintf(
-			"REPLACE(LTRIM(REPLACE(LOWER(COALESCE(%s, '')), ' ', ''), '-'), ',-', ',')",
-			column,
-		)
+func appendUniqueStrings(base []string, items ...string) []string {
+	seen := make(map[string]struct{}, len(base)+len(items))
+	for _, item := range base {
+		if key := strings.TrimSpace(item); key != "" {
+			seen[key] = struct{}{}
+		}
 	}
+	for _, item := range items {
+		key := strings.TrimSpace(item)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		base = append(base, key)
+	}
+	return base
+}
+
+func appendUniqueLower(base []string, items ...string) []string {
+	seen := make(map[string]struct{}, len(base)+len(items))
+	for _, item := range base {
+		if key := strings.ToLower(strings.TrimSpace(item)); key != "" {
+			seen[key] = struct{}{}
+		}
+	}
+	for _, item := range items {
+		key := strings.ToLower(strings.TrimSpace(item))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		base = append(base, key)
+	}
+	return base
 }
 
 func (r *StatsRepository) timeGroupExpr(format string) string {

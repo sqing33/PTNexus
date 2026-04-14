@@ -129,3 +129,33 @@ func TestQueryGroupStatsDeduplicatesByNameAndSizeAndSkipsEmptyNormalizedGroup(t 
 		t.Fatalf("expected total_size 300, got %d", row.TotalSize)
 	}
 }
+
+func TestQueryGroupStatsUsesRecognizedSourceSiteWithoutSiteGroupWhitelist(t *testing.T) {
+	store := newStatsRepositoryTestStore(t)
+	repo := NewStatsRepository(store)
+
+	mustExecStatsTest(t, store.DB, `INSERT INTO sites (site, nickname, "group") VALUES (?, ?, ?)`, "mteam", "M-Team", "-MTeam")
+
+	mustExecStatsTest(t, store.DB, `INSERT INTO torrents (hash, name, size, sites, "group", downloader_id, is_hidden) VALUES (?, ?, ?, ?, ?, ?, 0)`,
+		"hash-1", "Release", 100, "M-Team", "-Unexpected", "qb-1")
+
+	rows, err := repo.QueryGroupStats("M-Team")
+	if err != nil {
+		t.Fatalf("QueryGroupStats returned error: %v", err)
+	}
+
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d: %#v", len(rows), rows)
+	}
+
+	row := rows[0]
+	if row.SiteName != "M-Team" {
+		t.Fatalf("expected site_name M-Team, got %q", row.SiteName)
+	}
+	if row.GroupSuffix != "Unexpected" {
+		t.Fatalf("expected group_suffix Unexpected, got %q", row.GroupSuffix)
+	}
+	if row.TorrentCount != 1 || row.TotalSize != 100 {
+		t.Fatalf("unexpected row: %#v", row)
+	}
+}

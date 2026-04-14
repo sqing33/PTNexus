@@ -759,15 +759,6 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 // 获取本地版本
 func getLocalVersion() string {
-	if version := strings.TrimSpace(getEnv("PTNEXUS_VERSION", "")); version != "" {
-		return version
-	}
-	if version := readVersionFromPlainFile(strings.TrimSpace(getEnv("VERSION_FILE", ""))); version != "" {
-		return version
-	}
-	if version := readVersionFromPlainFile("/app/VERSION"); version != "" {
-		return version
-	}
 	if version := inferVersionFromCurrentRuntime(); version != "" {
 		return version
 	}
@@ -780,6 +771,16 @@ func getLocalVersion() string {
 		if !errors.Is(err, os.ErrNotExist) {
 			log.Printf("读取本地版本配置失败: path=%s err=%v", path, err)
 		}
+	}
+
+	if version := strings.TrimSpace(getEnv("PTNEXUS_VERSION", "")); version != "" {
+		return version
+	}
+	if version := readVersionFromPlainFile(strings.TrimSpace(getEnv("VERSION_FILE", ""))); version != "" {
+		return version
+	}
+	if version := readVersionFromPlainFile("/app/VERSION"); version != "" {
+		return version
 	}
 
 	return "unknown"
@@ -989,7 +990,7 @@ func proxyToBatchEnhancer(w http.ResponseWriter, r *http.Request) {
 func main() {
 	log.Println("PT Nexus 更新器启动...")
 	log.Println("监听端口:", updaterPort)
-	log.Printf("更新源策略: 自动并行探测 GitHub/Gitee")
+	log.Printf("更新源策略: 自动并行探测 GitHub")
 
 	// 检查定时配置
 	schedule := loadScheduleConfig()
