@@ -60,8 +60,11 @@ ENV PTNEXUS_BASE_DIR="/app/server"
 ENV PTNEXUS_DATA_DIR="/app/data"
 ENV PTNEXUS_BDINFO_DIR="/app/bdinfo/linux"
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+# 使用阿里云 Debian 镜像（解决网络不稳定问题）
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update --allow-insecure-repositories && \
+    apt-get install -y --allow-unauthenticated --no-install-recommends \
     bash \
     ca-certificates \
     ffmpeg \
