@@ -200,16 +200,23 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		args = append(args, reviewArgs...)
 	}
 	if excludedTarget := strings.TrimSpace(params.ExcludeTargetSites); excludedTarget != "" {
+		siteMatchCondition := "LOWER(tx.sites) = LOWER(?)"
+		if strings.EqualFold(dbType, "mysql") {
+			siteMatchCondition = "tx.sites = ?"
+		} else if strings.EqualFold(dbType, "postgresql") {
+			siteMatchCondition = "tx.sites ILIKE ?"
+		}
+
 		whereConditions = append(
 			whereConditions,
-			`ct.hash IS NOT NULL AND NOT EXISTS (
+			fmt.Sprintf(`ct.hash IS NOT NULL AND NOT EXISTS (
 				SELECT 1
 				FROM torrents tx
 				WHERE (tx.is_hidden = 0 OR tx.is_hidden IS NULL)
-				  AND LOWER(tx.sites) = LOWER(?)
+				  AND %s
 				  AND tx.name = ct.name
 				  AND tx.size = ct.size
-			)`,
+			)`, siteMatchCondition),
 		)
 		args = append(args, excludedTarget)
 	}
