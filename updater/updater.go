@@ -759,6 +759,15 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 // 获取本地版本
 func getLocalVersion() string {
+	if version := strings.TrimSpace(getEnv("PTNEXUS_VERSION", "")); version != "" {
+		return version
+	}
+	if version := readVersionFromPlainFile(strings.TrimSpace(getEnv("VERSION_FILE", ""))); version != "" {
+		return version
+	}
+	if version := readVersionFromPlainFile("/app/VERSION"); version != "" {
+		return version
+	}
 	if version := inferVersionFromCurrentRuntime(); version != "" {
 		return version
 	}
@@ -774,6 +783,18 @@ func getLocalVersion() string {
 	}
 
 	return "unknown"
+}
+
+func readVersionFromPlainFile(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func localVersionConfigCandidates() []string {

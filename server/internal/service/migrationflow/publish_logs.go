@@ -146,6 +146,53 @@ func (s *MigrateService) ListPublishLogs(query repository.PublishLogQuery) (map[
 	}, 200
 }
 
+// DeletePublishLog 删除一条发种日志；若该日志仍对应 queued 队列任务，会先取消队列任务再删除日志。
+// 参数/返回：logID 为日志主键；返回 success/message 结构与 HTTP 状态码。
+// 失败场景：日志不存在返回 404；queued 任务已开始执行返回 409；数据库错误返回 500。
+// 副作用：可能更新 publish_queue_tasks，并删除 publish_logs。
+func (s *MigrateService) DeletePublishLog(logID uint64) (map[string]any, int) {
+	if s == nil || s.publishLogRepo == nil {
+		return map[string]any{"success": false, "message": "发种日志未初始化"}, 500
+	}
+	if logID == 0 {
+		return map[string]any{"success": false, "message": "缺少有效的日志 ID"}, 400
+	}
+
+	row, ok, err := s.publishLogRepo.FindByID(logID)
+	if err != nil {
+		return map[string]any{"success": false, "message": "查询发种日志失败: " + err.Error()}, 500
+	}
+	if !ok || row == nil {
+		return map[string]any{"success": false, "message": "发种日志不存在"}, 404
+	}
+
+	if row.QueueTaskID != nil && *row.QueueTaskID > 0 && strings.TrimSpace(row.Status) == repository.PublishQueueStatusQueued {
+		if s.queueRepo == nil || s.queueRepo.DB() == nil {
+			return map[string]any{"success": false, "message": "队列服务未初始化，无法取消待发布任务"}, 500
+		}
+		if err := s.queueRepo.CancelQueuedTask(*row.QueueTaskID, "已从日志页删除"); err != nil {
+			switch {
+			case errors.Is(err, repository.ErrPublishQueueTaskNotFound):
+				return map[string]any{"success": false, "message": "队列任务不存在"}, 404
+			case errors.Is(err, repository.ErrPublishQueueTaskNotQueued):
+				return map[string]any{"success": false, "message": "该任务已开始执行或状态已变更，请刷新后重试"}, 409
+			default:
+				return map[string]any{"success": false, "message": "取消队列任务失败: " + err.Error()}, 500
+			}
+		}
+	}
+
+	deleted, err := s.publishLogRepo.DeleteByID(logID)
+	if err != nil {
+		return map[string]any{"success": false, "message": "删除发种日志失败: " + err.Error()}, 500
+	}
+	if !deleted {
+		return map[string]any{"success": false, "message": "发种日志不存在"}, 404
+	}
+
+	return map[string]any{"success": true, "message": "发种日志已删除"}, 200
+}
+
 func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID string, ctxTorrentID string, result map[string]any, statusCode int, cost time.Duration) {
 	if s == nil || s.publishLogRepo == nil {
 		return

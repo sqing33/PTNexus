@@ -275,6 +275,7 @@ func registerRoutes(
 		api.POST("/migrate_torrent", migrateHandler.MigrateTorrent)
 
 		api.GET("/publish_logs", migrateHandler.PublishLogs)
+		api.DELETE("/publish_logs/:id", migrateHandler.DeletePublishLog)
 	}
 
 	migrateAPI := engine.Group("/api/migrate")

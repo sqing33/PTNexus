@@ -15,6 +15,8 @@ const (
 	giteeManifestReleaseURLTemplate  = "https://github.com/jadylc/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
 	githubManifestReleaseLatestURL   = "https://github.com/jadylc/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
 	giteeManifestReleaseLatestURL    = "https://github.com/jadylc/PTNexus/releases/download/latest/UPDATE_MANIFEST.json"
+	githubManifestRawMainURL         = "https://raw.githubusercontent.com/jadylc/PTNexus/main/UPDATE_MANIFEST.json"
+	githubManifestRawMasterURL       = "https://raw.githubusercontent.com/jadylc/PTNexus/master/UPDATE_MANIFEST.json"
 )
 
 func normalizeURLCandidates(urls ...string) []string {
@@ -58,6 +60,8 @@ func manifestCandidates(versionHints ...string) []string {
 	candidates = append(candidates,
 		githubManifestReleaseLatestURL,
 		giteeManifestReleaseLatestURL,
+		githubManifestRawMainURL,
+		githubManifestRawMasterURL,
 	)
 	return normalizeURLCandidates(candidates...)
 }

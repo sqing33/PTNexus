@@ -64,6 +64,28 @@ type PublishLogRepository struct {
 	store *Store
 }
 
+// FindByID 按主键读取一条发种日志。
+// 参数/返回：id 为日志主键；返回日志、是否命中与 error。
+// 失败场景：数据库查询失败返回 error。
+// 副作用：读取 publish_logs。
+func (r *PublishLogRepository) FindByID(id uint64) (*PublishLogEntry, bool, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, false, errors.New("publish log repo is nil")
+	}
+	if id == 0 {
+		return nil, false, nil
+	}
+
+	row := PublishLogEntry{}
+	if err := r.store.DB.Model(&PublishLogEntry{}).Where("id = ?", id).Limit(1).Find(&row).Error; err != nil {
+		return nil, false, err
+	}
+	if row.ID == 0 {
+		return nil, false, nil
+	}
+	return &row, true, nil
+}
+
 // FindLatestByQueueTaskID 按 queue_task_id 查询最新的一条日志记录。
 // 参数/返回：queueTaskID 为队列任务自增 ID；返回日志记录、是否命中与 error。
 // 失败场景：DB 未初始化或查询失败返回 error。
@@ -299,6 +321,25 @@ func (r *PublishLogRepository) List(query PublishLogQuery) ([]PublishLogEntry, i
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+// DeleteByID 删除一条发种日志。
+// 参数/返回：id 为日志主键；返回是否删除成功与 error。
+// 失败场景：数据库删除失败返回 error。
+// 副作用：DELETE publish_logs。
+func (r *PublishLogRepository) DeleteByID(id uint64) (bool, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return false, errors.New("publish log repo is nil")
+	}
+	if id == 0 {
+		return false, nil
+	}
+
+	result := r.store.DB.Where("id = ?", id).Delete(&PublishLogEntry{})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }
 
 // MaxNumericTriggerSuffix 计算 publish_trigger 以指定前缀开头的最大数字后缀。

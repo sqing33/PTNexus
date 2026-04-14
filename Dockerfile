@@ -48,6 +48,8 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
+ARG PTNEXUS_VERSION=""
+
 # 确保容器内对 localhost 和 127.0.0.1 的请求直接连接，不通过代理
 ENV no_proxy="localhost,127.0.0.1,::1"
 ENV NO_PROXY="localhost,127.0.0.1,::1"
@@ -100,6 +102,7 @@ RUN chmod +x /app/updater
 
 # 复制版本文件（updater 默认读取 /app/CHANGELOG.json）
 COPY ./CHANGELOG.json /app/CHANGELOG.json
+RUN if [ -n "$PTNEXUS_VERSION" ]; then printf '%s\n' "$PTNEXUS_VERSION" > /app/VERSION; fi
 
 # Supervisor + 启动脚本（Go 版）
 COPY ./supervisord.conf /app/supervisord.conf

@@ -633,107 +633,118 @@ func (r *StatsRepository) QuerySiteStats() ([]SiteStatRow, error) {
 }
 
 func (r *StatsRepository) QueryGroupStats(siteName string) ([]GroupStatRow, error) {
-	groupColumn := r.store.GroupColumn()
-	if siteName != "" {
-		var query string
-		switch r.store.DBType {
-		case "mysql":
-			query = fmt.Sprintf(`
-				SELECT s.nickname AS site_name,
-				       ut.%[1]s AS group_suffix,
-				       COUNT(ut.name) AS torrent_count,
-				       SUM(ut.size) AS total_size
-					FROM (
-						SELECT name, %[1]s, MAX(size) AS size
-						FROM torrents
-						WHERE %[1]s IS NOT NULL AND %[1]s != '' AND sites = ? AND (is_hidden = 0 OR is_hidden IS NULL)
-						GROUP BY name, %[1]s
-					) AS ut
-				JOIN sites AS s ON FIND_IN_SET(ut.%[1]s, s.%[1]s) > 0
-				GROUP BY s.nickname, ut.%[1]s
-				ORDER BY torrent_count DESC
-			`, groupColumn)
-		default:
-			// sqlite / postgresql
-			query = fmt.Sprintf(`
-				SELECT s.nickname AS site_name,
-				       ut.%[1]s AS group_suffix,
-				       COUNT(ut.name) AS torrent_count,
-				       SUM(ut.size) AS total_size
-					FROM (
-						SELECT name, %[1]s, MAX(size) AS size
-						FROM torrents
-						WHERE %[1]s IS NOT NULL AND %[1]s != '' AND sites = ? AND (is_hidden = 0 OR is_hidden IS NULL)
-						GROUP BY name, %[1]s
-					) AS ut
-				JOIN sites AS s ON (',' || s.%[1]s || ',' LIKE '%%,' || ut.%[1]s || ',%%')
-				GROUP BY s.nickname, ut.%[1]s
-				ORDER BY torrent_count DESC
-			`, groupColumn)
-		}
+	torrentGroupColumn := r.groupColumnRef("t")
+	siteGroupColumn := r.groupColumnRef("s")
+	normalizedTorrentGroup := r.normalizedGroupExpr(torrentGroupColumn)
+	siteGroupMatchExpr := r.siteGroupMatchExpr("ut.group_suffix", siteGroupColumn)
+	sourceSiteMatchExpr := r.sourceSiteMatchExpr("ut.source_site", "s.nickname", "s.site")
 
-		rows := make([]GroupStatRow, 0)
-		if err := r.store.DB.Raw(query, siteName).Scan(&rows).Error; err != nil {
-			return nil, err
-		}
-		return rows, nil
-	}
-
-	var aggExpr string
-	switch r.store.DBType {
-	case "mysql":
-		// Match Python: GROUP_CONCAT(DISTINCT ut.`group` ORDER BY ut.`group` SEPARATOR ', ')
-		aggExpr = fmt.Sprintf("GROUP_CONCAT(DISTINCT ut.%s ORDER BY ut.%s SEPARATOR ', ')", groupColumn, groupColumn)
-	case "postgresql":
-		aggExpr = fmt.Sprintf("STRING_AGG(DISTINCT ut.%s, ', ')", groupColumn)
-	default:
-		// sqlite
-		aggExpr = fmt.Sprintf("GROUP_CONCAT(DISTINCT ut.%s)", groupColumn)
-	}
-
-	var query string
-	switch r.store.DBType {
-	case "mysql":
-		query = fmt.Sprintf(`
-			SELECT s.nickname AS site_name,
+	query := fmt.Sprintf(`
+		SELECT s.nickname AS site_name,
+		       ut.group_suffix AS group_suffix,
+		       COUNT(*) AS torrent_count,
+		       SUM(ut.size) AS total_size
+		FROM (
+			SELECT DISTINCT
+			       t.name AS torrent_name,
 			       %s AS group_suffix,
-			       COUNT(ut.name) AS torrent_count,
-			       SUM(ut.size) AS total_size
-				FROM (
-					SELECT name, %s, MAX(size) AS size
-					FROM torrents
-					WHERE %s IS NOT NULL AND %s != '' AND (is_hidden = 0 OR is_hidden IS NULL)
-					GROUP BY name, %s
-				) AS ut
-			JOIN sites AS s ON FIND_IN_SET(ut.%s, s.%s) > 0
-			GROUP BY s.nickname
-			ORDER BY s.nickname
-		`, aggExpr, groupColumn, groupColumn, groupColumn, groupColumn, groupColumn, groupColumn)
-	default:
-		// sqlite / postgresql
-		// NOTE: fmt.Sprintf treats '%' as formatting, so the LIKE pattern uses '%%' to emit literal '%'.
-		query = fmt.Sprintf(`
-			SELECT s.nickname AS site_name,
-			       %s AS group_suffix,
-			       COUNT(ut.name) AS torrent_count,
-			       SUM(ut.size) AS total_size
-				FROM (
-					SELECT name, %s, MAX(size) AS size
-					FROM torrents
-					WHERE %s IS NOT NULL AND %s != '' AND (is_hidden = 0 OR is_hidden IS NULL)
-					GROUP BY name, %s
-				) AS ut
-			JOIN sites AS s ON (',' || s.%s || ',' LIKE '%%,' || ut.%s || ',%%')
-			GROUP BY s.nickname
-			ORDER BY s.nickname
-		`, aggExpr, groupColumn, groupColumn, groupColumn, groupColumn, groupColumn, groupColumn)
+			       t.size AS size,
+			       t.sites AS source_site
+			FROM torrents t
+			WHERE %s IS NOT NULL
+			  AND TRIM(%s) != ''
+			  AND TRIM(%s) != ''
+			  AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
+		) AS ut
+		JOIN sites AS s ON %s AND %s
+	`, normalizedTorrentGroup, torrentGroupColumn, torrentGroupColumn, normalizedTorrentGroup, siteGroupMatchExpr, sourceSiteMatchExpr)
+
+	args := make([]any, 0)
+	trimmedSiteName := strings.TrimSpace(siteName)
+	if trimmedSiteName != "" {
+		query += `
+		WHERE LOWER(COALESCE(s.nickname, '')) = LOWER(?) OR LOWER(COALESCE(s.site, '')) = LOWER(?)
+		`
+		args = append(args, trimmedSiteName, trimmedSiteName)
 	}
+
+	query += `
+		GROUP BY s.nickname, ut.group_suffix
+		ORDER BY s.nickname ASC, torrent_count DESC, ut.group_suffix ASC
+	`
 
 	rows := make([]GroupStatRow, 0)
-	if err := r.store.DB.Raw(query).Scan(&rows).Error; err != nil {
+	if err := r.store.DB.Raw(query, args...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (r *StatsRepository) groupColumnRef(alias string) string {
+	switch r.store.DBType {
+	case "postgresql":
+		if strings.TrimSpace(alias) == "" {
+			return `"group"`
+		}
+		return alias + `."group"`
+	default:
+		if strings.TrimSpace(alias) == "" {
+			return "`group`"
+		}
+		return alias + ".`group`"
+	}
+}
+
+func (r *StatsRepository) normalizedGroupExpr(column string) string {
+	switch r.store.DBType {
+	case "mysql":
+		return fmt.Sprintf("TRIM(LEADING '-' FROM TRIM(%s))", column)
+	case "postgresql":
+		return fmt.Sprintf("LTRIM(BTRIM(%s), '-')", column)
+	default:
+		return fmt.Sprintf("LTRIM(TRIM(%s), '-')", column)
+	}
+}
+
+func (r *StatsRepository) siteGroupMatchExpr(groupValueExpr string, siteGroupColumn string) string {
+	normalizedSiteGroups := r.normalizedSiteGroupListExpr(siteGroupColumn)
+	switch r.store.DBType {
+	case "mysql":
+		return fmt.Sprintf("FIND_IN_SET(LOWER(%s), %s) > 0", groupValueExpr, normalizedSiteGroups)
+	default:
+		return fmt.Sprintf("(',' || %s || ',') LIKE '%%,' || LOWER(%s) || ',%%'", normalizedSiteGroups, groupValueExpr)
+	}
+}
+
+func (r *StatsRepository) sourceSiteMatchExpr(sourceSiteExpr string, siteNicknameExpr string, siteFieldExpr string) string {
+	return fmt.Sprintf(
+		"(TRIM(COALESCE(%s, '')) = '' OR LOWER(COALESCE(%s, '')) = LOWER(COALESCE(%s, '')) OR LOWER(COALESCE(%s, '')) = LOWER(COALESCE(%s, '')))",
+		sourceSiteExpr,
+		sourceSiteExpr,
+		siteNicknameExpr,
+		sourceSiteExpr,
+		siteFieldExpr,
+	)
+}
+
+func (r *StatsRepository) normalizedSiteGroupListExpr(column string) string {
+	switch r.store.DBType {
+	case "mysql":
+		return fmt.Sprintf(
+			"REPLACE(TRIM(LEADING '-' FROM REPLACE(LOWER(COALESCE(%s, '')), ' ', '')), ',-', ',')",
+			column,
+		)
+	case "postgresql":
+		return fmt.Sprintf(
+			"REPLACE(LTRIM(REPLACE(LOWER(COALESCE(%s, '')), ' ', ''), '-'), ',-', ',')",
+			column,
+		)
+	default:
+		return fmt.Sprintf(
+			"REPLACE(LTRIM(REPLACE(LOWER(COALESCE(%s, '')), ' ', ''), '-'), ',-', ',')",
+			column,
+		)
+	}
 }
 
 func (r *StatsRepository) timeGroupExpr(format string) string {

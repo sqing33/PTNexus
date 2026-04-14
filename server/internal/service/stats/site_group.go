@@ -27,10 +27,28 @@ func (s *Service) GetGroupStats(siteName string) ([]map[string]any, error) {
 	for _, row := range rows {
 		result = append(result, map[string]any{
 			"site_name":     row.SiteName,
-			"group_suffix":  strings.ReplaceAll(row.GroupSuffix, "-", ""),
+			"group_suffix":  normalizeGroupDisplay(row.GroupSuffix),
 			"torrent_count": row.TorrentCount,
 			"total_size":    row.TotalSize,
 		})
 	}
 	return result, nil
+}
+
+func normalizeGroupDisplay(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+
+	parts := strings.Split(trimmed, ",")
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(part), "-"))
+		if item == "" {
+			continue
+		}
+		normalized = append(normalized, item)
+	}
+	return strings.Join(normalized, ", ")
 }

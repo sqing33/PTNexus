@@ -200,12 +200,18 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		args = append(args, reviewArgs...)
 	}
 	if excludedTarget := strings.TrimSpace(params.ExcludeTargetSites); excludedTarget != "" {
-		siteMatchCondition := "LOWER(tx.sites) = LOWER(?)"
-		if strings.EqualFold(dbType, "mysql") {
-			siteMatchCondition = "tx.sites = ?"
-		} else if strings.EqualFold(dbType, "postgresql") {
-			siteMatchCondition = "tx.sites ILIKE ?"
+		targetAliases, err := s.repo.ResolveSiteAliases(excludedTarget)
+		if err != nil {
+			return nil, fmt.Errorf("resolve target site aliases failed: %w", err)
 		}
+		if len(targetAliases) == 0 {
+			targetAliases = []string{excludedTarget}
+		}
+
+		spNicknameCondition := buildAliasMatchCondition(dbType, "sp.nickname", targetAliases)
+		spSiteCondition := buildAliasMatchCondition(dbType, "sp.site_name", targetAliases)
+		txSiteCondition := buildAliasMatchCondition(dbType, "tx.sites", targetAliases)
+		aliasArgs := aliasMatchArgs(dbType, targetAliases)
 
 		whereConditions = append(
 			whereConditions,
@@ -216,9 +222,11 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 				  AND %s
 				  AND tx.name = ct.name
 				  AND tx.size = ct.size
-			)`, siteMatchCondition),
+			) AND NOT (%s OR %s)`, txSiteCondition, spNicknameCondition, spSiteCondition),
 		)
-		args = append(args, excludedTarget)
+		args = append(args, aliasArgs...)
+		args = append(args, aliasArgs...)
+		args = append(args, aliasArgs...)
 	}
 
 	whereClause := ""
@@ -337,4 +345,33 @@ func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[stri
 		return map[string]any{"success": false, "error": err.Error()}, 500
 	}
 	return map[string]any{"success": true, "message": fmt.Sprintf("种子数据 %s from %s 已删除", torrentID, siteName)}, 200
+}
+
+func buildAliasMatchCondition(dbType string, field string, aliases []string) string {
+	if len(aliases) == 0 {
+		return "1 = 0"
+	}
+
+	placeholders := make([]string, 0, len(aliases))
+	for range aliases {
+		placeholders = append(placeholders, "?")
+	}
+
+	if strings.EqualFold(dbType, "mysql") {
+		return fmt.Sprintf("%s IN (%s)", field, strings.Join(placeholders, ", "))
+	}
+	return fmt.Sprintf("LOWER(COALESCE(%s, '')) IN (%s)", field, strings.Join(placeholders, ", "))
+}
+
+func aliasMatchArgs(dbType string, aliases []string) []any {
+	result := make([]any, 0, len(aliases))
+	for _, alias := range aliases {
+		value := strings.TrimSpace(alias)
+		if strings.EqualFold(dbType, "mysql") {
+			result = append(result, value)
+			continue
+		}
+		result = append(result, strings.ToLower(value))
+	}
+	return result
 }
