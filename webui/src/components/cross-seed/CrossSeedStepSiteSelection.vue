@@ -9,22 +9,6 @@
       }}
     </p>
 
-    <!-- 禁止转载警告 -->
-    <el-alert
-      v-if="isUbitsDisabled"
-      type="error"
-      :closable="false"
-      style="width: 410px; margin: 0 auto"
-    >
-      <template #title>
-        <span style="font-weight: 600">禁止转载</span>
-      </template>
-      <div>
-        检测到制作组包含禁止转载的内容，已自动禁用 UBits 站点。<br />
-        禁止转载的制作组：CMCT、CMCTV、HDSky、HDSWEB、HDS、HDSTV、HDSPad
-      </div>
-    </el-alert>
-
     <div class="select-all-container" style="margin-top: 16px">
       <div class="site-selection-toolbar">
         <div class="toolbar-button-row">
@@ -69,16 +53,7 @@
           >{{ site.name }}</span
         >
         <el-tooltip
-          v-if="site.name === 'ubits' && !isTargetSiteSelectable(site.name)"
-          content="该制作组禁止转载到 uBits 站点"
-          placement="top"
-        >
-          <el-icon style="margin-left: 4px; color: #f56c6c">
-            <InfoFilled />
-          </el-icon>
-        </el-tooltip>
-        <el-tooltip
-          v-else-if="isIloliconSite(site) && !isCurrentSeedAnimationRelated"
+          v-if="isIloliconSite(site) && !isCurrentSeedAnimationRelated"
           content="ilolicon 仅支持动漫/动画内容，当前种子已自动禁用"
           placement="top"
         >
@@ -97,7 +72,6 @@ import { useCrossSeedPanelContext } from './crossSeedPanelContext'
 
 const {
   autoUpdateExistingTorrent,
-  isUbitsDisabled,
   autoAddExistingToDownloader,
   saveAutoAddExistingSetting,
   saveAutoUpdateExistingTorrentSetting,
@@ -113,4 +87,3 @@ const {
   isCurrentSeedAnimationRelated,
 } = useCrossSeedPanelContext()
 </script>
-

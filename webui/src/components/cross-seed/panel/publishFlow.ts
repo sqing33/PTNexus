@@ -156,12 +156,12 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       result.isExisted = true
     }
 
-    // 🚫 发布前预检查限制
+    // 发布前校验失败
     if (rawResult.pre_check === true && rawResult.limit_reached === true) {
       result.downloaderStatus = {
         success: false,
-        message: logs || '发布前预检查触发限制',
-        downloaderName: '发布前限制',
+        message: logs || '发布前校验失败',
+        downloaderName: '发布前校验',
       }
       return result
     }
@@ -516,15 +516,14 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
           break
         }
 
-        // 🚫 检查发布前预检查状态
+        // 检查发布前校验状态
         if (result.pre_check && result.limit_reached) {
-          // 提取限制信息用于突出显示
-          const limitInfo = result.message.replace('🚫 发布前预检查触发限制: ', '')
+          const limitInfo = result.message.replace(/^发布前校验失败:\s*/, '')
 
           result.downloaderStatus = {
             success: false,
             message: result.message,
-            downloaderName: '发布前限制',
+            downloaderName: '发布前校验',
             limit_reached: true,
             pre_check: true,
           }
@@ -532,22 +531,22 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
           results.push(result)
           finalResultsList.value = [...results]
 
-          // 🚫 显示限制提示
+          // 显示校验提示
           limitAlert.value = {
             visible: true,
-            title: '发布前限制触发',
+            title: '发布前校验失败',
             message: limitInfo,
           }
 
-          // 在日志顶部突出显示限制信息
+          // 在日志顶部突出显示校验信息
           logContent.value =
-            `\n\n=== 🚫 发种限制触发 ===\n${limitInfo}\n\n=== 🛑 批量发布已停止 ===\n由于发种限制触发，后续 ${selectedTargetSites.value.length - results.length} 个站点发布已暂停。\n\n` +
+            `\n\n=== ⚠️ 发布前校验失败 ===\n${limitInfo}\n\n=== 🛑 批量发布已停止 ===\n由于发布前校验失败，后续 ${selectedTargetSites.value.length - results.length} 个站点发布已暂停。\n\n` +
             logContent.value
 
-          // 显示发布前限制通知
+          // 显示发布前校验通知
           ElNotification({
-            title: '发布前限制触发',
-            message: `${siteName} 因发种限制无法发布\n${limitInfo}\n后续站点发布已自动停止。`,
+            title: '发布前校验失败',
+            message: `${siteName} 因发布前校验失败无法发布\n${limitInfo}\n后续站点发布已自动停止。`,
             type: 'warning',
             duration: 0,
             showClose: true,
@@ -937,22 +936,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     )
   }
 
-  // 检查是否包含受限标签
-  const hasRestrictedTag = computed(() => {
-    const tags = torrentData.value.standardized_params.tags || []
-    return tags.some((tag) => isRestrictedTag(tag))
-  })
-
   const handleTagClose = (tagToRemove: string) => {
-    if (isRestrictedTag(tagToRemove)) {
-      ElNotification.warning({
-        title: '无法删除',
-        message: '禁转/限转/分集标签不允许删除',
-        duration: 2000,
-      })
-      return
-    }
-
     const index = torrentData.value.standardized_params.tags.indexOf(tagToRemove)
     if (index > -1) {
       torrentData.value.standardized_params.tags.splice(index, 1)
@@ -1001,12 +985,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     )
     const hasUnrecognized = unrecognized && unrecognized.value !== ''
 
-    // 2. 检查禁转标签
-    if (hasRestrictedTag.value) {
-      return true
-    }
-
-    // 3. 【新增】检查简介、海报、截图是否为空
+    // 2. 【新增】检查简介、海报、截图是否为空
     const intro = torrentData.value.intro
     const hasEmptyPoster = !intro.poster || intro.poster.trim() === ''
     const hasEmptyScreenshots = !intro.screenshots || intro.screenshots.trim() === ''
@@ -1088,12 +1067,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
 
   // 计算属性：获取下一步按钮的提示文本
   const nextButtonTooltipContent = computed(() => {
-    // 1. 优先级最高：检查禁转标签
-    if (hasRestrictedTag.value) {
-      return '检测到禁转/限转/分集标签，不允许继续发布'
-    }
-
-    // 2. 检查是否存在"无法识别"的内容
+    // 1. 检查是否存在"无法识别"的内容
     const unrecognized = torrentData.value.title_components.find(
       (param) => param.key === '无法识别',
     )
@@ -1101,7 +1075,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       return '存在无法识别的标题内容，请手动修正或删除'
     }
 
-    // 3. 检查制作组是否为空或为NOGROUP
+    // 2. 检查制作组是否为空或为NOGROUP
     const team = torrentData.value.title_components.find((param) => param.key === '制作组')
     const hasEmptyTeam = !team || !team.value || team.value.trim() === ''
     const isNoGroup = team && team.value.trim().toUpperCase() === 'NOGROUP'
@@ -1114,7 +1088,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       return '制作组为NOGROUP，禁止发布'
     }
 
-    // 4. 检查必填参数是否为空 (包含：简介信息 + 标准化参数)
+    // 3. 检查必填参数是否为空 (包含：简介信息 + 标准化参数)
     const params = torrentData.value.standardized_params
     const intro = torrentData.value.intro
     const missingFields: string[] = []
@@ -1139,7 +1113,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       return `请补充必填项：${missingFields.join('、')}`
     }
 
-    // 4.5 检查简介正文完整性
+    // 3.5 检查简介正文完整性
     const introCompleteness = checkIntroCompleteness(intro.body)
     if (!introCompleteness.isComplete) {
       const criticalFields = ['片名', '产地', '简介']

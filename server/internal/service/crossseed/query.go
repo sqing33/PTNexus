@@ -30,7 +30,6 @@ func buildReviewStatusCondition(dbType string, reviewStatus string) (string, []a
 
 	isDeletedCondition := "ct.hash IS NULL"
 	isNotDeletedCondition := "ct.hash IS NOT NULL"
-	tagArgs := []any{"%禁转%", "%限转%", "%分集%"}
 
 	switch normalized {
 	case "reviewed", "unreviewed":
@@ -40,11 +39,11 @@ func buildReviewStatusCondition(dbType string, reviewStatus string) (string, []a
 				isReviewedValue = "true"
 			}
 			condition := fmt.Sprintf(
-				`sp.is_reviewed = %s AND %s AND (sp.tags IS NULL OR (sp.tags::text NOT LIKE ? AND sp.tags::text NOT LIKE ? AND sp.tags::text NOT LIKE ?)) AND (sp.title_components IS NULL OR sp.title_components::text !~ ?)`,
+				`sp.is_reviewed = %s AND %s AND (sp.title_components IS NULL OR sp.title_components::text !~ ?)`,
 				isReviewedValue,
 				isNotDeletedCondition,
 			)
-			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
+			return condition, []any{`"无法识别"[^}]*"value":\s*".+"`}
 		}
 
 		isReviewedValue := "0"
@@ -54,41 +53,41 @@ func buildReviewStatusCondition(dbType string, reviewStatus string) (string, []a
 
 		if strings.EqualFold(dbType, "mysql") {
 			condition := fmt.Sprintf(
-				`sp.is_reviewed = %s AND %s AND (sp.tags IS NULL OR (sp.tags NOT LIKE ? AND sp.tags NOT LIKE ? AND sp.tags NOT LIKE ?)) AND (sp.title_components IS NULL OR sp.title_components NOT REGEXP ?)`,
+				`sp.is_reviewed = %s AND %s AND (sp.title_components IS NULL OR sp.title_components NOT REGEXP ?)`,
 				isReviewedValue,
 				isNotDeletedCondition,
 			)
-			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
+			return condition, []any{`"无法识别"[^}]*"value":\s*".+"`}
 		}
 
 		condition := fmt.Sprintf(
-			`sp.is_reviewed = %s AND %s AND (sp.tags IS NULL OR (sp.tags NOT LIKE ? AND sp.tags NOT LIKE ? AND sp.tags NOT LIKE ?)) AND (sp.title_components IS NULL OR NOT (sp.title_components LIKE ? AND sp.title_components NOT LIKE ?))`,
+			`sp.is_reviewed = %s AND %s AND (sp.title_components IS NULL OR NOT (sp.title_components LIKE ? AND sp.title_components NOT LIKE ?))`,
 			isReviewedValue,
 			isNotDeletedCondition,
 		)
-		return condition, append(tagArgs, `%"无法识别"%`, `%"value": ""%`)
+		return condition, []any{`%"无法识别"%`, `%"value": ""%`}
 	case "error":
 		if strings.EqualFold(dbType, "postgresql") {
 			condition := fmt.Sprintf(
-				`(%s OR sp.tags::text LIKE ? OR sp.tags::text LIKE ? OR sp.tags::text LIKE ? OR sp.title_components::text ~ ?)`,
+				`(%s OR sp.title_components::text ~ ?)`,
 				isDeletedCondition,
 			)
-			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
+			return condition, []any{`"无法识别"[^}]*"value":\s*".+"`}
 		}
 
 		if strings.EqualFold(dbType, "mysql") {
 			condition := fmt.Sprintf(
-				`(%s OR sp.tags LIKE ? OR sp.tags LIKE ? OR sp.tags LIKE ? OR sp.title_components REGEXP ?)`,
+				`(%s OR sp.title_components REGEXP ?)`,
 				isDeletedCondition,
 			)
-			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
+			return condition, []any{`"无法识别"[^}]*"value":\s*".+"`}
 		}
 
 		condition := fmt.Sprintf(
-			`(%s OR sp.tags LIKE ? OR sp.tags LIKE ? OR sp.tags LIKE ? OR (sp.title_components LIKE ? AND sp.title_components NOT LIKE ?))`,
+			`(%s OR (sp.title_components LIKE ? AND sp.title_components NOT LIKE ?))`,
 			isDeletedCondition,
 		)
-		return condition, append(tagArgs, `%"无法识别"%`, `%"value": ""%`)
+		return condition, []any{`%"无法识别"%`, `%"value": ""%`}
 	default:
 		return "", nil
 	}
@@ -98,14 +97,14 @@ func buildCurrentTorrentsSubquery(dbType string) string {
 	// Match Python build_current_torrents_subquery().
 	if strings.EqualFold(dbType, "postgresql") {
 		return fmt.Sprintf(`
-			SELECT DISTINCT ON (t.hash) t.hash, t.save_path, t.downloader_id, t.state, t.last_seen
+			SELECT DISTINCT ON (t.hash) t.hash, t.name, t.size, t.save_path, t.downloader_id, t.state, t.last_seen
 			FROM torrents t
 			WHERE (t.is_hidden = 0 OR t.is_hidden IS NULL)
 			ORDER BY t.hash, %s, t.last_seen DESC
 		`, stateRankExpr("t"))
 	}
 	return fmt.Sprintf(`
-		SELECT t.hash, t.save_path, t.downloader_id, t.state, t.last_seen
+		SELECT t.hash, t.name, t.size, t.save_path, t.downloader_id, t.state, t.last_seen
 		FROM torrents t
 		JOIN (
 			SELECT hash,
@@ -195,6 +194,20 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 	if reviewCondition, reviewArgs := buildReviewStatusCondition(dbType, params.ReviewStatus); reviewCondition != "" {
 		whereConditions = append(whereConditions, reviewCondition)
 		args = append(args, reviewArgs...)
+	}
+	if excludedTarget := strings.TrimSpace(params.ExcludeTargetSites); excludedTarget != "" {
+		whereConditions = append(
+			whereConditions,
+			`ct.hash IS NOT NULL AND NOT EXISTS (
+				SELECT 1
+				FROM torrents tx
+				WHERE (tx.is_hidden = 0 OR tx.is_hidden IS NULL)
+				  AND LOWER(tx.sites) = LOWER(?)
+				  AND tx.name = ct.name
+				  AND tx.size = ct.size
+			)`,
+		)
+		args = append(args, excludedTarget)
 	}
 
 	whereClause := ""

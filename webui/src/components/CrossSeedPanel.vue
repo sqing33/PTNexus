@@ -823,18 +823,6 @@ const screenshotImages = computed(() => parseImageUrls(torrentData.value.intro.s
 const isScreenshotReviewPending = computed(
   () => torrentData.value.screenshot_review_status === 'pending',
 )
-const hasRestrictedAutoRepairTags = computed(() => {
-  const tags = torrentData.value.standardized_params.tags || []
-  return tags.some(
-    (tag) =>
-      tag === '禁转' ||
-      tag === 'tag.禁转' ||
-      tag === '限转' ||
-      tag === 'tag.限转' ||
-      tag === '分集' ||
-      tag === 'tag.分集',
-  )
-})
 
 const buildScreenshotPayload = (type: string, extra: Record<string, unknown> = {}) => ({
   type,
@@ -1421,82 +1409,11 @@ const isTargetSiteSelectable = (siteName: string): boolean => {
     return false
   }
 
-  // 条件 4: 检查是否为ubits站点并应用特殊禁转规则
-  if (siteName.toLowerCase() === 'ubits') {
-    const team = torrentData.value.standardized_params.team
-    const titleComponents = torrentData.value.title_components
-
-    // 检查标准化参数中的制作组
-    if (
-      team &&
-      ['cmct', 'cmctv', 'hdsky', 'hdsweb', 'hds', 'hdstv', 'hdspad'].includes(team.toLowerCase())
-    ) {
-      return false
-    }
-
-    // 检查标题组件中的制作组
-    const teamComponent = titleComponents.find((param) => param.key === '制作组')
-    if (teamComponent && teamComponent.value) {
-      const teamValue = teamComponent.value.toLowerCase()
-      const forbiddenTeams = [
-        'cmct',
-        'cmctv',
-        'telesto',
-        'shadow610',
-        'hdsky',
-        'hdsweb',
-        'hds',
-        'hdstv',
-        'hdspad',
-      ]
-
-      for (const forbiddenTeam of forbiddenTeams) {
-        if (teamValue.includes(forbiddenTeam)) {
-          return false
-        }
-      }
-    }
-  }
-
   // 如果所有检查都通过，则站点可选
   return true
 }
 
-const isUbitsDisabled = computed(() => {
-  const team = torrentData.value.standardized_params.team
-  const titleComponents = torrentData.value.title_components
-
-  if (
-    team &&
-    ['cmct', 'cmctv', 'hdsky', 'hdsweb', 'hds', 'hdstv', 'hdspad'].includes(team.toLowerCase())
-  ) {
-    return true
-  }
-
-  const teamComponent = titleComponents.find((param) => param.key === '制作组')
-  if (teamComponent && teamComponent.value) {
-    const teamValue = teamComponent.value.toLowerCase()
-    const forbiddenTeams = [
-      'cmct',
-      'cmctv',
-      'telesto',
-      'shadow610',
-      'hdsky',
-      'hdsweb',
-      'hds',
-      'hdstv',
-      'hdspad',
-    ]
-
-    for (const forbiddenTeam of forbiddenTeams) {
-      if (teamValue.includes(forbiddenTeam)) {
-        return true
-      }
-    }
-  }
-
-  return false
-})
+const isUbitsDisabled = computed(() => false)
 
 // 新增函数：根据站点状态获取按钮类型
 const getButtonType = (site: SiteStatus) => {
@@ -2303,14 +2220,6 @@ const reparseTitle = async () => {
 }
 
 const handleImageError = async (url: string, type: 'poster' | 'screenshot', index: number) => {
-  if (hasRestrictedAutoRepairTags.value) {
-    console.log(`受限标签已命中，跳过失效${type === 'poster' ? '海报' : '截图'}自动修复: ${url}`)
-    if (type === 'screenshot') {
-      screenshotValid.value = true
-    }
-    return
-  }
-
   // 如果是 pixhost.to 的图片，跳过检测
   if (url && url.includes('pixhost.to')) {
     console.log(`检测到 pixhost.to 图片，跳过有效性检测: ${url}`)

@@ -302,7 +302,7 @@ const formatNote = (note: string) => {
   let html = note.replace(/\n/g, '<br>')
 
   // 匹配 curl 命令
-  const cmdRegex = /(curl -sL https:\/\/github\.com\/sqing33\/.*?\| sudo bash)/g
+  const cmdRegex = /(curl -sL https:\/\/github\.com\/jadylc\/.*?\| sudo bash)/g
 
   // 修改结构：使用 div 布局，添加提示文本
   html = html.replace(cmdRegex, (match) => {

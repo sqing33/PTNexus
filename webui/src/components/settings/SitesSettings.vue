@@ -43,7 +43,7 @@
             <span>同步Cookie</span>
           </el-button>
           <el-link
-            href="https://github.com/sqing33/PTNexus/releases/latest/download/pt-nexus-browser-extension.zip"
+            href="https://github.com/jadylc/PTNexus/releases/latest/download/pt-nexus-browser-extension.zip"
             target="_blank"
             rel="noopener noreferrer"
             type="primary"

@@ -346,9 +346,7 @@
           <template #default="scope">
             <div class="mapped-cell datetime-cell">
               {{
-                scope.row.is_deleted || hasRestrictedTag(scope.row.tags)
-                  ? getRestrictionText(scope.row)
-                  : formatDateTime(scope.row.updated_at)
+                scope.row.is_deleted ? getRestrictionText(scope.row) : formatDateTime(scope.row.updated_at)
               }}
             </div>
           </template>
@@ -1206,8 +1204,8 @@ const loadReviewStatusFilter = async () => {
 
 // 为表格行设置CSS类名
 const tableRowClassName = ({ row }: { row: SeedParameter }) => {
-  // 红色背景：已删除、包含禁转标签、或有无法识别的内容
-  if (row.is_deleted || hasRestrictedTag(row.tags) || row.unrecognized) {
+  // 红色背景：已删除或有无法识别的内容
+  if (row.is_deleted || row.unrecognized) {
     return 'deleted-row'
   }
   // 如果未检查，添加unreviewed-row类（蓝色背景）
@@ -1256,24 +1254,9 @@ const hasRestrictedTag = (tags: string[] | string): boolean => {
 
 const getRestrictionText = (row: SeedParameter) => {
   const labels: string[] = []
-  const tagList = normalizeTagList(row.tags)
 
   if (row.is_deleted) {
     labels.push('已删除做种文件')
-  }
-
-  const restrictedTags: string[] = []
-  if (tagList.some((tag) => tag === '禁转' || tag === 'tag.禁转')) {
-    restrictedTags.push('禁转')
-  }
-  if (tagList.some((tag) => tag === '限转' || tag === 'tag.限转')) {
-    restrictedTags.push('限转')
-  }
-  if (tagList.some((tag) => tag === '分集' || tag === 'tag.分集')) {
-    restrictedTags.push('分集')
-  }
-  if (restrictedTags.length > 0) {
-    labels.push(restrictedTags.join('/'))
   }
 
   return labels.join('\n')
@@ -1281,14 +1264,9 @@ const getRestrictionText = (row: SeedParameter) => {
 
 // 控制表格行是否可选择
 const checkSelectable = (row: SeedParameter) => {
-  // 在删除模式下，所有行都可以被选择（包括已删除的行和有禁转标签的行）
+  // 在删除模式下，所有行都可以被选择
   if (isDeleteMode.value) {
     return true
-  }
-
-  // 在非删除模式下，检查是否包含禁转标签
-  if (hasRestrictedTag(row.tags)) {
-    return false
   }
 
   // 如果已删除筛选处于活动状态，则允许选择已删除的行 - 便于批量操作

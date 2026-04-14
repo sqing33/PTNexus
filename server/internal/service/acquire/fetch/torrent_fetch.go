@@ -60,16 +60,12 @@ type bdecodeParser struct {
 
 // PrepareSourceSite 校验并返回源站配置。
 // 参数/返回：reader 用于读取站点；siteName 为站点名称；返回站点配置。
-// 失败场景：站点不存在、未开启迁移、缺少 cookie/passkey。
+// 失败场景：站点不存在、缺少 cookie/passkey。
 // 副作用：无。
 func PrepareSourceSite(reader SiteInfoReader, siteName string) (map[string]any, error) {
 	siteInfo, err := reader.GetSiteByName(siteName)
 	if err != nil {
 		return nil, fmt.Errorf("源站点 '%s' 不存在", siteName)
-	}
-	migration := int(toFloatAny(siteInfo["migration"]))
-	if migration != 1 && migration != 3 {
-		return nil, fmt.Errorf("站点 '%s' 不允许作为源站点", siteName)
 	}
 	cookie := strings.TrimSpace(toStringAny(siteInfo["cookie"], ""))
 	passkey := strings.TrimSpace(toStringAny(siteInfo["passkey"], ""))

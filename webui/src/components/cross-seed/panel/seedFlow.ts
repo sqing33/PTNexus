@@ -149,27 +149,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     return 'none'
   }
 
-  const isRestrictedTag = (tag: string): boolean => {
-    return (
-      tag === '禁转' ||
-      tag === 'tag.禁转' ||
-      tag === '限转' ||
-      tag === 'tag.限转' ||
-      tag === '分集' ||
-      tag === 'tag.分集'
-    )
-  }
-
-  const hasRestrictedTags = (): boolean => {
-    const tags = torrentData.value.standardized_params.tags || []
-    return tags.some((tag) => typeof tag === 'string' && isRestrictedTag(tag))
-  }
-
   const checkScreenshotValidity = async () => {
-    if (hasRestrictedTags()) {
-      screenshotValid.value = true
-      return
-    }
     const screenshots = screenshotImages.value
     if (screenshots.length === 0) {
       screenshotValid.value = true
@@ -462,7 +442,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           isLoading.value = false
           await nextTick()
           await checkScreenshotValidity()
-          if (!hasRestrictedTags() && storeResponse.data.screenshot_preview_required) {
+          if (storeResponse.data.screenshot_preview_required) {
             await openFetchedScreenshotPreview()
           }
           return
@@ -855,7 +835,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           isLoading.value = false
           await nextTick()
           await checkScreenshotValidity()
-          if (!hasRestrictedTags() && storeResponse.data.screenshot_preview_required) {
+          if (storeResponse.data.screenshot_preview_required) {
             await openFetchedScreenshotPreview()
           }
         } else {
@@ -967,8 +947,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     const currentTags = torrentData.value.standardized_params.tags || []
     const combined = [...new Set([...predefinedTags, ...currentTags])]
 
-    const filtered = combined.filter((tag) => !isRestrictedTag(tag))
-    return filtered.map((tagValue) => ({
+    return combined.map((tagValue) => ({
       value: tagValue,
       label: reverseMappings.value.tags[tagValue] || tagValue,
     }))

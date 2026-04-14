@@ -237,7 +237,7 @@
                             v-for="item in data"
                             :key="item.value"
                             :type="getTagType(item.value)"
-                            :closable="!isRestrictedTag(item.value)"
+                            closable
                             disable-transitions
                             @close="handleTagClose(item.value)"
                             style="margin: 2px"

@@ -11,10 +11,10 @@ import (
 const (
 	// Manifest is expected to be published as a Release asset.
 	// Runtime metadata is served only from Release assets.
-	githubManifestReleaseURLTemplate = "https://github.com/sqing33/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
-	giteeManifestReleaseURLTemplate  = "https://gitee.com/sqing33/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
-	githubManifestReleaseLatestURL   = "https://github.com/sqing33/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
-	giteeManifestReleaseLatestURL    = "https://gitee.com/sqing33/PTNexus/releases/download/latest/UPDATE_MANIFEST.json"
+	githubManifestReleaseURLTemplate = "https://github.com/jadylc/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
+	giteeManifestReleaseURLTemplate  = "https://github.com/jadylc/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
+	githubManifestReleaseLatestURL   = "https://github.com/jadylc/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
+	giteeManifestReleaseLatestURL    = "https://github.com/jadylc/PTNexus/releases/download/latest/UPDATE_MANIFEST.json"
 )
 
 func normalizeURLCandidates(urls ...string) []string {

@@ -6,27 +6,27 @@
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
         "size": 11163781,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz"
+          "https://github.com/jadylc/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz"
         ]
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
         "size": 10104449,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz"
+          "https://github.com/jadylc/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz"
         ]
       }
     ],
@@ -103,7 +103,7 @@
     {
       "version": "v3.6.1",
       "date": "2026.02.10",
-      "note": "注：Win 版本正在测试ing...\n盒子端需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：Win 版本正在测试ing...\n盒子端需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "新增：转种目标站点-爱萝莉",
         "新增：出种限速功能",
@@ -119,7 +119,7 @@
     {
       "version": "v3.6.0",
       "date": "2026.01.29",
-      "note": "注：(可选)盒子端修改获取截图和 MediaInfo 和 BDInfo 的超时时间需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：(可选)盒子端修改获取截图和 MediaInfo 和 BDInfo 的超时时间需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "新增：修改了下载进度的计算逻辑，对于拆包下载作种的种子添加了一个‘部分做种’的状态",
         "新增：基于媒介（medium）规范视频编码 AVC / HEVC、H.264 / H.265、x264/x265",
@@ -132,7 +132,7 @@
     {
       "version": "v3.5.9",
       "date": "2026.01.27",
-      "note": "注：盒子端修复截图上传功能需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：盒子端修复截图上传功能需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "修复：pixhost 图床更换 img1 直链为 img2 导致新发图片无法显示"
       ]
@@ -182,7 +182,7 @@
     {
       "version": "v3.5.3",
       "date": "2026.01.13",
-      "note": "注：盒子端新增自动选择中文字幕流功能需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：盒子端新增自动选择中文字幕流功能需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "新增：禁转规则-空官组禁转至 ub",
         "新增：自动选择中文字幕流，盒子端需要一同更新",
@@ -225,10 +225,10 @@
     {
       "version": "v3.4.7",
       "date": "2026.01.08",
-      "note": "注：修改 Github 仓库地址为 'https://github.com/sqing33/PTNexus'，因为 'pt-nexus' 缺失横杠无法搜索到，以至于有人在安装的时候安装到了 'nexusphp'。\n结算画面： 'https://img1.pixhost.to/images/11481/682419724_4ba3b6c6-d528-471d-b898-c05c88ea4332.png' \n新的盒子端安装地址为 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash",
+      "note": "注：修改 Github 仓库地址为 'https://github.com/jadylc/PTNexus'，因为 'pt-nexus' 缺失横杠无法搜索到，以至于有人在安装的时候安装到了 'nexusphp'。\n结算画面： 'https://img1.pixhost.to/images/11481/682419724_4ba3b6c6-d528-471d-b898-c05c88ea4332.png' \n新的盒子端安装地址为 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash",
       "changes": [
         "修改：从 mediainfo 与 bdinfo 获取音频编码的选择",
-        "修改：Github 仓库地址为 'https://github.com/sqing33/PTNexus'"
+        "修改：Github 仓库地址为 'https://github.com/jadylc/PTNexus'"
       ]
     },
     {
@@ -296,7 +296,7 @@
     {
       "version": "v3.3.4",
       "date": "2025.12.25",
-      "note": "注：修复盒子端获取原盘的截图有概率会报错失败的问题需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：修复盒子端获取原盘的截图有概率会报错失败的问题需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "新增：转种目标站点-劳改所",
         "修复：部分站点丢失 HDR 标签",
@@ -333,7 +333,7 @@
     {
       "version": "v3.3.0",
       "date": "2025.12.15",
-      "note": "注:若报错“ModuleNotFoundError: No module named 'PIL'”则需要重新下载镜像进行更新，如仍然报错则删除 data 目录下的 updates 文件夹。\n13City限速12.5MB/s，代码不会修改非0的限速，需要手动修改。\n盒子获取 bdinfo 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注:若报错“ModuleNotFoundError: No module named 'PIL'”则需要重新下载镜像进行更新，如仍然报错则删除 data 目录下的 updates 文件夹。\n13City限速12.5MB/s，代码不会修改非0的限速，需要手动修改。\n盒子获取 bdinfo 需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "修复：“ModuleNotFoundError: No module named 'PIL'”报错",
         "修复：青蛙、三月传媒主标题出现重复制作组的问题",
@@ -351,7 +351,7 @@
     {
       "version": "v3.2.4",
       "date": "2025.12.11",
-      "note": "注：盒子优化截图速度需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：盒子优化截图速度需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "优化：截图速度，截图名称用时间点命名",
         "新增：转种目标站点-PTSkit"
@@ -360,7 +360,7 @@
     {
       "version": "v3.2.3",
       "date": "2025.12.11",
-      "note": "注：（需要更新 docker 镜像）新增环境变量 UPDATE_SOURCE，可选值 github 或 gitee，默认为 gitee，用于选择更新的源。\n盒子截图 png 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：（需要更新 docker 镜像）新增环境变量 UPDATE_SOURCE，可选值 github 或 gitee，默认为 gitee，用于选择更新的源。\n盒子截图 png 需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "修复：数据库迁移错误",
         "修复：标题参数 DTS 无法正确识别",
