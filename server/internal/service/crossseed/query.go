@@ -121,14 +121,18 @@ func buildCurrentTorrentsSubquery(dbType string) string {
 }
 
 func (s *CrossSeedService) UniquePaths() (map[string]any, error) {
-	currentTorrentsSubquery := buildCurrentTorrentsSubquery(s.repo.DBType())
-	query := fmt.Sprintf(`
-		SELECT DISTINCT ct.save_path
-		FROM seed_parameters sp
-		JOIN (%s) ct ON sp.hash = ct.hash
-		WHERE ct.save_path IS NOT NULL AND ct.save_path != ''
-		ORDER BY ct.save_path
-	`, currentTorrentsSubquery)
+	query := `
+		SELECT DISTINCT t.save_path
+		FROM torrents t
+		WHERE (t.is_hidden = 0 OR t.is_hidden IS NULL)
+		  AND t.save_path IS NOT NULL AND t.save_path != ''
+		  AND EXISTS (
+			SELECT 1
+			FROM seed_parameters sp
+			WHERE sp.hash = t.hash
+		  )
+		ORDER BY t.save_path
+	`
 	paths, err := s.repo.RawStrings(query, "save_path")
 	if err != nil {
 		return nil, err
@@ -266,18 +270,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 	if err != nil {
 		targetSites = []string{}
 	}
-	uniquePaths, err := s.repo.RawStrings(`
-		SELECT DISTINCT ct.save_path
-		FROM seed_parameters sp
-		JOIN (`+currentTorrentsSubquery+`) ct ON sp.hash = ct.hash
-		WHERE ct.save_path IS NOT NULL AND ct.save_path != ''
-		ORDER BY ct.save_path
-	`, "save_path")
-	if err != nil {
-		uniquePaths = []string{}
-	}
-
-	return map[string]any{
+	result := map[string]any{
 		"success":          true,
 		"data":             pageData,
 		"count":            len(pageData),
@@ -285,9 +278,19 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		"page":             params.Page,
 		"page_size":        params.PageSize,
 		"reverse_mappings": reversemapping.Build(nil),
-		"unique_paths":     uniquePaths,
 		"target_sites":     targetSites,
-	}, nil
+	}
+
+	if params.IncludeUniquePaths {
+		uniquePaths, err := s.UniquePaths()
+		if err == nil {
+			if values, ok := uniquePaths["unique_paths"]; ok {
+				result["unique_paths"] = values
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[string]any, int) {

@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,11 @@ func (h *CrossSeedHandler) UniquePaths(c *gin.Context) {
 }
 
 func (h *CrossSeedHandler) Data(c *gin.Context) {
+	includeUniquePaths := true
+	if raw := strings.TrimSpace(c.Query("include_unique_paths")); raw != "" {
+		includeUniquePaths = boolQuery(c, "include_unique_paths")
+	}
+
 	params := service.CrossSeedQueryParams{
 		Page:               intQuery(c, "page", 1),
 		PageSize:           intQuery(c, "page_size", 20),
@@ -35,6 +41,7 @@ func (h *CrossSeedHandler) Data(c *gin.Context) {
 		IsDeleted:          c.Query("is_deleted"),
 		ExcludeTargetSites: c.Query("exclude_target_sites"),
 		ReviewStatus:       c.Query("review_status"),
+		IncludeUniquePaths: includeUniquePaths,
 	}
 	result, err := h.service.QueryData(params)
 	if err != nil {

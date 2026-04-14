@@ -747,6 +747,15 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 
 func (m *SchemaManager) indexSpecs() []schemaIndexSpec {
 	return []schemaIndexSpec{
+		{table: "torrents", name: "idx_torrents_hash", columns: []string{"hash"}},
+		{table: "torrents", name: "idx_torrents_hash_last_seen", columns: []string{"hash", "last_seen"}},
+		{table: "torrents", name: "idx_torrents_hidden_hash_last_seen", columns: []string{"is_hidden", "hash", "last_seen"}},
+		{table: "torrents", name: "idx_torrents_name_size_sites_hidden", columns: []string{"name", "size", "sites", "is_hidden"}},
+		{table: "seed_parameters", name: "idx_seed_parameters_hash", columns: []string{"hash"}},
+		{table: "seed_parameters", name: "idx_seed_parameters_created_at", columns: []string{"created_at"}},
+		{table: "seed_parameters", name: "idx_seed_parameters_torrent_site", columns: []string{"torrent_id", "site_name"}},
+		{table: "seed_parameters", name: "idx_seed_parameters_reviewed_created", columns: []string{"is_reviewed", "created_at"}},
+
 		{table: "publish_queue_tasks", name: "idx_publish_queue_status_next", columns: []string{"status", "next_run_at"}},
 		{table: "publish_queue_tasks", name: "idx_publish_queue_group_id", columns: []string{"group_id"}},
 		{table: "publish_queue_tasks", name: "idx_publish_queue_created_at", columns: []string{"created_at"}},

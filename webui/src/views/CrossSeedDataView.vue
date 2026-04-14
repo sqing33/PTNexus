@@ -27,7 +27,7 @@
         style="margin-right: 15px"
         :disabled="isDeleteMode"
       >
-        批量转种
+        {{ batchCrossSeedButtonText }}
       </el-button>
 
       <!-- 查看BDInfo记录按钮 -->
@@ -94,21 +94,17 @@
     </div>
 
     <!-- 筛选器弹窗 -->
-    <div
-      v-if="filterDialogVisible"
-      class="filter-overlay"
-      @click.self="filterDialogVisible = false"
-    >
+    <div v-if="filterDialogVisible" class="filter-overlay" @click.self="closeFilterDialog">
       <el-card class="filter-card">
         <template #header>
           <div class="filter-card-header">
             <span>筛选选项</span>
-            <el-button type="danger" circle @click="filterDialogVisible = false" plain>X</el-button>
+            <el-button type="danger" circle @click="closeFilterDialog" plain>X</el-button>
           </div>
         </template>
         <div class="filter-card-body">
           <el-divider content-position="left">保存路径</el-divider>
-          <div class="path-tree-container">
+          <div v-loading="uniquePathsLoading" class="path-tree-container">
             <el-tree
               ref="pathTreeRef"
               :data="pathTreeData"
@@ -168,7 +164,7 @@
           </div>
         </div>
         <div class="filter-card-footer">
-          <el-button @click="filterDialogVisible = false">取消</el-button>
+          <el-button @click="closeFilterDialog">取消</el-button>
           <el-button type="primary" @click="applyFilters">确认</el-button>
         </div>
       </el-card>
@@ -346,7 +342,9 @@
           <template #default="scope">
             <div class="mapped-cell datetime-cell">
               {{
-                scope.row.is_deleted ? getRestrictionText(scope.row) : formatDateTime(scope.row.updated_at)
+                scope.row.is_deleted
+                  ? getRestrictionText(scope.row)
+                  : formatDateTime(scope.row.updated_at)
               }}
             </div>
           </template>
@@ -543,6 +541,7 @@ const error = ref<string | null>(null)
 
 // 批量转种相关
 const selectedRows = ref<SeedParameter[]>([])
+const pendingBatchCrossSeedAfterFilter = ref(false)
 
 // 批量获取数据相关
 const batchFetchDialogVisible = ref<boolean>(false)
@@ -557,6 +556,11 @@ const recordDialogVisible = ref<boolean>(false)
 const pathTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
 const pathTreeData = ref<PathNode[]>([])
 const uniquePaths = ref<string[]>([])
+const uniquePathsLoaded = ref(false)
+const uniquePathsLoading = ref(false)
+
+let fetchSequence = 0
+let searchDebounceTimer: ReturnType<typeof window.setTimeout> | null = null
 
 // 表格高度
 const tableMaxHeight = ref<number>(window.innerHeight - 80)
@@ -644,6 +648,21 @@ const selectedTargetSite = computed({
 const clearSelectedTargetSite = () => {
   tempFilters.value.excludeTargetSites = ''
 }
+
+const batchCrossSeedButtonText = computed(() => {
+  const selectedCount = selectedRows.value.length
+  const targetSiteName = activeFilters.value.excludeTargetSites.trim()
+
+  if (selectedCount === 0) {
+    return '批量转种'
+  }
+
+  if (targetSiteName) {
+    return `转种到 ${targetSiteName} (${selectedCount})`
+  }
+
+  return `批量转种 (${selectedCount})`
+})
 
 // 辅助函数：获取映射后的中文值
 const getMappedValue = (category: keyof ReverseMappings, standardValue: string) => {
@@ -865,6 +884,7 @@ const buildPathTree = (paths: string[]): PathNode[] => {
 }
 
 const fetchData = async () => {
+  const requestId = ++fetchSequence
   loading.value = true
   error.value = null
   try {
@@ -876,6 +896,7 @@ const fetchData = async () => {
       is_deleted: activeFilters.value.isDeleted,
       exclude_target_sites: activeFilters.value.excludeTargetSites,
       review_status: reviewStatusFilter.value, // 新增：检查状态筛选参数
+      include_unique_paths: '0',
     })
 
     // 调试日志：检查筛选参数
@@ -885,6 +906,10 @@ const fetchData = async () => {
 
     const response = await axios.get(`/api/cross-seed-data?${params.toString()}`)
     const result = response.data
+
+    if (requestId !== fetchSequence) {
+      return
+    }
 
     if (result.success) {
       tableData.value = result.data
@@ -899,6 +924,7 @@ const fetchData = async () => {
       if (result.unique_paths) {
         uniquePaths.value = result.unique_paths
         pathTreeData.value = buildPathTree(result.unique_paths)
+        uniquePathsLoaded.value = true
       }
 
       // 更新目标站点列表
@@ -929,17 +955,55 @@ const fetchData = async () => {
       ElMessage.error(result.error || '获取数据失败')
     }
   } catch (e: unknown) {
+    if (requestId !== fetchSequence) {
+      return
+    }
+
     const message = axios.isAxiosError(e)
-      ? ((e.response?.data as { message?: string; error?: string } | undefined)?.message ||
+      ? (e.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (e.response?.data as { error?: string } | undefined)?.error ||
-        e.message)
+        e.message
       : e instanceof Error
         ? e.message
         : '网络错误'
     error.value = message
     ElMessage.error(message)
   } finally {
-    loading.value = false
+    if (requestId === fetchSequence) {
+      loading.value = false
+    }
+  }
+}
+
+const loadUniquePaths = async (force = false) => {
+  if (uniquePathsLoading.value || (uniquePathsLoaded.value && !force)) {
+    return
+  }
+
+  uniquePathsLoading.value = true
+  try {
+    const response = await axios.get('/api/cross-seed-data/unique-paths')
+    const result = response.data
+
+    if (!result.success) {
+      throw new Error(result.error || '加载路径列表失败')
+    }
+
+    const paths = Array.isArray(result.unique_paths) ? result.unique_paths : []
+    uniquePaths.value = paths
+    pathTreeData.value = buildPathTree(paths)
+    uniquePathsLoaded.value = true
+  } catch (e) {
+    const message = axios.isAxiosError(e)
+      ? (e.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (e.response?.data as { error?: string } | undefined)?.error ||
+        e.message
+      : e instanceof Error
+        ? e.message
+        : '加载路径列表失败'
+    ElMessage.error(message)
+  } finally {
+    uniquePathsLoading.value = false
   }
 }
 
@@ -953,7 +1017,7 @@ const saveUiSettings = async () => {
     await axios.post('/api/ui_settings/cross_seed', settingsToSave)
   } catch (e: unknown) {
     const message = axios.isAxiosError(e)
-      ? ((e.response?.data as { message?: string } | undefined)?.message || e.message)
+      ? (e.response?.data as { message?: string } | undefined)?.message || e.message
       : e instanceof Error
         ? e.message
         : String(e)
@@ -999,18 +1063,26 @@ const clearFilters = () => {
   saveUiSettings()
 }
 
+const closeFilterDialog = () => {
+  filterDialogVisible.value = false
+  pendingBatchCrossSeedAfterFilter.value = false
+}
+
 // 打开筛选对话框
-const openFilterDialog = () => {
+const openFilterDialog = async () => {
   // 将当前活动的筛选条件复制到临时筛选条件
   tempFilters.value = { ...activeFilters.value }
   filterDialogVisible.value = true
-  nextTick(() => {
-    // 如果已有选中的路径，设置树的选中状态
-    if (pathTreeRef.value && activeFilters.value.paths.length > 0) {
-      // 设置树的选中状态
-      pathTreeRef.value.setCheckedKeys(activeFilters.value.paths, false)
-    }
-  })
+
+  if (!uniquePathsLoaded.value) {
+    await loadUniquePaths()
+  }
+
+  await nextTick()
+
+  if (pathTreeRef.value) {
+    pathTreeRef.value.setCheckedKeys(activeFilters.value.paths, false)
+  }
 }
 
 // 应用筛选条件
@@ -1024,10 +1096,19 @@ const applyFilters = () => {
   // 将临时筛选条件应用为活动筛选条件
   activeFilters.value = { ...tempFilters.value }
   filterDialogVisible.value = false
+  const shouldContinueBatchCrossSeed =
+    pendingBatchCrossSeedAfterFilter.value &&
+    selectedRows.value.length > 0 &&
+    activeFilters.value.excludeTargetSites.trim() !== ''
+  pendingBatchCrossSeedAfterFilter.value = false
   // 重置到第一页并获取数据
   currentPage.value = 1
   fetchData()
   saveUiSettings()
+
+  if (shouldContinueBatchCrossSeed) {
+    void handleBatchCrossSeed(activeFilters.value.excludeTargetSites.trim())
+  }
 }
 
 const crossSeedStore = useCrossSeedStore()
@@ -1037,9 +1118,15 @@ const uiInitializing = ref(true)
 // 监听搜索查询的变化，自动触发搜索
 watch(searchQuery, () => {
   if (uiInitializing.value) return
-  currentPage.value = 1
-  fetchData()
-  saveUiSettings()
+  if (searchDebounceTimer !== null) {
+    window.clearTimeout(searchDebounceTimer)
+  }
+  searchDebounceTimer = window.setTimeout(() => {
+    currentPage.value = 1
+    void fetchData()
+    void saveUiSettings()
+    searchDebounceTimer = null
+  }, 300)
 })
 
 // 控制转种弹窗的显示
@@ -1105,9 +1192,9 @@ const handleEdit = async (row: SeedParameter) => {
     }
   } catch (error: unknown) {
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (error.response?.data as { error?: string } | undefined)?.error ||
-        error.message)
+        error.message
       : error instanceof Error
         ? error.message
         : '网络错误'
@@ -1148,9 +1235,9 @@ const handleDelete = async (row: SeedParameter) => {
   } catch (error: unknown) {
     if (error === 'cancel' || error === 'close') return
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (error.response?.data as { error?: string } | undefined)?.error ||
-        error.message)
+        error.message
       : error instanceof Error
         ? error.message
         : '网络错误'
@@ -1302,10 +1389,15 @@ const handleSelectionChange = (selection: SeedParameter[]) => {
 
 // 处理批量转种按钮点击
 const handleBatchCrossSeedButtonClick = () => {
-  const targetSiteName = activeFilters.value.excludeTargetSites.trim()
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要批量转种的条目')
+    return
+  }
 
-  if (!targetSiteName || selectedRows.value.length === 0) {
-    openFilterDialog()
+  const targetSiteName = activeFilters.value.excludeTargetSites.trim()
+  if (!targetSiteName) {
+    pendingBatchCrossSeedAfterFilter.value = true
+    void openFilterDialog()
     return
   }
 
@@ -1313,12 +1405,17 @@ const handleBatchCrossSeedButtonClick = () => {
 }
 
 // 处理批量转种
-const handleBatchCrossSeed = async () => {
+const handleBatchCrossSeed = async (targetSiteOverride?: string) => {
   // 直接使用筛选中的站点
-  const targetSiteName = activeFilters.value.excludeTargetSites
+  const targetSiteName = (targetSiteOverride || activeFilters.value.excludeTargetSites).trim()
 
-  if (!targetSiteName || targetSiteName.trim() === '') {
+  if (!targetSiteName) {
     ElMessage.warning('请先在筛选中选择目标站点')
+    return
+  }
+
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要批量转种的条目')
     return
   }
 
@@ -1367,9 +1464,9 @@ const handleBatchCrossSeed = async () => {
     }
   } catch (error: unknown) {
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (error.response?.data as { error?: string } | undefined)?.error ||
-        error.message)
+        error.message
       : error instanceof Error
         ? error.message
         : '网络错误'
@@ -1447,9 +1544,9 @@ const executeBatchDelete = async () => {
   } catch (error: unknown) {
     if (error === 'cancel' || error === 'close') return
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (error.response?.data as { error?: string } | undefined)?.error ||
-        error.message)
+        error.message
       : error instanceof Error
         ? error.message
         : '网络错误'
@@ -1480,6 +1577,9 @@ const openRecordViewDialog = () => {
 }
 
 onUnmounted(() => {
+  if (searchDebounceTimer !== null) {
+    window.clearTimeout(searchDebounceTimer)
+  }
   window.removeEventListener('resize', handleResize)
 })
 </script>
