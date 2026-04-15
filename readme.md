@@ -256,6 +256,10 @@ wget -O - https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-
 
 # 更新日志
 
+### v4.0.10（2026.04.15）
+
+- 优化：编辑种子时无异常可直接完成，仅在检测到异常时要求浏览完整预览
+
 ### v4.0.9（2026.04.15）
 
 - 新增：恢复 Gitee 更新源（gitee.com/jadylc/PTNexus），支持 GitHub + Gitee 双源并行探测

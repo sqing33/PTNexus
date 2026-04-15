@@ -4,10 +4,19 @@
     <div v-if="activeStep === 0" class="button-group">
       <transition name="el-fade-in-linear">
         <div v-if="showCompleteButton" class="check-hint">
-          修改完成后请预览一遍种子信息确保无误后完成修改！
+          无异常可直接完成，也可先预览。
         </div>
       </transition>
       <el-button @click="handleCancelClick">取消</el-button>
+
+      <el-button
+        v-if="showCompleteButton"
+        type="primary"
+        @click="handleCompleteClick"
+        :disabled="isLoading || isNextButtonDisabled"
+      >
+        修改完成
+      </el-button>
 
       <el-button type="primary" @click="goToPublishPreviewStep" :disabled="isNextButtonDisabled">
         下一步：发布参数预览
@@ -31,21 +40,21 @@
         type="primary"
         @click="handleCompleteClick"
         v-if="showCompleteButton"
-        :disabled="isLoading || !isScrolledToBottom"
+        :disabled="isLoading || (isNextButtonDisabled && !isScrolledToBottom)"
       >
         修改完成
       </el-button>
 
       <el-button type="primary" @click="handleScrollOrNextStep" :disabled="isLoading">
-        {{ isScrolledToBottom ? '下一步：选择发布站点' : '继续浏览 ↓' }}
+        {{ isNextButtonDisabled && !isScrolledToBottom ? '继续浏览 ↓' : '下一步：选择发布站点' }}
       </el-button>
 
       <transition name="el-fade-in-linear">
-        <div v-if="!isScrolledToBottom" class="validation-hint">
+        <div v-if="isNextButtonDisabled && !isScrolledToBottom" class="validation-hint">
           <el-icon class="hint-icon">
             <Warning />
           </el-icon>
-          <span>请先浏览完所有参数信息再继续</span>
+          <span>检测到异常，请先浏览完参数信息</span>
         </div>
       </transition>
     </div>

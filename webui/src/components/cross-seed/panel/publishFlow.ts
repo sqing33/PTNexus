@@ -802,9 +802,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     requestAnimationFrame(animate)
   }
 
-  // 步骤1：点击"下一步"按钮的处理（未到底先滚动，到底再跳转）
+  // 步骤1：点击"下一步"按钮的处理（仅在存在自动校验异常时要求先完整浏览）
   const handleScrollOrNextStep = () => {
-    if (isScrolledToBottom.value) {
+    if (!isNextButtonDisabled.value || isScrolledToBottom.value) {
       goToSelectSiteStep()
     } else {
       scrollPreviewToBottom()
