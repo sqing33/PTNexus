@@ -990,7 +990,7 @@ func proxyToBatchEnhancer(w http.ResponseWriter, r *http.Request) {
 func main() {
 	log.Println("PT Nexus 更新器启动...")
 	log.Println("监听端口:", updaterPort)
-	log.Printf("更新源策略: 自动并行探测 GitHub")
+	log.Printf("更新源策略: 自动并行探测 GitHub + Gitee")
 
 	// 检查定时配置
 	schedule := loadScheduleConfig()

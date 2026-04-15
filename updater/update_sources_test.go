@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestManifestCandidatesDoNotIncludeGiteeByDefault(t *testing.T) {
+func TestManifestCandidatesIncludeGitee(t *testing.T) {
 	t.Setenv("UPDATE_MANIFEST_URL", "")
 
 	candidates := manifestCandidates("v4.0.2")
@@ -15,10 +15,15 @@ func TestManifestCandidatesDoNotIncludeGiteeByDefault(t *testing.T) {
 		t.Fatal("expected non-empty candidates")
 	}
 
+	hasGitee := false
 	for _, item := range candidates {
 		if strings.Contains(strings.ToLower(item), "gitee") {
-			t.Fatalf("unexpected gitee candidate: %s", item)
+			hasGitee = true
+			break
 		}
+	}
+	if !hasGitee {
+		t.Fatal("expected at least one gitee candidate in manifest candidates")
 	}
 }
 

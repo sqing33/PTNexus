@@ -256,6 +256,10 @@ wget -O - https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-
 
 # 更新日志
 
+### v4.0.9（2026.04.15）
+
+- 新增：恢复 Gitee 更新源（gitee.com/jadylc/PTNexus），支持 GitHub + Gitee 双源并行探测
+
 ### v4.0.8（2026.04.15）
 
 - 修复：种子官组字段仅匹配后缀样式，避免将站点分组误写入 torrents.group

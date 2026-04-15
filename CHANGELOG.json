@@ -5,6 +5,10 @@
       "url": "https://github.com/jadylc/PTNexus/releases/download/{version}/{filename}"
     },
     {
+      "name": "gitee",
+      "url": "https://gitee.com/jadylc/PTNexus/releases/download/{version}/{filename}"
+    },
+    {
       "name": "github-proxy",
       "url": "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/{version}/{filename}"
     },
@@ -14,6 +18,13 @@
     }
   ],
   "history": [
+    {
+      "version": "v4.0.9",
+      "date": "2026.04.15",
+      "changes": [
+        "新增：恢复 Gitee 更新源（gitee.com/jadylc/PTNexus），支持 GitHub + Gitee 双源并行探测"
+      ]
+    },
     {
       "version": "v4.0.8",
       "date": "2026.04.15",

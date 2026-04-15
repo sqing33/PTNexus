@@ -15,6 +15,11 @@ const (
 	githubManifestReleaseLatestURL   = "https://github.com/jadylc/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
 	githubManifestRawMainURL         = "https://raw.githubusercontent.com/jadylc/PTNexus/main/UPDATE_MANIFEST.json"
 	githubManifestRawMasterURL       = "https://raw.githubusercontent.com/jadylc/PTNexus/master/UPDATE_MANIFEST.json"
+
+	giteeManifestReleaseURLTemplate = "https://gitee.com/jadylc/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
+	giteeManifestReleaseLatestURL   = "https://gitee.com/jadylc/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
+	giteeManifestRawMainURL         = "https://gitee.com/jadylc/PTNexus/raw/main/UPDATE_MANIFEST.json"
+	giteeManifestRawMasterURL       = "https://gitee.com/jadylc/PTNexus/raw/master/UPDATE_MANIFEST.json"
 )
 
 func normalizeURLCandidates(urls ...string) []string {
@@ -43,6 +48,7 @@ func manifestReleaseCandidatesForVersion(version string) []string {
 	escaped := url.PathEscape(clean)
 	return []string{
 		fmt.Sprintf(githubManifestReleaseURLTemplate, escaped),
+		fmt.Sprintf(giteeManifestReleaseURLTemplate, escaped),
 	}
 }
 
@@ -56,8 +62,11 @@ func manifestCandidates(versionHints ...string) []string {
 	}
 	candidates = append(candidates,
 		githubManifestReleaseLatestURL,
+		giteeManifestReleaseLatestURL,
 		githubManifestRawMainURL,
+		giteeManifestRawMainURL,
 		githubManifestRawMasterURL,
+		giteeManifestRawMasterURL,
 	)
 	return normalizeURLCandidates(candidates...)
 }
