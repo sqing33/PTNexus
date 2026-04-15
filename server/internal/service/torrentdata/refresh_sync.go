@@ -436,12 +436,17 @@ func (m refreshGroupMatcher) Match(name string, snapshotGroup string) string {
 	if len(partialMatches) > 0 {
 		return longestString(partialMatches)
 	}
+
+	// 兜底只接受显式“后缀样式”的 group（如 -WiKi），避免将下载器分类/站点标签误判为官组。
 	return m.matchSnapshotGroup(snapshotGroup)
 }
 
 func (m refreshGroupMatcher) matchSnapshotGroup(snapshotGroup string) string {
 	trimmed := strings.TrimSpace(snapshotGroup)
 	if trimmed == "" {
+		return ""
+	}
+	if !strings.HasPrefix(trimmed, "-") {
 		return ""
 	}
 	if strings.Contains(trimmed, ",") {
