@@ -1,41 +1,46 @@
 {
   "schema": 2,
   "latest": {
-    "version": "v4.0.6",
+    "version": "v4.0.8",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.6/ptnexus-runtime-linux-amd64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.8/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
         "size": 11163781,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://github.com/jadylc/PTNexus/releases/download/v4.0.6/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.6/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.6/ptnexus-runtime-linux-amd64.tar.gz"
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.8/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.8/ptnexus-runtime-linux-amd64.tar.gz"
         ]
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.6/ptnexus-runtime-linux-arm64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.8/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
         "size": 10104449,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://github.com/jadylc/PTNexus/releases/download/v4.0.6/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.6/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.6/ptnexus-runtime-linux-arm64.tar.gz"
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.8/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.8/ptnexus-runtime-linux-arm64.tar.gz"
         ]
       }
     ],
-    "date": "2026.04.14"
+    "date": "2026.04.15"
   },
   "history": [
     {
-      "version": "v4.0.6",
-      "date": "2026.04.14",
+      "version": "v4.0.8",
+      "date": "2026.04.15",
+      "changes": [
+        "修复：种子官组字段仅匹配后缀样式，避免将站点分组误写入 torrents.group"
+      ]
+    },
+    {
+      "version": "v4.0.7",
+      "date": "2026.04.15",
       "changes": [
         "修复：同步在线更新元数据与镜像版本号，避免版本显示与镜像实际版本不一致"
       ]

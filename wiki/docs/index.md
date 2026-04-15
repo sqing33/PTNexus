@@ -121,6 +121,14 @@
 
 # 更新日志
 
+### v4.0.8（2026.04.15）
+
+- 修复：种子官组字段仅匹配后缀样式，避免将站点分组误写入 torrents.group
+
+### v4.0.7（2026.04.15）
+
+- 修复：同步在线更新元数据与镜像版本号，避免版本显示与镜像实际版本不一致
+
 ### v4.0.2（2026.03.21）
 
 - 修改：盒子端脚本下载地址
@@ -264,7 +272,7 @@
 ### v3.4.7（2026.01.08）
 
 > **注：修改 Github 仓库地址为 'https://github.com/jadylc/PTNexus'，因为 'pt-nexus' 缺失横杠无法搜索到，以至于有人在安装的时候安装到了 'nexusphp'。
-结算画面： 'https://img1.pixhost.to/images/11481/682419724_4ba3b6c6-d528-471d-b898-c05c88ea4332.png'
+结算画面： 'https://img1.pixhost.to/images/11481/682419724_4ba3b6c6-d528-471d-b898-c05c88ea4332.png' 
 新的盒子端安装地址为 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash**
 
 - 修改：从 mediainfo 与 bdinfo 获取音频编码的选择
