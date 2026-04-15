@@ -1015,6 +1015,7 @@ jobs:
           import json
           import os
           import pathlib
+          import time
           import urllib.request
           import urllib.error
           import mimetypes
@@ -1027,8 +1028,9 @@ jobs:
           repo = "PTNexus"
           api_base = f"https://gitee.com/api/v5/repos/{owner}/{repo}"
           assets_dir = pathlib.Path(f"dist/release-assets/{version}")
+          MAX_RETRIES = 3
 
-          def gitee_api(path, data=None, method="GET"):
+          def gitee_api(path, data=None, method="GET", retries=MAX_RETRIES):
               url = f"{api_base}/{path}"
               sep = "&" if "?" in url else "?"
               url = f"{url}{sep}access_token={token}"
@@ -1039,20 +1041,36 @@ jobs:
               else:
                   req = urllib.request.Request(url, method=method)
               print(f"  Gitee API {method} {path}")
-              try:
-                  with urllib.request.urlopen(req, timeout=60) as resp:
-                      raw = resp.read().decode("utf-8", errors="replace")
-                      if not raw or not raw.strip():
-                          print(f"  API returned empty body")
-                          return None
-                      result = json.loads(raw)
-                      if result is None:
-                          print(f"  API returned null")
-                      return result
-              except urllib.error.HTTPError as exc:
-                  detail = exc.read().decode("utf-8", errors="replace")
-                  print(f"  Gitee API error: {exc.code} {detail[:500]}")
-                  raise
+              for attempt in range(1, retries + 1):
+                  try:
+                      with urllib.request.urlopen(req, timeout=120) as resp:
+                          raw = resp.read().decode("utf-8", errors="replace")
+                          if not raw or not raw.strip():
+                              print(f"  API returned empty body")
+                              return None
+                          result = json.loads(raw)
+                          if result is None:
+                              print(f"  API returned null")
+                          return result
+                  except urllib.error.HTTPError as exc:
+                      detail = exc.read().decode("utf-8", errors="replace")
+                      print(f"  Gitee API error: {exc.code} {detail[:500]}")
+                      raise
+                  except (urllib.error.URLError, OSError) as exc:
+                      if attempt < retries:
+                          wait = 10 * attempt
+                          print(f"  Attempt {attempt}/{retries} failed: {exc}. Retrying in {wait}s...")
+                          time.sleep(wait)
+                          # Rebuild request for retry (urlopen consumes data)
+                          if data is not None:
+                              encoded = json.dumps(data).encode("utf-8")
+                              req = urllib.request.Request(url, data=encoded, method=method)
+                              req.add_header("Content-Type", "application/json")
+                          else:
+                              req = urllib.request.Request(url, method=method)
+                      else:
+                          print(f"  All {retries} attempts failed for {method} {path}")
+                          raise
 
           # Step 1: Ensure tag exists on Gitee
           print("Step 1: Checking tag on Gitee...")
@@ -1107,13 +1125,16 @@ jobs:
 
           # Step 4: Upload assets
           print("Step 4: Uploading assets...")
+          failed_uploads = []
           if not assets_dir.is_dir():
               print(f"  No assets directory found: {assets_dir}")
           else:
               for asset_file in sorted(assets_dir.iterdir()):
                   if not asset_file.is_file():
                       continue
-                  print(f"  Uploading {asset_file.name} ({asset_file.stat().st_size} bytes)...")
+                  file_size = asset_file.stat().st_size
+                  print(f"  Uploading {asset_file.name} ({file_size} bytes)...")
+
                   boundary = uuid.uuid4().hex
                   filename = asset_file.name
                   mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
@@ -1128,17 +1149,33 @@ jobs:
                   ).encode("utf-8") + file_data + f"\r\n--{boundary}--\r\n".encode("utf-8")
 
                   upload_url = f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/{release_id}/attach_files?access_token={token}"
-                  req = urllib.request.Request(upload_url, data=body_parts, method="POST")
-                  req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-                  try:
-                      with urllib.request.urlopen(req, timeout=300) as resp:
-                          raw = resp.read().decode("utf-8", errors="replace")
-                          result = json.loads(raw) if raw.strip() else {}
-                          print(f"    Uploaded: {result.get('file_name', filename) if result else filename}")
-                  except urllib.error.HTTPError as exc:
-                      detail = exc.read().decode("utf-8", errors="replace")
-                      print(f"    Failed to upload {filename}: {exc.code} {detail[:500]}")
+                  uploaded = False
+                  for attempt in range(1, MAX_RETRIES + 1):
+                      try:
+                          req = urllib.request.Request(upload_url, data=body_parts, method="POST")
+                          req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+                          with urllib.request.urlopen(req, timeout=300) as resp:
+                              raw = resp.read().decode("utf-8", errors="replace")
+                              result = json.loads(raw) if raw.strip() else {}
+                              print(f"    Uploaded: {result.get('file_name', filename) if result else filename}")
+                              uploaded = True
+                              break
+                      except urllib.error.HTTPError as exc:
+                          detail = exc.read().decode("utf-8", errors="replace")
+                          print(f"    Failed to upload {filename}: {exc.code} {detail[:500]}")
+                          break
+                      except (urllib.error.URLError, OSError) as exc:
+                          if attempt < MAX_RETRIES:
+                              wait = 15 * attempt
+                              print(f"    Upload attempt {attempt}/{MAX_RETRIES} failed: {exc}. Retrying in {wait}s...")
+                              time.sleep(wait)
+                          else:
+                              print(f"    All {MAX_RETRIES} upload attempts failed for {filename}")
+                  if not uploaded:
+                      failed_uploads.append(filename)
 
+          if failed_uploads:
+              print(f"::warning::Gitee release created but {len(failed_uploads)} file(s) failed to upload: {', '.join(failed_uploads)}")
           print("Gitee release sync completed!")
           PY
 
