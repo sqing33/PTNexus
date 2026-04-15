@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,9 +11,19 @@ import (
 func TestManifestCandidatesIncludeGitee(t *testing.T) {
 	t.Setenv("UPDATE_MANIFEST_URL", "")
 
-	candidates := manifestCandidates("v4.0.2")
+	version := "v4.0.2"
+	candidates := manifestCandidates(version)
 	if len(candidates) == 0 {
 		t.Fatal("expected non-empty candidates")
+	}
+
+	expectedGitHub := fmt.Sprintf(githubManifestReleaseURLTemplate, version)
+	expectedGitee := fmt.Sprintf(giteeManifestReleaseURLTemplate, version)
+	if candidates[0] != expectedGitHub {
+		t.Fatalf("expected first candidate %q, got %q", expectedGitHub, candidates[0])
+	}
+	if candidates[1] != expectedGitee {
+		t.Fatalf("expected second candidate %q, got %q", expectedGitee, candidates[1])
 	}
 
 	hasGitee := false

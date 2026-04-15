@@ -286,11 +286,7 @@ func runAutoUpdate() {
 
 	localVersion := getLocalVersion()
 
-	manifest, err := getRemoteManifest()
-	if err != nil {
-		log.Printf("自动更新失败：无法获取更新清单: %v", err)
-		return
-	}
+	manifest, err := getRemoteManifest(localVersion)
 
 	remoteVersion := strings.TrimSpace(manifest.Latest.Version)
 	shouldForce := manifest.Latest.ForceUpdate || hasCrossVersionForceUpdate(localVersion, manifest.History)
@@ -451,7 +447,7 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	var disableUpdateFromManifest bool
 	manifestReady := false
 	var desktopInstaller *DesktopInstallerAsset
-	if manifest, err := getRemoteManifest(); err != nil {
+	if manifest, err := getRemoteManifest(localVersion); err != nil {
 		log.Printf("检查更新时获取更新清单失败: %v", err)
 	} else {
 		manifestVersion = strings.TrimSpace(manifest.Latest.Version)
@@ -594,7 +590,7 @@ func pullUpdateHandler(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 			defer cancel()
 
-			manifest, err := getRemoteManifest()
+			manifest, err := getRemoteManifest(getLocalVersion())
 			if err != nil {
 				return err
 			}
@@ -899,7 +895,7 @@ func getChangelogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manifest, err := getRemoteManifest()
+	manifest, err := getRemoteManifest(getLocalVersion())
 	if err != nil {
 		log.Printf("获取远程更新历史失败: %v", err)
 		json.NewEncoder(w).Encode(map[string]interface{}{
