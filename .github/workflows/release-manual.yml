@@ -47,6 +47,27 @@ env:
   BROWSER_EXTENSION_ASSET_NAME: pt-nexus-browser-extension.zip
 
 jobs:
+  sync_to_gitee:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 推送到 Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "GITEE_TOKEN 未配置，跳过同步"
+            exit 0
+          fi
+          git remote add gitee https://oauth2:${GITEE_TOKEN}@gitee.com/jadylc/PTNexus.git 2>/dev/null || true
+          git push gitee HEAD:go --force
+          git push gitee --tags --force
+
   meta:
     runs-on: ubuntu-latest
     outputs:
@@ -969,4 +990,109 @@ jobs:
           files: dist/release-assets/${{ needs.meta.outputs.version }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 11. 同步代码到 Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "GITEE_TOKEN 未配置，跳过同步"
+            exit 0
+          fi
+          git remote add gitee https://oauth2:${GITEE_TOKEN}@gitee.com/jadylc/PTNexus.git 2>/dev/null || true
+          git push gitee HEAD:go --force
+
+      - name: 12. 发布版本到 Gitee Release
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          BODY: ${{ needs.meta.outputs.body }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import urllib.request
+          import urllib.error
+          import urllib.parse
+          import mimetypes
+          import uuid
+
+          token = os.environ["GITEE_TOKEN"].strip()
+          version = os.environ["VERSION"].strip()
+          body = os.environ.get("BODY", "").strip() or "自动发布"
+          owner = "jadylc"
+          repo = "PTNexus"
+          api_base = f"https://gitee.com/api/v5/repos/{owner}/{repo}"
+          assets_dir = pathlib.Path(f"dist/release-assets/{version}")
+
+          def gitee_api(url, data=None, method="GET"):
+              if data is not None:
+                  data = json.dumps(data).encode("utf-8")
+              req = urllib.request.Request(url, data=data, method=method)
+              req.add_header("Content-Type", "application/json")
+              if data is None:
+                  sep = "&" if "?" in url else "?"
+                  url = f"{url}{sep}access_token={token}"
+                  req = urllib.request.Request(url, method=method)
+              else:
+                  sep = "&" if "?" in url else "?"
+                  url = f"{url}{sep}access_token={token}"
+                  req = urllib.request.Request(url, data=data, method=method)
+                  req.add_header("Content-Type", "application/json")
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as resp:
+                      return json.load(resp)
+              except urllib.error.HTTPError as exc:
+                  detail = exc.read().decode("utf-8", errors="replace")
+                  print(f"Gitee API error: {exc.code} {detail}")
+                  raise
+
+          # Check if release already exists
+          try:
+              release = gitee_api(f"{api_base}/releases/tags/{version}")
+              release_id = release["id"]
+              print(f"Release {version} already exists (id={release_id}), updating...")
+          except urllib.error.HTTPError:
+              release = gitee_api(f"{api_base}/releases", data={
+                  "tag_name": version,
+                  "name": version,
+                  "body": body,
+                  "target_commitish": "go",
+                  "prerelease": False,
+              }, method="POST")
+              release_id = release["id"]
+              print(f"Created Gitee release {version} (id={release_id})")
+
+          # Upload assets
+          for asset_file in sorted(assets_dir.iterdir()):
+              if not asset_file.is_file():
+                  continue
+              print(f"Uploading {asset_file.name}...")
+              boundary = uuid.uuid4().hex
+              filename = asset_file.name
+              mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+              with open(asset_file, "rb") as f:
+                  file_data = f.read()
+
+              body_parts = (
+                  f"--{boundary}\r\n"
+                  f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+                  f"Content-Type: {mime}\r\n\r\n"
+              ).encode("utf-8") + file_data + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+              upload_url = f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/{release_id}/attach_files?access_token={token}"
+              req = urllib.request.Request(upload_url, data=body_parts, method="POST")
+              req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+              try:
+                  with urllib.request.urlopen(req, timeout=300) as resp:
+                      result = json.load(resp)
+                      print(f"  Uploaded: {result.get('file_name', filename)}")
+              except urllib.error.HTTPError as exc:
+                  detail = exc.read().decode("utf-8", errors="replace")
+                  print(f"  Failed to upload {filename}: {exc.code} {detail}")
+
+          print("Gitee release sync completed!")
+          PY
 
