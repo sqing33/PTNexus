@@ -256,6 +256,11 @@ wget -O - https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-
 
 # 更新日志
 
+### v4.0.12（2026.04.15）
+
+- 修复：在线更新优先使用版本化更新清单地址，避免 latest/raw 地址失效导致获取 UPDATE_MANIFEST 失败
+- 修复：发布 release_assets 到 Gitee Release 时改用共享脚本上传，避免内联上传器长时间卡住不结束
+
 ### v4.0.11（2026.04.15）
 
 - 修复：编辑种子第一步直接点击修改完成时会先保存修改内容，避免数据丢失

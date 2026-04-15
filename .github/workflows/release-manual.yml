@@ -1011,171 +1011,22 @@ jobs:
           VERSION: ${{ needs.meta.outputs.version }}
           BODY: ${{ needs.meta.outputs.body }}
         run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import pathlib
-          import time
-          import urllib.request
-          import urllib.error
-          import mimetypes
-          import uuid
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "GITEE_TOKEN 未配置，跳过 Gitee Release 发布"
+            exit 0
+          fi
 
-          token = os.environ["GITEE_TOKEN"].strip()
-          version = os.environ["VERSION"].strip()
-          body = os.environ.get("BODY", "").strip() or "自动发布"
-          owner = "jadylc"
-          repo = "PTNexus"
-          api_base = f"https://gitee.com/api/v5/repos/{owner}/{repo}"
-          assets_dir = pathlib.Path(f"dist/release-assets/{version}")
-          MAX_RETRIES = 3
+          body_file="$(mktemp)"
+          trap 'rm -f "$body_file"' EXIT
+          printf '%s\n' "$BODY" > "$body_file"
 
-          def gitee_api(path, data=None, method="GET", retries=MAX_RETRIES):
-              url = f"{api_base}/{path}"
-              sep = "&" if "?" in url else "?"
-              url = f"{url}{sep}access_token={token}"
-              if data is not None:
-                  encoded = json.dumps(data).encode("utf-8")
-                  req = urllib.request.Request(url, data=encoded, method=method)
-                  req.add_header("Content-Type", "application/json")
-              else:
-                  req = urllib.request.Request(url, method=method)
-              print(f"  Gitee API {method} {path}")
-              for attempt in range(1, retries + 1):
-                  try:
-                      with urllib.request.urlopen(req, timeout=120) as resp:
-                          raw = resp.read().decode("utf-8", errors="replace")
-                          if not raw or not raw.strip():
-                              print(f"  API returned empty body")
-                              return None
-                          result = json.loads(raw)
-                          if result is None:
-                              print(f"  API returned null")
-                          return result
-                  except urllib.error.HTTPError as exc:
-                      detail = exc.read().decode("utf-8", errors="replace")
-                      print(f"  Gitee API error: {exc.code} {detail[:500]}")
-                      raise
-                  except (urllib.error.URLError, OSError) as exc:
-                      if attempt < retries:
-                          wait = 10 * attempt
-                          print(f"  Attempt {attempt}/{retries} failed: {exc}. Retrying in {wait}s...")
-                          time.sleep(wait)
-                          # Rebuild request for retry (urlopen consumes data)
-                          if data is not None:
-                              encoded = json.dumps(data).encode("utf-8")
-                              req = urllib.request.Request(url, data=encoded, method=method)
-                              req.add_header("Content-Type", "application/json")
-                          else:
-                              req = urllib.request.Request(url, method=method)
-                      else:
-                          print(f"  All {retries} attempts failed for {method} {path}")
-                          raise
-
-          # Step 1: Ensure tag exists on Gitee
-          print("Step 1: Checking tag on Gitee...")
-          try:
-              tags = gitee_api("tags")
-              tag_names = [t.get("name") for t in (tags or [])] or []
-              if version not in tag_names:
-                  print(f"  Tag {version} not found, creating...")
-                  gitee_api("tags", data={
-                      "tag_name": version,
-                      "ref": "go",
-                      "message": f"Release {version}",
-                  }, method="POST")
-              else:
-                  print(f"  Tag {version} already exists")
-          except urllib.error.HTTPError:
-              pass
-
-          # Step 2: Check if release already exists
-          print("Step 2: Checking release...")
-          release_id = None
-          try:
-              release = gitee_api(f"releases/tags/{version}")
-              if release and isinstance(release, dict):
-                  release_id = release.get("id")
-                  if release_id:
-                      print(f"  Release {version} already exists (id={release_id})")
-                  else:
-                      print(f"  Tag lookup returned no id: {json.dumps(release, ensure_ascii=False)[:300]}")
-          except urllib.error.HTTPError as exc:
-              if exc.code == 404:
-                  print(f"  Release {version} not found, creating...")
-              else:
-                  raise
-
-          # Step 3: Create release if needed
-          if not release_id:
-              print("Step 3: Creating release...")
-              release = gitee_api("releases", data={
-                  "tag_name": version,
-                  "name": version,
-                  "body": body,
-                  "target_commitish": "go",
-                  "prerelease": False,
-              }, method="POST")
-              if release and isinstance(release, dict):
-                  release_id = release.get("id")
-              if not release_id:
-                  print(f"  Failed to create release. Response: {json.dumps(release, ensure_ascii=False)[:500] if release else 'None'}")
-                  raise SystemExit("Gitee release creation failed: no id returned")
-              print(f"  Created Gitee release {version} (id={release_id})")
-
-          # Step 4: Upload assets
-          print("Step 4: Uploading assets...")
-          failed_uploads = []
-          if not assets_dir.is_dir():
-              print(f"  No assets directory found: {assets_dir}")
-          else:
-              for asset_file in sorted(assets_dir.iterdir()):
-                  if not asset_file.is_file():
-                      continue
-                  file_size = asset_file.stat().st_size
-                  print(f"  Uploading {asset_file.name} ({file_size} bytes)...")
-
-                  boundary = uuid.uuid4().hex
-                  filename = asset_file.name
-                  mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-
-                  with open(asset_file, "rb") as f:
-                      file_data = f.read()
-
-                  body_parts = (
-                      f"--{boundary}\r\n"
-                      f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-                      f"Content-Type: {mime}\r\n\r\n"
-                  ).encode("utf-8") + file_data + f"\r\n--{boundary}--\r\n".encode("utf-8")
-
-                  upload_url = f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/{release_id}/attach_files?access_token={token}"
-                  uploaded = False
-                  for attempt in range(1, MAX_RETRIES + 1):
-                      try:
-                          req = urllib.request.Request(upload_url, data=body_parts, method="POST")
-                          req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-                          with urllib.request.urlopen(req, timeout=300) as resp:
-                              raw = resp.read().decode("utf-8", errors="replace")
-                              result = json.loads(raw) if raw.strip() else {}
-                              print(f"    Uploaded: {result.get('file_name', filename) if result else filename}")
-                              uploaded = True
-                              break
-                      except urllib.error.HTTPError as exc:
-                          detail = exc.read().decode("utf-8", errors="replace")
-                          print(f"    Failed to upload {filename}: {exc.code} {detail[:500]}")
-                          break
-                      except (urllib.error.URLError, OSError) as exc:
-                          if attempt < MAX_RETRIES:
-                              wait = 15 * attempt
-                              print(f"    Upload attempt {attempt}/{MAX_RETRIES} failed: {exc}. Retrying in {wait}s...")
-                              time.sleep(wait)
-                          else:
-                              print(f"    All {MAX_RETRIES} upload attempts failed for {filename}")
-                  if not uploaded:
-                      failed_uploads.append(filename)
-
-          if failed_uploads:
-              print(f"::warning::Gitee release created but {len(failed_uploads)} file(s) failed to upload: {', '.join(failed_uploads)}")
-          print("Gitee release sync completed!")
-          PY
+          python3 scripts/publish-gitee-release.py \
+            --owner jadylc \
+            --repo PTNexus \
+            --tag "$VERSION" \
+            --target-commitish go \
+            --name "$VERSION" \
+            --body-file "$body_file" \
+            --assets-dir "dist/release-assets/$VERSION" \
+            --token "$GITEE_TOKEN"
 
