@@ -5,6 +5,8 @@ on:
     branches:
       - go
       - main
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       build_runtime:
@@ -27,8 +29,14 @@ on:
         required: false
         default: true
         type: boolean
+      run_cloudflare_import:
+        description: 是否执行 Cloudflare 豆瓣-IMDb 映射导入
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "0 22 * * *" # Asia/Shanghai 06:00
+    - cron: "0 0 * * 0"
 
 permissions:
   contents: write
@@ -36,8 +44,6 @@ permissions:
 
 env:
   IMAGE_NAME: pt-nexus
-  GITEE_OWNER: sqing33
-  GITEE_REPO: PTNexus
   BROWSER_EXTENSION_ASSET_NAME: pt-nexus-browser-extension.zip
 
 jobs:
@@ -52,6 +58,7 @@ jobs:
       run_proxy: ${{ steps.meta.outputs.run_proxy }}
       run_docker_image: ${{ steps.meta.outputs.run_docker_image }}
       run_release_assets: ${{ steps.meta.outputs.run_release_assets }}
+      run_cloudflare_import: ${{ steps.meta.outputs.run_cloudflare_import }}
       should_run: ${{ steps.meta.outputs.should_run }}
       skip_reason: ${{ steps.meta.outputs.skip_reason }}
 
@@ -65,6 +72,9 @@ jobs:
         id: meta
         env:
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -124,10 +134,28 @@ jobs:
           body = "\n".join(lines).strip() or "自动发布。"
 
           event_name = os.environ["EVENT_NAME"]
+          event_schedule = os.environ.get("EVENT_SCHEDULE", "").strip()
+          ref_type = os.environ.get("REF_TYPE", "").strip()
+          ref_name = os.environ.get("REF_NAME", "").strip()
           latest_release_version = ""
           skip_reason = ""
+          run_cloudflare_import = False
 
-          if event_name in {"schedule", "push"}:
+          if event_name == "schedule" and event_schedule == "0 0 * * 0":
+              should_run = True
+              run_runtime = False
+              run_desktop_windows = False
+              run_proxy = False
+              run_docker_image = False
+              run_cloudflare_import = True
+          elif event_name == "push" and ref_type == "tag":
+              should_run = True
+              run_runtime = False
+              run_desktop_windows = False
+              run_proxy = False
+              run_docker_image = True
+              run_cloudflare_import = False
+          elif event_name in {"schedule", "push"}:
               headers = {"User-Agent": "ptnexus-ci"}
               token = os.environ.get("GITHUB_TOKEN", "").strip()
               if token:
@@ -151,7 +179,8 @@ jobs:
               run_runtime = should_run
               run_desktop_windows = should_run
               run_proxy = should_run
-              run_docker_image = should_run
+              run_docker_image = True if event_name == "push" else should_run
+              run_cloudflare_import = False
               if not should_run:
                   trigger_name = "定时构建" if event_name == "schedule" else "推送构建"
                   skip_reason = (
@@ -167,8 +196,9 @@ jobs:
               run_desktop_windows = to_bool(inputs.get("build_desktop_windows"), True)
               run_proxy = to_bool(inputs.get("build_proxy"), True)
               run_docker_image = to_bool(inputs.get("build_docker_image"), True)
+              run_cloudflare_import = to_bool(inputs.get("run_cloudflare_import"), False)
               should_run = any(
-                  (run_runtime, run_desktop_windows, run_proxy, run_docker_image)
+                  (run_runtime, run_desktop_windows, run_proxy, run_docker_image, run_cloudflare_import)
               )
               if not should_run:
                   skip_reason = "手动触发时未选择任何构建项，跳过执行。"
@@ -183,6 +213,7 @@ jobs:
           write_output("run_proxy", str(run_proxy).lower())
           write_output("run_docker_image", str(run_docker_image).lower())
           write_output("run_release_assets", str(run_release_assets).lower())
+          write_output("run_cloudflare_import", str(run_cloudflare_import).lower())
           write_output("should_run", str(should_run).lower())
           write_multiline_output("skip_reason", skip_reason)
           PY
@@ -195,6 +226,7 @@ jobs:
           RUN_DESKTOP_WINDOWS: ${{ steps.meta.outputs.run_desktop_windows }}
           RUN_PROXY: ${{ steps.meta.outputs.run_proxy }}
           RUN_DOCKER_IMAGE: ${{ steps.meta.outputs.run_docker_image }}
+          RUN_CLOUDFLARE_IMPORT: ${{ steps.meta.outputs.run_cloudflare_import }}
           SHOULD_RUN: ${{ steps.meta.outputs.should_run }}
           SKIP_REASON: ${{ steps.meta.outputs.skip_reason }}
         run: |
@@ -205,10 +237,107 @@ jobs:
           echo "run_desktop_windows=${RUN_DESKTOP_WINDOWS}"
           echo "run_proxy=${RUN_PROXY}"
           echo "run_docker_image=${RUN_DOCKER_IMAGE}"
+          echo "run_cloudflare_import=${RUN_CLOUDFLARE_IMPORT}"
           echo "should_run=${SHOULD_RUN}"
           if [[ "${SHOULD_RUN}" != "true" && -n "${SKIP_REASON}" ]]; then
             echo "${SKIP_REASON}"
           fi
+
+  cloudflare_import:
+    needs: meta
+    if: ${{ needs.meta.outputs.run_cloudflare_import == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
+
+      - name: 2. 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 3. 安装最新 Wrangler
+        run: npm install -g wrangler@latest
+
+      - name: 4. 创建 Wrangler 配置
+        run: |
+          DB_NAME="pt-nexus"
+
+          echo "name = \"d1-importer-project\"" > wrangler.toml
+          echo "compatibility_date = \"$(date +'%Y-%m-%d')\"" >> wrangler.toml
+          echo "" >> wrangler.toml
+          echo "[[d1_databases]]" >> wrangler.toml
+          echo "binding = \"$DB_NAME\"" >> wrangler.toml
+          echo "database_name = \"$DB_NAME\"" >> wrangler.toml
+          echo "database_id = \"${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}\"" >> wrangler.toml
+
+          cat wrangler.toml
+
+      - name: 5. 下载 JSON 数据
+        run: |
+          JSON_URL="https://raw.githubusercontent.com/ourbits/PtGen/refs/heads/main/internal_map/douban_imdb_map.json"
+          curl -o data.json "$JSON_URL"
+
+      - name: 6. 导入数据到 Cloudflare D1
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          cat <<'EOF' > import.mjs
+          import fs from 'fs';
+          import { execSync } from 'child_process';
+
+          const DATABASE_NAME = 'pt-nexus';
+          const INPUT_FILE = './data.json';
+          const BATCH_SIZE = 1000;
+
+          function escapeSqlValue(value) {
+            if (value === null || typeof value === 'undefined') {
+              return 'NULL';
+            }
+            return `'${String(value).replace(/'/g, "''")}'`;
+          }
+
+          async function main() {
+            console.log(`[步骤 1/2] 读取本地已下载的数据...`);
+            const content = fs.readFileSync(INPUT_FILE, 'utf-8');
+            const allData = JSON.parse(content);
+            console.log(`读取成功! 共 ${allData.length} 条记录。`);
+
+            console.log(`[步骤 2/2] 开始分批导入数据到云端...`);
+            for (let i = 0; i < allData.length; i += BATCH_SIZE) {
+              const batch = allData.slice(i, i + BATCH_SIZE);
+              const currentBatchNum = i / BATCH_SIZE + 1;
+              const totalBatches = Math.ceil(allData.length / BATCH_SIZE);
+
+              const valuesString = batch.map(item =>
+                `(${escapeSqlValue(item.dbid)}, ${escapeSqlValue(item.imdbid)}, ${escapeSqlValue(item.name)}, ${escapeSqlValue(item.year)})`
+              ).join(',');
+
+              if (!valuesString) continue;
+
+              const fullSql = `INSERT OR IGNORE INTO "douban-imdb" (doubanid, imdbid, name, year) VALUES ${valuesString};`;
+              const escapedSql = fullSql.replace(/'/g, "'\\''");
+
+              const command = `wrangler d1 execute ${DATABASE_NAME} --remote --command '${escapedSql}'`;
+
+              try {
+                console.log(`正在推送第 ${currentBatchNum} / ${totalBatches} 批数据...`);
+                execSync(command, { stdio: 'inherit' });
+              } catch (e) {
+                console.error(`第 ${currentBatchNum} 批数据推送失败:`, e.message);
+                process.exit(1);
+              }
+            }
+
+            console.log('全部数据导入/更新成功!');
+          }
+
+          main();
+          EOF
+
+          node import.mjs
 
   runtime:
     needs: meta
@@ -620,18 +749,78 @@ jobs:
 
       - name: 6. 准备 Docker 标签
         id: prepare-tags
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
           GHCR_REPO="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          FULL_TAGS="${GHCR_REPO}:${{ needs.meta.outputs.version }},${GHCR_REPO}:latest"
+          TAGS=()
+
+          add_tag() {
+            local image_repo="$1"
+            local image_tag="$2"
+            if [[ -n "$image_repo" && -n "$image_tag" ]]; then
+              TAGS+=("${image_repo}:${image_tag}")
+            fi
+          }
+
+          add_semver_tags() {
+            local image_repo="$1"
+            local raw="$2"
+            local cleaned="${raw#v}"
+            IFS='.' read -r major minor patch <<< "$cleaned"
+            add_tag "$image_repo" "$cleaned"
+            if [[ -n "$major" && -n "$minor" ]]; then
+              add_tag "$image_repo" "${major}.${minor}"
+            fi
+            if [[ -n "$major" ]]; then
+              add_tag "$image_repo" "${major}"
+            fi
+          }
+
+          if [[ "${EVENT_NAME}" == "push" && "${REF_TYPE}" == "tag" ]]; then
+            add_semver_tags "$GHCR_REPO" "$REF_NAME"
+          elif [[ "${EVENT_NAME}" == "push" && "${REF_TYPE}" == "branch" ]]; then
+            add_tag "$GHCR_REPO" "$REF_NAME"
+            if [[ "${REF_NAME}" == "main" ]]; then
+              add_tag "$GHCR_REPO" "latest"
+            fi
+            if [[ "${VERSION}" != "" ]]; then
+              add_tag "$GHCR_REPO" "$VERSION"
+            fi
+          else
+            if [[ "${VERSION}" != "" ]]; then
+              add_tag "$GHCR_REPO" "$VERSION"
+            fi
+            add_tag "$GHCR_REPO" "latest"
+          fi
 
           if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
             DOCKERHUB_REPO="${DOCKERHUB_USERNAME}/${{ env.IMAGE_NAME }}"
-            FULL_TAGS="${FULL_TAGS},${DOCKERHUB_REPO}:${{ needs.meta.outputs.version }},${DOCKERHUB_REPO}:latest"
+            if [[ "${EVENT_NAME}" == "push" && "${REF_TYPE}" == "tag" ]]; then
+              add_semver_tags "$DOCKERHUB_REPO" "$REF_NAME"
+            elif [[ "${EVENT_NAME}" == "push" && "${REF_TYPE}" == "branch" ]]; then
+              add_tag "$DOCKERHUB_REPO" "$REF_NAME"
+              if [[ "${REF_NAME}" == "main" ]]; then
+                add_tag "$DOCKERHUB_REPO" "latest"
+              fi
+              if [[ "${VERSION}" != "" ]]; then
+                add_tag "$DOCKERHUB_REPO" "$VERSION"
+              fi
+            else
+              if [[ "${VERSION}" != "" ]]; then
+                add_tag "$DOCKERHUB_REPO" "$VERSION"
+              fi
+              add_tag "$DOCKERHUB_REPO" "latest"
+            fi
           else
             echo "::warning::DOCKERHUB_USERNAME 或 DOCKERHUB_TOKEN 未配置，本次只推送 GHCR。"
           fi
 
-          echo "tags=$FULL_TAGS" >> "$GITHUB_OUTPUT"
+          UNIQUE_TAGS="$(printf '%s\n' "${TAGS[@]}" | awk 'NF && !seen[$0]++' | paste -sd, -)"
+          echo "tags=$UNIQUE_TAGS" >> "$GITHUB_OUTPUT"
 
       - name: 7. 构建并推送 AMD64/ARM64 Docker 镜像
         uses: docker/build-push-action@v6
@@ -780,28 +969,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 11. 发布版本 Gitee Release
-        continue-on-error: true
-        env:
-          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
-          RELEASE_BODY: ${{ needs.meta.outputs.body }}
-          TARGET_COMMITISH: ${{ github.ref_name }}
-          VERSION: ${{ needs.meta.outputs.version }}
-        run: |
-          if [[ -z "${GITEE_ACCESS_TOKEN}" ]]; then
-            echo "::warning::GITEE_ACCESS_TOKEN 未配置，跳过 Gitee Release 发布。"
-            exit 0
-          fi
-
-          BODY_FILE="${RUNNER_TEMP}/gitee-release-body.md"
-          printf '%s\n' "${RELEASE_BODY}" > "${BODY_FILE}"
-
-          python3 scripts/publish-gitee-release.py \
-            --owner "${GITEE_OWNER}" \
-            --repo "${GITEE_REPO}" \
-            --tag "${VERSION}" \
-            --target-commitish "${TARGET_COMMITISH}" \
-            --name "${VERSION}" \
-            --body-file "${BODY_FILE}" \
-            --assets-dir "dist/release-assets/${VERSION}" \
-            --token "${GITEE_ACCESS_TOKEN}"
