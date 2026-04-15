@@ -34,6 +34,11 @@ on:
         required: false
         default: false
         type: boolean
+      sync_to_gitee:
+        description: 是否同步代码与 Release 到 Gitee
+        required: false
+        default: true
+        type: boolean
   schedule:
     - cron: "0 22 * * *" # Asia/Shanghai 06:00
     - cron: "0 0 * * 0"
@@ -49,7 +54,7 @@ env:
 jobs:
   sync_to_gitee:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.sync_to_gitee) }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -80,6 +85,7 @@ jobs:
       run_docker_image: ${{ steps.meta.outputs.run_docker_image }}
       run_release_assets: ${{ steps.meta.outputs.run_release_assets }}
       run_cloudflare_import: ${{ steps.meta.outputs.run_cloudflare_import }}
+      sync_to_gitee: ${{ steps.meta.outputs.sync_to_gitee }}
       should_run: ${{ steps.meta.outputs.should_run }}
       skip_reason: ${{ steps.meta.outputs.skip_reason }}
 
@@ -235,6 +241,10 @@ jobs:
           write_output("run_docker_image", str(run_docker_image).lower())
           write_output("run_release_assets", str(run_release_assets).lower())
           write_output("run_cloudflare_import", str(run_cloudflare_import).lower())
+          sync_to_gitee = True
+          if event_name == "workflow_dispatch":
+              sync_to_gitee = to_bool(inputs.get("sync_to_gitee"), True)
+          write_output("sync_to_gitee", str(sync_to_gitee).lower())
           write_output("should_run", str(should_run).lower())
           write_multiline_output("skip_reason", skip_reason)
           PY
@@ -992,6 +1002,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 11. 同步代码到 Gitee
+        if: ${{ needs.meta.outputs.sync_to_gitee == 'true' }}
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
@@ -1003,6 +1014,7 @@ jobs:
           git push gitee HEAD:go --force
 
       - name: 12. 发布版本到 Gitee Release
+        if: ${{ needs.meta.outputs.sync_to_gitee == 'true' }}
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           VERSION: ${{ needs.meta.outputs.version }}
