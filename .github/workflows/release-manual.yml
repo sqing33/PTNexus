@@ -1047,31 +1047,59 @@ jobs:
                   req.add_header("Content-Type", "application/json")
               else:
                   req = urllib.request.Request(url, method=method)
+              print(f"  Gitee API {method} {path}")
               try:
                   with urllib.request.urlopen(req, timeout=60) as resp:
                       raw = resp.read().decode("utf-8", errors="replace")
-                      return json.loads(raw)
+                      if not raw or not raw.strip():
+                          print(f"  API returned empty body")
+                          return None
+                      result = json.loads(raw)
+                      if result is None:
+                          print(f"  API returned null")
+                      return result
               except urllib.error.HTTPError as exc:
                   detail = exc.read().decode("utf-8", errors="replace")
-                  print(f"Gitee API error: {exc.code} {detail}")
+                  print(f"  Gitee API error: {exc.code} {detail[:500]}")
                   raise
 
-          # Check if release already exists
+          # Step 1: Ensure tag exists on Gitee
+          print("Step 1: Checking tag on Gitee...")
+          try:
+              tags = gitee_api("tags")
+              tag_names = [t.get("name") for t in (tags or [])] or []
+              if version not in tag_names:
+                  print(f"  Tag {version} not found, creating...")
+                  gitee_api("tags", data={
+                      "tag_name": version,
+                      "ref": "go",
+                      "message": f"Release {version}",
+                  }, method="POST")
+              else:
+                  print(f"  Tag {version} already exists")
+          except urllib.error.HTTPError:
+              pass
+
+          # Step 2: Check if release already exists
+          print("Step 2: Checking release...")
           release_id = None
           try:
               release = gitee_api(f"releases/tags/{version}")
-              release_id = release.get("id")
-              if release_id:
-                  print(f"Release {version} already exists (id={release_id})")
-              else:
-                  print(f"Warning: tag lookup returned no id: {json.dumps(release, ensure_ascii=False)[:500]}")
+              if release and isinstance(release, dict):
+                  release_id = release.get("id")
+                  if release_id:
+                      print(f"  Release {version} already exists (id={release_id})")
+                  else:
+                      print(f"  Tag lookup returned no id: {json.dumps(release, ensure_ascii=False)[:300]}")
           except urllib.error.HTTPError as exc:
               if exc.code == 404:
-                  print(f"Release {version} not found, creating...")
+                  print(f"  Release {version} not found, creating...")
               else:
                   raise
 
+          # Step 3: Create release if needed
           if not release_id:
+              print("Step 3: Creating release...")
               release = gitee_api("releases", data={
                   "tag_name": version,
                   "name": version,
@@ -1079,20 +1107,22 @@ jobs:
                   "target_commitish": "go",
                   "prerelease": False,
               }, method="POST")
-              release_id = release.get("id")
+              if release and isinstance(release, dict):
+                  release_id = release.get("id")
               if not release_id:
-                  print(f"Failed to create release. API response: {json.dumps(release, ensure_ascii=False)[:500]}")
+                  print(f"  Failed to create release. Response: {json.dumps(release, ensure_ascii=False)[:500] if release else 'None'}")
                   raise SystemExit("Gitee release creation failed: no id returned")
-              print(f"Created Gitee release {version} (id={release_id})")
+              print(f"  Created Gitee release {version} (id={release_id})")
 
-          # Upload assets
+          # Step 4: Upload assets
+          print("Step 4: Uploading assets...")
           if not assets_dir.is_dir():
-              print(f"No assets directory found: {assets_dir}")
+              print(f"  No assets directory found: {assets_dir}")
           else:
               for asset_file in sorted(assets_dir.iterdir()):
                   if not asset_file.is_file():
                       continue
-                  print(f"Uploading {asset_file.name} ({asset_file.stat().st_size} bytes)...")
+                  print(f"  Uploading {asset_file.name} ({asset_file.stat().st_size} bytes)...")
                   boundary = uuid.uuid4().hex
                   filename = asset_file.name
                   mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
@@ -1111,11 +1141,12 @@ jobs:
                   req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
                   try:
                       with urllib.request.urlopen(req, timeout=300) as resp:
-                          result = json.loads(resp.read().decode("utf-8", errors="replace"))
-                          print(f"  Uploaded: {result.get('file_name', filename)}")
+                          raw = resp.read().decode("utf-8", errors="replace")
+                          result = json.loads(raw) if raw.strip() else {}
+                          print(f"    Uploaded: {result.get('file_name', filename) if result else filename}")
                   except urllib.error.HTTPError as exc:
                       detail = exc.read().decode("utf-8", errors="replace")
-                      print(f"  Failed to upload {filename}: {exc.code} {detail}")
+                      print(f"    Failed to upload {filename}: {exc.code} {detail[:500]}")
 
           print("Gitee release sync completed!")
           PY
