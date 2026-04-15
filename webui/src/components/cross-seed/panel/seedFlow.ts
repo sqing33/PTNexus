@@ -63,6 +63,7 @@ export type SeedFlowApi = {
   saveAutoUpdateExistingTorrentSetting: () => Promise<void>
   fetchTorrentInfo: (prefetchedDbSeedInfo?: unknown) => Promise<void>
   handleTeamInput: (param: TitleComponent, value: string) => void
+  saveCurrentSeedEdits: () => Promise<boolean>
   goToPublishPreviewStep: () => Promise<void>
   goToSelectSiteStep: () => Promise<void>
   toggleSiteSelection: (siteName: string) => void
@@ -70,6 +71,12 @@ export type SeedFlowApi = {
   clearAllTargetSites: () => void
   invalidStandardParams: ComputedRef<Array<StandardParamKey | 'tags'>>
   allTagOptions: ComputedRef<TagOption[]>
+}
+
+type SaveSeedEditsOptions = {
+  loadingMessage: string
+  successMessage: string
+  moveToPreview: boolean
 }
 
 type DbSeedRecord = {
@@ -968,7 +975,11 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     }
   }
 
-  const goToPublishPreviewStep = async () => {
+  const saveSeedEdits = async ({
+    loadingMessage,
+    successMessage,
+    moveToPreview,
+  }: SaveSeedEditsOptions): Promise<boolean> => {
     // 打印从store获取的已存在站点信息
     console.log('=== 从store获取的已存在站点信息 ===')
     console.log('torrent.value:', torrent.value)
@@ -1006,7 +1017,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         duration: 0,
         showClose: true,
       })
-      return
+      return false
     }
 
     const currentTorrent = torrent.value
@@ -1017,14 +1028,14 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         duration: 0,
         showClose: true,
       })
-      return
+      return false
     }
 
     isLoading.value = true
     try {
       ElNotification({
         title: '正在处理',
-        message: '正在更新参数并生成预览...',
+        message: loadingMessage,
         type: 'info',
         duration: 0,
       })
@@ -1068,7 +1079,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           duration: 0,
           showClose: true,
         })
-        return
+        return false
       }
 
       console.log(`更新种子参数: ${torrentId} from ${siteName}`)
@@ -1145,24 +1156,46 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
         ElNotification.success({
           title: '更新成功',
-          message: '参数已更新并重新标准化，请核对预览内容。',
+          message: successMessage,
         })
 
-        activeStep.value = 1
-      } else {
-        ElNotification.error({
-          title: '更新失败',
-          message: response.data.message || '更新参数失败',
-          duration: 0,
-          showClose: true,
-        })
+        if (moveToPreview) {
+          activeStep.value = 1
+        }
+
+        return true
       }
+
+      ElNotification.error({
+        title: '更新失败',
+        message: response.data.message || '更新参数失败',
+        duration: 0,
+        showClose: true,
+      })
+      return false
     } catch (error) {
       ElNotification.closeAll()
       handleApiError(error, '更新预览数据时发生错误，请查看后台日志。')
+      return false
     } finally {
       isLoading.value = false
     }
+  }
+
+  const saveCurrentSeedEdits = async () => {
+    return saveSeedEdits({
+      loadingMessage: '正在保存种子修改...',
+      successMessage: '种子修改已保存。',
+      moveToPreview: false,
+    })
+  }
+
+  const goToPublishPreviewStep = async () => {
+    await saveSeedEdits({
+      loadingMessage: '正在更新参数并生成预览...',
+      successMessage: '参数已更新并重新标准化，请核对预览内容。',
+      moveToPreview: true,
+    })
   }
 
   // 【新增】计算属性：整合预设标签和当前已选标签，用于渲染下拉列表
@@ -1276,6 +1309,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     saveAutoUpdateExistingTorrentSetting,
     fetchTorrentInfo,
     handleTeamInput,
+    saveCurrentSeedEdits,
     goToPublishPreviewStep,
     goToSelectSiteStep,
     toggleSiteSelection,

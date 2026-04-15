@@ -2379,6 +2379,7 @@ const {
   saveAutoUpdateExistingTorrentSetting,
   fetchTorrentInfo,
   handleTeamInput,
+  saveCurrentSeedEdits,
   goToPublishPreviewStep,
   goToSelectSiteStep,
   toggleSiteSelection,
@@ -2549,6 +2550,7 @@ const publishFlow = createPublishFlow({
   showLogProgress,
 
   goToSelectSiteStep,
+  saveCurrentSeedEdits,
 
   invalidStandardParams,
   screenshotValid,

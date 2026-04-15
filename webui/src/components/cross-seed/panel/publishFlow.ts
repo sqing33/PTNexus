@@ -61,6 +61,7 @@ export type PublishFlowDeps = {
   showLogProgress: Ref<boolean>
 
   goToSelectSiteStep: () => Promise<void>
+  saveCurrentSeedEdits: () => Promise<boolean>
 
   invalidStandardParams: ComputedRef<Array<StandardParamKey | 'tags'>>
   screenshotValid: Ref<boolean>
@@ -75,7 +76,7 @@ export type PublishFlowApi = {
   handlePreviousStep: () => void
   handleCancelClick: () => void
   handleScrollOrNextStep: () => void
-  handleCompleteClick: () => void
+  handleCompleteClick: () => Promise<void>
   getMappedValue: (category: StandardParamKey) => string
   getMappedTags: () => string[]
   filteredTitleComponents: ComputedRef<TitleComponent[]>
@@ -126,6 +127,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     logProgressTaskId,
     showLogProgress,
     goToSelectSiteStep,
+    saveCurrentSeedEdits,
     invalidStandardParams,
     screenshotValid,
   } = deps
@@ -812,7 +814,14 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
   }
 
   // 处理完成按钮点击
-  const handleCompleteClick = () => {
+  const handleCompleteClick = async () => {
+    if (activeStep.value === 0) {
+      const saved = await saveCurrentSeedEdits()
+      if (!saved) {
+        return
+      }
+    }
+
     emit('complete')
   }
 
