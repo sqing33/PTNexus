@@ -1014,7 +1014,6 @@ jobs:
           import pathlib
           import urllib.request
           import urllib.error
-          import urllib.parse
           import mimetypes
           import uuid
 
@@ -1026,72 +1025,85 @@ jobs:
           api_base = f"https://gitee.com/api/v5/repos/{owner}/{repo}"
           assets_dir = pathlib.Path(f"dist/release-assets/{version}")
 
-          def gitee_api(url, data=None, method="GET"):
+          def gitee_api(path, data=None, method="GET"):
+              url = f"{api_base}/{path}"
+              sep = "&" if "?" in url else "?"
+              url = f"{url}{sep}access_token={token}"
               if data is not None:
-                  data = json.dumps(data).encode("utf-8")
-              req = urllib.request.Request(url, data=data, method=method)
-              req.add_header("Content-Type", "application/json")
-              if data is None:
-                  sep = "&" if "?" in url else "?"
-                  url = f"{url}{sep}access_token={token}"
-                  req = urllib.request.Request(url, method=method)
-              else:
-                  sep = "&" if "?" in url else "?"
-                  url = f"{url}{sep}access_token={token}"
-                  req = urllib.request.Request(url, data=data, method=method)
+                  encoded = json.dumps(data).encode("utf-8")
+                  req = urllib.request.Request(url, data=encoded, method=method)
                   req.add_header("Content-Type", "application/json")
+              else:
+                  req = urllib.request.Request(url, method=method)
               try:
                   with urllib.request.urlopen(req, timeout=60) as resp:
-                      return json.load(resp)
+                      raw = resp.read().decode("utf-8", errors="replace")
+                      return json.loads(raw)
               except urllib.error.HTTPError as exc:
                   detail = exc.read().decode("utf-8", errors="replace")
                   print(f"Gitee API error: {exc.code} {detail}")
                   raise
 
           # Check if release already exists
+          release_id = None
           try:
-              release = gitee_api(f"{api_base}/releases/tags/{version}")
-              release_id = release["id"]
-              print(f"Release {version} already exists (id={release_id}), updating...")
-          except urllib.error.HTTPError:
-              release = gitee_api(f"{api_base}/releases", data={
+              release = gitee_api(f"releases/tags/{version}")
+              release_id = release.get("id")
+              if release_id:
+                  print(f"Release {version} already exists (id={release_id})")
+              else:
+                  print(f"Warning: tag lookup returned no id: {json.dumps(release, ensure_ascii=False)[:500]}")
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  print(f"Release {version} not found, creating...")
+              else:
+                  raise
+
+          if not release_id:
+              release = gitee_api("releases", data={
                   "tag_name": version,
                   "name": version,
                   "body": body,
                   "target_commitish": "go",
                   "prerelease": False,
               }, method="POST")
-              release_id = release["id"]
+              release_id = release.get("id")
+              if not release_id:
+                  print(f"Failed to create release. API response: {json.dumps(release, ensure_ascii=False)[:500]}")
+                  raise SystemExit("Gitee release creation failed: no id returned")
               print(f"Created Gitee release {version} (id={release_id})")
 
           # Upload assets
-          for asset_file in sorted(assets_dir.iterdir()):
-              if not asset_file.is_file():
-                  continue
-              print(f"Uploading {asset_file.name}...")
-              boundary = uuid.uuid4().hex
-              filename = asset_file.name
-              mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+          if not assets_dir.is_dir():
+              print(f"No assets directory found: {assets_dir}")
+          else:
+              for asset_file in sorted(assets_dir.iterdir()):
+                  if not asset_file.is_file():
+                      continue
+                  print(f"Uploading {asset_file.name} ({asset_file.stat().st_size} bytes)...")
+                  boundary = uuid.uuid4().hex
+                  filename = asset_file.name
+                  mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
-              with open(asset_file, "rb") as f:
-                  file_data = f.read()
+                  with open(asset_file, "rb") as f:
+                      file_data = f.read()
 
-              body_parts = (
-                  f"--{boundary}\r\n"
-                  f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-                  f"Content-Type: {mime}\r\n\r\n"
-              ).encode("utf-8") + file_data + f"\r\n--{boundary}--\r\n".encode("utf-8")
+                  body_parts = (
+                      f"--{boundary}\r\n"
+                      f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+                      f"Content-Type: {mime}\r\n\r\n"
+                  ).encode("utf-8") + file_data + f"\r\n--{boundary}--\r\n".encode("utf-8")
 
-              upload_url = f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/{release_id}/attach_files?access_token={token}"
-              req = urllib.request.Request(upload_url, data=body_parts, method="POST")
-              req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-              try:
-                  with urllib.request.urlopen(req, timeout=300) as resp:
-                      result = json.load(resp)
-                      print(f"  Uploaded: {result.get('file_name', filename)}")
-              except urllib.error.HTTPError as exc:
-                  detail = exc.read().decode("utf-8", errors="replace")
-                  print(f"  Failed to upload {filename}: {exc.code} {detail}")
+                  upload_url = f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/{release_id}/attach_files?access_token={token}"
+                  req = urllib.request.Request(upload_url, data=body_parts, method="POST")
+                  req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+                  try:
+                      with urllib.request.urlopen(req, timeout=300) as resp:
+                          result = json.loads(resp.read().decode("utf-8", errors="replace"))
+                          print(f"  Uploaded: {result.get('file_name', filename)}")
+                  except urllib.error.HTTPError as exc:
+                      detail = exc.read().decode("utf-8", errors="replace")
+                      print(f"  Failed to upload {filename}: {exc.code} {detail}")
 
           print("Gitee release sync completed!")
           PY
