@@ -17,13 +17,13 @@ func TestManifestCandidatesIncludeGitee(t *testing.T) {
 		t.Fatal("expected non-empty candidates")
 	}
 
-	expectedGitHub := fmt.Sprintf(githubManifestReleaseURLTemplate, version)
 	expectedGitee := fmt.Sprintf(giteeManifestReleaseURLTemplate, version)
-	if candidates[0] != expectedGitHub {
-		t.Fatalf("expected first candidate %q, got %q", expectedGitHub, candidates[0])
+	expectedGitHub := fmt.Sprintf(githubManifestReleaseURLTemplate, version)
+	if candidates[0] != expectedGitee {
+		t.Fatalf("expected first candidate %q, got %q", expectedGitee, candidates[0])
 	}
-	if candidates[1] != expectedGitee {
-		t.Fatalf("expected second candidate %q, got %q", expectedGitee, candidates[1])
+	if candidates[1] != expectedGitHub {
+		t.Fatalf("expected second candidate %q, got %q", expectedGitHub, candidates[1])
 	}
 
 	hasGitee := false

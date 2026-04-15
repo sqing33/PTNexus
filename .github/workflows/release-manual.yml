@@ -1006,6 +1006,7 @@ jobs:
 
       - name: 11. 发布版本到 Gitee Release
         if: ${{ needs.meta.outputs.sync_to_gitee == 'true' }}
+        timeout-minutes: 5
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           VERSION: ${{ needs.meta.outputs.version }}

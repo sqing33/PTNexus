@@ -170,7 +170,14 @@ def upload_release_asset(owner: str, repo: str, release_id: int, token: str, fil
     url = f"{API_BASE}/repos/{owner}/{repo}/releases/{release_id}/attach_files"
     command = [
         "curl",
-        "-fsS",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--location",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        "60",
         "-X",
         "POST",
         "-H",
@@ -187,7 +194,10 @@ def upload_release_asset(owner: str, repo: str, release_id: int, token: str, fil
         f"file=@{file_path}",
         url,
     ]
-    completed = subprocess.run(command, capture_output=True, text=True)
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=90)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"upload {file_path.name} timed out after 90s") from exc
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         stdout = completed.stdout.strip()
@@ -289,6 +299,7 @@ def main() -> int:
             print(f"[gitee-release] replacing {path.name}")
             delete_release_asset(args.owner, args.repo, release_id, attach_id, args.token)
         upload_release_asset(args.owner, args.repo, release_id, args.token, path)
+        print(f"[gitee-release] uploaded {path.name}")
 
     print(f"[gitee-release] release ready: {release.get('html_url', '')}")
     return 0
