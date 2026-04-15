@@ -53,8 +53,9 @@ env:
 
 jobs:
   sync_to_gitee:
+    needs: meta
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.sync_to_gitee) }}
+    if: ${{ needs.meta.outputs.sync_to_gitee == 'true' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -868,6 +869,7 @@ jobs:
   release_assets:
     needs:
       - meta
+      - sync_to_gitee
       - runtime
       - desktop_windows
       - proxy
@@ -876,6 +878,7 @@ jobs:
         always() &&
         needs.meta.outputs.run_release_assets == 'true' &&
         needs.meta.result == 'success' &&
+        (needs.sync_to_gitee.result == 'success' || needs.sync_to_gitee.result == 'skipped') &&
         (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') &&
         (needs.desktop_windows.result == 'success' || needs.desktop_windows.result == 'skipped') &&
         (needs.proxy.result == 'success' || needs.proxy.result == 'skipped')
@@ -1001,19 +1004,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 11. 同步代码到 Gitee
-        if: ${{ needs.meta.outputs.sync_to_gitee == 'true' }}
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: |
-          if [ -z "$GITEE_TOKEN" ]; then
-            echo "GITEE_TOKEN 未配置，跳过同步"
-            exit 0
-          fi
-          git remote add gitee https://oauth2:${GITEE_TOKEN}@gitee.com/jadylc/PTNexus.git 2>/dev/null || true
-          git push gitee HEAD:go --force
-
-      - name: 12. 发布版本到 Gitee Release
+      - name: 11. 发布版本到 Gitee Release
         if: ${{ needs.meta.outputs.sync_to_gitee == 'true' }}
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
