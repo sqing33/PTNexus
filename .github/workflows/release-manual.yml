@@ -784,7 +784,8 @@ jobs:
             add_semver_tags "$GHCR_REPO" "$REF_NAME"
           elif [[ "${EVENT_NAME}" == "push" && "${REF_TYPE}" == "branch" ]]; then
             add_tag "$GHCR_REPO" "$REF_NAME"
-            if [[ "${REF_NAME}" == "main" ]]; then
+            # go 与 main 均为发布分支：推送时同步 latest，避免仅用 main 时 go 线镜像永远无 latest
+            if [[ "${REF_NAME}" == "main" || "${REF_NAME}" == "go" ]]; then
               add_tag "$GHCR_REPO" "latest"
             fi
             if [[ "${VERSION}" != "" ]]; then
@@ -803,7 +804,7 @@ jobs:
               add_semver_tags "$DOCKERHUB_REPO" "$REF_NAME"
             elif [[ "${EVENT_NAME}" == "push" && "${REF_TYPE}" == "branch" ]]; then
               add_tag "$DOCKERHUB_REPO" "$REF_NAME"
-              if [[ "${REF_NAME}" == "main" ]]; then
+              if [[ "${REF_NAME}" == "main" || "${REF_NAME}" == "go" ]]; then
                 add_tag "$DOCKERHUB_REPO" "latest"
               fi
               if [[ "${VERSION}" != "" ]]; then
