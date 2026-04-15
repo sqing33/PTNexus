@@ -34,6 +34,7 @@
 - 不显式传入构建开关时，脚本会逐项以 Y/N 询问是否构建在线更新文件、Windows 桌面安装包、盒子端代理、Docker 镜像
 - 传入 `--all` 时，会跳过交互并直接启用全部四项发布
 - 命令会先执行 `git push origin <branch>`，成功后再触发 `.github/workflows/release-manual.yml`
+- 推送到 `go` / `main` 分支，或推送 `v*` 标签时，也会直接触发同一套 GitHub Actions 工作流
 - 默认优先使用 `go` 分支；若仓库不存在 `go`，则回退到远端默认分支
 - 版本号与 Release 文案仍以 `CHANGELOG.json` 最新一条为准
 - 这是仓库级脚本，不需要进入 `webui/`，也不依赖 `npm` / `pnpm`
