@@ -57,6 +57,20 @@ func TestManifestCandidatesWithoutHintsUseLatestOnly(t *testing.T) {
 	}
 }
 
+func TestManifestVersionHintCandidatesExcludeLatestFallback(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	candidates := manifestVersionHintCandidates("v4.0.16")
+	if len(candidates) != 2 {
+		t.Fatalf("expected exactly 2 version-hint candidates, got %d: %#v", len(candidates), candidates)
+	}
+	if candidates[0] != fmt.Sprintf(giteeManifestReleaseURLTemplate, "v4.0.16") {
+		t.Fatalf("unexpected first candidate: %q", candidates[0])
+	}
+	if candidates[1] != fmt.Sprintf(githubManifestReleaseURLTemplate, "v4.0.16") {
+		t.Fatalf("unexpected second candidate: %q", candidates[1])
+	}
+}
+
 func TestManifestCandidatesDefaultToReleaseAssetsOnly(t *testing.T) {
 	t.Setenv("UPDATE_MANIFEST_URL", "")
 	t.Setenv(updateManifestRawFallbackEnv, "false")
@@ -201,6 +215,85 @@ func TestGetRemoteManifestForModeFallsBackToVersionHintsWhenLatestUnavailable(t 
 	}
 	if manifest == nil || manifest.Latest.Version != "v4.0.16" {
 		t.Fatalf("expected fallback manifest version v4.0.16, got %#v", manifest)
+	}
+}
+
+func TestGetRemoteManifestForModeUsesVersionHintWhenLatestIsStale(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv("UPDATE_OS", "linux")
+	t.Setenv("UPDATE_ARCH", "amd64")
+
+	oldGiteeLatest := giteeManifestReleaseLatestURL
+	oldGithubLatest := githubManifestReleaseLatestURL
+	oldGiteeTemplate := giteeManifestReleaseURLTemplate
+	oldGithubTemplate := githubManifestReleaseURLTemplate
+	t.Cleanup(func() {
+		giteeManifestReleaseLatestURL = oldGiteeLatest
+		githubManifestReleaseLatestURL = oldGithubLatest
+		giteeManifestReleaseURLTemplate = oldGiteeTemplate
+		githubManifestReleaseURLTemplate = oldGithubTemplate
+	})
+
+	latest := `{"schema":2,"latest":{"version":"v4.0.18","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"latestsha"}]},"history":[{"version":"v4.0.18","changes":["old latest"]}]}`
+	hinted := `{"schema":2,"latest":{"version":"v4.0.19","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"hintsha"}]},"history":[{"version":"v4.0.19","changes":["new hinted"]}]}`
+
+	server := newManifestTestServer(t, map[string]manifestTestResponse{
+		"/latest.json":  {body: latest},
+		"/v4.0.18.json": {body: latest},
+		"/v4.0.19.json": {body: hinted},
+	})
+
+	giteeManifestReleaseLatestURL = server.URL + "/latest.json"
+	githubManifestReleaseLatestURL = server.URL + "/latest.json"
+	giteeManifestReleaseURLTemplate = server.URL + "/%s.json"
+	githubManifestReleaseURLTemplate = server.URL + "/%s.json"
+
+	manifest, err := getRemoteManifestForMode(updateModeRuntimeInstall, "v4.0.19")
+	if err != nil {
+		t.Fatalf("expected hinted manifest fetch success, got error: %v", err)
+	}
+	if manifest == nil || manifest.Latest.Version != "v4.0.19" {
+		t.Fatalf("expected hinted manifest version v4.0.19, got %#v", manifest)
+	}
+}
+
+func TestGetRemoteManifestForModeKeepsLatestWhenItIsNewerThanHint(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv("UPDATE_OS", "linux")
+	t.Setenv("UPDATE_ARCH", "amd64")
+
+	oldGiteeLatest := giteeManifestReleaseLatestURL
+	oldGithubLatest := githubManifestReleaseLatestURL
+	oldGiteeTemplate := giteeManifestReleaseURLTemplate
+	oldGithubTemplate := githubManifestReleaseURLTemplate
+	t.Cleanup(func() {
+		giteeManifestReleaseLatestURL = oldGiteeLatest
+		githubManifestReleaseLatestURL = oldGithubLatest
+		giteeManifestReleaseURLTemplate = oldGiteeTemplate
+		githubManifestReleaseURLTemplate = oldGithubTemplate
+	})
+
+	latest := `{"schema":2,"latest":{"version":"v4.0.19","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"latestsha"}]},"history":[{"version":"v4.0.19","changes":["latest"]}]}`
+	hinted := `{"schema":2,"latest":{"version":"v4.0.18","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"hintsha"}]},"history":[{"version":"v4.0.18","changes":["hinted"]}]}`
+
+	server := newManifestTestServer(t, map[string]manifestTestResponse{
+		"/latest.json":  {body: latest},
+		"/v4.0.18.json": {body: hinted},
+	})
+
+	giteeManifestReleaseLatestURL = server.URL + "/latest.json"
+	githubManifestReleaseLatestURL = server.URL + "/latest.json"
+	giteeManifestReleaseURLTemplate = server.URL + "/%s.json"
+	githubManifestReleaseURLTemplate = server.URL + "/%s.json"
+
+	manifest, err := getRemoteManifestForMode(updateModeRuntimeInstall, "v4.0.18")
+	if err != nil {
+		t.Fatalf("expected latest manifest fetch success, got error: %v", err)
+	}
+	if manifest == nil || manifest.Latest.Version != "v4.0.19" {
+		t.Fatalf("expected latest manifest version v4.0.19, got %#v", manifest)
 	}
 }
 

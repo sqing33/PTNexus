@@ -158,10 +158,36 @@ func getRemoteManifestForMode(updateMode string, versionHints ...string) (*Updat
 	if err != nil && len(cleanHints) > 0 {
 		manifest, source, err = fetchJSONFromCandidates[UpdateManifest](
 			context.Background(),
-			manifestCandidates(cleanHints...),
+			manifestVersionHintCandidates(cleanHints...),
 			15*time.Second,
 			validator,
 		)
+	}
+	if err == nil && manifest != nil && len(cleanHints) > 0 {
+		currentVersion := strings.TrimSpace(manifest.Latest.Version)
+		needHintRefresh := currentVersion == ""
+		if !needHintRefresh {
+			for _, hint := range cleanHints {
+				if !isNewerVersion(currentVersion, hint) {
+					needHintRefresh = true
+					break
+				}
+			}
+		}
+		if needHintRefresh {
+			if hintedManifest, hintedSource, hintedErr := fetchJSONFromCandidates[UpdateManifest](
+				context.Background(),
+				manifestVersionHintCandidates(cleanHints...),
+				15*time.Second,
+				validator,
+			); hintedErr == nil && hintedManifest != nil {
+				hintedVersion := strings.TrimSpace(hintedManifest.Latest.Version)
+				if currentVersion == "" || isNewerVersion(hintedVersion, currentVersion) {
+					manifest = hintedManifest
+					source = hintedSource
+				}
+			}
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败: %w", err)

@@ -57,6 +57,16 @@ func manifestReleaseCandidatesForVersion(version string) []string {
 	}
 }
 
+func manifestVersionHintCandidates(versionHints ...string) []string {
+	override := strings.TrimSpace(getEnv("UPDATE_MANIFEST_URL", ""))
+	candidates := make([]string, 0, 1+len(versionHints)*2)
+	candidates = append(candidates, override)
+	for _, hint := range versionHints {
+		candidates = append(candidates, manifestReleaseCandidatesForVersion(hint)...)
+	}
+	return normalizeURLCandidates(candidates...)
+}
+
 func manifestCandidates(versionHints ...string) []string {
 	// Allow explicit override for deployments that publish manifest in another location.
 	override := strings.TrimSpace(getEnv("UPDATE_MANIFEST_URL", ""))
