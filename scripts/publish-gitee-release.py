@@ -182,9 +182,11 @@ def upload_release_asset(owner: str, repo: str, release_id: int, token: str, fil
         "--connect-timeout",
         "10",
         "--max-time",
-        "60",
+        "180",
         "-X",
         "POST",
+        "-H",
+        "Expect:",
         "-H",
         "Content-Type: multipart/form-data",
         "-F",
@@ -200,9 +202,9 @@ def upload_release_asset(owner: str, repo: str, release_id: int, token: str, fil
         url,
     ]
     try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=90)
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=210)
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"upload {file_path.name} timed out after 90s") from exc
+        raise RuntimeError(f"upload {file_path.name} timed out after 210s") from exc
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         stdout = completed.stdout.strip()
