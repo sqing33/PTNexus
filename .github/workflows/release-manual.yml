@@ -207,7 +207,7 @@ jobs:
               run_runtime = should_run
               run_desktop_windows = should_run
               run_proxy = should_run
-              run_docker_image = True if event_name == "push" else should_run
+              run_docker_image = should_run
               run_cloudflare_import = False
               if not should_run:
                   trigger_name = "定时构建" if event_name == "schedule" else "推送构建"
@@ -816,7 +816,7 @@ jobs:
             add_semver_tags "$GHCR_REPO" "$REF_NAME"
           elif [[ "${EVENT_NAME}" == "push" && "${REF_TYPE}" == "branch" ]]; then
             add_tag "$GHCR_REPO" "$REF_NAME"
-            # go 与 main 均为发布分支：推送时同步 latest，避免仅用 main 时 go 线镜像永远无 latest
+            # Docker 任务只会在正式版本发布或显式手动触发时执行；一旦执行，go/main 仍同步 latest
             if [[ "${REF_NAME}" == "main" || "${REF_NAME}" == "go" ]]; then
               add_tag "$GHCR_REPO" "latest"
             fi
