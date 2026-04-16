@@ -13,6 +13,11 @@ from typing import Any
 API_BASE = "https://gitee.com/api/v5"
 DEFAULT_MAX_BYTES = 100 * 1024 * 1024
 MANIFEST_NAME = "UPDATE_MANIFEST.json"
+RUNTIME_NAMES = (
+    "ptnexus-runtime-linux-amd64.tar.gz",
+    "ptnexus-runtime-linux-arm64.tar.gz",
+)
+REQUIRED_ASSET_NAMES = (*RUNTIME_NAMES, MANIFEST_NAME)
 
 
 def add_query(url: str, **params: str) -> str:
@@ -208,14 +213,19 @@ def upload_release_asset(owner: str, repo: str, release_id: int, token: str, fil
 def collect_asset_paths(assets_dir: Path, max_bytes: int) -> tuple[list[Path], list[str]]:
     selected: list[Path] = []
     skipped: list[str] = []
-    for path in sorted(p for p in assets_dir.iterdir() if p.is_file()):
+    available_files = {path.name: path for path in assets_dir.iterdir() if path.is_file()}
+
+    for name in REQUIRED_ASSET_NAMES:
+        path = available_files.get(name)
+        if path is None:
+            skipped.append(f"{name}: skipped (not found)")
+            continue
         size = path.stat().st_size
-        if path.name != MANIFEST_NAME and size > max_bytes:
-            skipped.append(f"{path.name}: skipped ({size} bytes > {max_bytes})")
+        if name != MANIFEST_NAME and size > max_bytes:
+            skipped.append(f"{name}: skipped ({size} bytes > {max_bytes})")
             continue
         selected.append(path)
 
-    selected.sort(key=lambda path: (path.name == MANIFEST_NAME, path.name))
     return selected, skipped
 
 

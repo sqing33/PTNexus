@@ -19,6 +19,14 @@
   ],
   "history": [
     {
+      "version": "v4.0.14",
+      "date": "2026.04.16",
+      "changes": [
+        "修复：Gitee Release 仅同步内部升级所需 runtime 包与 UPDATE_MANIFEST.json，避免非必需产物上传导致超时卡住",
+        "修复：收紧 Gitee 更新侧资产范围，减少发布后国内更新链路的不稳定因素"
+      ]
+    },
+    {
       "version": "v4.0.13",
       "date": "2026.04.15",
       "changes": [
