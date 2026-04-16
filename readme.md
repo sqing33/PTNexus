@@ -256,6 +256,11 @@ wget -O - https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-
 
 # 更新日志
 
+### v4.0.13（2026.04.15）
+
+- 修复：收紧 Gitee Release 上传超时并补充成功日志，避免同步完成后工作流长时间挂起
+- 修复：在线更新清单优先使用 go 分支与 Gitee 候选源，提升国内更新成功率
+
 ### v4.0.12（2026.04.15）
 
 - 修复：在线更新优先使用版本化更新清单地址，避免 latest/raw 地址失效导致获取 UPDATE_MANIFEST 失败
