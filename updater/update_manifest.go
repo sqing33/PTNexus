@@ -144,14 +144,25 @@ func getRemoteManifestForMode(updateMode string, versionHints ...string) (*Updat
 		}
 	}
 
+	validator := func(manifest *UpdateManifest) error {
+		return validateUpdateManifestForMode(manifest, updateMode)
+	}
+
+	candidates := manifestCandidates()
 	manifest, source, err := fetchJSONFromCandidates[UpdateManifest](
 		context.Background(),
-		manifestCandidates(cleanHints...),
+		candidates,
 		15*time.Second,
-		func(manifest *UpdateManifest) error {
-			return validateUpdateManifestForMode(manifest, updateMode)
-		},
+		validator,
 	)
+	if err != nil && len(cleanHints) > 0 {
+		manifest, source, err = fetchJSONFromCandidates[UpdateManifest](
+			context.Background(),
+			manifestCandidates(cleanHints...),
+			15*time.Second,
+			validator,
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败: %w", err)
 	}

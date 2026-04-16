@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-const (
-	// Manifest is expected to be published as a Release asset.
-	// Runtime metadata is served only from Release assets.
+var (
 	githubManifestReleaseURLTemplate = "https://github.com/jadylc/PTNexus/releases/download/%s/UPDATE_MANIFEST.json"
 	githubManifestReleaseLatestURL   = "https://github.com/jadylc/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
 	githubManifestRawGoURL           = "https://raw.githubusercontent.com/jadylc/PTNexus/go/UPDATE_MANIFEST.json"
@@ -20,7 +18,11 @@ const (
 	giteeManifestReleaseLatestURL   = "https://gitee.com/jadylc/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
 	giteeManifestRawGoURL           = "https://gitee.com/jadylc/PTNexus/raw/go/UPDATE_MANIFEST.json"
 	giteeManifestRawMainURL         = "https://gitee.com/jadylc/PTNexus/raw/main/UPDATE_MANIFEST.json"
+)
 
+const (
+	// Manifest is expected to be published as a Release asset.
+	// Runtime metadata is served only from Release assets.
 	updateManifestRawFallbackEnv = "UPDATE_MANIFEST_RAW_FALLBACK"
 )
 
