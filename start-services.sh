@@ -15,6 +15,36 @@ log_bootstrap() {
   echo "[bootstrap] $*"
 }
 
+move_path_with_cross_device_fallback() {
+  local src_path="$1"
+  local dst_path="$2"
+
+  if mv "$src_path" "$dst_path" 2>/tmp/ptnexus-mv.err; then
+    rm -f /tmp/ptnexus-mv.err
+    return 0
+  fi
+
+  local move_err=""
+  move_err="$(cat /tmp/ptnexus-mv.err 2>/dev/null || true)"
+  rm -f /tmp/ptnexus-mv.err
+  if ! printf '%s' "$move_err" | grep -qi 'cross-device link'; then
+    echo "$move_err" >&2
+    return 1
+  fi
+
+  log_bootstrap "目录迁移遇到跨设备限制，改用复制回退 src=${src_path} dst=${dst_path}"
+  if ! cp -a "$src_path" "$dst_path"; then
+    rm -rf "$dst_path"
+    echo "跨设备复制失败：${src_path} -> ${dst_path}" >&2
+    return 1
+  fi
+  if ! rm -rf "$src_path"; then
+    echo "跨设备复制后删除源路径失败：${src_path}" >&2
+    return 1
+  fi
+  return 0
+}
+
 update_symlink_atomic() {
   local link_path="$1"
   local target="$2"
@@ -54,12 +84,15 @@ restore_updated_runtime() {
   local backup_dir=""
   if [ -e "$base_dir" ] && [ ! -L "$base_dir" ]; then
     backup_dir="${base_dir}.image.$(date +%Y%m%d-%H%M%S)"
-    mv "$base_dir" "$backup_dir"
+    if ! move_path_with_cross_device_fallback "$base_dir" "$backup_dir"; then
+      echo "备份镜像内运行时失败：${base_dir} -> ${backup_dir}" >&2
+      return 1
+    fi
   fi
 
   if ! update_symlink_atomic "$base_dir" "$current_link"; then
     if [ -n "$backup_dir" ] && [ ! -e "$base_dir" ]; then
-      mv "$backup_dir" "$base_dir"
+      move_path_with_cross_device_fallback "$backup_dir" "$base_dir" || true
     fi
     echo "恢复持久化更新运行时失败：${base_dir} -> ${current_link}" >&2
     return 1

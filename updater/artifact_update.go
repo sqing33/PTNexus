@@ -49,19 +49,23 @@ type artifactProbeResult struct {
 }
 
 var (
-	supervisorctlRunner = runSupervisorctl
-	createSymlinkFn     = os.Symlink
-	replaceSymlinkFn    = os.Rename
-	removeSymlinkFn     = os.Remove
-	renameFileFn        = os.Rename
-	removeFileFn        = os.Remove
-	updateSymlinkFn     = updateSymlinkAtomic
-	ensureRuntimeFn     = ensureRuntimeSymlinks
-	stopServerFn        = stopServerProcess
-	startServerFn       = startServerProcess
-	rollbackRuntimeFn   = rollbackRuntime
-	fileOpRetrySleepFn  = time.Sleep
-	fileOpRetryEnabled  = runtime.GOOS == "windows"
+	supervisorctlRunner      = runSupervisorctl
+	createSymlinkFn          = os.Symlink
+	replaceSymlinkFn         = os.Rename
+	removeSymlinkFn          = os.Remove
+	renameFileFn             = os.Rename
+	removeFileFn             = os.Remove
+	renamePathFn             = os.Rename
+	removePathFn             = os.Remove
+	removeAllPathFn          = os.RemoveAll
+	copyPathForCrossDeviceFn = copyPathForCrossDevice
+	updateSymlinkFn          = updateSymlinkAtomic
+	ensureRuntimeFn          = ensureRuntimeSymlinks
+	stopServerFn             = stopServerProcess
+	startServerFn            = startServerProcess
+	rollbackRuntimeFn        = rollbackRuntime
+	fileOpRetrySleepFn       = time.Sleep
+	fileOpRetryEnabled       = runtime.GOOS == "windows"
 )
 
 const (
@@ -1006,6 +1010,80 @@ func isCrossDeviceRenameErr(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "cross-device link")
 }
 
+func copyPathForCrossDevice(srcPath, dstPath string) error {
+	info, err := os.Lstat(srcPath)
+	if err != nil {
+		return err
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(srcPath)
+		if err != nil {
+			return err
+		}
+		return os.Symlink(target, dstPath)
+	}
+
+	if info.IsDir() {
+		if err := os.MkdirAll(dstPath, info.Mode().Perm()); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(srcPath)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := copyPathForCrossDevice(filepath.Join(srcPath, entry.Name()), filepath.Join(dstPath, entry.Name())); err != nil {
+				return err
+			}
+		}
+		return os.Chmod(dstPath, info.Mode().Perm())
+	}
+
+	in, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	copyErr := error(nil)
+	if _, err := io.Copy(out, in); err != nil {
+		copyErr = err
+	}
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Chmod(dstPath, info.Mode().Perm())
+}
+
+func movePathWithCrossDeviceFallback(srcPath, dstPath string) error {
+	if err := renamePathFn(srcPath, dstPath); err == nil {
+		return nil
+	} else if !isCrossDeviceRenameErr(err) {
+		return fmt.Errorf("rename %s -> %s 失败: %w", srcPath, dstPath, err)
+	} else {
+		log.Printf("安装更新步骤: 目录迁移遇到跨设备限制，改用复制回退 src=%s dst=%s err=%v", srcPath, dstPath, err)
+	}
+
+	if err := copyPathForCrossDeviceFn(srcPath, dstPath); err != nil {
+		_ = removeAllPathFn(dstPath)
+		return fmt.Errorf("跨设备复制 %s -> %s 失败: %w", srcPath, dstPath, err)
+	}
+	if err := removeAllPathFn(srcPath); err != nil {
+		return fmt.Errorf("跨设备复制后删除源路径 %s 失败: %w", srcPath, err)
+	}
+	log.Printf("安装更新步骤: 目录迁移已通过跨设备复制回退完成 src=%s dst=%s", srcPath, dstPath)
+	return nil
+}
+
 func updateSymlinkAtomic(linkPath, target string) error {
 	if strings.TrimSpace(linkPath) == "" {
 		return errors.New("empty link path")
@@ -1053,10 +1131,10 @@ func updateSymlinkAtomic(linkPath, target string) error {
 }
 
 func rollbackBootstrappedBaseDir(baseDir, legacy string, cause error) error {
-	if removeErr := os.Remove(baseDir); removeErr != nil && !os.IsNotExist(removeErr) {
+	if removeErr := removePathFn(baseDir); removeErr != nil && !os.IsNotExist(removeErr) {
 		return fmt.Errorf("%w; 删除失败的 baseDir 软链失败: %v", cause, removeErr)
 	}
-	if renameErr := os.Rename(legacy, baseDir); renameErr != nil {
+	if renameErr := movePathWithCrossDeviceFallback(legacy, baseDir); renameErr != nil {
 		return fmt.Errorf("%w; 恢复 baseDir 失败: %v", cause, renameErr)
 	}
 	return cause
@@ -1086,12 +1164,12 @@ func ensureRuntimeSymlinks() (baseDir, currentLink, currentTarget string, err er
 		} else {
 			// Move image runtime aside and make baseDir a stable symlink.
 			legacy := fmt.Sprintf("%s.image.%s", baseDir, time.Now().Format("20060102-150405"))
-			if err := os.Rename(baseDir, legacy); err != nil {
+			if err := movePathWithCrossDeviceFallback(baseDir, legacy); err != nil {
 				return "", "", "", fmt.Errorf("迁移 baseDir 失败: %w", err)
 			}
 			if err := updateSymlinkFn(baseDir, currentLink); err != nil {
 				// Best-effort rollback.
-				_ = os.Rename(legacy, baseDir)
+				_ = movePathWithCrossDeviceFallback(legacy, baseDir)
 				return "", "", "", err
 			}
 			if err := updateSymlinkFn(currentLink, legacy); err != nil {
@@ -1105,11 +1183,11 @@ func ensureRuntimeSymlinks() (baseDir, currentLink, currentTarget string, err er
 		if st.Mode()&os.ModeSymlink == 0 {
 			// Container recreated: baseDir is image directory while currentLink exists on volume.
 			legacy := fmt.Sprintf("%s.image.%s", baseDir, time.Now().Format("20060102-150405"))
-			if err := os.Rename(baseDir, legacy); err != nil {
+			if err := movePathWithCrossDeviceFallback(baseDir, legacy); err != nil {
 				return "", "", "", fmt.Errorf("迁移 baseDir 失败: %w", err)
 			}
 			if err := updateSymlinkFn(baseDir, currentLink); err != nil {
-				_ = os.Rename(legacy, baseDir)
+				_ = movePathWithCrossDeviceFallback(legacy, baseDir)
 				return "", "", "", err
 			}
 		}
