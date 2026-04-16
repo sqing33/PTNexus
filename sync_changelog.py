@@ -84,8 +84,8 @@ def update_wiki_docs(changelog_md):
 def update_update_manifest(changelog):
     """根据 CHANGELOG.json 重写根目录 UPDATE_MANIFEST.json。
 
-    与 scripts/build-update-artifacts.sh 生成的结构一致；sha256 留空由 Release 工作流补全。
-    产物 size 优先沿用旧 manifest 同架构数值，避免无本地构建时丢失占位信息。
+    根目录 manifest 仅用于仓库内同步版本历史与下载地址占位，不作为生产在线更新权威源。
+    生产在线更新应使用 scripts/build-update-artifacts.sh / Release 工作流生成的 manifest。
     """
     history = changelog.get("history") or []
     if not history:
@@ -163,6 +163,7 @@ def update_update_manifest(changelog):
 
     manifest = {
         "schema": 2,
+        "note": "repo-root metadata only; production updater must use release UPDATE_MANIFEST.json",
         "latest": latest,
         "history": history,
     }

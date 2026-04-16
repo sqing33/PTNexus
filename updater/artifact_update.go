@@ -769,7 +769,7 @@ func prepareUpdateBundleFromManifest(ctx context.Context, manifest *UpdateManife
 }
 
 func prepareLatestUpdateBundle(ctx context.Context) (*PreparedUpdate, error) {
-	manifest, err := getRemoteManifest(getLocalVersion())
+	manifest, err := getRemoteManifestForMode(updateModeRuntimeInstall, getLocalVersion())
 	if err != nil {
 		return nil, err
 	}

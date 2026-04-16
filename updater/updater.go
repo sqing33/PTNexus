@@ -286,7 +286,11 @@ func runAutoUpdate() {
 
 	localVersion := getLocalVersion()
 
-	manifest, err := getRemoteManifest(localVersion)
+	manifest, err := getRemoteManifestForMode(updateModeRuntimeInstall, localVersion)
+	if err != nil {
+		log.Printf("自动更新时获取更新清单失败: %v", err)
+		return
+	}
 
 	remoteVersion := strings.TrimSpace(manifest.Latest.Version)
 	shouldForce := manifest.Latest.ForceUpdate || hasCrossVersionForceUpdate(localVersion, manifest.History)
@@ -447,7 +451,7 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	var disableUpdateFromManifest bool
 	manifestReady := false
 	var desktopInstaller *DesktopInstallerAsset
-	if manifest, err := getRemoteManifest(localVersion); err != nil {
+	if manifest, err := getRemoteManifestForMode(updateMode, localVersion); err != nil {
 		log.Printf("检查更新时获取更新清单失败: %v", err)
 	} else {
 		manifestVersion = strings.TrimSpace(manifest.Latest.Version)
@@ -492,7 +496,7 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 			disableUpdate = !manifestReady
 		}
 	} else if hasUpdate && !manifestReady {
-		// 无可用产物时禁用“在线更新”，避免 UI 出现“有更新但无法安装”的误导操作。
+		// runtime 在线更新只要求当前平台存在可下载产物；sha256 缺失延后到真正下载阶段再校验。
 		disableUpdate = true
 	}
 
@@ -590,7 +594,7 @@ func pullUpdateHandler(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 			defer cancel()
 
-			manifest, err := getRemoteManifest(getLocalVersion())
+			manifest, err := getRemoteManifestForMode(updateModeInstallerDownload, getLocalVersion())
 			if err != nil {
 				return err
 			}

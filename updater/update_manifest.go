@@ -117,7 +117,26 @@ func validateUpdateManifest(manifest *UpdateManifest) error {
 	return nil
 }
 
-func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {
+func validateUpdateManifestForMode(manifest *UpdateManifest, updateMode string) error {
+	if err := validateUpdateManifest(manifest); err != nil {
+		return err
+	}
+	switch strings.TrimSpace(updateMode) {
+	case updateModeInstallerDownload:
+		_, err := resolveDesktopInstallerForCurrentPlatform(manifest)
+		if err != nil {
+			return fmt.Errorf("桌面安装包信息不可用: %w", err)
+		}
+	default:
+		_, err := resolveManifestArtifactForCurrentPlatform(manifest)
+		if err != nil {
+			return fmt.Errorf("运行时更新产物不可用: %w", err)
+		}
+	}
+	return nil
+}
+
+func getRemoteManifestForMode(updateMode string, versionHints ...string) (*UpdateManifest, error) {
 	cleanHints := make([]string, 0, len(versionHints))
 	for _, hint := range versionHints {
 		if v := strings.TrimSpace(hint); v != "" {
@@ -125,13 +144,21 @@ func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {
 		}
 	}
 
-	manifest, source, err := fetchJSONFromCandidates[UpdateManifest](context.Background(), manifestCandidates(cleanHints...), 15*time.Second)
+	manifest, source, err := fetchJSONFromCandidates[UpdateManifest](
+		context.Background(),
+		manifestCandidates(cleanHints...),
+		15*time.Second,
+		func(manifest *UpdateManifest) error {
+			return validateUpdateManifestForMode(manifest, updateMode)
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败: %w", err)
 	}
-	if err := validateUpdateManifest(manifest); err != nil {
-		return nil, err
-	}
-	log.Printf("获取更新清单成功，使用源: %s", source)
+	log.Printf("获取更新清单成功，使用源: %s (mode=%s)", source, strings.TrimSpace(updateMode))
 	return manifest, nil
+}
+
+func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {
+	return getRemoteManifestForMode(updateModeRuntimeInstall, versionHints...)
 }

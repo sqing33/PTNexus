@@ -20,6 +20,8 @@ const (
 	giteeManifestReleaseLatestURL   = "https://gitee.com/jadylc/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
 	giteeManifestRawGoURL           = "https://gitee.com/jadylc/PTNexus/raw/go/UPDATE_MANIFEST.json"
 	giteeManifestRawMainURL         = "https://gitee.com/jadylc/PTNexus/raw/main/UPDATE_MANIFEST.json"
+
+	updateManifestRawFallbackEnv = "UPDATE_MANIFEST_RAW_FALLBACK"
 )
 
 func normalizeURLCandidates(urls ...string) []string {
@@ -64,11 +66,15 @@ func manifestCandidates(versionHints ...string) []string {
 	candidates = append(candidates,
 		giteeManifestReleaseLatestURL,
 		githubManifestReleaseLatestURL,
-		giteeManifestRawGoURL,
-		giteeManifestRawMainURL,
-		githubManifestRawGoURL,
-		githubManifestRawMainURL,
 	)
+	if isTruthy(getEnv(updateManifestRawFallbackEnv, "false")) {
+		candidates = append(candidates,
+			giteeManifestRawGoURL,
+			giteeManifestRawMainURL,
+			githubManifestRawGoURL,
+			githubManifestRawMainURL,
+		)
+	}
 	return normalizeURLCandidates(candidates...)
 }
 
@@ -92,7 +98,7 @@ type candidateFetchResult[T any] struct {
 	err     error
 }
 
-func fetchJSONFromCandidates[T any](ctx context.Context, candidates []string, timeout time.Duration) (*T, string, error) {
+func fetchJSONFromCandidates[T any](ctx context.Context, candidates []string, timeout time.Duration, validators ...func(*T) error) (*T, string, error) {
 	list := normalizeURLCandidates(candidates...)
 	if len(list) == 0 {
 		return nil, "", fmt.Errorf("没有可用的候选更新源")
@@ -123,8 +129,22 @@ func fetchJSONFromCandidates[T any](ctx context.Context, candidates []string, ti
 	for i := 0; i < len(list); i++ {
 		result := <-results
 		if result.err == nil && result.value != nil {
-			cancel()
-			return result.value, result.baseURL, nil
+			validatorErr := error(nil)
+			for _, validate := range validators {
+				if validate == nil {
+					continue
+				}
+				if err := validate(result.value); err != nil {
+					validatorErr = err
+					break
+				}
+			}
+			if validatorErr == nil {
+				cancel()
+				return result.value, result.baseURL, nil
+			}
+			errMessages = append(errMessages, fmt.Sprintf("%s -> %v", result.baseURL, validatorErr))
+			continue
 		}
 		errMessages = append(errMessages, fmt.Sprintf("%s -> %v", result.baseURL, result.err))
 	}
