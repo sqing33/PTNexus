@@ -10,7 +10,7 @@
     class="update-dialog"
   >
     <el-card shadow="never" class="update-card">
-      <div class="update-content">
+      <div class="update-content" v-loading="isDialogLoading">
         <!-- Version Info -->
         <div class="version-info-box">
           <div class="version-item">
@@ -22,7 +22,7 @@
             <div class="version-label">最新版本</div>
             <div class="version-value new-version">{{ updateInfo.remoteVersion }}</div>
           </div>
-          <div v-if="!updateInfo.hasUpdate" class="version-status">
+          <div v-if="!updateInfo.hasUpdate && !isDialogLoading" class="version-status">
             <el-icon color="#67c23a" size="20"><SuccessFilled /></el-icon>
             <span>已是最新版本</span>
           </div>
@@ -30,7 +30,7 @@
 
         <!-- 强制更新提示 -->
         <div
-          v-if="isForceUpdate && !updateInfo.updateControl.disable_update"
+          v-if="!isDialogLoading && isForceUpdate && !updateInfo.updateControl.disable_update"
           class="force-update-notice"
           style="color: #f56c6c; background: #fef0f0; border-color: #fde2e2"
         >
@@ -39,7 +39,7 @@
         </div>
 
         <div
-          v-else-if="updateInfo.updateControl.disable_update && updateInfo.hasUpdate"
+          v-else-if="!isDialogLoading && updateInfo.updateControl.disable_update && updateInfo.hasUpdate"
           class="force-update-notice"
         >
           <el-icon color="#e6a23c" size="18"><WarningFilled /></el-icon>
@@ -48,7 +48,8 @@
 
         <!-- All Versions Timeline -->
         <div class="all-versions-section">
-          <div v-if="updateInfo.history.length === 0" class="no-history">暂无版本记录</div>
+          <div v-if="isDialogLoading" class="dialog-loading-text">正在加载版本信息...</div>
+          <div v-else-if="updateInfo.history.length === 0" class="no-history">暂无版本记录</div>
           <div v-else class="history-timeline">
             <div
               v-for="(version, versionIndex) in updateInfo.history"
@@ -114,7 +115,7 @@
           <el-button
             v-if="!isBlockingForceUpdate || updateInfo.updateControl.disable_update"
             @click="updateDialogVisible = false"
-            :disabled="isUpdating"
+            :disabled="isDialogLoading || isUpdating"
           >
             {{ updateInfo.hasUpdate ? '稍后更新' : '确定' }}
           </el-button>
@@ -125,7 +126,7 @@
             type="primary"
             @click="performUpdate"
             :loading="isUpdating"
-            :disabled="isUpdating || updateInfo.updateControl.disable_update"
+            :disabled="isDialogLoading || isUpdating || updateInfo.updateControl.disable_update"
             :title="disableUpdateButtonTitle"
           >
             {{ primaryActionLabel }}
@@ -147,6 +148,7 @@ import { getDesktopBridge } from '@/desktop/bridge'
 const isUpdating = ref(false)
 const updateProgress = ref(0)
 const updateStatus = ref('')
+const isDialogLoading = ref(false)
 
 const emit = defineEmits<{
   'version-loaded': [version: string]
@@ -431,61 +433,89 @@ const loadVersionInfo = async () => {
   }
 }
 
+const resetDialogDisplayState = () => {
+  updateInfo.hasUpdate = false
+  updateInfo.currentVersion = currentVersion.value
+  updateInfo.remoteVersion = ''
+  updateInfo.changelog = []
+  updateInfo.history = []
+  updateInfo.updateMode = 'runtime_install'
+  updateInfo.desktopInstaller = null
+  updateInfo.updateControl = {
+    force_update: false,
+    disable_update: false,
+    schedule: {
+      enabled: false,
+      timezone: 'Asia/Shanghai',
+      time: '06:00',
+      last_run: null,
+    },
+  }
+  activeUpdateTab.value = 'latest'
+}
+
+const applyUpdateDialogData = (versionData: UpdateCheckData, changelogData: Record<string, any>) => {
+  const compareResult = compareVersions(versionData.remote_version || '', currentVersion.value)
+  const isLocalNewer = compareResult < 0
+  const updateMode: UpdateMode =
+    versionData.update_mode === 'installer_download' ? 'installer_download' : 'runtime_install'
+
+  updateInfo.hasUpdate = compareResult > 0
+  updateInfo.currentVersion = currentVersion.value
+  updateInfo.remoteVersion = versionData.remote_version || ''
+  updateInfo.changelog = changelogData.changelog || []
+  updateInfo.history = changelogData.history || []
+  updateInfo.updateMode = updateMode
+  updateInfo.desktopInstaller = versionData.desktop_installer || null
+
+  const schedule = versionData.update_control?.schedule
+  updateInfo.updateControl = {
+    force_update: isLocalNewer ? false : versionData.update_control?.force_update || false,
+    disable_update: versionData.update_control?.disable_update || false,
+    schedule: {
+      enabled: schedule?.enabled ?? false,
+      timezone: schedule?.timezone ?? 'Asia/Shanghai',
+      time: schedule?.time ?? '06:00',
+      last_run: schedule?.last_run ?? null,
+    },
+  }
+
+  activeUpdateTab.value = 'latest'
+}
+
 // 修改：接收可选的 preLoadedData
 const showUpdateDialog = async (preLoadedData: UpdateCheckData | null = null) => {
+  updateDialogVisible.value = true
+  resetDialogDisplayState()
+  isDialogLoading.value = true
+
   try {
     const timestamp = new Date().getTime()
     const changelogPromise = axios.get(`/update/changelog?t=${timestamp}`)
+    const versionPromise = preLoadedData
+      ? Promise.resolve({ data: preLoadedData as UpdateCheckData })
+      : axios.get(`/update/check?t=${timestamp}`)
 
-    let versionData: UpdateCheckData = preLoadedData ?? {}
-    if (!preLoadedData) {
-      const versionResponse = await axios.get(`/update/check?t=${timestamp}`)
-      versionData = versionResponse.data as UpdateCheckData
-    }
+    const [versionResponse, changelogResponse] = await Promise.all([versionPromise, changelogPromise])
+    const versionData = versionResponse.data as UpdateCheckData
+    const changelogData = changelogResponse.data as Record<string, any>
 
-    const changelogResponse = await changelogPromise
-    const changelogData = changelogResponse.data
-
-    const compareResult = compareVersions(versionData.remote_version || '', currentVersion.value)
-    // 如果 compareResult < 0，说明本地版本比远程新
-    const isLocalNewer = compareResult < 0
-    const updateMode: UpdateMode =
-      versionData.update_mode === 'installer_download' ? 'installer_download' : 'runtime_install'
-
-    updateInfo.hasUpdate = compareResult > 0
-    updateInfo.currentVersion = currentVersion.value
-    updateInfo.remoteVersion = versionData.remote_version || ''
-    updateInfo.changelog = changelogData.changelog || []
-    updateInfo.history = changelogData.history || []
-    updateInfo.updateMode = updateMode
-    updateInfo.desktopInstaller = versionData.desktop_installer || null
-
-    const schedule = versionData.update_control?.schedule
-    updateInfo.updateControl = {
-      // 修复：如果本地版本比远程新，强行关闭 force_update 标志，防止UI显示错误
-      force_update: isLocalNewer ? false : versionData.update_control?.force_update || false,
-      disable_update: versionData.update_control?.disable_update || false,
-      schedule: {
-        enabled: schedule?.enabled ?? false,
-        timezone: schedule?.timezone ?? 'Asia/Shanghai',
-        time: schedule?.time ?? '06:00',
-        last_run: schedule?.last_run ?? null,
-      },
-    }
-
-    activeUpdateTab.value = 'latest'
-
-    // 如果是手动点击检查更新(versionData为空进来)，且本地比远程新，可以弹窗提示"已是最新"
-    // 但如果是自动检查(loadVersionInfo)，上面的逻辑已经拦截了
-    updateDialogVisible.value = true
+    applyUpdateDialogData(versionData, changelogData)
   } catch (error) {
     console.error('检查更新失败:', error)
     ElMessage.error('检查更新失败，请稍后重试')
+  } finally {
+    isDialogLoading.value = false
   }
 }
 
 // 实际执行更新的逻辑 (发送请求)
 const performUpdate = async () => {
+  if (isDialogLoading.value) {
+    ElMessage.warning('版本信息加载中，请稍候再试')
+    return
+  }
+
   // 防卫：如果已经禁止更新，直接返回
   if (updateInfo.updateControl.disable_update) {
     ElMessage.warning(disableUpdateNoticeText.value)
@@ -639,6 +669,10 @@ const performUpdate = async () => {
 }
 
 const show = () => {
+  if (isDialogLoading.value) {
+    updateDialogVisible.value = true
+    return
+  }
   showUpdateDialog()
 }
 
@@ -663,10 +697,17 @@ onMounted(() => {
   border: none;
 }
 
-.update-content {
+ .update-content {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-height: 220px;
+}
+
+.dialog-loading-text {
+  color: #606266;
+  font-size: 14px;
+  padding: 32px 0;
 }
 
 .version-info-box {
