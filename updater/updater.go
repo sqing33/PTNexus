@@ -452,9 +452,9 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		manifestVersion = strings.TrimSpace(manifest.Latest.Version)
 		forceUpdateFromManifest = manifest.Latest.ForceUpdate || hasCrossVersionForceUpdate(localVersion, manifest.History)
-		disableUpdateFromManifest = manifest.Latest.DisableUpdate
 
 		if updateMode == updateModeInstallerDownload {
+			disableUpdateFromManifest = manifest.Latest.DisableUpdate
 			installer, err := resolveDesktopInstallerForCurrentPlatform(manifest)
 			if err != nil {
 				log.Printf("检查更新时桌面安装包信息不完整，跳过安装包下载入口: %v", err)
