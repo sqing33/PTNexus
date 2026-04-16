@@ -256,6 +256,10 @@ wget -O - https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-
 
 # 更新日志
 
+### v4.0.15（2026.04.16）
+
+- 测试：空版本升级，用于验证在线更新链路
+
 ### v4.0.14（2026.04.16）
 
 - 修复：Gitee Release 仅同步内部升级所需 runtime 包与 UPDATE_MANIFEST.json，避免非必需产物上传导致超时卡住
