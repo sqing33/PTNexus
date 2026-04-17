@@ -431,6 +431,12 @@ type localVersionDetails struct {
 	Source  string `json:"source"`
 }
 
+type localVersionResponse struct {
+	Success            bool   `json:"success"`
+	LocalVersion       string `json:"local_version"`
+	LocalVersionSource string `json:"local_version_source,omitempty"`
+}
+
 type updateDecision struct {
 	Success             bool                      `json:"success"`
 	HasUpdate           bool                      `json:"has_update"`
@@ -571,6 +577,29 @@ func buildUpdateDecision(updateMode string) updateDecision {
 	decision.UpdateControl["force_update"] = forceUpdate && decision.HasUpdate
 	decision.UpdateControl["disable_update"] = disableUpdate && decision.HasUpdate
 	return decision
+}
+
+// 获取本地版本
+func getLocalVersionHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	localDetails := getLocalVersionDetails()
+	json.NewEncoder(w).Encode(localVersionResponse{
+		Success:            true,
+		LocalVersion:       localDetails.Version,
+		LocalVersionSource: localDetails.Source,
+	})
 }
 
 // 检查更新
@@ -1066,6 +1095,7 @@ func main() {
 
 	// 注册路由
 	http.HandleFunc("/health", healthHandler)
+	http.HandleFunc("/update/local-version", getLocalVersionHandler)
 	http.HandleFunc("/update/check", checkUpdateHandler)
 	http.HandleFunc("/update/pull", pullUpdateHandler)
 	http.HandleFunc("/update/install", installUpdateHandler)

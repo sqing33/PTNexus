@@ -137,15 +137,21 @@ func validateUpdateManifestForMode(manifest *UpdateManifest, updateMode string) 
 }
 
 type ManifestLookupDiagnostics struct {
-	Strategy             string                     `json:"strategy,omitempty"`
-	HintRefreshAttempted bool                       `json:"hint_refresh_attempted,omitempty"`
-	HintRefreshApplied   bool                       `json:"hint_refresh_applied,omitempty"`
-	ManifestSource       string                     `json:"manifest_source,omitempty"`
-	InitialCandidates    []string                   `json:"initial_candidates,omitempty"`
-	HintCandidates       []string                   `json:"hint_candidates,omitempty"`
-	InitialFetch         *candidateFetchDiagnostics `json:"initial_fetch,omitempty"`
-	HintFetch            *candidateFetchDiagnostics `json:"hint_fetch,omitempty"`
-	HintRefreshError     string                     `json:"hint_refresh_error,omitempty"`
+	Strategy              string                     `json:"strategy,omitempty"`
+	HintRefreshAttempted  bool                       `json:"hint_refresh_attempted,omitempty"`
+	HintRefreshApplied    bool                       `json:"hint_refresh_applied,omitempty"`
+	ForwardProbeAttempted bool                       `json:"forward_probe_attempted,omitempty"`
+	ForwardProbeApplied   bool                       `json:"forward_probe_applied,omitempty"`
+	ManifestSource        string                     `json:"manifest_source,omitempty"`
+	InitialCandidates     []string                   `json:"initial_candidates,omitempty"`
+	HintCandidates        []string                   `json:"hint_candidates,omitempty"`
+	ForwardProbeCandidates []string                  `json:"forward_probe_candidates,omitempty"`
+	ForwardProbeVersions  []string                   `json:"forward_probe_versions,omitempty"`
+	InitialFetch          *candidateFetchDiagnostics `json:"initial_fetch,omitempty"`
+	HintFetch             *candidateFetchDiagnostics `json:"hint_fetch,omitempty"`
+	ForwardProbeFetch     *candidateFetchDiagnostics `json:"forward_probe_fetch,omitempty"`
+	HintRefreshError      string                     `json:"hint_refresh_error,omitempty"`
+	ForwardProbeError     string                     `json:"forward_probe_error,omitempty"`
 }
 
 type RemoteManifestResult struct {
@@ -222,12 +228,49 @@ func getRemoteManifestResultForMode(updateMode string, versionHints ...string) (
 				if currentVersion == "" || isNewerVersion(hintedVersion, currentVersion) {
 					manifest = hintedManifest
 					source = hintedSource
+					currentVersion = hintedVersion
 					result.Diagnostics.HintRefreshApplied = true
 					result.Diagnostics.Strategy = "version_hint_refresh"
 				}
 			} else {
 				result.Diagnostics.HintFetch = hintedDiag
 				result.Diagnostics.HintRefreshError = hintedErr.Error()
+			}
+		}
+
+		needForwardProbe := currentVersion == ""
+		if !needForwardProbe {
+			for _, hint := range cleanHints {
+				if !isNewerVersion(currentVersion, hint) {
+					needForwardProbe = true
+					break
+				}
+			}
+		}
+		if needForwardProbe {
+			forwardCandidates, probeVersions := manifestForwardProbeCandidates(cleanHints...)
+			if len(forwardCandidates) > 0 {
+				result.Diagnostics.ForwardProbeAttempted = true
+				result.Diagnostics.ForwardProbeCandidates = append([]string(nil), forwardCandidates...)
+				result.Diagnostics.ForwardProbeVersions = append([]string(nil), probeVersions...)
+				if probedManifest, probedSource, probedDiag, probedErr := fetchJSONFromCandidatesWithDiagnostics[UpdateManifest](
+					context.Background(),
+					forwardCandidates,
+					15*time.Second,
+					validator,
+				); probedErr == nil && probedManifest != nil {
+					result.Diagnostics.ForwardProbeFetch = probedDiag
+					probedVersion := strings.TrimSpace(probedManifest.Latest.Version)
+					if currentVersion == "" || isNewerVersion(probedVersion, currentVersion) {
+						manifest = probedManifest
+						source = probedSource
+						result.Diagnostics.ForwardProbeApplied = true
+						result.Diagnostics.Strategy = "forward_patch_probe"
+					}
+				} else {
+					result.Diagnostics.ForwardProbeFetch = probedDiag
+					result.Diagnostics.ForwardProbeError = probedErr.Error()
+				}
 			}
 		}
 	}

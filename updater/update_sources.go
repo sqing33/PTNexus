@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -65,6 +66,59 @@ func manifestVersionHintCandidates(versionHints ...string) []string {
 		candidates = append(candidates, manifestReleaseCandidatesForVersion(hint)...)
 	}
 	return normalizeURLCandidates(candidates...)
+}
+
+func parseVersionParts(version string) ([]int, bool) {
+	clean := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(version), "v"), "V"))
+	if clean == "" {
+		return nil, false
+	}
+	parts := strings.Split(clean, ".")
+	parsed := make([]int, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			return nil, false
+		}
+		value, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, false
+		}
+		parsed = append(parsed, value)
+	}
+	return parsed, true
+}
+
+func buildForwardProbeVersionHints(versionHints ...string) []string {
+	const maxPatchProbe = 3
+	seen := make(map[string]struct{}, len(versionHints)*maxPatchProbe)
+	out := make([]string, 0, len(versionHints)*maxPatchProbe)
+	for _, hint := range versionHints {
+		parts, ok := parseVersionParts(hint)
+		if !ok || len(parts) < 3 {
+			continue
+		}
+		base := append([]int(nil), parts...)
+		for i := 1; i <= maxPatchProbe; i++ {
+			candidateParts := append([]int(nil), base...)
+			candidateParts[len(candidateParts)-1] += i
+			segments := make([]string, 0, len(candidateParts))
+			for _, part := range candidateParts {
+				segments = append(segments, strconv.Itoa(part))
+			}
+			candidate := "v" + strings.Join(segments, ".")
+			if _, exists := seen[candidate]; exists {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+func manifestForwardProbeCandidates(versionHints ...string) ([]string, []string) {
+	probeVersions := buildForwardProbeVersionHints(versionHints...)
+	return manifestVersionHintCandidates(probeVersions...), probeVersions
 }
 
 func manifestCandidates(versionHints ...string) []string {

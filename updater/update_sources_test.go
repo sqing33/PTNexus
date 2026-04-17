@@ -301,6 +301,111 @@ func TestGetRemoteManifestForModeKeepsLatestWhenItIsNewerThanHint(t *testing.T) 
 	}
 }
 
+func TestGetRemoteManifestForModeUsesForwardPatchProbeWhenLatestIsStale(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv("UPDATE_OS", "linux")
+	t.Setenv("UPDATE_ARCH", "amd64")
+
+	oldGiteeLatest := giteeManifestReleaseLatestURL
+	oldGithubLatest := githubManifestReleaseLatestURL
+	oldGiteeTemplate := giteeManifestReleaseURLTemplate
+	oldGithubTemplate := githubManifestReleaseURLTemplate
+	t.Cleanup(func() {
+		giteeManifestReleaseLatestURL = oldGiteeLatest
+		githubManifestReleaseLatestURL = oldGithubLatest
+		giteeManifestReleaseURLTemplate = oldGiteeTemplate
+		githubManifestReleaseURLTemplate = oldGithubTemplate
+	})
+
+	latest := `{"schema":2,"latest":{"version":"v4.0.22","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"latestsha"}]},"history":[{"version":"v4.0.22","changes":["stale latest"]}]}`
+	probed := `{"schema":2,"latest":{"version":"v4.0.23","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"probesha"}]},"history":[{"version":"v4.0.23","changes":["forward probe"]}]}`
+
+	server := newManifestTestServer(t, map[string]manifestTestResponse{
+		"/latest.json":  {body: latest},
+		"/v4.0.22.json": {body: latest},
+		"/v4.0.23.json": {body: probed},
+	})
+
+	giteeManifestReleaseLatestURL = server.URL + "/latest.json"
+	githubManifestReleaseLatestURL = server.URL + "/latest.json"
+	giteeManifestReleaseURLTemplate = server.URL + "/%s.json"
+	githubManifestReleaseURLTemplate = server.URL + "/%s.json"
+
+	result, err := getRemoteManifestResultForMode(updateModeRuntimeInstall, "v4.0.22")
+	if err != nil {
+		t.Fatalf("expected forward probe manifest fetch success, got error: %v", err)
+	}
+	if result == nil || result.Manifest == nil || result.Manifest.Latest.Version != "v4.0.23" {
+		t.Fatalf("expected probed manifest version v4.0.23, got %#v", result)
+	}
+	if result.Source != server.URL+"/v4.0.23.json" {
+		t.Fatalf("expected probed source %q, got %#v", server.URL+"/v4.0.23.json", result)
+	}
+	if !result.Diagnostics.ForwardProbeAttempted {
+		t.Fatalf("expected forward probe attempted, got %#v", result.Diagnostics)
+	}
+	if !result.Diagnostics.ForwardProbeApplied {
+		t.Fatalf("expected forward probe applied, got %#v", result.Diagnostics)
+	}
+	if result.Diagnostics.Strategy != "forward_patch_probe" {
+		t.Fatalf("expected forward_patch_probe strategy, got %#v", result.Diagnostics)
+	}
+	if len(result.Diagnostics.ForwardProbeVersions) == 0 || result.Diagnostics.ForwardProbeVersions[0] != "v4.0.23" {
+		t.Fatalf("expected forward probe versions to include v4.0.23, got %#v", result.Diagnostics.ForwardProbeVersions)
+	}
+}
+
+func TestGetRemoteManifestForModeKeepsLatestWhenForwardPatchProbeMisses(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv("UPDATE_OS", "linux")
+	t.Setenv("UPDATE_ARCH", "amd64")
+
+	oldGiteeLatest := giteeManifestReleaseLatestURL
+	oldGithubLatest := githubManifestReleaseLatestURL
+	oldGiteeTemplate := giteeManifestReleaseURLTemplate
+	oldGithubTemplate := githubManifestReleaseURLTemplate
+	t.Cleanup(func() {
+		giteeManifestReleaseLatestURL = oldGiteeLatest
+		githubManifestReleaseLatestURL = oldGithubLatest
+		giteeManifestReleaseURLTemplate = oldGiteeTemplate
+		githubManifestReleaseURLTemplate = oldGithubTemplate
+	})
+
+	latest := `{"schema":2,"latest":{"version":"v4.0.22","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"latestsha"}]},"history":[{"version":"v4.0.22","changes":["stale latest"]}]}`
+
+	server := newManifestTestServer(t, map[string]manifestTestResponse{
+		"/latest.json":  {body: latest},
+		"/v4.0.22.json": {body: latest},
+	})
+
+	giteeManifestReleaseLatestURL = server.URL + "/latest.json"
+	githubManifestReleaseLatestURL = server.URL + "/latest.json"
+	giteeManifestReleaseURLTemplate = server.URL + "/%s.json"
+	githubManifestReleaseURLTemplate = server.URL + "/%s.json"
+
+	result, err := getRemoteManifestResultForMode(updateModeRuntimeInstall, "v4.0.22")
+	if err != nil {
+		t.Fatalf("expected latest manifest fetch success, got error: %v", err)
+	}
+	if result == nil || result.Manifest == nil || result.Manifest.Latest.Version != "v4.0.22" {
+		t.Fatalf("expected latest manifest version v4.0.22, got %#v", result)
+	}
+	if result.Diagnostics.Strategy != "latest_first" {
+		t.Fatalf("expected latest_first strategy when probe misses, got %#v", result.Diagnostics)
+	}
+	if !result.Diagnostics.ForwardProbeAttempted {
+		t.Fatalf("expected forward probe attempted, got %#v", result.Diagnostics)
+	}
+	if result.Diagnostics.ForwardProbeApplied {
+		t.Fatalf("expected forward probe not applied, got %#v", result.Diagnostics)
+	}
+	if result.Diagnostics.ForwardProbeError == "" {
+		t.Fatalf("expected forward probe error to be recorded, got %#v", result.Diagnostics)
+	}
+}
+
 func TestGetLocalVersionPrefersCurrentRuntimeOverImageVersion(t *testing.T) {
 	oldUpdateDir := updateDir
 	oldLocalConfigFile := localConfigFile
@@ -509,5 +614,35 @@ func TestCheckUpdateHandlerIncludesDecisionDiagnostics(t *testing.T) {
 	}
 	if resp.ManifestStrategy != "latest_first" {
 		t.Fatalf("expected latest_first strategy, got %#v", resp)
+	}
+}
+
+func TestGetLocalVersionHandlerReturnsLocalVersionAndSource(t *testing.T) {
+	t.Setenv("PTNEXUS_VERSION", "v4.0.23")
+	t.Setenv("VERSION_FILE", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/update/local-version", nil)
+	rec := httptest.NewRecorder()
+	getLocalVersionHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp localVersionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v body=%s", err, rec.Body.String())
+	}
+	if !resp.Success {
+		t.Fatalf("expected success true, got %#v", resp)
+	}
+	if resp.LocalVersion != "v4.0.23" {
+		t.Fatalf("expected local_version v4.0.23, got %#v", resp)
+	}
+	if resp.LocalVersionSource != "env:PTNEXUS_VERSION" {
+		t.Fatalf("expected local_version_source env:PTNEXUS_VERSION, got %#v", resp)
+	}
+	if cacheControl := rec.Header().Get("Cache-Control"); !strings.Contains(cacheControl, "no-cache") {
+		t.Fatalf("expected no-cache header, got %q", cacheControl)
 	}
 }

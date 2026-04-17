@@ -216,6 +216,12 @@ type DesktopInstallerData = {
   size?: number
 }
 
+type LocalVersionData = {
+  success?: boolean
+  local_version?: string
+  local_version_source?: string
+}
+
 type UpdateCheckData = {
   success?: boolean
   has_update?: boolean
@@ -430,6 +436,34 @@ const handleNoteClick = async (e: MouseEvent) => {
   }
 }
 
+const loadLocalVersion = async () => {
+  try {
+    const timestamp = new Date().getTime()
+    const response = await axios.get(`/update/local-version?t=${timestamp}`)
+    const data = response.data as LocalVersionData
+    currentVersion.value = data.local_version || 'unknown'
+    emit('version-loaded', currentVersion.value)
+  } catch (error) {
+    console.error('加载本地版本失败:', error)
+    currentVersion.value = 'unknown'
+    emit('version-loaded', currentVersion.value)
+  }
+}
+
+const loadChangelog = async () => {
+  const timestamp = new Date().getTime()
+  try {
+    const changelogResponse = await axios.get(`/update/changelog?t=${timestamp}`)
+    const changelogData = changelogResponse.data as Record<string, any>
+    changelogLoadError.value = ''
+    updateInfo.changelog = changelogData.changelog || []
+    updateInfo.history = changelogData.history || []
+  } catch (error) {
+    console.error('加载更新日志失败:', error)
+    changelogLoadError.value = '更新说明加载失败，可稍后重试'
+  }
+}
+
 const loadVersionInfo = async () => {
   try {
     const timestamp = new Date().getTime()
@@ -437,16 +471,19 @@ const loadVersionInfo = async () => {
     const data = response.data as UpdateCheckData
 
     if (data.success) {
-      currentVersion.value = data.local_version || 'unknown'
-      emit('version-loaded', currentVersion.value)
+      if (!currentVersion.value || currentVersion.value === '加载中...' || currentVersion.value === 'unknown') {
+        currentVersion.value = data.local_version || 'unknown'
+        emit('version-loaded', currentVersion.value)
+      }
 
+      const localVersion = data.local_version || currentVersion.value
       const backendHasUpdate = data.has_update === true
-      const compareResult = compareVersions(data.remote_version || '', currentVersion.value)
+      const compareResult = compareVersions(data.remote_version || '', localVersion)
       const isReallyHasUpdate = backendHasUpdate || compareResult > 0
       const isLocalNewer = compareResult < 0
 
       console.log('版本检查结果:', {
-        local: currentVersion.value,
+        local: localVersion,
         remote: data.remote_version,
         hasUpdate: isReallyHasUpdate,
         backendHasUpdate,
@@ -477,8 +514,6 @@ const loadVersionInfo = async () => {
     }
   } catch (error) {
     console.error('加载版本信息失败:', error)
-    currentVersion.value = 'unknown'
-    emit('version-loaded', currentVersion.value)
   }
 }
 
@@ -558,16 +593,7 @@ const showUpdateDialog = async (preLoadedData: UpdateCheckData | null = null) =>
 
     applyUpdateDialogData(versionData)
     isDialogLoading.value = false
-
-    try {
-      const changelogResponse = await axios.get(`/update/changelog?t=${timestamp}`)
-      const changelogData = changelogResponse.data as Record<string, any>
-      changelogLoadError.value = ''
-      applyUpdateDialogData(versionData, changelogData)
-    } catch (error) {
-      console.error('加载更新日志失败:', error)
-      changelogLoadError.value = '更新说明加载失败，可稍后重试'
-    }
+    void loadChangelog()
   } catch (error) {
     console.error('检查更新失败:', error)
     resetDialogDisplayState()
@@ -576,8 +602,6 @@ const showUpdateDialog = async (preLoadedData: UpdateCheckData | null = null) =>
     isDialogLoading.value = false
     return
   }
-
-  isDialogLoading.value = false
 }
 
 // 实际执行更新的逻辑 (发送请求)
@@ -716,12 +740,19 @@ const performUpdate = async () => {
       await new Promise((resolve) => setTimeout(resolve, 300))
 
       updateProgress.value = 100
-      updateStatus.value = '更新成功'
+      const targetVersion = updateInfo.remoteVersion || currentVersion.value || 'unknown'
+      const refreshedVersion = await refreshLocalVersionState(targetVersion)
+      updateInfo.hasUpdate = false
+      updateInfo.currentVersion = refreshedVersion
+      updateInfo.remoteVersion = targetVersion
+      updateInfo.reasonCode = 'already_latest'
+      updateInfo.reasonMessage = '更新已完成，正在刷新页面'
+      updateInfo.updateControl.force_update = false
+      updateInfo.updateControl.disable_update = true
+      updateStatus.value = '更新成功，正在刷新页面...'
       ElMessage.success('更新成功！页面将在5秒后刷新...')
 
       setTimeout(() => {
-        // 如果不是强制更新，可以让用户自己点，或者自动关闭
-        // 强制更新一般自动刷新
         updateDialogVisible.value = false
         window.location.reload()
       }, 5000)
@@ -747,6 +778,26 @@ const show = () => {
   showUpdateDialog()
 }
 
+const refreshLocalVersionState = async (preferredVersion?: string) => {
+  try {
+    const timestamp = new Date().getTime()
+    const response = await axios.get(`/update/local-version?t=${timestamp}`)
+    const data = response.data as LocalVersionData
+    const nextVersion = data.local_version || preferredVersion || currentVersion.value || 'unknown'
+    currentVersion.value = nextVersion
+    emit('version-loaded', nextVersion)
+    updateInfo.currentVersion = nextVersion
+    return nextVersion
+  } catch (error) {
+    console.error('刷新本地版本失败:', error)
+    const fallbackVersion = preferredVersion || currentVersion.value || 'unknown'
+    currentVersion.value = fallbackVersion
+    emit('version-loaded', fallbackVersion)
+    updateInfo.currentVersion = fallbackVersion
+    return fallbackVersion
+  }
+}
+
 const getCurrentVersion = () => {
   return currentVersion.value
 }
@@ -757,6 +808,7 @@ defineExpose({
 })
 
 onMounted(() => {
+  loadLocalVersion()
   loadVersionInfo()
 })
 </script>
