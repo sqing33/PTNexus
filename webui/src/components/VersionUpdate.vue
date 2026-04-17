@@ -23,8 +23,8 @@
             <div class="version-value new-version">{{ updateInfo.remoteVersion }}</div>
           </div>
           <div v-if="!updateInfo.hasUpdate && !isDialogLoading" class="version-status">
-            <el-icon color="#67c23a" size="20"><SuccessFilled /></el-icon>
-            <span>已是最新版本</span>
+            <el-icon :color="versionStatusColor" size="20"><SuccessFilled /></el-icon>
+            <span>{{ versionStatusText }}</span>
           </div>
         </div>
 
@@ -49,6 +49,10 @@
         <!-- All Versions Timeline -->
         <div class="all-versions-section">
           <div v-if="isDialogLoading" class="dialog-loading-text">正在加载版本信息...</div>
+          <div v-else-if="changelogLoadError" class="changelog-error-state">
+            <el-icon color="#e6a23c" size="18"><WarningFilled /></el-icon>
+            <span>{{ changelogLoadError }}</span>
+          </div>
           <div v-else-if="updateInfo.history.length === 0" class="no-history">暂无版本记录</div>
           <div v-else class="history-timeline">
             <div
@@ -149,6 +153,7 @@ const isUpdating = ref(false)
 const updateProgress = ref(0)
 const updateStatus = ref('')
 const isDialogLoading = ref(false)
+const changelogLoadError = ref('')
 
 const emit = defineEmits<{
   'version-loaded': [version: string]
@@ -181,6 +186,8 @@ const updateInfo = reactive({
   },
   updateMode: 'runtime_install' as UpdateMode,
   desktopInstaller: null as DesktopInstallerData | null,
+  reasonCode: 'already_latest',
+  reasonMessage: '',
 })
 
 type UpdateControlSchedule = {
@@ -210,14 +217,58 @@ type DesktopInstallerData = {
 }
 
 type UpdateCheckData = {
+  success?: boolean
   has_update?: boolean
   local_version?: string
   remote_version?: string
+  reason_code?: string
+  reason_message?: string
   update_control?: UpdateControlData
   update_mode?: string
   desktop_installer?: DesktopInstallerData | null
   [key: string]: unknown
 }
+
+const versionStatusText = computed(() => {
+  if (updateInfo.reasonMessage) {
+    switch (updateInfo.reasonCode) {
+      case 'already_latest':
+      case 'local_version_unknown':
+      case 'remote_manifest_unavailable':
+        return updateInfo.reasonMessage
+    }
+  }
+
+  switch (updateInfo.reasonCode) {
+    case 'local_version_unknown':
+      return '当前实例版本未知，暂时无法准确判断更新状态'
+    case 'remote_manifest_unavailable':
+      return '更新信息暂时不可用，请稍后重试'
+    case 'platform_artifact_missing':
+      return '检测到新版本，但当前平台缺少可用更新产物'
+    case 'platform_installer_missing':
+      return '检测到新版本，但当前平台缺少可用安装包'
+    case 'update_explicitly_disabled':
+      return '检测到新版本，但当前版本暂时禁止在线更新'
+    default:
+      return '已是最新版本'
+  }
+})
+
+const versionStatusColor = computed(() => {
+  switch (updateInfo.reasonCode) {
+    case 'already_latest':
+      return '#67c23a'
+    case 'local_version_unknown':
+    case 'remote_manifest_unavailable':
+    case 'platform_artifact_missing':
+    case 'platform_installer_missing':
+    case 'update_explicitly_disabled':
+      return '#e6a23c'
+    default:
+      return '#67c23a'
+  }
+})
 
 // 计算属性：判断是否为强制更新
 const isForceUpdate = computed(() => {
@@ -432,9 +483,12 @@ const loadVersionInfo = async () => {
 }
 
 const resetDialogDisplayState = () => {
+  changelogLoadError.value = ''
   updateInfo.hasUpdate = false
   updateInfo.currentVersion = currentVersion.value
   updateInfo.remoteVersion = ''
+  updateInfo.reasonCode = 'already_latest'
+  updateInfo.reasonMessage = ''
   updateInfo.changelog = []
   updateInfo.history = []
   updateInfo.updateMode = 'runtime_install'
@@ -452,7 +506,10 @@ const resetDialogDisplayState = () => {
   activeUpdateTab.value = 'latest'
 }
 
-const applyUpdateDialogData = (versionData: UpdateCheckData, changelogData: Record<string, any>) => {
+const applyUpdateDialogData = (
+  versionData: UpdateCheckData,
+  changelogData?: Record<string, any> | null,
+) => {
   const localVersion = versionData.local_version || currentVersion.value
   const compareResult = compareVersions(versionData.remote_version || '', localVersion)
   const isLocalNewer = compareResult < 0
@@ -462,8 +519,12 @@ const applyUpdateDialogData = (versionData: UpdateCheckData, changelogData: Reco
   updateInfo.hasUpdate = versionData.has_update === true || compareResult > 0
   updateInfo.currentVersion = localVersion
   updateInfo.remoteVersion = versionData.remote_version || ''
-  updateInfo.changelog = changelogData.changelog || []
-  updateInfo.history = changelogData.history || []
+  updateInfo.reasonCode = String(versionData.reason_code || '').trim() || 'already_latest'
+  updateInfo.reasonMessage = String(versionData.reason_message || '').trim()
+  if (changelogData) {
+    updateInfo.changelog = changelogData.changelog || []
+    updateInfo.history = changelogData.history || []
+  }
   updateInfo.updateMode = updateMode
   updateInfo.desktopInstaller = versionData.desktop_installer || null
 
@@ -490,22 +551,33 @@ const showUpdateDialog = async (preLoadedData: UpdateCheckData | null = null) =>
 
   try {
     const timestamp = new Date().getTime()
-    const changelogPromise = axios.get(`/update/changelog?t=${timestamp}`)
-    const versionPromise = preLoadedData
-      ? Promise.resolve({ data: preLoadedData as UpdateCheckData })
-      : axios.get(`/update/check?t=${timestamp}`)
-
-    const [versionResponse, changelogResponse] = await Promise.all([versionPromise, changelogPromise])
+    const versionResponse = preLoadedData
+      ? { data: preLoadedData as UpdateCheckData }
+      : await axios.get(`/update/check?t=${timestamp}`)
     const versionData = versionResponse.data as UpdateCheckData
-    const changelogData = changelogResponse.data as Record<string, any>
 
-    applyUpdateDialogData(versionData, changelogData)
+    applyUpdateDialogData(versionData)
+    isDialogLoading.value = false
+
+    try {
+      const changelogResponse = await axios.get(`/update/changelog?t=${timestamp}`)
+      const changelogData = changelogResponse.data as Record<string, any>
+      changelogLoadError.value = ''
+      applyUpdateDialogData(versionData, changelogData)
+    } catch (error) {
+      console.error('加载更新日志失败:', error)
+      changelogLoadError.value = '更新说明加载失败，可稍后重试'
+    }
   } catch (error) {
     console.error('检查更新失败:', error)
+    resetDialogDisplayState()
+    changelogLoadError.value = ''
     ElMessage.error('检查更新失败，请稍后重试')
-  } finally {
     isDialogLoading.value = false
+    return
   }
+
+  isDialogLoading.value = false
 }
 
 // 实际执行更新的逻辑 (发送请求)
@@ -701,6 +773,15 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   min-height: 220px;
+}
+
+.changelog-error-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e6a23c;
+  font-size: 14px;
+  padding: 32px 0;
 }
 
 .dialog-loading-text {

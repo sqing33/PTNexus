@@ -136,7 +136,25 @@ func validateUpdateManifestForMode(manifest *UpdateManifest, updateMode string) 
 	return nil
 }
 
-func getRemoteManifestForMode(updateMode string, versionHints ...string) (*UpdateManifest, error) {
+type ManifestLookupDiagnostics struct {
+	Strategy             string                     `json:"strategy,omitempty"`
+	HintRefreshAttempted bool                       `json:"hint_refresh_attempted,omitempty"`
+	HintRefreshApplied   bool                       `json:"hint_refresh_applied,omitempty"`
+	ManifestSource       string                     `json:"manifest_source,omitempty"`
+	InitialCandidates    []string                   `json:"initial_candidates,omitempty"`
+	HintCandidates       []string                   `json:"hint_candidates,omitempty"`
+	InitialFetch         *candidateFetchDiagnostics `json:"initial_fetch,omitempty"`
+	HintFetch            *candidateFetchDiagnostics `json:"hint_fetch,omitempty"`
+	HintRefreshError     string                     `json:"hint_refresh_error,omitempty"`
+}
+
+type RemoteManifestResult struct {
+	Manifest    *UpdateManifest           `json:"manifest,omitempty"`
+	Source      string                    `json:"source,omitempty"`
+	Diagnostics ManifestLookupDiagnostics `json:"diagnostics"`
+}
+
+func getRemoteManifestResultForMode(updateMode string, versionHints ...string) (*RemoteManifestResult, error) {
 	cleanHints := make([]string, 0, len(versionHints))
 	for _, hint := range versionHints {
 		if v := strings.TrimSpace(hint); v != "" {
@@ -145,23 +163,36 @@ func getRemoteManifestForMode(updateMode string, versionHints ...string) (*Updat
 	}
 
 	validator := func(manifest *UpdateManifest) error {
-		return validateUpdateManifestForMode(manifest, updateMode)
+		return validateUpdateManifest(manifest)
 	}
 
 	candidates := manifestCandidates()
-	manifest, source, err := fetchJSONFromCandidates[UpdateManifest](
+	result := &RemoteManifestResult{
+		Diagnostics: ManifestLookupDiagnostics{
+			Strategy:          "latest_first",
+			InitialCandidates: append([]string(nil), candidates...),
+		},
+	}
+
+	manifest, source, initialDiag, err := fetchJSONFromCandidatesWithDiagnostics[UpdateManifest](
 		context.Background(),
 		candidates,
 		15*time.Second,
 		validator,
 	)
+	result.Diagnostics.InitialFetch = initialDiag
 	if err != nil && len(cleanHints) > 0 {
-		manifest, source, err = fetchJSONFromCandidates[UpdateManifest](
+		hintCandidates := manifestVersionHintCandidates(cleanHints...)
+		result.Diagnostics.Strategy = "version_hint_fallback"
+		result.Diagnostics.HintCandidates = append([]string(nil), hintCandidates...)
+		var hintDiag *candidateFetchDiagnostics
+		manifest, source, hintDiag, err = fetchJSONFromCandidatesWithDiagnostics[UpdateManifest](
 			context.Background(),
-			manifestVersionHintCandidates(cleanHints...),
+			hintCandidates,
 			15*time.Second,
 			validator,
 		)
+		result.Diagnostics.HintFetch = hintDiag
 	}
 	if err == nil && manifest != nil && len(cleanHints) > 0 {
 		currentVersion := strings.TrimSpace(manifest.Latest.Version)
@@ -175,25 +206,47 @@ func getRemoteManifestForMode(updateMode string, versionHints ...string) (*Updat
 			}
 		}
 		if needHintRefresh {
-			if hintedManifest, hintedSource, hintedErr := fetchJSONFromCandidates[UpdateManifest](
+			result.Diagnostics.HintRefreshAttempted = true
+			hintCandidates := manifestVersionHintCandidates(cleanHints...)
+			if len(result.Diagnostics.HintCandidates) == 0 {
+				result.Diagnostics.HintCandidates = append([]string(nil), hintCandidates...)
+			}
+			if hintedManifest, hintedSource, hintedDiag, hintedErr := fetchJSONFromCandidatesWithDiagnostics[UpdateManifest](
 				context.Background(),
-				manifestVersionHintCandidates(cleanHints...),
+				hintCandidates,
 				15*time.Second,
 				validator,
 			); hintedErr == nil && hintedManifest != nil {
+				result.Diagnostics.HintFetch = hintedDiag
 				hintedVersion := strings.TrimSpace(hintedManifest.Latest.Version)
 				if currentVersion == "" || isNewerVersion(hintedVersion, currentVersion) {
 					manifest = hintedManifest
 					source = hintedSource
+					result.Diagnostics.HintRefreshApplied = true
+					result.Diagnostics.Strategy = "version_hint_refresh"
 				}
+			} else {
+				result.Diagnostics.HintFetch = hintedDiag
+				result.Diagnostics.HintRefreshError = hintedErr.Error()
 			}
 		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败: %w", err)
 	}
-	log.Printf("获取更新清单成功，使用源: %s (mode=%s)", source, strings.TrimSpace(updateMode))
-	return manifest, nil
+	result.Manifest = manifest
+	result.Source = source
+	result.Diagnostics.ManifestSource = source
+	log.Printf("获取更新清单成功，使用源: %s (mode=%s strategy=%s)", source, strings.TrimSpace(updateMode), result.Diagnostics.Strategy)
+	return result, nil
+}
+
+func getRemoteManifestForMode(updateMode string, versionHints ...string) (*UpdateManifest, error) {
+	result, err := getRemoteManifestResultForMode(updateMode, versionHints...)
+	if err != nil {
+		return nil, err
+	}
+	return result.Manifest, nil
 }
 
 func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {

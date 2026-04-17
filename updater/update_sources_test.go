@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -163,7 +167,7 @@ func TestGetRemoteManifestForModePrefersLatestBeforeVersionHints(t *testing.T) {
 	oldVersion := `{"schema":2,"latest":{"version":"v4.0.16","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"oldsha"}]},"history":[{"version":"v4.0.16","changes":["old"]}]}`
 
 	server := newManifestTestServer(t, map[string]manifestTestResponse{
-		"/latest.json": {body: latest},
+		"/latest.json":  {body: latest},
 		"/v4.0.16.json": {body: oldVersion},
 	})
 
@@ -345,5 +349,165 @@ func TestGetLocalVersionPrefersCurrentRuntimeOverImageVersion(t *testing.T) {
 	version := getLocalVersion()
 	if version != "v4.0.2" {
 		t.Fatalf("expected current runtime version v4.0.2, got %s", version)
+	}
+}
+
+func TestGetLocalVersionDetailsFallsBackToEnvVersion(t *testing.T) {
+	oldUpdateDir := updateDir
+	oldLocalConfigFile := localConfigFile
+	oldEmbeddedConfigFile := embeddedConfigFile
+	oldLocalVersionFilePath := localVersionFilePath
+	t.Cleanup(func() {
+		updateDir = oldUpdateDir
+		localConfigFile = oldLocalConfigFile
+		embeddedConfigFile = oldEmbeddedConfigFile
+		localVersionFilePath = oldLocalVersionFilePath
+	})
+
+	root := t.TempDir()
+	updateDir = filepath.Join(root, "updates")
+	localConfigFile = filepath.Join(root, "missing-local.json")
+	embeddedConfigFile = filepath.Join(root, "missing-embedded.json")
+	localVersionFilePath = filepath.Join(root, "missing-version")
+
+	t.Setenv("PTNEXUS_VERSION", "v4.0.23")
+	t.Setenv("VERSION_FILE", "")
+
+	details := getLocalVersionDetails()
+	if details.Version != "v4.0.23" {
+		t.Fatalf("expected env version v4.0.23, got %#v", details)
+	}
+	if details.Source != "env:PTNEXUS_VERSION" {
+		t.Fatalf("expected env source, got %#v", details)
+	}
+}
+
+func TestBuildUpdateDecisionRuntimeArtifactMissing(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv("PTNEXUS_VERSION", "v4.0.18")
+	t.Setenv("VERSION_FILE", "")
+
+	oldGiteeLatest := giteeManifestReleaseLatestURL
+	oldGithubLatest := githubManifestReleaseLatestURL
+	oldGiteeTemplate := giteeManifestReleaseURLTemplate
+	oldGithubTemplate := githubManifestReleaseURLTemplate
+	t.Cleanup(func() {
+		giteeManifestReleaseLatestURL = oldGiteeLatest
+		githubManifestReleaseLatestURL = oldGithubLatest
+		giteeManifestReleaseURLTemplate = oldGiteeTemplate
+		githubManifestReleaseURLTemplate = oldGithubTemplate
+	})
+
+	manifestBody := `{"schema":2,"latest":{"version":"v4.0.19","artifacts":[{"os":"unsupported-os","arch":"unsupported-arch","url":"https://example.com/runtime.tar.gz","sha256":"abc123"}]},"history":[{"version":"v4.0.19","changes":["missing platform"]}]}`
+	server := newManifestTestServer(t, map[string]manifestTestResponse{
+		"/latest.json": {body: manifestBody},
+	})
+
+	giteeManifestReleaseLatestURL = server.URL + "/latest.json"
+	githubManifestReleaseLatestURL = server.URL + "/latest.json"
+	giteeManifestReleaseURLTemplate = server.URL + "/%s.json"
+	githubManifestReleaseURLTemplate = server.URL + "/%s.json"
+
+	decision := buildUpdateDecision(updateModeRuntimeInstall)
+	if !decision.HasUpdate {
+		t.Fatalf("expected update to be detected, got %#v", decision)
+	}
+	if decision.ReasonCode != "platform_artifact_missing" {
+		t.Fatalf("expected platform_artifact_missing, got %#v", decision)
+	}
+	if decision.PlatformReady {
+		t.Fatalf("expected platform not ready, got %#v", decision)
+	}
+	if disable, _ := decision.UpdateControl["disable_update"].(bool); !disable {
+		t.Fatalf("expected disable_update true, got %#v", decision.UpdateControl)
+	}
+}
+
+func TestBuildUpdateDecisionRemoteManifestUnavailable(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv("PTNEXUS_VERSION", "v4.0.18")
+	t.Setenv("VERSION_FILE", "")
+
+	oldGiteeLatest := giteeManifestReleaseLatestURL
+	oldGithubLatest := githubManifestReleaseLatestURL
+	oldGiteeTemplate := giteeManifestReleaseURLTemplate
+	oldGithubTemplate := githubManifestReleaseURLTemplate
+	t.Cleanup(func() {
+		giteeManifestReleaseLatestURL = oldGiteeLatest
+		githubManifestReleaseLatestURL = oldGithubLatest
+		giteeManifestReleaseURLTemplate = oldGiteeTemplate
+		githubManifestReleaseURLTemplate = oldGithubTemplate
+	})
+
+	server := newManifestTestServer(t, map[string]manifestTestResponse{})
+	giteeManifestReleaseLatestURL = server.URL + "/missing.json"
+	githubManifestReleaseLatestURL = server.URL + "/missing.json"
+	giteeManifestReleaseURLTemplate = server.URL + "/missing-%s.json"
+	githubManifestReleaseURLTemplate = server.URL + "/missing-%s.json"
+
+	decision := buildUpdateDecision(updateModeRuntimeInstall)
+	if decision.ReasonCode != "remote_manifest_unavailable" {
+		t.Fatalf("expected remote_manifest_unavailable, got %#v", decision)
+	}
+	if decision.ManifestSource != "" {
+		t.Fatalf("expected empty manifest source, got %#v", decision)
+	}
+}
+
+func TestCheckUpdateHandlerIncludesDecisionDiagnostics(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv("PTNEXUS_VERSION", "v4.0.18")
+	t.Setenv("VERSION_FILE", "")
+
+	oldGiteeLatest := giteeManifestReleaseLatestURL
+	oldGithubLatest := githubManifestReleaseLatestURL
+	oldGiteeTemplate := giteeManifestReleaseURLTemplate
+	oldGithubTemplate := githubManifestReleaseURLTemplate
+	t.Cleanup(func() {
+		giteeManifestReleaseLatestURL = oldGiteeLatest
+		githubManifestReleaseLatestURL = oldGithubLatest
+		giteeManifestReleaseURLTemplate = oldGiteeTemplate
+		githubManifestReleaseURLTemplate = oldGithubTemplate
+	})
+
+	manifestBody := fmt.Sprintf(`{"schema":2,"latest":{"version":"v4.0.19","artifacts":[{"os":%q,"arch":%q,"url":"https://example.com/runtime.tar.gz","sha256":"abc123"}]},"history":[{"version":"v4.0.19","changes":["ok"]}]}`,
+		runtime.GOOS,
+		runtime.GOARCH,
+	)
+	server := newManifestTestServer(t, map[string]manifestTestResponse{
+		"/latest.json": {body: manifestBody},
+	})
+
+	giteeManifestReleaseLatestURL = server.URL + "/latest.json"
+	githubManifestReleaseLatestURL = server.URL + "/latest.json"
+	giteeManifestReleaseURLTemplate = server.URL + "/%s.json"
+	githubManifestReleaseURLTemplate = server.URL + "/%s.json"
+
+	req := httptest.NewRequest(http.MethodGet, "/update/check", nil)
+	rec := httptest.NewRecorder()
+	checkUpdateHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp updateDecision
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v body=%s", err, rec.Body.String())
+	}
+	if resp.ReasonCode != "update_available" {
+		t.Fatalf("expected update_available, got %#v", resp)
+	}
+	if resp.LocalVersionSource != "env:PTNEXUS_VERSION" {
+		t.Fatalf("expected local_version_source from env, got %#v", resp)
+	}
+	if resp.ManifestSource != server.URL+"/latest.json" {
+		t.Fatalf("expected manifest source %q, got %#v", server.URL+"/latest.json", resp)
+	}
+	if resp.ManifestStrategy != "latest_first" {
+		t.Fatalf("expected latest_first strategy, got %#v", resp)
 	}
 }

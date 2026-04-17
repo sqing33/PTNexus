@@ -110,10 +110,20 @@ type candidateFetchResult[T any] struct {
 	err     error
 }
 
-func fetchJSONFromCandidates[T any](ctx context.Context, candidates []string, timeout time.Duration, validators ...func(*T) error) (*T, string, error) {
+type candidateFetchAttempt struct {
+	URL     string `json:"url"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+type candidateFetchDiagnostics struct {
+	Attempts []candidateFetchAttempt `json:"attempts,omitempty"`
+}
+
+func fetchJSONFromCandidatesWithDiagnostics[T any](ctx context.Context, candidates []string, timeout time.Duration, validators ...func(*T) error) (*T, string, *candidateFetchDiagnostics, error) {
 	list := normalizeURLCandidates(candidates...)
 	if len(list) == 0 {
-		return nil, "", fmt.Errorf("没有可用的候选更新源")
+		return nil, "", &candidateFetchDiagnostics{}, fmt.Errorf("没有可用的候选更新源")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -137,6 +147,7 @@ func fetchJSONFromCandidates[T any](ctx context.Context, candidates []string, ti
 		}()
 	}
 
+	diagnostics := &candidateFetchDiagnostics{Attempts: make([]candidateFetchAttempt, 0, len(list))}
 	errMessages := make([]string, 0, len(list))
 	for i := 0; i < len(list); i++ {
 		result := <-results
@@ -152,14 +163,26 @@ func fetchJSONFromCandidates[T any](ctx context.Context, candidates []string, ti
 				}
 			}
 			if validatorErr == nil {
+				diagnostics.Attempts = append(diagnostics.Attempts, candidateFetchAttempt{URL: result.baseURL, Success: true})
 				cancel()
-				return result.value, result.baseURL, nil
+				return result.value, result.baseURL, diagnostics, nil
 			}
+			diagnostics.Attempts = append(diagnostics.Attempts, candidateFetchAttempt{URL: result.baseURL, Success: false, Error: validatorErr.Error()})
 			errMessages = append(errMessages, fmt.Sprintf("%s -> %v", result.baseURL, validatorErr))
 			continue
 		}
+		errText := "unknown error"
+		if result.err != nil {
+			errText = result.err.Error()
+		}
+		diagnostics.Attempts = append(diagnostics.Attempts, candidateFetchAttempt{URL: result.baseURL, Success: false, Error: errText})
 		errMessages = append(errMessages, fmt.Sprintf("%s -> %v", result.baseURL, result.err))
 	}
 
-	return nil, "", fmt.Errorf("所有候选源均失败: %s", strings.Join(errMessages, "; "))
+	return nil, "", diagnostics, fmt.Errorf("所有候选源均失败: %s", strings.Join(errMessages, "; "))
+}
+
+func fetchJSONFromCandidates[T any](ctx context.Context, candidates []string, timeout time.Duration, validators ...func(*T) error) (*T, string, error) {
+	value, source, _, err := fetchJSONFromCandidatesWithDiagnostics(ctx, candidates, timeout, validators...)
+	return value, source, err
 }
