@@ -297,14 +297,16 @@ func TestGetRemoteManifestForModeKeepsLatestWhenItIsNewerThanHint(t *testing.T) 
 	}
 }
 
-func TestGetLocalVersionPrefersImageVersionOverRuntimeState(t *testing.T) {
+func TestGetLocalVersionPrefersCurrentRuntimeOverImageVersion(t *testing.T) {
 	oldUpdateDir := updateDir
 	oldLocalConfigFile := localConfigFile
 	oldEmbeddedConfigFile := embeddedConfigFile
+	oldLocalVersionFilePath := localVersionFilePath
 	t.Cleanup(func() {
 		updateDir = oldUpdateDir
 		localConfigFile = oldLocalConfigFile
 		embeddedConfigFile = oldEmbeddedConfigFile
+		localVersionFilePath = oldLocalVersionFilePath
 	})
 
 	root := t.TempDir()
@@ -331,11 +333,17 @@ func TestGetLocalVersionPrefersImageVersionOverRuntimeState(t *testing.T) {
 		t.Skipf("symlink unsupported in current environment: %v", err)
 	}
 
-	t.Setenv("PTNEXUS_VERSION", "v4.0.0")
+	t.Setenv("PTNEXUS_VERSION", "")
 	t.Setenv("VERSION_FILE", "")
 
+	appVersionPath := filepath.Join(root, "VERSION")
+	if err := os.WriteFile(appVersionPath, []byte("v4.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write app version: %v", err)
+	}
+	localVersionFilePath = appVersionPath
+
 	version := getLocalVersion()
-	if version != "v4.0.0" {
-		t.Fatalf("expected image version v4.0.0, got %s", version)
+	if version != "v4.0.2" {
+		t.Fatalf("expected current runtime version v4.0.2, got %s", version)
 	}
 }
