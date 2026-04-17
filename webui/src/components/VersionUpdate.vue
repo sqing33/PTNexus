@@ -210,6 +210,8 @@ type DesktopInstallerData = {
 }
 
 type UpdateCheckData = {
+  has_update?: boolean
+  local_version?: string
   remote_version?: string
   update_control?: UpdateControlData
   update_mode?: string
@@ -381,31 +383,27 @@ const loadVersionInfo = async () => {
   try {
     const timestamp = new Date().getTime()
     const response = await axios.get(`/update/check?t=${timestamp}`)
-    const data = response.data
+    const data = response.data as UpdateCheckData
 
     if (data.success) {
-      currentVersion.value = data.local_version
+      currentVersion.value = data.local_version || 'unknown'
       emit('version-loaded', currentVersion.value)
 
-      // 计算版本差异
-      // compareResult > 0 : 远程 > 本地 (有更新)
-      // compareResult < 0 : 远程 < 本地 (本地是开发版或更新版)
-      const compareResult = compareVersions(data.remote_version || '', data.local_version)
-      const isReallyHasUpdate = compareResult > 0
+      const backendHasUpdate = data.has_update === true
+      const compareResult = compareVersions(data.remote_version || '', currentVersion.value)
+      const isReallyHasUpdate = backendHasUpdate || compareResult > 0
       const isLocalNewer = compareResult < 0
 
       console.log('版本检查结果:', {
-        local: data.local_version,
+        local: currentVersion.value,
         remote: data.remote_version,
         hasUpdate: isReallyHasUpdate,
-        isLocalNewer: isLocalNewer, // 调试看是否识别为本地更新
+        backendHasUpdate,
+        isLocalNewer: isLocalNewer,
         forceUpdate: data.update_control?.force_update,
         updateMode: data.update_mode,
       })
 
-      // 核心修复：
-      // 只有在 (有真实更新 OR (强制更新 AND 本地不比远程新)) 时才弹窗
-      // 这样就屏蔽了 3.3.4 (Local) > 3.3.3 (Remote) 但带有 force_update 标志的情况
       const shouldShowDialog =
         isReallyHasUpdate || (data.update_control?.force_update && !isLocalNewer)
 
@@ -416,7 +414,7 @@ const loadVersionInfo = async () => {
           data.update_control &&
           data.update_control.force_update &&
           !data.update_control.disable_update &&
-          !isLocalNewer && // 再次确保本地较新时不自动更新
+          !isLocalNewer &&
           data.update_mode !== 'installer_download'
         ) {
           console.log('检测到强制更新，自动触发更新流程...')
@@ -455,13 +453,14 @@ const resetDialogDisplayState = () => {
 }
 
 const applyUpdateDialogData = (versionData: UpdateCheckData, changelogData: Record<string, any>) => {
-  const compareResult = compareVersions(versionData.remote_version || '', currentVersion.value)
+  const localVersion = versionData.local_version || currentVersion.value
+  const compareResult = compareVersions(versionData.remote_version || '', localVersion)
   const isLocalNewer = compareResult < 0
   const updateMode: UpdateMode =
     versionData.update_mode === 'installer_download' ? 'installer_download' : 'runtime_install'
 
-  updateInfo.hasUpdate = compareResult > 0
-  updateInfo.currentVersion = currentVersion.value
+  updateInfo.hasUpdate = versionData.has_update === true || compareResult > 0
+  updateInfo.currentVersion = localVersion
   updateInfo.remoteVersion = versionData.remote_version || ''
   updateInfo.changelog = changelogData.changelog || []
   updateInfo.history = changelogData.history || []
