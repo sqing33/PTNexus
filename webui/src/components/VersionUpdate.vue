@@ -49,49 +49,64 @@
         <!-- All Versions Timeline -->
         <div class="all-versions-section">
           <div v-if="isDialogLoading" class="dialog-loading-text">正在加载版本信息...</div>
-          <div v-else-if="changelogLoadError" class="changelog-error-state">
-            <el-icon color="#e6a23c" size="18"><WarningFilled /></el-icon>
-            <span>{{ changelogLoadError }}</span>
-          </div>
-          <div v-else-if="updateInfo.history.length === 0" class="no-history">暂无版本记录</div>
-          <div v-else class="history-timeline">
-            <div
-              v-for="(version, versionIndex) in updateInfo.history"
-              :key="versionIndex"
-              class="history-version"
-              :class="{
-                'latest-version': compareVersions(version.version, updateInfo.currentVersion) > 0,
-              }"
+          <template v-else>
+            <el-alert
+              v-if="historyStatusBarVisible"
+              :title="historyStatusText"
+              :type="historyStatusType"
+              :closable="false"
+              show-icon
+              class="history-status-alert"
             >
-              <div class="version-header">
-                <div class="version-title">
-                  <span class="version-name">{{ version.version }}</span>
-                  <span class="version-date"
-                    >{{ version.date
-                    }}{{
-                      compareVersions(version.version, updateInfo.currentVersion) > 0 ? ' 新' : ''
-                    }}</span
-                  >
-                </div>
-              </div>
+              <template v-if="showHistoryRetry" #default>
+                <el-button link type="primary" :disabled="isHistoryLoading" @click="retryChangelog">
+                  重试
+                </el-button>
+              </template>
+            </el-alert>
+            <div v-if="updateInfo.history.length === 0 && !hasLoadedHistoryOnce" class="dialog-loading-text">
+              正在加载版本记录...
+            </div>
+            <div v-else-if="updateInfo.history.length === 0" class="no-history">暂无版本记录</div>
+            <div v-else class="history-timeline">
               <div
-                v-if="version.note"
-                class="version-note"
-                @click="handleNoteClick"
-                v-html="formatNote(version.note)"
-              ></div>
-              <div class="version-changes">
+                v-for="(version, versionIndex) in updateInfo.history"
+                :key="versionIndex"
+                class="history-version"
+                :class="{
+                  'latest-version': compareVersions(version.version, updateInfo.currentVersion) > 0,
+                }"
+              >
+                <div class="version-header">
+                  <div class="version-title">
+                    <span class="version-name">{{ version.version }}</span>
+                    <span class="version-date"
+                      >{{ version.date
+                      }}{{
+                        compareVersions(version.version, updateInfo.currentVersion) > 0 ? ' 新' : ''
+                      }}</span
+                    >
+                  </div>
+                </div>
                 <div
-                  v-for="(change, changeIndex) in version.changes"
-                  :key="changeIndex"
-                  class="changelog-item"
-                >
-                  <div class="changelog-number">{{ changeIndex + 1 }}</div>
-                  <div class="changelog-text" v-html="change.replace(/\n/g, '<br>')"></div>
+                  v-if="version.note"
+                  class="version-note"
+                  @click="handleNoteClick"
+                  v-html="formatNote(version.note)"
+                ></div>
+                <div class="version-changes">
+                  <div
+                    v-for="(change, changeIndex) in version.changes"
+                    :key="changeIndex"
+                    class="changelog-item"
+                  >
+                    <div class="changelog-number">{{ changeIndex + 1 }}</div>
+                    <div class="changelog-text" v-html="change.replace(/\n/g, '<br>')"></div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          </template>
         </div>
       </div>
     </el-card>
@@ -153,7 +168,10 @@ const isUpdating = ref(false)
 const updateProgress = ref(0)
 const updateStatus = ref('')
 const isDialogLoading = ref(false)
+const isHistoryLoading = ref(false)
 const changelogLoadError = ref('')
+const hasLoadedHistoryOnce = ref(false)
+let changelogRequestSeq = 0
 
 const emit = defineEmits<{
   'version-loaded': [version: string]
@@ -274,6 +292,28 @@ const versionStatusColor = computed(() => {
     default:
       return '#67c23a'
   }
+})
+
+const historyStatusBarVisible = computed(() => {
+  return isHistoryLoading.value || !!changelogLoadError.value
+})
+
+const historyStatusType = computed<'info' | 'warning'>(() => {
+  return changelogLoadError.value ? 'warning' : 'info'
+})
+
+const historyStatusText = computed(() => {
+  if (changelogLoadError.value) {
+    return changelogLoadError.value
+  }
+  if (isHistoryLoading.value) {
+    return updateInfo.history.length > 0 ? '正在刷新版本记录...' : '正在加载版本记录...'
+  }
+  return ''
+})
+
+const showHistoryRetry = computed(() => {
+  return !!changelogLoadError.value
 })
 
 // 计算属性：判断是否为强制更新
@@ -451,17 +491,36 @@ const loadLocalVersion = async () => {
 }
 
 const loadChangelog = async () => {
-  const timestamp = new Date().getTime()
+  const requestId = ++changelogRequestSeq
+  isHistoryLoading.value = true
+  changelogLoadError.value = ''
+
   try {
+    const timestamp = new Date().getTime()
     const changelogResponse = await axios.get(`/update/changelog?t=${timestamp}`)
     const changelogData = changelogResponse.data as Record<string, any>
+    if (requestId !== changelogRequestSeq) {
+      return
+    }
+    updateInfo.changelog = Array.isArray(changelogData.changelog) ? changelogData.changelog : []
+    updateInfo.history = Array.isArray(changelogData.history) ? changelogData.history : []
+    hasLoadedHistoryOnce.value = true
     changelogLoadError.value = ''
-    updateInfo.changelog = changelogData.changelog || []
-    updateInfo.history = changelogData.history || []
   } catch (error) {
+    if (requestId !== changelogRequestSeq) {
+      return
+    }
     console.error('加载更新日志失败:', error)
-    changelogLoadError.value = '更新说明加载失败，可稍后重试'
+    changelogLoadError.value = '版本记录加载失败，可重试'
+  } finally {
+    if (requestId === changelogRequestSeq) {
+      isHistoryLoading.value = false
+    }
   }
+}
+
+const retryChangelog = () => {
+  void loadChangelog()
 }
 
 const loadVersionInfo = async () => {
@@ -518,14 +577,11 @@ const loadVersionInfo = async () => {
 }
 
 const resetDialogDisplayState = () => {
-  changelogLoadError.value = ''
   updateInfo.hasUpdate = false
   updateInfo.currentVersion = currentVersion.value
   updateInfo.remoteVersion = ''
   updateInfo.reasonCode = 'already_latest'
   updateInfo.reasonMessage = ''
-  updateInfo.changelog = []
-  updateInfo.history = []
   updateInfo.updateMode = 'runtime_install'
   updateInfo.desktopInstaller = null
   updateInfo.updateControl = {
@@ -557,8 +613,9 @@ const applyUpdateDialogData = (
   updateInfo.reasonCode = String(versionData.reason_code || '').trim() || 'already_latest'
   updateInfo.reasonMessage = String(versionData.reason_message || '').trim()
   if (changelogData) {
-    updateInfo.changelog = changelogData.changelog || []
-    updateInfo.history = changelogData.history || []
+    updateInfo.changelog = Array.isArray(changelogData.changelog) ? changelogData.changelog : []
+    updateInfo.history = Array.isArray(changelogData.history) ? changelogData.history : []
+    hasLoadedHistoryOnce.value = true
   }
   updateInfo.updateMode = updateMode
   updateInfo.desktopInstaller = versionData.desktop_installer || null
@@ -597,7 +654,6 @@ const showUpdateDialog = async (preLoadedData: UpdateCheckData | null = null) =>
   } catch (error) {
     console.error('检查更新失败:', error)
     resetDialogDisplayState()
-    changelogLoadError.value = ''
     ElMessage.error('检查更新失败，请稍后重试')
     isDialogLoading.value = false
     return
@@ -808,8 +864,9 @@ defineExpose({
 })
 
 onMounted(() => {
-  loadLocalVersion()
-  loadVersionInfo()
+  void loadLocalVersion()
+  void loadChangelog()
+  void loadVersionInfo()
 })
 </script>
 
@@ -827,13 +884,8 @@ onMounted(() => {
   min-height: 220px;
 }
 
-.changelog-error-state {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #e6a23c;
-  font-size: 14px;
-  padding: 32px 0;
+.history-status-alert {
+  margin-bottom: 12px;
 }
 
 .dialog-loading-text {
