@@ -487,6 +487,46 @@ func TestGetLocalVersionDetailsFallsBackToEnvVersion(t *testing.T) {
 	}
 }
 
+func TestGetLocalVersionDetailsPrefersPersistedVersionOverEnvFallback(t *testing.T) {
+	oldUpdateDir := updateDir
+	oldLocalConfigFile := localConfigFile
+	oldEmbeddedConfigFile := embeddedConfigFile
+	oldLocalVersionFilePath := localVersionFilePath
+	t.Cleanup(func() {
+		updateDir = oldUpdateDir
+		localConfigFile = oldLocalConfigFile
+		embeddedConfigFile = oldEmbeddedConfigFile
+		localVersionFilePath = oldLocalVersionFilePath
+	})
+
+	root := t.TempDir()
+	updateDir = filepath.Join(root, "updates")
+	localConfigFile = filepath.Join(root, "local", "CHANGELOG.json")
+	embeddedConfigFile = filepath.Join(root, "embedded", "CHANGELOG.json")
+	localVersionFilePath = filepath.Join(root, "VERSION")
+
+	if err := os.MkdirAll(filepath.Dir(localConfigFile), 0o755); err != nil {
+		t.Fatalf("mkdir local config dir: %v", err)
+	}
+	if err := os.WriteFile(localConfigFile, []byte(`{"history":[{"version":"v4.0.24"}]}`), 0o644); err != nil {
+		t.Fatalf("write local config: %v", err)
+	}
+	if err := os.WriteFile(localVersionFilePath, []byte("v4.0.23\n"), 0o644); err != nil {
+		t.Fatalf("write plain version file: %v", err)
+	}
+
+	t.Setenv("PTNEXUS_VERSION", "v4.0.22")
+	t.Setenv("VERSION_FILE", "")
+
+	details := getLocalVersionDetails()
+	if details.Version != "v4.0.24" {
+		t.Fatalf("expected persisted version v4.0.24, got %#v", details)
+	}
+	if details.Source != localConfigFile {
+		t.Fatalf("expected persisted version source %q, got %#v", localConfigFile, details)
+	}
+}
+
 func TestBuildUpdateDecisionRuntimeArtifactMissing(t *testing.T) {
 	t.Setenv("UPDATE_MANIFEST_URL", "")
 	t.Setenv(updateManifestRawFallbackEnv, "false")
@@ -618,7 +658,34 @@ func TestCheckUpdateHandlerIncludesDecisionDiagnostics(t *testing.T) {
 }
 
 func TestGetLocalVersionHandlerReturnsLocalVersionAndSource(t *testing.T) {
-	t.Setenv("PTNEXUS_VERSION", "v4.0.23")
+	oldUpdateDir := updateDir
+	oldLocalConfigFile := localConfigFile
+	oldEmbeddedConfigFile := embeddedConfigFile
+	oldLocalVersionFilePath := localVersionFilePath
+	t.Cleanup(func() {
+		updateDir = oldUpdateDir
+		localConfigFile = oldLocalConfigFile
+		embeddedConfigFile = oldEmbeddedConfigFile
+		localVersionFilePath = oldLocalVersionFilePath
+	})
+
+	root := t.TempDir()
+	updateDir = filepath.Join(root, "updates")
+	localConfigFile = filepath.Join(root, "local", "CHANGELOG.json")
+	embeddedConfigFile = filepath.Join(root, "embedded", "CHANGELOG.json")
+	localVersionFilePath = filepath.Join(root, "VERSION")
+
+	if err := os.MkdirAll(filepath.Dir(localConfigFile), 0o755); err != nil {
+		t.Fatalf("mkdir local config dir: %v", err)
+	}
+	if err := os.WriteFile(localConfigFile, []byte(`{"history":[{"version":"v4.0.24"}]}`), 0o644); err != nil {
+		t.Fatalf("write local config: %v", err)
+	}
+	if err := os.WriteFile(localVersionFilePath, []byte("v4.0.23\n"), 0o644); err != nil {
+		t.Fatalf("write plain version file: %v", err)
+	}
+
+	t.Setenv("PTNEXUS_VERSION", "v4.0.22")
 	t.Setenv("VERSION_FILE", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/update/local-version", nil)
@@ -636,11 +703,11 @@ func TestGetLocalVersionHandlerReturnsLocalVersionAndSource(t *testing.T) {
 	if !resp.Success {
 		t.Fatalf("expected success true, got %#v", resp)
 	}
-	if resp.LocalVersion != "v4.0.23" {
-		t.Fatalf("expected local_version v4.0.23, got %#v", resp)
+	if resp.LocalVersion != "v4.0.24" {
+		t.Fatalf("expected local_version v4.0.24, got %#v", resp)
 	}
-	if resp.LocalVersionSource != "env:PTNEXUS_VERSION" {
-		t.Fatalf("expected local_version_source env:PTNEXUS_VERSION, got %#v", resp)
+	if resp.LocalVersionSource != localConfigFile {
+		t.Fatalf("expected local_version_source %q, got %#v", localConfigFile, resp)
 	}
 	if cacheControl := rec.Header().Get("Cache-Control"); !strings.Contains(cacheControl, "no-cache") {
 		t.Fatalf("expected no-cache header, got %q", cacheControl)

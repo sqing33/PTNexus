@@ -459,12 +459,6 @@ func getLocalVersionDetails() localVersionDetails {
 	if version := inferVersionFromCurrentRuntime(); version != "" {
 		return localVersionDetails{Version: version, Source: "current_runtime"}
 	}
-	if version := strings.TrimSpace(getEnv("PTNEXUS_VERSION", "")); version != "" {
-		return localVersionDetails{Version: version, Source: "env:PTNEXUS_VERSION"}
-	}
-	if version := readVersionFromPlainFile(strings.TrimSpace(getEnv("VERSION_FILE", ""))); version != "" {
-		return localVersionDetails{Version: version, Source: "env:VERSION_FILE"}
-	}
 	for _, path := range localVersionConfigCandidates() {
 		version, err := readVersionFromConfig(path)
 		if err == nil {
@@ -476,6 +470,12 @@ func getLocalVersionDetails() localVersionDetails {
 	}
 	if version := readVersionFromPlainFile(localVersionFilePath); version != "" {
 		return localVersionDetails{Version: version, Source: localVersionFilePath}
+	}
+	if version := strings.TrimSpace(getEnv("PTNEXUS_VERSION", "")); version != "" {
+		return localVersionDetails{Version: version, Source: "env:PTNEXUS_VERSION"}
+	}
+	if version := readVersionFromPlainFile(strings.TrimSpace(getEnv("VERSION_FILE", ""))); version != "" {
+		return localVersionDetails{Version: version, Source: "env:VERSION_FILE"}
 	}
 	return localVersionDetails{Version: "unknown", Source: "unknown"}
 }
