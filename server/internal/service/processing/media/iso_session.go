@@ -339,20 +339,7 @@ func buildMediaPathCandidates(savePaths []string, torrentName, contentName strin
 }
 
 func shouldAllowSavePathDirScan(savePath, torrentName, contentName string) bool {
-	if torrentName == "" && contentName == "" {
-		return true
-	}
-	baseName := strings.TrimSpace(filepath.Base(strings.TrimSpace(savePath)))
-	if baseName == "" {
-		return false
-	}
-	if torrentName != "" && strings.EqualFold(baseName, torrentName) {
-		return true
-	}
-	if contentName != "" && strings.EqualFold(baseName, contentName) {
-		return true
-	}
-	return false
+	return strings.TrimSpace(savePath) != ""
 }
 
 func appendMediaPathCandidate(candidates *[]mediaPathCandidate, indexByPath map[string]int, candidate mediaPathCandidate) {

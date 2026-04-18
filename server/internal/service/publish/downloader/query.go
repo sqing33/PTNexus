@@ -9,6 +9,7 @@ import (
 // DownloaderInfoRepo 定义查询下载器信息所需的最小仓储接口。
 type DownloaderInfoRepo interface {
 	GetSeedParameter(torrentID string, siteName string) (map[string]any, error)
+	GetCurrentTorrentByHash(hash string) (map[string]any, error)
 	GetCurrentTorrentByName(name string) (map[string]any, error)
 }
 
@@ -30,13 +31,22 @@ func GetDownloaderInfo(payload map[string]any, repo DownloaderInfoRepo) (map[str
 	if err != nil {
 		return map[string]any{"success": false, "message": "未找到该种子信息"}, 404
 	}
-	name := strings.TrimSpace(processingshared.ToString(seed["name"], ""))
-	if name == "" {
-		return map[string]any{"success": false, "message": "未找到该种子信息"}, 404
+	current := map[string]any{}
+	if hash := strings.TrimSpace(processingshared.ToString(seed["hash"], "")); hash != "" {
+		if row, currentErr := repo.GetCurrentTorrentByHash(hash); currentErr == nil {
+			current = row
+		}
 	}
-	current, err := repo.GetCurrentTorrentByName(name)
-	if err != nil {
-		return map[string]any{"success": false, "message": "未找到该种子信息"}, 404
+	if len(current) == 0 {
+		name := strings.TrimSpace(processingshared.ToString(seed["name"], ""))
+		if name == "" {
+			return map[string]any{"success": false, "message": "未找到该种子信息"}, 404
+		}
+		row, currentErr := repo.GetCurrentTorrentByName(name)
+		if currentErr != nil {
+			return map[string]any{"success": false, "message": "未找到该种子信息"}, 404
+		}
+		current = row
 	}
 	return map[string]any{
 		"success":       true,

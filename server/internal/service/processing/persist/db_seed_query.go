@@ -5,6 +5,7 @@ import "strings"
 // SeedQueryRepo 定义查询并归一化种子参数所需的最小仓储接口。
 type SeedQueryRepo interface {
 	GetSeedParameter(torrentID, siteName string) (map[string]any, error)
+	GetCurrentTorrentByHash(hash string) (map[string]any, error)
 	GetCurrentTorrentByName(name string) (map[string]any, error)
 }
 
@@ -29,11 +30,22 @@ func QueryAndNormalizeSeed(repo SeedQueryRepo, torrentID, siteName string) (map[
 		normalized["title"] = strings.TrimSpace(torrentID)
 	}
 
-	if name := strings.TrimSpace(toStringSimple(normalized["name"])); name != "" {
-		if current, currentErr := repo.GetCurrentTorrentByName(name); currentErr == nil {
-			normalized["save_path"] = toStringSimple(current["save_path"])
-			normalized["downloader_id"] = toStringSimple(current["downloader_id"])
+	current := map[string]any{}
+	if hash := strings.TrimSpace(toStringSimple(normalized["hash"])); hash != "" {
+		if row, currentErr := repo.GetCurrentTorrentByHash(hash); currentErr == nil {
+			current = row
 		}
+	}
+	if len(current) == 0 {
+		if name := strings.TrimSpace(toStringSimple(normalized["name"])); name != "" {
+			if row, currentErr := repo.GetCurrentTorrentByName(name); currentErr == nil {
+				current = row
+			}
+		}
+	}
+	if len(current) > 0 {
+		normalized["save_path"] = toStringSimple(current["save_path"])
+		normalized["downloader_id"] = toStringSimple(current["downloader_id"])
 	}
 	if normalized["save_path"] == nil {
 		normalized["save_path"] = ""
