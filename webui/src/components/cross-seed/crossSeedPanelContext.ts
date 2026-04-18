@@ -178,6 +178,8 @@ export interface CrossSeedPanelContext {
   isRefreshingIntro: Ref<boolean>
   refreshMediainfo: () => Promise<void>
   isRefreshingMediainfo: Ref<boolean>
+  refetchFromSource: () => Promise<void>
+  isRefetchingFromSource: Ref<boolean>
   bdinfoProgress: Ref<BdinfoProgress>
   discSize: Ref<number>
   formatFileSize: (size: number) => string

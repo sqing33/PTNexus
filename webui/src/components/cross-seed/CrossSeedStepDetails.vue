@@ -9,7 +9,14 @@
                 <el-form-item label="原始/待解析标题">
                   <el-input v-model="torrentData.original_main_title">
                     <template #append>
-                      <el-button :icon="Refresh" @click="reparseTitle" :loading="isReparsing">
+                      <el-button
+                        @click="refetchFromSource"
+                        :loading="isRefetchingFromSource"
+                        :disabled="isReparsing || isRefetchingFromSource"
+                      >
+                        重新从源站拉取数据
+                      </el-button>
+                      <el-button :icon="Refresh" @click="reparseTitle" :loading="isReparsing" :disabled="isRefetchingFromSource">
                         重新解析
                       </el-button>
                     </template>
@@ -531,7 +538,9 @@ const {
   reverseMappings,
   invalidStandardParams,
   reparseTitle,
+  refetchFromSource,
   isReparsing,
+  isRefetchingFromSource,
   handleTeamInput,
   allTagOptions,
   invalidTagsList,

@@ -1,6 +1,7 @@
 package media
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -57,5 +58,36 @@ func TestBuildMediaPathCandidatesHandlesSingleFileSavePath(t *testing.T) {
 	}
 	if !candidates[0].AllowDirScan {
 		t.Fatalf("expected save_path candidate to allow dir scan")
+	}
+}
+
+func TestFindMediaSiblingByBaseNameMatchesSingleMediaFile(t *testing.T) {
+	tempDir := t.TempDir()
+	base := "Sleepwalkers.2021.BluRay.1080p.DD5.1.x264-BMDru"
+	matchedPath := filepath.Join(tempDir, base+".mkv")
+	if err := os.WriteFile(matchedPath, []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write matched file: %v", err)
+	}
+
+	resolved, err := findMediaSiblingByBaseName(filepath.Join(tempDir, base), true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolved != matchedPath {
+		t.Fatalf("expected %s, got %s", matchedPath, resolved)
+	}
+}
+
+func TestFindMediaSiblingByBaseNameRejectsMultipleMatches(t *testing.T) {
+	tempDir := t.TempDir()
+	base := "Sleepwalkers.2021.BluRay.1080p.DD5.1.x264-BMDru"
+	for _, ext := range []string{".mkv", ".mp4"} {
+		if err := os.WriteFile(filepath.Join(tempDir, base+ext), []byte("ok"), 0o644); err != nil {
+			t.Fatalf("write test file: %v", err)
+		}
+	}
+
+	if _, err := findMediaSiblingByBaseName(filepath.Join(tempDir, base), true); err == nil {
+		t.Fatalf("expected multiple match error")
 	}
 }

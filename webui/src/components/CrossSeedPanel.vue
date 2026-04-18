@@ -746,6 +746,7 @@ const publishBatchEventSource = ref<EventSource | null>(null)
 const isReparsing = ref(false)
 const isRefreshingScreenshots = ref(false)
 const isConfirmingScreenshotReview = ref(false)
+const isRefetchingFromSource = ref(false)
 const isFinalizingScreenshotPreview = ref(false)
 const showScreenshotPreviewDialog = ref(false)
 const screenshotPreviewCandidates = ref<ScreenshotPreviewCandidateItem[]>([])
@@ -2350,13 +2351,13 @@ const seedFlow = createSeedFlow({
   isLoading,
   isDataFromDatabase,
   taskId,
+  isRefetchingFromSource,
 
   torrentData,
   reverseMappings,
 
   logProgressTaskId,
   showLogProgress,
-
   fetchFlowErrorMessage,
 
   filterExtraEmptyLines,
@@ -2378,6 +2379,7 @@ const {
   saveAutoAddExistingSetting,
   saveAutoUpdateExistingTorrentSetting,
   fetchTorrentInfo,
+  refetchFromSource,
   handleTeamInput,
   saveCurrentSeedEdits,
   goToPublishPreviewStep,
@@ -2626,6 +2628,8 @@ provide(crossSeedPanelContextKey, {
   isRefreshingIntro,
   refreshMediainfo,
   isRefreshingMediainfo,
+  refetchFromSource,
+  isRefetchingFromSource,
   bdinfoProgress,
   discSize,
   formatFileSize,

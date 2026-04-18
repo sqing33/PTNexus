@@ -234,7 +234,20 @@ func resolveMediaAccessForCandidate(candidate mediaPathCandidate, scene string) 
 	)
 	info, err := os.Stat(trimmed)
 	if err != nil {
-		return nil, fmt.Errorf("访问候选路径失败: %w", err)
+		if errors.Is(err, os.ErrNotExist) {
+			if matchedPath, matchErr := findMediaSiblingByBaseName(trimmed, true); matchErr == nil {
+				logx.Infof(
+					isoSessionLogModule,
+					"候选路径未命中，按同名媒体文件回退 scene=%s source=%s path=%s matched=%s",
+					normalizeMediaScene(scene), normalizeMediaCandidateSource(candidate.Source), trimmed, matchedPath,
+				)
+				trimmed = matchedPath
+				info, err = os.Stat(trimmed)
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("访问候选路径失败: %w", err)
+		}
 	}
 
 	if !info.IsDir() {
@@ -467,6 +480,50 @@ func pickMediaEntry(savePath string, allowISO bool) (string, error) {
 		return "", fmt.Errorf("目录中未找到可分析的视频文件: %s", trimmed)
 	}
 	return largest, nil
+}
+
+func findMediaSiblingByBaseName(path string, allowISO bool) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", errors.New("候选路径为空")
+	}
+	if ext := strings.TrimSpace(filepath.Ext(trimmed)); ext != "" {
+		return "", fmt.Errorf("候选路径已包含扩展名: %s", trimmed)
+	}
+
+	dir := filepath.Dir(trimmed)
+	base := strings.TrimSpace(filepath.Base(trimmed))
+	if dir == "" || base == "" {
+		return "", fmt.Errorf("无法解析候选路径目录或文件名: %s", trimmed)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+
+	allowedExt := supportedMediaExtensions(allowISO)
+	matches := make([]string, 0, 2)
+	for _, entry := range entries {
+		if entry == nil || entry.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(entry.Name())
+		if strings.TrimSpace(strings.TrimSuffix(name, filepath.Ext(name))) != base {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(name))
+		if _, ok := allowedExt[ext]; !ok {
+			continue
+		}
+		matches = append(matches, filepath.Join(dir, name))
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("目录中未找到同名媒体文件: %s", trimmed)
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("目录中找到多个同名媒体文件: %s", strings.Join(matches, ", "))
+	}
+	return matches[0], nil
 }
 
 func supportedMediaExtensions(allowISO bool) map[string]struct{} {
