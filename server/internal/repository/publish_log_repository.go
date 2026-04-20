@@ -342,6 +342,29 @@ func (r *PublishLogRepository) DeleteByID(id uint64) (bool, error) {
 	return result.RowsAffected > 0, nil
 }
 
+// ListRecentAttentionLogs 读取最近需要用户关注的失败/限制类日志。
+// 参数/返回：limit 为最大返回数量；返回日志切片与 error。
+// 失败场景：数据库未初始化或查询失败返回 error。
+// 副作用：读取 publish_logs。
+func (r *PublishLogRepository) ListRecentAttentionLogs(limit int) ([]PublishLogEntry, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("publish log repo is nil")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows := make([]PublishLogEntry, 0)
+	if err := r.store.DB.Model(&PublishLogEntry{}).
+		Where("status IN ?", []string{"failed", "pre_check_limit"}).
+		Order("updated_at DESC, id DESC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // MaxNumericTriggerSuffix 计算 publish_trigger 以指定前缀开头的最大数字后缀。
 // 参数/返回：prefix 为触发前缀（例如：批量转种-）；返回最大数字（不存在则为 0）与 error。
 // 失败场景：DB 未初始化或查询失败返回 error；解析失败的触发会被忽略。

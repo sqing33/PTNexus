@@ -95,6 +95,32 @@ func (s *BatchFetchState) Snapshot(taskID string) (BatchFetchTask, bool) {
 	return copied, true
 }
 
+// SnapshotAll 返回全部批量抓取任务快照。
+// 参数/返回：无参数；返回 task_id 到任务快照的映射。
+// 失败场景：状态管理器为空时返回空映射。
+// 副作用：无。
+func (s *BatchFetchState) SnapshotAll() map[string]BatchFetchTask {
+	if s == nil {
+		return map[string]BatchFetchTask{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[string]BatchFetchTask, len(s.tasks))
+	for taskID, task := range s.tasks {
+		if task == nil {
+			continue
+		}
+		copied := *task
+		copied.Results = make([]map[string]any, 0, len(task.Results))
+		for _, item := range task.Results {
+			copied.Results = append(copied.Results, cloneAnyMap(item))
+		}
+		result[taskID] = copied
+	}
+	return result
+}
+
 func cloneAnyMap(source map[string]any) map[string]any {
 	if source == nil {
 		return map[string]any{}

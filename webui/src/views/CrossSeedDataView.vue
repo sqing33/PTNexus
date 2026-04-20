@@ -349,9 +349,18 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="130" align="center" fixed="right">
+        <el-table-column label="操作" width="210" align="center" fixed="right">
           <template #default="scope">
-            <el-button size="small" type="primary" @click="handleEdit(scope.row)">编辑</el-button>
+            <el-button size="small" type="primary" @click="handleEdit(scope.row)">维护</el-button>
+            <el-button
+              size="small"
+              type="warning"
+              plain
+              @click="openRefetchDialog(scope.row)"
+              style="margin-left: 5px"
+            >
+              重新拉取
+            </el-button>
             <el-button
               size="small"
               type="danger"
@@ -384,6 +393,55 @@
         </div>
       </el-card>
     </div>
+
+    <el-dialog
+      v-model="refetchDialogVisible"
+      title="重新从源站拉取数据"
+      width="520px"
+      destroy-on-close
+    >
+      <el-form label-position="top">
+        <el-form-item label="目标记录">
+          <el-input :model-value="refetchTargetLabel" disabled />
+        </el-form-item>
+        <el-form-item label="源站">
+          <el-select
+            v-model="refetchForm.sourceSite"
+            placeholder="选择源站"
+            filterable
+            :disabled="refetchSubmitting"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="site in sourceSiteOptions"
+              :key="site.site"
+              :label="site.name"
+              :value="site.name"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="源站种子 ID">
+          <el-input
+            v-model="refetchForm.searchTerm"
+            placeholder="输入源站种子 ID"
+            :disabled="refetchSubmitting"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="refetchDialogVisible = false" :disabled="refetchSubmitting"
+          >取消</el-button
+        >
+        <el-button
+          type="warning"
+          @click="submitRefetch"
+          :loading="refetchSubmitting"
+          :disabled="!canSubmitRefetch"
+        >
+          开始重新拉取
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -439,6 +497,7 @@ interface SeedParameter {
   torrent_id: string
   site_name: string
   nickname: string
+  save_path: string
   downloader_id?: string
   title: string
   subtitle: string
@@ -499,6 +558,11 @@ interface ReverseMappings {
   site_name: Record<string, string>
 }
 
+interface SourceSiteOption {
+  name: string
+  site: string
+}
+
 // 反向映射表，用于将标准值映射到中文显示名称
 const reverseMappings = ref<ReverseMappings>({
   type: {},
@@ -528,6 +592,14 @@ const isDeleteMode = ref<boolean>(false)
 
 // BDInfo记录查看相关
 const recordDialogVisible = ref<boolean>(false)
+const refetchDialogVisible = ref(false)
+const refetchSubmitting = ref(false)
+const refetchTargetRow = ref<SeedParameter | null>(null)
+const refetchForm = ref({
+  sourceSite: '',
+  searchTerm: '',
+})
+const sourceSiteOptions = ref<SourceSiteOption[]>([])
 
 // 路径树相关
 const pathTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
@@ -610,6 +682,19 @@ const activeFilters = ref({
 })
 const tempFilters = ref({ ...activeFilters.value })
 const targetSitesList = ref<string[]>([]) // 新增：目标站点列表
+
+const refetchTargetLabel = computed(() => {
+  const row = refetchTargetRow.value
+  if (!row) return ''
+  return `${row.nickname} / ${row.torrent_id}`
+})
+
+const canSubmitRefetch = computed(
+  () =>
+    !!refetchTargetRow.value &&
+    !!refetchForm.value.sourceSite.trim() &&
+    !!refetchForm.value.searchTerm.trim(),
+)
 
 // 计算属性：选中的目标站点（单选）
 const selectedTargetSite = computed({
@@ -1090,7 +1175,6 @@ const applyFilters = () => {
 
 const uiInitializing = ref(true)
 
-
 // 监听搜索查询的变化，自动触发搜索
 watch(searchQuery, () => {
   if (uiInitializing.value) return
@@ -1116,6 +1200,77 @@ const handleEdit = async (row: SeedParameter) => {
       from: '/data',
     },
   })
+}
+
+const loadSourceSiteOptions = async () => {
+  if (sourceSiteOptions.value.length > 0) {
+    return
+  }
+
+  try {
+    const response = await axios.get('/api/sites/status')
+    const allSites = Array.isArray(response.data) ? response.data : []
+    sourceSiteOptions.value = allSites
+      .filter((site) => site && site.is_source)
+      .map((site) => ({
+        name: String(site.name || '').trim(),
+        site: String(site.site || '').trim(),
+      }))
+      .filter((site) => site.name && site.site)
+  } catch (error) {
+    console.error('加载源站列表失败:', error)
+  }
+}
+
+const openRefetchDialog = async (row: SeedParameter) => {
+  refetchTargetRow.value = row
+  refetchForm.value = {
+    sourceSite: row.nickname || row.site_name,
+    searchTerm: row.torrent_id,
+  }
+  await loadSourceSiteOptions()
+  refetchDialogVisible.value = true
+}
+
+const submitRefetch = async () => {
+  if (!canSubmitRefetch.value || !refetchTargetRow.value) {
+    return
+  }
+
+  refetchSubmitting.value = true
+  try {
+    const row = refetchTargetRow.value
+    const payload = {
+      sourceSite: refetchForm.value.sourceSite.trim(),
+      searchTerm: refetchForm.value.searchTerm.trim(),
+      savePath: String(row.save_path || ''),
+      torrentName: String(row.title || ''),
+      downloaderId: String(row.downloader_id || ''),
+      target_torrent_id: row.torrent_id,
+      target_site_name: row.site_name,
+      screenshotReviewMode: 'interactive',
+    }
+    const response = await axios.post('/api/migrate/refetch_maintenance_seed', payload)
+    const result = response.data
+    if (!result.success) {
+      throw new Error(result.message || result.error || '重新拉取失败')
+    }
+
+    ElMessage.success('重新拉取完成，列表已刷新')
+    refetchDialogVisible.value = false
+    await fetchData()
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (error.response?.data as { error?: string } | undefined)?.error ||
+        error.message
+      : error instanceof Error
+        ? error.message
+        : '网络错误'
+    ElMessage.error(message)
+  } finally {
+    refetchSubmitting.value = false
+  }
 }
 
 // 处理删除按钮点击

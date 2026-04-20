@@ -1,6 +1,6 @@
 <template>
   <div class="cross-seed-panel">
-    <CrossSeedStepsHeader :steps="steps" :active-step="activeStep" />
+    <CrossSeedStepsHeader v-if="!maintenanceOnly" :steps="steps" :active-step="activeStep" />
 
     <!-- 2. 中间内容区 -->
     <main class="panel-content">
@@ -8,13 +8,13 @@
       <CrossSeedStepDetails v-if="activeStep === 0" />
 
       <!-- 步骤 1: 发布参数预览 -->
-      <CrossSeedStepPublishPreview v-if="activeStep === 1" />
+      <CrossSeedStepPublishPreview v-if="!maintenanceOnly && activeStep === 1" />
 
       <!-- 步骤 2: 选择发布站点 -->
-      <CrossSeedStepSiteSelection v-if="activeStep === 2" />
+      <CrossSeedStepSiteSelection v-if="!maintenanceOnly && activeStep === 2" />
 
       <!-- 步骤 3: 完成发布 -->
-      <CrossSeedStepPublishResults v-if="activeStep === 3" />
+      <CrossSeedStepPublishResults v-if="!maintenanceOnly && activeStep === 3" />
     </main>
 
     <!-- 3. 底部按钮栏 (固定) -->
@@ -394,6 +394,7 @@ const taskMonitorStore = useTaskMonitorStore()
 const torrent = computed(() => crossSeedStore.workingParams as WorkingTorrent)
 const sourceSite = computed(() => crossSeedStore.sourceInfo?.name || '')
 const sourceTorrentId = computed(() => crossSeedStore.sourceInfo?.torrentId || '')
+const maintenanceOnly = computed(() => props.publishScene === 'maintenance')
 
 const normalizeScreenshotReviewStatus = (value: unknown): ScreenshotReviewStatus => {
   if (typeof value !== 'string') return 'none'
@@ -1234,10 +1235,7 @@ const openFetchedScreenshotPreview = async () => {
     })
   } catch (error: unknown) {
     ElNotification.closeAll()
-    const errorMsg = getScreenshotValidateErrorMessage(
-      error,
-      '未能生成候选截图，请查看后台日志。',
-    )
+    const errorMsg = getScreenshotValidateErrorMessage(error, '未能生成候选截图，请查看后台日志。')
     ElNotification.error({
       title: '候选生成失败',
       message: errorMsg,
@@ -1400,10 +1398,7 @@ const confirmScreenshotPreviewSelection = async () => {
     })
   } catch (error: unknown) {
     ElNotification.closeAll()
-    const errorMsg = getScreenshotValidateErrorMessage(
-      error,
-      '未能生成正式截图，请查看后台日志。',
-    )
+    const errorMsg = getScreenshotValidateErrorMessage(error, '未能生成正式截图，请查看后台日志。')
     ElNotification.error({
       title: '正式截图生成失败',
       message: errorMsg,
@@ -1778,10 +1773,7 @@ const refreshScreenshots = async () => {
     }
   } catch (error: unknown) {
     ElNotification.closeAll()
-    const errorMsg = getScreenshotValidateErrorMessage(
-      error,
-      '未能生成候选截图，请查看后台日志。',
-    )
+    const errorMsg = getScreenshotValidateErrorMessage(error, '未能生成候选截图，请查看后台日志。')
     ElNotification.error({
       title: '候选生成失败',
       message: errorMsg,
@@ -2820,6 +2812,7 @@ provide(crossSeedPanelContextKey, {
   steps,
   activeStep,
   activeTab,
+  maintenanceOnly,
   torrentData,
   reverseMappings,
   filteredTitleComponents,

@@ -308,26 +308,6 @@
       background
     />
 
-    <!-- 转种弹窗 -->
-    <div v-if="crossSeedDialogVisible" class="modal-overlay">
-      <el-card class="cross-seed-card" shadow="always">
-        <template #header>
-          <div class="modal-header">
-            <span>转种 - {{ selectedTorrentForMigration?.name }}</span>
-            <el-button type="danger" circle @click="closeCrossSeedDialog" plain>X</el-button>
-          </div>
-        </template>
-        <div class="cross-seed-content" v-if="selectedTorrentForMigration">
-          <CrossSeedPanel
-            publish-scene="multi_site"
-            @complete="handleCrossSeedComplete"
-            @cancel="closeCrossSeedDialog"
-            @close-with-refresh="handleCloseWithRefresh"
-          />
-        </div>
-      </el-card>
-    </div>
-
     <!-- 筛选器弹窗 (无改动) -->
     <div
       v-if="filterDialogVisible"
@@ -659,6 +639,62 @@
       </el-card>
     </div>
 
+    <div v-if="directTransferDialogVisible" class="filter-overlay">
+      <el-card class="filter-card" style="max-width: 760px">
+        <template #header>
+          <div class="filter-card-header">
+            <span>直接转种</span>
+            <el-button type="danger" circle @click="closeDirectTransferDialog" plain>X</el-button>
+          </div>
+        </template>
+        <div class="filter-card-body">
+          <div class="torrent-name-container">
+            <p class="label">种子名称:</p>
+            <p class="torrent-name">{{ selectedTorrentForMigration?.name }}</p>
+          </div>
+          <p>源站点: {{ directTransferSourceSite }}</p>
+          <p style="color: #909399; margin-bottom: 12px">
+            当前流程不再进入编辑面板；如需修改标题、简介、标签等，请去“维护”页处理。
+          </p>
+
+          <el-divider content-position="left">选择目标站点</el-divider>
+          <el-checkbox-group
+            v-model="directTransferSelectedTargets"
+            class="direct-target-checkboxes"
+          >
+            <el-checkbox
+              v-for="site in directTransferTargetSites"
+              :key="site.name"
+              :label="site.name"
+              :disabled="!isDirectTargetSelectable(site)"
+            >
+              {{ site.name }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </div>
+        <div class="filter-card-footer">
+          <el-button @click="closeDirectTransferDialog">取消</el-button>
+          <el-button
+            type="warning"
+            plain
+            :loading="directTransferLoading"
+            :disabled="directTransferSelectedTargets.length === 0"
+            @click="enqueueDirectTransfer"
+          >
+            加入队列
+          </el-button>
+          <el-button
+            type="primary"
+            :loading="directTransferLoading"
+            :disabled="directTransferSelectedTargets.length === 0"
+            @click="publishDirectTransfer"
+          >
+            立即发布
+          </el-button>
+        </div>
+      </el-card>
+    </div>
+
     <!-- 站点数据查看器 -->
     <SiteDataViewer @refresh="handleTorrentRefresh" />
 
@@ -738,7 +774,6 @@ import { ElMessageBox } from 'element-plus'
 import type { TableInstance, Sort } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
-import CrossSeedPanel from '../components/CrossSeedPanel.vue'
 import SiteDataViewer from '../components/SiteDataViewer.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
 import { useTaskMonitorStore } from '@/stores/taskMonitor'
@@ -890,7 +925,14 @@ const pathTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
 const pathTreeData = ref<PathNode[]>([])
 
 const sourceSelectionDialogVisible = ref<boolean>(false)
+const directTransferDialogVisible = ref<boolean>(false)
+const directTransferLoading = ref<boolean>(false)
+const directTransferTaskId = ref<string | null>(null)
+const directTransferUploadData = ref<Record<string, any> | null>(null)
+const directTransferSelectedTargets = ref<string[]>([])
+const directTransferSourceSite = ref('')
 const allSourceSitesStatus = ref<SiteStatus[]>([])
+const allSitesStatus = ref<SiteStatus[]>([])
 const iyuuBatchQueryLoading = ref<boolean>(false)
 const iyuuBatchDialogVisible = ref<boolean>(false)
 const iyuuBatchTaskId = ref<string | null>(null)
@@ -929,10 +971,14 @@ const crossSeedStore = useCrossSeedStore()
 const taskMonitorStore = useTaskMonitorStore()
 const siteDataStore = useSiteDataStore()
 
-// 控制转种弹窗的显示，当 taskId 存在时显示
-const crossSeedDialogVisible = computed(() => !!crossSeedStore.taskId)
 // 从 store 获取选中的种子信息
 const selectedTorrentForMigration = computed(() => crossSeedStore.workingParams as Torrent | null)
+const directTransferTargetSites = computed(() =>
+  allSitesStatus.value.filter((site) => site.is_target),
+)
+
+const autoAddExistingToDownloader = ref(true)
+const autoUpdateExistingTorrent = ref(false)
 
 // 站点操作弹窗相关
 const siteOperationDialogVisible = ref<boolean>(false)
@@ -1160,9 +1206,27 @@ const fetchDownloadersList = async (forceRefresh = false) => {
 // 从缓存或API加载站点状态
 const fetchAllSitesStatus = async (forceRefresh = false) => {
   try {
-    allSourceSitesStatus.value = await torrentsViewState.fetchSitesStatus(forceRefresh)
+    if (!forceRefresh && allSitesStatus.value.length > 0) {
+      allSourceSitesStatus.value = allSitesStatus.value.filter((site) => site.is_source)
+      return
+    }
+
+    const response = await axios.get('/api/sites/status')
+    const allSites = Array.isArray(response.data) ? response.data : []
+    allSitesStatus.value = allSites
+    allSourceSitesStatus.value = allSites.filter((site) => site.is_source)
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+const fetchCrossSeedSettings = async () => {
+  try {
+    const response = await axios.get('/api/settings/cross_seed')
+    autoAddExistingToDownloader.value = !!response.data?.auto_add_existing_to_downloader
+    autoUpdateExistingTorrent.value = !!response.data?.auto_update_existing_torrent
+  } catch (e) {
+    console.warn('获取转种设置失败:', e)
   }
 }
 
@@ -1215,6 +1279,11 @@ const fetchData = async () => {
 const startCrossSeed = async (row: Torrent) => {
   // 在开始转种流程前，先重置 store，防止旧数据污染
   crossSeedStore.reset()
+  directTransferTaskId.value = null
+  directTransferUploadData.value = null
+  directTransferSelectedTargets.value = []
+  directTransferSourceSite.value = ''
+  directTransferDialogVisible.value = false
 
   const availableSources = Object.entries(row.sites)
     .map(([siteName, siteDetails]) => ({ siteName, ...siteDetails }))
@@ -1228,7 +1297,7 @@ const startCrossSeed = async (row: Torrent) => {
   crossSeedStore.setParams(row)
 
   // 查询缓存站点
-  await queryCachedSites(row)
+  await Promise.all([queryCachedSites(row), fetchCrossSeedSettings()])
 
   // 即使没有可用的源站点，也打开弹窗，让用户可以使用 IYUU 查询
   if (availableSources.length === 0) {
@@ -1274,6 +1343,86 @@ const queryCachedSites = async (row: Torrent) => {
   }
 }
 
+const buildDirectTransferRouteTarget = (
+  patch: {
+    status?: string
+    queueGroupId?: string
+  } = {},
+) => ({
+  path: '/publish-logs',
+  query: Object.fromEntries(
+    Object.entries({
+      scene: 'multi_site',
+      ...(patch.status ? { status: patch.status } : {}),
+      ...(patch.queueGroupId ? { queue_group_id: patch.queueGroupId } : {}),
+    }).filter(([, value]) => typeof value === 'string' && value.trim()),
+  ) as Record<string, string>,
+})
+
+const isDirectTargetSelectable = (site: SiteStatus) => {
+  const row = selectedTorrentForMigration.value
+  if (!row) return false
+  if (!site.is_target) return false
+  if (site.name === directTransferSourceSite.value) return false
+  if (row.sites[site.name]) return false
+  if (!site.has_cookie) return false
+  if ((site.name === '杜比' || site.name === '肉丝') && !site.has_passkey) return false
+  return true
+}
+
+const closeDirectTransferDialog = () => {
+  directTransferDialogVisible.value = false
+  directTransferSelectedTargets.value = []
+}
+
+const fetchDirectTransferSeedData = async (sourceSite: SourceSiteOption, torrentId: string) => {
+  const row = selectedTorrentForMigration.value
+  if (!row) {
+    throw new Error('当前种子为空')
+  }
+
+  const sourceSiteIdentifier =
+    allSourceSitesStatus.value.find((s) => s.name === sourceSite.siteName)?.site ||
+    sourceSite.siteName.toLowerCase()
+  const fallbackDownloaderId =
+    row.downloaderId ||
+    (row.downloaderIds && row.downloaderIds.length > 0 ? row.downloaderIds[0] : '')
+
+  const taskId = `direct_${torrentId}_${Date.now()}`
+  const storeResponse = await axios.post(
+    '/api/migrate/fetch_and_store',
+    {
+      sourceSite: sourceSite.siteName,
+      searchTerm: torrentId,
+      savePath: row.save_path,
+      torrentName: row.name,
+      downloaderId: fallbackDownloaderId,
+      screenshotReviewMode: 'interactive',
+      task_id: taskId,
+    },
+    { timeout: 600000 },
+  )
+
+  const dbResponse = await axios.get('/api/migrate/get_db_seed_info', {
+    params: {
+      torrent_id: torrentId,
+      site_name: sourceSiteIdentifier,
+    },
+    timeout: 600000,
+  })
+
+  if (!dbResponse.data?.success || !dbResponse.data?.data) {
+    throw new Error(dbResponse.data?.message || dbResponse.data?.error || '读取抓取结果失败')
+  }
+
+  directTransferTaskId.value = String(storeResponse.data?.task_id || taskId)
+  directTransferUploadData.value = {
+    ...dbResponse.data.data,
+    save_path: row.save_path,
+  }
+  directTransferSourceSite.value = sourceSite.siteName
+}
+
 const confirmSourceSiteAndProceed = async (sourceSite: SourceSiteOption | null) => {
   const row = selectedTorrentForMigration.value
   if (!row || !sourceSite) {
@@ -1314,16 +1463,32 @@ const confirmSourceSiteAndProceed = async (sourceSite: SourceSiteOption | null) 
 
   const sourceSiteIdentifier =
     allSourceSitesStatus.value.find((s) => s.name === siteName)?.site || siteName.toLowerCase()
-  ElMessage.success(`准备从站点 [${siteName}] 开始迁移种子...`)
+  ElMessage.success(`正在准备站点 [${siteName}] 的转种数据...`)
   const sourceInfo: ISourceInfo = {
     name: siteName,
     site: sourceSiteIdentifier,
     torrentId,
   }
   crossSeedStore.setSourceInfo(sourceInfo)
-  crossSeedStore.setTaskId(row.name + '_' + Date.now())
 
-  sourceSelectionDialogVisible.value = false
+  try {
+    directTransferLoading.value = true
+    await fetchDirectTransferSeedData(sourceSite, torrentId)
+    directTransferSelectedTargets.value = []
+    sourceSelectionDialogVisible.value = false
+    directTransferDialogVisible.value = true
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (error.response?.data as { error?: string } | undefined)?.error ||
+        error.message
+      : error instanceof Error
+        ? error.message
+        : '准备转种数据失败'
+    ElMessage.error(message)
+  } finally {
+    directTransferLoading.value = false
+  }
 }
 
 const isSourceSiteSelectable = (siteName: string): boolean => {
@@ -1347,10 +1512,6 @@ const isSourceSiteSelectable = (siteName: string): boolean => {
   }
 
   return true
-}
-
-const closeCrossSeedDialog = () => {
-  crossSeedStore.reset()
 }
 
 // 处理站点点击事件
@@ -1417,9 +1578,9 @@ const setSiteNotExist = async () => {
   } catch (error: unknown) {
     console.error('设置站点状态时出错:', error)
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { error?: string; message?: string } | undefined)?.error ||
+      ? (error.response?.data as { error?: string; message?: string } | undefined)?.error ||
         (error.response?.data as { error?: string; message?: string } | undefined)?.message ||
-        error.message)
+        error.message
       : error instanceof Error
         ? error.message
         : '设置站点状态时发生错误'
@@ -1427,19 +1588,153 @@ const setSiteNotExist = async () => {
   }
 }
 
-const handleCrossSeedComplete = async () => {
-  ElMessage.success('转种操作已完成！')
-  crossSeedStore.reset()
-  // 可选：刷新数据以显示最新状态
-  await refreshBackendAndReload()
+const enqueueDirectTransfer = async () => {
+  const row = selectedTorrentForMigration.value
+  if (
+    !row ||
+    !directTransferTaskId.value ||
+    !directTransferUploadData.value ||
+    directTransferSelectedTargets.value.length === 0
+  ) {
+    return
+  }
+
+  directTransferLoading.value = true
+  const queueMonitorKey = `publish_queue:${directTransferTaskId.value}`
+  taskMonitorStore.markRunning({
+    key: queueMonitorKey,
+    kind: 'publish_queue',
+    rawId: directTransferTaskId.value,
+    title: '发布任务入队',
+    message: `准备加入 ${directTransferSelectedTargets.value.length} 个站点的发布队列`,
+    progressText: '正在创建队列分组',
+    routeTarget: buildDirectTransferRouteTarget({ status: 'running' }),
+  })
+
+  try {
+    const response = await axios.post('/api/migrate/publish_queue/enqueue', {
+      task_id: directTransferTaskId.value,
+      upload_data: directTransferUploadData.value,
+      targetSites: directTransferSelectedTargets.value,
+      sourceSite: directTransferSourceSite.value,
+      downloaderId: row.downloaderId,
+      auto_add_to_downloader: true,
+      auto_add_existing_to_downloader: autoAddExistingToDownloader.value,
+      auto_update_existing_torrent: autoUpdateExistingTorrent.value,
+      publish_scene: 'multi_site',
+    })
+
+    if (!response.data?.success || !response.data?.group_id) {
+      throw new Error(response.data?.message || '加入队列失败')
+    }
+
+    taskMonitorStore.markSuccess(queueMonitorKey, {
+      kind: 'publish_queue',
+      rawId: response.data.group_id,
+      title: '发布任务入队',
+      message: `已加入队列分组 ${response.data.group_id}`,
+      progressText: `共 ${response.data.count || 0} 个站点`,
+      routeTarget: buildDirectTransferRouteTarget({
+        status: 'running',
+        queueGroupId: String(response.data.group_id),
+      }),
+    })
+    ElMessage.success(`已加入队列：${response.data.group_id}`)
+    closeDirectTransferDialog()
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? (error.response?.data as { logs?: string; message?: string } | undefined)?.logs ||
+        (error.response?.data as { message?: string } | undefined)?.message ||
+        error.message
+      : error instanceof Error
+        ? error.message
+        : '加入队列失败'
+    taskMonitorStore.markFailed(queueMonitorKey, {
+      kind: 'publish_queue',
+      rawId: directTransferTaskId.value,
+      title: '发布任务入队',
+      message: '加入队列失败',
+      progressText: `目标站点 ${directTransferSelectedTargets.value.length} 个`,
+      error: message,
+      routeTarget: buildDirectTransferRouteTarget({ status: 'failed' }),
+    })
+    ElMessage.error(message)
+  } finally {
+    directTransferLoading.value = false
+  }
 }
 
-// 处理带刷新的关闭事件（在步骤3点击关闭按钮时触发）
-const handleCloseWithRefresh = async () => {
-  ElMessage.success('转种操作已完成！')
-  crossSeedStore.reset()
-  // 刷新数据以显示最新状态
-  await refreshBackendAndReload()
+const publishDirectTransfer = async () => {
+  const row = selectedTorrentForMigration.value
+  if (
+    !row ||
+    !directTransferTaskId.value ||
+    !directTransferUploadData.value ||
+    directTransferSelectedTargets.value.length === 0
+  ) {
+    return
+  }
+
+  directTransferLoading.value = true
+  const publishMonitorKey = `publish_batch:${directTransferTaskId.value}`
+  taskMonitorStore.markRunning({
+    key: publishMonitorKey,
+    kind: 'publish_batch',
+    rawId: directTransferTaskId.value,
+    title: '直接转种发布',
+    message: `准备发布到 ${directTransferSelectedTargets.value.length} 个站点`,
+    progressText: '正在启动发布任务',
+    routeTarget: buildDirectTransferRouteTarget({ status: 'running' }),
+  })
+
+  try {
+    const response = await axios.post('/api/migrate/publish_batch/start', {
+      task_id: directTransferTaskId.value,
+      upload_data: directTransferUploadData.value,
+      targetSites: directTransferSelectedTargets.value,
+      sourceSite: directTransferSourceSite.value,
+      downloaderId: row.downloaderId,
+      auto_add_to_downloader: true,
+      auto_add_existing_to_downloader: autoAddExistingToDownloader.value,
+      auto_update_existing_torrent: autoUpdateExistingTorrent.value,
+      publish_scene: 'multi_site',
+    })
+
+    if (!response.data?.success || !response.data?.batch_id) {
+      throw new Error(response.data?.message || '启动发布失败')
+    }
+
+    taskMonitorStore.markSuccess(publishMonitorKey, {
+      kind: 'publish_batch',
+      rawId: response.data.batch_id,
+      title: '直接转种发布',
+      message: `已启动批量发布 ${response.data.batch_id}`,
+      progressText: `并发 ${response.data.concurrency || 1}`,
+      routeTarget: buildDirectTransferRouteTarget({ status: 'running' }),
+    })
+    ElMessage.success('批量发布任务已启动，请到任务面板或发布日志查看进度')
+    closeDirectTransferDialog()
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? (error.response?.data as { logs?: string; message?: string } | undefined)?.logs ||
+        (error.response?.data as { message?: string } | undefined)?.message ||
+        error.message
+      : error instanceof Error
+        ? error.message
+        : '启动发布失败'
+    taskMonitorStore.markFailed(publishMonitorKey, {
+      kind: 'publish_batch',
+      rawId: directTransferTaskId.value,
+      title: '直接转种发布',
+      message: '启动发布失败',
+      progressText: `目标站点 ${directTransferSelectedTargets.value.length} 个`,
+      error: message,
+      routeTarget: buildDirectTransferRouteTarget({ status: 'failed' }),
+    })
+    ElMessage.error(message)
+  } finally {
+    directTransferLoading.value = false
+  }
 }
 
 const getSiteDetails = (siteName: string) => {
@@ -1525,9 +1820,9 @@ const refreshIyuuBatchProgress = async () => {
     }
   } catch (error: unknown) {
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (error.response?.data as { error?: string } | undefined)?.error ||
-        error.message)
+        error.message
       : error instanceof Error
         ? error.message
         : '获取IYUU批量查询进度时发生网络错误'
@@ -1597,11 +1892,13 @@ const triggerIYUUQueryForFiltered = async () => {
     const listData = Array.isArray(listResult.data) ? (listResult.data as Torrent[]) : []
     const candidates = listData
       .slice(0, IYUU_BATCH_MAX_GROUPS)
-      .map((t): IyuuBatchCandidate => ({
-        name: t.name,
-        size: t.size,
-        save_path: t.save_path,
-      }))
+      .map(
+        (t): IyuuBatchCandidate => ({
+          name: t.name,
+          size: t.size,
+          save_path: t.save_path,
+        }),
+      )
       .filter((t) => t.name && t.size)
 
     // 确保包含当前正在处理的种子（避免筛选结果过大时不在前 200 里）
@@ -1659,9 +1956,9 @@ const triggerIYUUQueryForFiltered = async () => {
   } catch (error: unknown) {
     console.error('触发筛选结果 IYUU 批量查询时出错:', error)
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (error.response?.data as { error?: string } | undefined)?.error ||
-        error.message)
+        error.message
       : error instanceof Error
         ? error.message
         : '触发IYUU批量查询失败'
@@ -1830,7 +2127,10 @@ const getLink = (siteData?: SiteData | null, siteName?: string | null): string |
   const { comment } = siteData
   if (comment.startsWith('http')) {
     // 过滤掉 &existed=1 参数
-    return comment.replace(/&existed=1/g, '').replace(/\?&/, '?').replace(/\?$/, '')
+    return comment
+      .replace(/&existed=1/g, '')
+      .replace(/\?&/, '?')
+      .replace(/\?$/, '')
   }
   const rule = site_link_rules.value[siteName]
   if (rule && /^\d+$/.test(comment)) {
@@ -1996,6 +2296,7 @@ onMounted(async () => {
     await loadUiSettings(true)
     // 然后执行完整刷新
     await refreshBackendAndReload()
+    await fetchCrossSeedSettings()
     torrentsViewState.setInitialized()
   } else {
     // 非首次进入：使用缓存数据，不调用 API
@@ -2003,6 +2304,7 @@ onMounted(async () => {
     await loadUiSettings(false)
     // 从缓存加载下载器和站点状态
     await Promise.all([fetchDownloadersList(false), fetchAllSitesStatus(false)])
+    await fetchCrossSeedSettings()
     // 只获取种子数据（这个不缓存，每次都需要获取）
     await fetchDataWithoutLoadingControl()
     loading.value = false

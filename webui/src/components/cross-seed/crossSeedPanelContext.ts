@@ -1,10 +1,5 @@
 import { inject } from 'vue'
-import type {
-  ComputedRef,
-  InjectionKey,
-  Ref,
-  WritableComputedRef,
-} from 'vue'
+import type { ComputedRef, InjectionKey, Ref, WritableComputedRef } from 'vue'
 
 export interface TitleComponent {
   key: string
@@ -145,6 +140,7 @@ export interface CrossSeedPanelContext {
   steps: Array<{ title: string }>
   activeStep: Ref<number>
   activeTab: Ref<string>
+  maintenanceOnly: ComputedRef<boolean>
 
   // Core data
   torrentData: Ref<TorrentData>
@@ -238,9 +234,8 @@ export interface CrossSeedPanelContext {
   handlePublish: () => Promise<void>
 }
 
-export const crossSeedPanelContextKey: InjectionKey<CrossSeedPanelContext> = Symbol(
-  'crossSeedPanelContext',
-)
+export const crossSeedPanelContextKey: InjectionKey<CrossSeedPanelContext> =
+  Symbol('crossSeedPanelContext')
 
 export function useCrossSeedPanelContext(): CrossSeedPanelContext {
   const ctx = inject(crossSeedPanelContextKey)

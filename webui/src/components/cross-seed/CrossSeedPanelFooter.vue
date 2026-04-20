@@ -4,7 +4,7 @@
     <div v-if="activeStep === 0" class="button-group">
       <transition name="el-fade-in-linear">
         <div v-if="showCompleteButton" class="check-hint">
-          无异常可直接完成，也可先预览。
+          {{ maintenanceOnly ? '确认无误后可直接完成维护。' : '无异常可直接完成，也可先预览。' }}
         </div>
       </transition>
       <el-button @click="handleCancelClick">取消</el-button>
@@ -18,12 +18,17 @@
         修改完成
       </el-button>
 
-      <el-button type="primary" @click="goToPublishPreviewStep" :disabled="isNextButtonDisabled">
+      <el-button
+        v-if="!maintenanceOnly"
+        type="primary"
+        @click="goToPublishPreviewStep"
+        :disabled="isNextButtonDisabled"
+      >
         下一步：发布参数预览
       </el-button>
 
       <transition name="el-fade-in-linear">
-        <div v-if="isNextButtonDisabled" class="validation-hint">
+        <div v-if="!maintenanceOnly && isNextButtonDisabled" class="validation-hint">
           <el-icon class="hint-icon">
             <Warning />
           </el-icon>
@@ -33,7 +38,7 @@
     </div>
 
     <!-- 步骤 1 的按钮 -->
-    <div v-if="activeStep === 1" class="button-group">
+    <div v-if="!maintenanceOnly && activeStep === 1" class="button-group">
       <el-button @click="handlePreviousStep" :disabled="isLoading">上一步</el-button>
 
       <el-button
@@ -60,7 +65,7 @@
     </div>
 
     <!-- 步骤 2 的按钮 -->
-    <div v-if="activeStep === 2" class="button-group">
+    <div v-if="!maintenanceOnly && activeStep === 2" class="button-group">
       <el-button @click="handleCancelClick" :disabled="isLoading">取消</el-button>
       <el-button
         type="warning"
@@ -81,7 +86,7 @@
     </div>
 
     <!-- 步骤 3 的按钮 -->
-    <div v-if="activeStep === 3" class="button-group">
+    <div v-if="!maintenanceOnly && activeStep === 3" class="button-group">
       <el-button type="primary" @click="handleCompleteClick">完成</el-button>
     </div>
   </footer>
@@ -93,6 +98,7 @@ import { useCrossSeedPanelContext } from './crossSeedPanelContext'
 
 const {
   activeStep,
+  maintenanceOnly,
   showCompleteButton,
   isLoading,
   isEnqueueing,
@@ -109,4 +115,3 @@ const {
   handlePublish,
 } = useCrossSeedPanelContext()
 </script>
-

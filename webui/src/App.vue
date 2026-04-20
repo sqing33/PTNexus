@@ -129,11 +129,7 @@
         >
           导出后端日志
         </el-button>
-        <el-link
-          href="https://github.com/jadylc/PTNexus/issues"
-          target="_blank"
-          :underline="false"
-        >
+        <el-link href="https://github.com/jadylc/PTNexus/issues" target="_blank" :underline="false">
           <el-button type="primary" plain>反馈</el-button>
         </el-link>
         <el-button
@@ -250,21 +246,12 @@
           <el-icon><Link /></el-icon>
           GitHub
         </el-link>
-        <el-link
-          href="https://github.com/jadylc/PTNexus/issues"
-          target="_blank"
-          :underline="false"
-        >
+        <el-link href="https://github.com/jadylc/PTNexus/issues" target="_blank" :underline="false">
           <el-button type="primary" plain>反馈</el-button>
         </el-link>
       </div>
     </el-drawer>
-    <el-drawer
-      v-model="mobileTaskMonitorVisible"
-      title="全局任务监控"
-      size="88%"
-      append-to-body
-    >
+    <el-drawer v-model="mobileTaskMonitorVisible" title="全局任务监控" size="88%" append-to-body>
       <div class="task-monitor-panel task-monitor-panel--mobile">
         <div class="task-monitor-panel__header">
           <span>后台任务</span>
@@ -279,7 +266,9 @@
                 taskStatusText(task.status)
               }}</el-tag>
             </div>
-            <div v-if="task.progressText" class="task-monitor-item__progress">{{ task.progressText }}</div>
+            <div v-if="task.progressText" class="task-monitor-item__progress">
+              {{ task.progressText }}
+            </div>
             <div v-if="task.message" class="task-monitor-item__message">{{ task.message }}</div>
             <div v-if="task.error" class="task-monitor-item__error">{{ task.error }}</div>
             <div class="task-monitor-item__footer">
@@ -381,6 +370,24 @@ const taskList = computed(() => taskMonitorStore.taskList)
 const runningCount = computed(() => taskMonitorStore.runningCount)
 const failedCount = computed(() => taskMonitorStore.failedCount)
 const taskMonitorBadge = computed(() => runningCount.value + failedCount.value)
+let taskMonitorRefreshTimer: ReturnType<typeof window.setInterval> | null = null
+
+type ServerTaskRouteTarget = {
+  path?: string
+  query?: Record<string, string>
+}
+
+type ServerTaskItem = {
+  key?: string
+  kind?: string
+  raw_id?: string | null
+  title?: string
+  status?: TaskMonitorStatus
+  message?: string
+  error?: string
+  progress_text?: string
+  route_target?: ServerTaskRouteTarget
+}
 
 const taskStatusText = (status: TaskMonitorStatus) => {
   if (status === 'running') return '运行中'
@@ -405,6 +412,39 @@ const formatTaskTime = (timestamp: number) => {
 
 const clearFinishedTasks = () => {
   taskMonitorStore.clearFinished()
+}
+
+const syncTaskMonitor = async () => {
+  try {
+    const response = await axios.get('/api/migrate/task_monitor')
+    const payload = response.data
+    const tasks = Array.isArray(payload?.tasks) ? (payload.tasks as ServerTaskItem[]) : []
+    taskMonitorStore.replaceServerTasks(
+      tasks.map((task) => ({
+        key: String(task.key || '').trim(),
+        kind: String(task.kind || 'generic').trim(),
+        rawId: typeof task.raw_id === 'string' ? task.raw_id : null,
+        source: 'server',
+        title: String(task.title || '后台任务').trim(),
+        status:
+          task.status === 'running' || task.status === 'success' || task.status === 'failed'
+            ? task.status
+            : 'running',
+        message: String(task.message || '').trim(),
+        error: String(task.error || '').trim(),
+        progressText: String(task.progress_text || '').trim(),
+        routeTarget:
+          task.route_target?.path && typeof task.route_target.path === 'string'
+            ? {
+                path: task.route_target.path,
+                query: task.route_target.query,
+              }
+            : undefined,
+      })),
+    )
+  } catch (error) {
+    console.warn('同步任务监控失败:', error)
+  }
 }
 
 const openTaskRoute = (routeTarget?: { path: string; query?: Record<string, string> }) => {
@@ -437,7 +477,11 @@ const handleComponentReady = (refreshMethod: () => Promise<void>) => {
 }
 
 const shouldDelegateRefreshToComponent = (path: string) => {
-  return path.startsWith('/torrents') || path.startsWith('/seed-maintenance') || path.startsWith('/publish-logs')
+  return (
+    path.startsWith('/torrents') ||
+    path.startsWith('/seed-maintenance') ||
+    path.startsWith('/publish-logs')
+  )
 }
 
 const handleGlobalRefresh = async () => {
@@ -657,12 +701,20 @@ watch(
 onMounted(() => {
   updateIsMobile()
   loadBackgroundSettings()
+  syncTaskMonitor()
+  taskMonitorRefreshTimer = window.setInterval(() => {
+    void syncTaskMonitor()
+  }, 15000)
   window.addEventListener('background-updated', handleBackgroundUpdate)
   window.addEventListener('app-global-refresh-loading', handleRefreshLoadingChange as EventListener)
   window.addEventListener('resize', updateIsMobile)
 })
 
 onUnmounted(() => {
+  if (taskMonitorRefreshTimer) {
+    window.clearInterval(taskMonitorRefreshTimer)
+    taskMonitorRefreshTimer = null
+  }
   window.removeEventListener('background-updated', handleBackgroundUpdate)
   window.removeEventListener('resize', updateIsMobile)
   window.removeEventListener(

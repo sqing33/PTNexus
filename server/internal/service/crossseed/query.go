@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pt-nexus/server/internal/repository"
 	"github.com/pt-nexus/server/internal/service/reversemapping"
 )
 
@@ -154,6 +155,8 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 	offset := (params.Page - 1) * params.PageSize
 	dbType := s.repo.DBType()
 	currentTorrentsSubquery := buildCurrentTorrentsSubquery(dbType)
+	hasPublishQueueTable := s.repo.DB() != nil && s.repo.DB().Migrator().HasTable("publish_queue_tasks")
+	hasPublishLogTable := s.repo.DB() != nil && s.repo.DB().Migrator().HasTable("publish_logs")
 
 	fromClause := fmt.Sprintf(`
 		FROM seed_parameters sp
@@ -213,8 +216,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		txSiteCondition := buildAliasMatchCondition(dbType, "tx.sites", targetAliases)
 		aliasArgs := aliasMatchArgs(dbType, targetAliases)
 
-		whereConditions = append(
-			whereConditions,
+		conditionParts := []string{
 			fmt.Sprintf(`ct.hash IS NOT NULL AND NOT EXISTS (
 				SELECT 1
 				FROM torrents tx
@@ -222,11 +224,41 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 				  AND %s
 				  AND tx.name = ct.name
 				  AND tx.size = ct.size
-			) AND NOT (%s OR %s)`, txSiteCondition, spNicknameCondition, spSiteCondition),
-		)
+			)`, txSiteCondition),
+		}
+		args = append(args, aliasArgs...)
+
+		if hasPublishQueueTable {
+			queueSiteCondition := buildAliasMatchCondition(dbType, "pqt.target_site", targetAliases)
+			conditionParts = append(conditionParts, fmt.Sprintf(`NOT EXISTS (
+				SELECT 1
+				FROM publish_queue_tasks pqt
+				WHERE pqt.torrent_id = sp.torrent_id
+				  AND %s
+				  AND pqt.status IN (?, ?, ?)
+			)`, queueSiteCondition))
+			args = append(args, aliasArgs...)
+			args = append(args, repository.PublishQueueStatusQueued, repository.PublishQueueStatusRunning, repository.PublishQueueStatusSuccess)
+		}
+
+		if hasPublishLogTable {
+			logSiteCondition := buildAliasMatchCondition(dbType, "pl.target_site", targetAliases)
+			conditionParts = append(conditionParts, fmt.Sprintf(`NOT EXISTS (
+				SELECT 1
+				FROM publish_logs pl
+				WHERE pl.torrent_id = sp.torrent_id
+				  AND %s
+				  AND pl.status = ?
+			)`, logSiteCondition))
+			args = append(args, aliasArgs...)
+			args = append(args, "success")
+		}
+
+		conditionParts = append(conditionParts, fmt.Sprintf("NOT (%s OR %s)", spNicknameCondition, spSiteCondition))
 		args = append(args, aliasArgs...)
 		args = append(args, aliasArgs...)
-		args = append(args, aliasArgs...)
+
+		whereConditions = append(whereConditions, strings.Join(conditionParts, " AND "))
 	}
 
 	whereClause := ""

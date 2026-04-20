@@ -10,13 +10,11 @@
                   <el-input v-model="torrentData.original_main_title">
                     <template #append>
                       <el-button
-                        @click="refetchFromSource"
-                        :loading="isRefetchingFromSource"
-                        :disabled="isReparsing || isRefetchingFromSource"
+                        :icon="Refresh"
+                        @click="reparseTitle"
+                        :loading="isReparsing"
+                        :disabled="isRefetchingFromSource"
                       >
-                        重新从源站拉取数据
-                      </el-button>
-                      <el-button :icon="Refresh" @click="reparseTitle" :loading="isReparsing" :disabled="isRefetchingFromSource">
                         重新解析
                       </el-button>
                     </template>
@@ -70,7 +68,10 @@
                     </el-form-item>
                   </div>
                   <!-- 无法识别占1列 -->
-                  <div :class="{ 'unrecognized-section': unrecognizedValue }" style="grid-column: span 1">
+                  <div
+                    :class="{ 'unrecognized-section': unrecognizedValue }"
+                    style="grid-column: span 1"
+                  >
                     <el-form-item label="无法识别">
                       <el-input v-model="unrecognizedValue" />
                     </el-form-item>
@@ -258,13 +259,16 @@
                           :label="option.label"
                           :value="option.value"
                         >
-                          <span :style="{ color: invalidTagsList.includes(option.value) ? '#F56C6C' : '' }">
+                          <span
+                            :style="{
+                              color: invalidTagsList.includes(option.value) ? '#F56C6C' : '',
+                            }"
+                          >
                             {{ option.label }}
                           </span>
                         </el-option>
                       </el-select>
                     </el-form-item>
-
                   </div>
                 </div>
               </div>
@@ -459,10 +463,22 @@
                       <span>BDInfo 获取中...</span>
                       <div class="header-buttons">
                         <span class="background-hint">可在后台继续获取</span>
-                        <el-button :icon="Monitor" @click="runInBackground" size="small" text type="primary">
+                        <el-button
+                          :icon="Monitor"
+                          @click="runInBackground"
+                          size="small"
+                          text
+                          type="primary"
+                        >
                           放置后台
                         </el-button>
-                        <el-button :icon="Close" @click="stopBDInfoSSE" size="small" text type="info">
+                        <el-button
+                          :icon="Close"
+                          @click="stopBDInfoSSE"
+                          size="small"
+                          text
+                          type="info"
+                        >
                           取消获取
                         </el-button>
                       </div>
@@ -495,7 +511,11 @@
         </el-form>
       </el-tab-pane>
 
-      <el-tab-pane label="已过滤声明" name="filtered-declarations" class="filtered-declarations-pane">
+      <el-tab-pane
+        label="已过滤声明"
+        name="filtered-declarations"
+        class="filtered-declarations-pane"
+      >
         <div class="filtered-declarations-container">
           <div class="filtered-declarations-header">
             <h3>已自动过滤的声明内容</h3>
@@ -538,7 +558,6 @@ const {
   reverseMappings,
   invalidStandardParams,
   reparseTitle,
-  refetchFromSource,
   isReparsing,
   isRefetchingFromSource,
   handleTeamInput,
