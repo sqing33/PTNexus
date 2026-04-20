@@ -410,6 +410,7 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { Setting } from '@element-plus/icons-vue'
 import axios from 'axios'
 import type { ElTree } from 'element-plus'
+import { useTaskMonitorStore } from '@/stores/taskMonitor'
 import { ElMessage } from '@/utils/uiNotify'
 
 const emit = defineEmits<{
@@ -524,6 +525,7 @@ const tempFilters = ref({ ...activeFilters.value })
 
 // 任务进度相关
 const currentTaskId = ref<string | null>(null)
+const taskMonitorStore = useTaskMonitorStore()
 const progress = ref<BatchProgress>({
   total: 0,
   processed: 0,
@@ -535,6 +537,55 @@ const progress = ref<BatchProgress>({
 })
 const refreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const REFRESH_INTERVAL = 3000 // 3秒刷新一次
+const batchFetchMonitorKey = computed(() =>
+  currentTaskId.value ? `batch_fetch:${currentTaskId.value}` : '',
+)
+
+const updateBatchFetchMonitor = () => {
+  if (!currentTaskId.value || !batchFetchMonitorKey.value) return
+
+  const completed = progress.value.processed || 0
+  const totalCount = progress.value.total || selectedRows.value.length || 0
+  const summaryText = totalCount > 0 ? `${completed}/${totalCount}` : '准备中'
+  const bdinfoStats = progress.value.bdinfo_stats
+  const bdinfoText = bdinfoStats
+    ? `，BDInfo ${bdinfoStats.completed}/${bdinfoStats.processing + bdinfoStats.completed + bdinfoStats.failed}`
+    : ''
+
+  if (progress.value.isRunning) {
+    taskMonitorStore.markRunning({
+      key: batchFetchMonitorKey.value,
+      kind: 'batch_fetch',
+      rawId: currentTaskId.value,
+      title: '批量获取种子数据',
+      message: `已处理 ${summaryText}${bdinfoText}`,
+      progressText: totalCount > 0 ? `处理中 ${summaryText}` : '任务运行中',
+    })
+    return
+  }
+
+  const failedResults = progress.value.results.filter((item) => item.status === 'failed')
+  const failedReason = failedResults[0]?.reason || ''
+  if (progress.value.failed > 0) {
+    taskMonitorStore.markFailed(batchFetchMonitorKey.value, {
+      kind: 'batch_fetch',
+      rawId: currentTaskId.value,
+      title: '批量获取种子数据',
+      message: `完成 ${summaryText}，失败 ${progress.value.failed} 个`,
+      progressText: `已完成 ${summaryText}`,
+      error: failedReason || `共有 ${progress.value.failed} 个种子处理失败`,
+    })
+    return
+  }
+
+  taskMonitorStore.markSuccess(batchFetchMonitorKey.value, {
+    kind: 'batch_fetch',
+    rawId: currentTaskId.value,
+    title: '批量获取种子数据',
+    message: `完成 ${summaryText}，成功 ${progress.value.success} 个`,
+    progressText: `已完成 ${summaryText}`,
+  })
+}
 
 const currentFilterText = computed(() => {
   const filters = activeFilters.value
@@ -958,6 +1009,23 @@ const startBatchFetch = async () => {
 
     if (result.success) {
       currentTaskId.value = result.task_id
+      progress.value = {
+        total: selectedRows.value.length,
+        processed: 0,
+        success: 0,
+        failed: 0,
+        skipped: 0,
+        isRunning: true,
+        results: [],
+      }
+      taskMonitorStore.markRunning({
+        key: `batch_fetch:${result.task_id}`,
+        kind: 'batch_fetch',
+        rawId: result.task_id,
+        title: '批量获取种子数据',
+        message: `已选择 ${selectedRows.value.length} 个种子`,
+        progressText: '等待进度上报',
+      })
       ElMessage.success('批量获取任务已启动')
       closeBatchFetchDialog()
       openProgressDialog()
@@ -1023,32 +1091,51 @@ const refreshProgress = async () => {
       // 添加 BDInfo 处理统计
       if (progress.value.results && progress.value.results.length > 0) {
         const bdinfoStats = {
-          processing: progress.value.results.filter(r => 
-            r.bdinfo_status === 'processing_bdinfo' || 
+          processing: progress.value.results.filter(r =>
+            r.bdinfo_status === 'processing_bdinfo' ||
             (r.mediainfo && r.mediainfo.includes('正在处理 BDInfo'))
           ).length,
-          completed: progress.value.results.filter(r => 
-            r.bdinfo_status === 'completed' || 
+          completed: progress.value.results.filter(r =>
+            r.bdinfo_status === 'completed' ||
             (r.mediainfo && r.mediainfo.includes('DISC INFO'))
           ).length,
-          failed: progress.value.results.filter(r => 
-            r.bdinfo_status === 'failed' || 
+          failed: progress.value.results.filter(r =>
+            r.bdinfo_status === 'failed' ||
             (r.mediainfo && r.mediainfo.includes('bdinfo提取失败'))
           ).length
         }
-        
+
         // 更新进度对象中的 BDInfo 统计
         progress.value.bdinfo_stats = bdinfoStats
       }
+
+      updateBatchFetchMonitor()
 
       // 如果任务从运行中变为已完成，触发完成事件
       if (wasRunning && !progress.value.isRunning) {
         emit('fetch-completed')
       }
     } else {
+      taskMonitorStore.markFailed(batchFetchMonitorKey.value, {
+        kind: 'batch_fetch',
+        rawId: currentTaskId.value,
+        title: '批量获取种子数据',
+        message: result.message || '获取进度失败',
+        progressText: '状态查询失败',
+        error: result.message || '获取进度失败',
+      })
       ElMessage.error(result.message || '获取进度失败')
     }
   } catch (error: unknown) {
+    const message = getErrorMessage(error) || '获取进度时发生错误'
+    taskMonitorStore.markFailed(batchFetchMonitorKey.value, {
+      kind: 'batch_fetch',
+      rawId: currentTaskId.value,
+      title: '批量获取种子数据',
+      message,
+      progressText: '状态查询失败',
+      error: message,
+    })
     console.error('获取进度时出错:', error)
   }
 }

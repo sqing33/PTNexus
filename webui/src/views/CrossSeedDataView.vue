@@ -364,27 +364,6 @@
       </el-table>
     </div>
 
-    <!-- 转种弹窗 -->
-    <div v-if="crossSeedDialogVisible" class="modal-overlay">
-      <el-card class="cross-seed-card" shadow="always">
-        <template #header>
-          <div class="modal-header">
-            <span>转种 - {{ selectedTorrentName }}</span>
-            <el-button type="danger" circle @click="closeCrossSeedDialog" plain>X</el-button>
-          </div>
-        </template>
-        <div class="cross-seed-content">
-          <CrossSeedPanel
-            :show-complete-button="true"
-            publish-scene="multi_torrent"
-            :prefetched-db-seed-info="prefetchedDbSeedInfo"
-            @complete="handleCrossSeedComplete"
-            @cancel="closeCrossSeedDialog"
-          />
-        </div>
-      </el-card>
-    </div>
-
     <!-- 处理记录查看弹窗 -->
     <BDInfoRecordsDialog v-model="recordDialogVisible" @closed="fetchData" />
 
@@ -415,10 +394,8 @@ import { WarningFilled } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
-import CrossSeedPanel from '../components/CrossSeedPanel.vue'
 import BatchFetchPanel from '../components/BatchFetchPanel.vue'
 import BDInfoRecordsDialog from '../components/cross-seed-data/BDInfoRecordsDialog.vue'
-import { useCrossSeedStore } from '@/stores/crossSeed'
 import '@/assets/styles/glass-morphism.scss'
 import { ElMessage } from '@/utils/uiNotify'
 
@@ -1111,9 +1088,8 @@ const applyFilters = () => {
   }
 }
 
-const crossSeedStore = useCrossSeedStore()
-const prefetchedDbSeedInfo = ref<Record<string, unknown> | undefined>(undefined)
 const uiInitializing = ref(true)
+
 
 // 监听搜索查询的变化，自动触发搜索
 watch(searchQuery, () => {
@@ -1129,77 +1105,17 @@ watch(searchQuery, () => {
   }, 300)
 })
 
-// 控制转种弹窗的显示
-const crossSeedDialogVisible = computed(() => !!crossSeedStore.taskId)
-const selectedTorrentName = computed(() => {
-  const params = crossSeedStore.workingParams as { title?: string; name?: string } | null
-  return params?.title ?? params?.name ?? ''
-})
-
 // 处理编辑按钮点击
 const handleEdit = async (row: SeedParameter) => {
-  try {
-    // 重置 store
-    crossSeedStore.reset()
-    prefetchedDbSeedInfo.value = undefined
-
-    // 从后端API获取详细的种子参数
-    const response = await axios.get(
-      `/api/migrate/get_db_seed_info?torrent_id=${row.torrent_id}&site_name=${row.site_name}`,
-    )
-    const result = response.data
-
-    if (result.success) {
-      prefetchedDbSeedInfo.value = result
-      // 将获取到的数据设置到 store 中
-      // 构造一个基本的 Torrent 对象结构
-      const torrentData = {
-        ...result.data,
-        // 优先使用数据库中的name列，如果不存在则使用title列
-        name: result.data.name || result.data.title,
-        // 使用从数据库获取的实际保存路径，如果没有则为空字符串
-        save_path: result.data.save_path || '',
-        size: 0,
-        size_formatted: '0 B',
-        progress: 100,
-        state: 'completed',
-        total_uploaded: 0,
-        total_uploaded_formatted: '0 B',
-        // 添加下载器ID（如果从数据库返回了）
-        downloaderId: result.data.downloader_id || null,
-        sites: {
-          [result.data.site_name]: {
-            torrentId: result.data.torrent_id,
-            comment: `id=${result.data.torrent_id}`, // 为了向后兼容，也提供comment格式
-          },
-        },
-      }
-
-      crossSeedStore.setParams(torrentData)
-
-      // 设置源站点信息
-      const sourceInfo: ISourceInfo = {
-        name: result.data.site_name,
-        site: result.data.site_name.toLowerCase(), // 假设站点标识符是站点名称的小写形式
-        torrentId: result.data.torrent_id,
-      }
-      crossSeedStore.setSourceInfo(sourceInfo)
-
-      // 设置一个任务ID以显示弹窗
-      crossSeedStore.setTaskId(`cross_seed_${row.id}_${Date.now()}`)
-    } else {
-      ElMessage.error(result.error || '获取种子参数失败')
-    }
-  } catch (error: unknown) {
-    const message = axios.isAxiosError(error)
-      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
-        (error.response?.data as { error?: string } | undefined)?.error ||
-        error.message
-      : error instanceof Error
-        ? error.message
-        : '网络错误'
-    ElMessage.error(message)
-  }
+  await router.push({
+    path: '/seed-maintenance',
+    query: {
+      torrent_id: row.torrent_id,
+      site_name: row.site_name,
+      row_id: String(row.id),
+      from: '/data',
+    },
+  })
 }
 
 // 处理删除按钮点击
@@ -1243,21 +1159,6 @@ const handleDelete = async (row: SeedParameter) => {
         : '网络错误'
     ElMessage.error(message)
   }
-}
-
-// 关闭转种弹窗
-const closeCrossSeedDialog = () => {
-  prefetchedDbSeedInfo.value = undefined
-  crossSeedStore.reset()
-}
-
-// 处理转种完成
-const handleCrossSeedComplete = () => {
-  ElMessage.success('转种操作已完成！')
-  prefetchedDbSeedInfo.value = undefined
-  crossSeedStore.reset()
-  // 可选：刷新数据以显示最新状态
-  fetchData()
 }
 
 // 处理窗口大小变化

@@ -49,6 +49,56 @@
         class="right-buttons-container desktop-no-drag"
         :class="{ 'right-buttons-container--with-window-controls': showDesktopWindowControlsInNav }"
       >
+        <el-popover
+          placement="bottom-end"
+          :width="360"
+          trigger="click"
+          popper-class="task-monitor-popover"
+        >
+          <template #reference>
+            <el-badge :value="taskMonitorBadge" :hidden="taskMonitorBadge <= 0" :max="99">
+              <el-button plain class="task-monitor-button">
+                任务
+                <span class="task-monitor-button__summary">
+                  {{ runningCount }} 运行中 / {{ failedCount }} 失败
+                </span>
+              </el-button>
+            </el-badge>
+          </template>
+          <div class="task-monitor-panel">
+            <div class="task-monitor-panel__header">
+              <span>全局任务监控</span>
+              <el-button link @click="clearFinishedTasks">清理已结束</el-button>
+            </div>
+            <div v-if="taskList.length === 0" class="task-monitor-panel__empty">暂无后台任务</div>
+            <div v-else class="task-monitor-list">
+              <div v-for="task in taskList" :key="task.key" class="task-monitor-item">
+                <div class="task-monitor-item__top">
+                  <span class="task-monitor-item__title">{{ task.title }}</span>
+                  <el-tag :type="taskStatusTagType(task.status)" size="small">{{
+                    taskStatusText(task.status)
+                  }}</el-tag>
+                </div>
+                <div v-if="task.progressText" class="task-monitor-item__progress">
+                  {{ task.progressText }}
+                </div>
+                <div v-if="task.message" class="task-monitor-item__message">{{ task.message }}</div>
+                <div v-if="task.error" class="task-monitor-item__error">{{ task.error }}</div>
+                <div class="task-monitor-item__footer">
+                  <span>{{ formatTaskTime(task.updatedAt) }}</span>
+                  <el-button
+                    v-if="task.routeTarget"
+                    link
+                    type="primary"
+                    @click="openTaskRoute(task.routeTarget)"
+                  >
+                    查看详情
+                  </el-button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-popover>
         <el-link
           href="https://ptn-wiki.sqing33.dpdns.org"
           target="_blank"
@@ -115,6 +165,9 @@
         </div>
       </div>
       <div class="mobile-top-actions">
+        <el-badge :value="taskMonitorBadge" :hidden="taskMonitorBadge <= 0" :max="99">
+          <el-button plain size="small" @click="mobileTaskMonitorVisible = true">任务</el-button>
+        </el-badge>
         <el-button
           type="success"
           plain
@@ -206,6 +259,44 @@
         </el-link>
       </div>
     </el-drawer>
+    <el-drawer
+      v-model="mobileTaskMonitorVisible"
+      title="全局任务监控"
+      size="88%"
+      append-to-body
+    >
+      <div class="task-monitor-panel task-monitor-panel--mobile">
+        <div class="task-monitor-panel__header">
+          <span>后台任务</span>
+          <el-button link @click="clearFinishedTasks">清理已结束</el-button>
+        </div>
+        <div v-if="taskList.length === 0" class="task-monitor-panel__empty">暂无后台任务</div>
+        <div v-else class="task-monitor-list">
+          <div v-for="task in taskList" :key="task.key" class="task-monitor-item">
+            <div class="task-monitor-item__top">
+              <span class="task-monitor-item__title">{{ task.title }}</span>
+              <el-tag :type="taskStatusTagType(task.status)" size="small">{{
+                taskStatusText(task.status)
+              }}</el-tag>
+            </div>
+            <div v-if="task.progressText" class="task-monitor-item__progress">{{ task.progressText }}</div>
+            <div v-if="task.message" class="task-monitor-item__message">{{ task.message }}</div>
+            <div v-if="task.error" class="task-monitor-item__error">{{ task.error }}</div>
+            <div class="task-monitor-item__footer">
+              <span>{{ formatTaskTime(task.updatedAt) }}</span>
+              <el-button
+                v-if="task.routeTarget"
+                link
+                type="primary"
+                @click="openTaskRoute(task.routeTarget)"
+              >
+                查看详情
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 
   <main
@@ -226,15 +317,18 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Download, Link, Menu } from '@element-plus/icons-vue'
 import axios from 'axios'
 import DesktopWindowControls from '@/components/desktop/DesktopWindowControls.vue'
 import { useDesktopWindowControls } from '@/desktop/windowControls'
 import VersionUpdate from '@/components/VersionUpdate.vue'
+import { useTaskMonitorStore, type TaskMonitorStatus } from '@/stores/taskMonitor'
 import { ElMessage } from '@/utils/uiNotify'
 
 const route = useRoute()
+const router = useRouter()
+const taskMonitorStore = useTaskMonitorStore()
 const {
   hideWindowToTray,
   isDesktopShell,
@@ -251,6 +345,7 @@ const backgroundUrl = ref('https://pic.pting.club/i/2025/10/07/68e4fbfe9be93.jpg
 const currentVersion = ref('加载中...')
 
 const mobileMenuVisible = ref(false)
+const mobileTaskMonitorVisible = ref(false)
 const isMobile = ref(false)
 const MOBILE_BREAKPOINT = 768
 
@@ -262,6 +357,7 @@ const routeTitleMap: Record<string, string> = {
   '/publish-logs': '发种日志',
   '/sites': '做种检索',
   '/settings': '设置',
+  '/seed-maintenance': '维护种子信息',
 }
 
 const isLoginPage = computed(() => route.path === '/login')
@@ -281,6 +377,42 @@ const showMobileNav = computed(() => isMobile.value && !isDesktopShell.value)
 const showDesktopCompactTitleBar = computed(() => isWindowsDesktop.value && isLoginPage.value)
 const showDesktopWindowControlsInNav = computed(() => isWindowsDesktop.value && !isLoginPage.value)
 
+const taskList = computed(() => taskMonitorStore.taskList)
+const runningCount = computed(() => taskMonitorStore.runningCount)
+const failedCount = computed(() => taskMonitorStore.failedCount)
+const taskMonitorBadge = computed(() => runningCount.value + failedCount.value)
+
+const taskStatusText = (status: TaskMonitorStatus) => {
+  if (status === 'running') return '运行中'
+  if (status === 'failed') return '失败'
+  return '已完成'
+}
+
+const taskStatusTagType = (status: TaskMonitorStatus): 'primary' | 'success' | 'danger' => {
+  if (status === 'running') return 'primary'
+  if (status === 'failed') return 'danger'
+  return 'success'
+}
+
+const formatTaskTime = (timestamp: number) => {
+  if (!timestamp) return '--'
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+const clearFinishedTasks = () => {
+  taskMonitorStore.clearFinished()
+}
+
+const openTaskRoute = (routeTarget?: { path: string; query?: Record<string, string> }) => {
+  if (!routeTarget?.path) return
+  mobileTaskMonitorVisible.value = false
+  void router.push({ path: routeTarget.path, query: routeTarget.query })
+}
+
 const isRefreshing = ref(false)
 const exportingLogs = ref(false)
 
@@ -289,6 +421,7 @@ const isRefreshSupportedRoute = (path: string) => {
     path.startsWith('/torrents') ||
     path.startsWith('/sites') ||
     path.startsWith('/data') ||
+    path.startsWith('/seed-maintenance') ||
     path.startsWith('/publish-logs') ||
     path.startsWith('/batch-fetch')
   )
@@ -304,7 +437,7 @@ const handleComponentReady = (refreshMethod: () => Promise<void>) => {
 }
 
 const shouldDelegateRefreshToComponent = (path: string) => {
-  return path.startsWith('/torrents')
+  return path.startsWith('/torrents') || path.startsWith('/seed-maintenance') || path.startsWith('/publish-logs')
 }
 
 const handleGlobalRefresh = async () => {
@@ -517,6 +650,7 @@ watch(
   () => route.path,
   () => {
     mobileMenuVisible.value = false
+    mobileTaskMonitorVisible.value = false
   },
 )
 
@@ -799,6 +933,103 @@ body {
 
 .drawer-actions .el-link {
   width: fit-content;
+}
+
+.task-monitor-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-monitor-button__summary {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.task-monitor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-monitor-panel--mobile {
+  min-height: 100%;
+}
+
+.task-monitor-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.task-monitor-panel__empty {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.task-monitor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.task-monitor-panel--mobile .task-monitor-list {
+  max-height: none;
+}
+
+.task-monitor-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.task-monitor-item__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-monitor-item__title {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.task-monitor-item__progress,
+.task-monitor-item__message,
+.task-monitor-item__footer {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.task-monitor-item__error {
+  color: var(--el-color-danger);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.task-monitor-item__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-monitor-item__footer span {
+  min-width: 0;
 }
 
 .main-content {

@@ -1,6 +1,7 @@
 import { computed, nextTick, type ComputedRef, type Ref } from 'vue'
 import axios from 'axios'
 import { ElMessageBox } from 'element-plus'
+import { useTaskMonitorStore } from '@/stores/taskMonitor'
 import { ElNotification } from '@/utils/uiNotify'
 import { resolveSourceTorrentId } from '@/utils/sourceTorrentId'
 
@@ -190,6 +191,21 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     fetchFlowErrorMessage.value = message.trim() || '获取种子信息时发生错误，请查看后台日志。'
     showLogProgress.value = true
   }
+
+  const taskMonitorStore = useTaskMonitorStore()
+
+  const buildFetchRouteTarget = (patch: { taskId?: string; status?: string } = {}) => ({
+    path: '/publish-logs',
+    query: Object.fromEntries(
+      Object.entries({
+        scene: 'multi_torrent',
+        ...(patch.status ? { status: patch.status } : {}),
+        ...(patch.taskId ? { search: patch.taskId } : {}),
+      }).filter(([, value]) => typeof value === 'string' && value.trim()),
+    ) as Record<string, string>,
+  })
+
+  const createFetchMonitorKey = (rawId: string) => `seed_fetch:${rawId}`
 
   const getEnglishSiteName = async (chineseSiteName: string): Promise<string> => {
     // 优先从当前种子携带的站点信息中读取，避免重复请求 /api/sites/status。
@@ -602,8 +618,21 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
     isLoading.value = true
 
-    // 生成任务ID并显示进度组件
     const tempTaskId = `fetch_${torrentId}_${Date.now()}`
+    const initialTaskId = taskId.value || tempTaskId
+    let activeFetchTaskId = initialTaskId
+    const fetchMonitorKey = createFetchMonitorKey(activeFetchTaskId)
+    const baseRouteTarget = buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'running' })
+    taskMonitorStore.markRunning({
+      key: fetchMonitorKey,
+      kind: 'seed_fetch',
+      rawId: activeFetchTaskId,
+      title: '抓取源种子信息',
+      message: prefetchedDbSeedInfo ? '正在加载缓存种子信息' : `正在抓取 ${sourceSite.value} 种子信息`,
+      progressText: prefetchedDbSeedInfo ? '正在读取数据库缓存' : '正在准备日志流',
+      routeTarget: baseRouteTarget,
+    })
+
     if (!prefetchedDbSeedInfo) {
       logProgressTaskId.value = tempTaskId
       showLogProgress.value = true
@@ -632,6 +661,19 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
             timeout: 600000, // 10分钟超时
           })
 
+      if (dbResponse.data.task_id) {
+        activeFetchTaskId = dbResponse.data.task_id
+        taskMonitorStore.markRunning({
+          key: fetchMonitorKey,
+          kind: 'seed_fetch',
+          rawId: activeFetchTaskId,
+          title: '抓取源种子信息',
+          message: prefetchedDbSeedInfo ? '正在加载缓存种子信息' : `正在处理 ${sourceSite.value} 种子信息`,
+          progressText: dbResponse.status === 202 ? '正在等待源站抓取完成' : '正在读取数据库缓存',
+          routeTarget: buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'running' }),
+        })
+      }
+
       // 检查是否需要继续抓取（202状态码）
       if (!prefetchedDbSeedInfo && dbResponse.status === 202 && dbResponse.data.should_fetch) {
         console.log('数据库中没有缓存，继续使用同一日志流从源站点抓取...')
@@ -657,6 +699,20 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           return
         } catch (error: unknown) {
           ElNotification.closeAll()
+          const message = axios.isAxiosError(error)
+            ? ((error.response?.data as { message?: string } | undefined)?.message || error.message)
+            : error instanceof Error
+              ? error.message
+              : '从源站点抓取时发生错误，请查看后台日志。'
+          taskMonitorStore.markFailed(fetchMonitorKey, {
+            kind: 'seed_fetch',
+            rawId: activeFetchTaskId,
+            title: '抓取源种子信息',
+            message: '源站抓取失败',
+            progressText: `来源站点 ${sourceSite.value}`,
+            error: message,
+            routeTarget: buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'failed' }),
+          })
           handleApiError(error, '从源站点抓取时发生错误，请查看后台日志。')
           isLoading.value = false
           return
@@ -693,6 +749,60 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           console.warn('后端未返回taskId，使用标识符')
         }
 
+        taskMonitorStore.markSuccess(fetchMonitorKey, {
+          kind: 'seed_fetch',
+          rawId: taskId.value || activeFetchTaskId,
+          title: '抓取源种子信息',
+          message: prefetchedDbSeedInfo ? '缓存种子信息已加载' : '数据库缓存读取完成',
+          progressText: '可继续核对并发布',
+          routeTarget: buildFetchRouteTarget({
+            taskId: taskId.value || activeFetchTaskId,
+            status: 'success',
+          }),
+        })
+
+        // 检查 BDInfo 进度状态（从数据库读取，使用默认重试设置）
+        checkAndStartBDInfoProgress(compositeSeedId, false)
+
+        // 自动提取链接的逻辑保持不变
+        if (
+          (!torrentData.value.imdb_link || !torrentData.value.douban_link) &&
+          torrentData.value.intro.body
+        ) {
+          let imdbExtracted = false
+          let doubanExtracted = false
+          if (!torrentData.value.imdb_link) {
+            const imdbRegex = /(https?:\/\/www\.imdb\.com\/title\/tt\d+)/
+            const imdbMatch = torrentData.value.intro.body.match(imdbRegex)
+            if (imdbMatch && imdbMatch[1]) {
+              torrentData.value.imdb_link = imdbMatch[1]
+              imdbExtracted = true
+            }
+          }
+          if (!torrentData.value.douban_link) {
+            const doubanRegex = /(https:\/\/movie\.douban\.com\/subject\/\d+)/
+            const doubanMatch = torrentData.value.intro.body.match(doubanRegex)
+            if (doubanMatch && doubanMatch[1]) {
+              torrentData.value.douban_link = doubanMatch[1]
+              doubanExtracted = true
+            }
+          }
+          if (imdbExtracted || doubanExtracted) {
+            const messages = []
+            if (imdbExtracted) messages.push('IMDb链接')
+            if (doubanExtracted) messages.push('豆瓣链接')
+            ElNotification.info({
+              title: '自动填充',
+              message: `已从简介正文中自动提取并填充 ${messages.join(' 和 ')}。`,
+            })
+          }
+        }
+
+        activeStep.value = 0
+        nextTick(() => {
+          void checkScreenshotValidity()
+        })
+        isDataFromDatabase.value = true
         isLoading.value = false
         return
       } else {
@@ -771,24 +881,28 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       const code = axios.isAxiosError(error) ? error.code : undefined
       const status = axios.isAxiosError(error) ? error.response?.status : undefined
 
+      let fetchErrorMessage = message || '获取种子信息时发生错误，请查看后台日志。'
+
       // 区分不同类型的错误并提供更具体的错误信息
       if (code === 'ECONNABORTED' || message.includes('timeout')) {
-        // 1. 获取错误消息
-        const msg = '抓取种子信息超时，请检查网络连接或稍后重试。'
-        setFetchFlowError(msg)
+        fetchErrorMessage = '抓取种子信息超时，请检查网络连接或稍后重试。'
       } else if (status === 404) {
-        // 1. 获取错误消息
-        const msg = '在源站点未找到指定的种子，请检查种子ID是否正确。'
-        setFetchFlowError(msg)
+        fetchErrorMessage = '在源站点未找到指定的种子，请检查种子ID是否正确。'
       } else if (typeof status === 'number' && status >= 500) {
-        // 1. 获取错误消息
-        const msg = '后端服务器发生错误，请稍后重试或联系管理员。'
-        setFetchFlowError(msg)
-      } else {
-        // 使用原有的错误处理
-        const msg = message || '获取种子信息时发生错误，请查看后台日志。'
-        setFetchFlowError(msg)
+        fetchErrorMessage = '后端服务器发生错误，请稍后重试或联系管理员。'
       }
+
+      taskMonitorStore.markFailed(fetchMonitorKey, {
+        kind: 'seed_fetch',
+        rawId: activeFetchTaskId,
+        title: '抓取源种子信息',
+        message: '抓取源种子信息失败',
+        progressText: `来源站点 ${sourceSite.value}`,
+        error: fetchErrorMessage,
+        routeTarget: buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'failed' }),
+      })
+
+      setFetchFlowError(fetchErrorMessage)
     } finally {
       isLoading.value = false
     }

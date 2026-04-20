@@ -741,6 +741,7 @@ import axios from 'axios'
 import CrossSeedPanel from '../components/CrossSeedPanel.vue'
 import SiteDataViewer from '../components/SiteDataViewer.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
+import { useTaskMonitorStore } from '@/stores/taskMonitor'
 import { useSiteDataStore } from '@/stores/siteData'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import type { ISourceInfo, Torrent, SiteData, Downloader } from '@/types'
@@ -918,10 +919,14 @@ const iyuuBatchRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const iyuuBatchNotified = ref<boolean>(false)
 const IYUU_BATCH_MAX_GROUPS = 200
 const IYUU_BATCH_POLL_INTERVAL_MS = 2000
+const iyuuBatchMonitorKey = computed(() =>
+  iyuuBatchTaskId.value ? `iyuu_batch:${iyuuBatchTaskId.value}` : '',
+)
 const cachedSites = ref<string[]>([]) // 存储已缓存的站点列表
 const cachedSitesLoading = ref<boolean>(false) // 查询缓存站点的加载状态
 
 const crossSeedStore = useCrossSeedStore()
+const taskMonitorStore = useTaskMonitorStore()
 const siteDataStore = useSiteDataStore()
 
 // 控制转种弹窗的显示，当 taskId 存在时显示
@@ -1459,6 +1464,39 @@ const refreshIyuuBatchProgress = async () => {
     )
     if (response.data?.success) {
       iyuuBatchTask.value = response.data.task
+      if (iyuuBatchTask.value) {
+        const totalCount = Number(iyuuBatchTask.value.total || 0)
+        const processedCount = Number(iyuuBatchTask.value.processed || 0)
+        const progressText = totalCount > 0 ? `${processedCount}/${totalCount}` : '处理中'
+
+        if (iyuuBatchTask.value.isRunning) {
+          taskMonitorStore.markRunning({
+            key: iyuuBatchMonitorKey.value,
+            kind: 'iyuu_batch',
+            rawId: iyuuBatchTaskId.value,
+            title: 'IYUU 批量查询',
+            message: `已处理 ${progressText}`,
+            progressText: totalCount > 0 ? `处理中 ${progressText}` : '任务运行中',
+          })
+        } else if (iyuuBatchTask.value.success) {
+          taskMonitorStore.markSuccess(iyuuBatchMonitorKey.value, {
+            kind: 'iyuu_batch',
+            rawId: iyuuBatchTaskId.value,
+            title: 'IYUU 批量查询',
+            message: iyuuBatchTask.value.message || `完成 ${progressText}`,
+            progressText: totalCount > 0 ? `已完成 ${progressText}` : '已完成',
+          })
+        } else {
+          taskMonitorStore.markFailed(iyuuBatchMonitorKey.value, {
+            kind: 'iyuu_batch',
+            rawId: iyuuBatchTaskId.value,
+            title: 'IYUU 批量查询',
+            message: iyuuBatchTask.value.message || `完成 ${progressText}`,
+            progressText: totalCount > 0 ? `已完成 ${progressText}` : '已结束',
+            error: iyuuBatchTask.value.message || 'IYUU批量查询失败',
+          })
+        }
+      }
       if (iyuuBatchTask.value && !iyuuBatchTask.value.isRunning) {
         stopIyuuBatchPolling()
         if (!iyuuBatchNotified.value) {
@@ -1608,6 +1646,14 @@ const triggerIYUUQueryForFiltered = async () => {
     iyuuBatchTaskId.value = startResult.task_id
     iyuuBatchTask.value = null
     iyuuBatchNotified.value = false
+    taskMonitorStore.markRunning({
+      key: `iyuu_batch:${startResult.task_id}`,
+      kind: 'iyuu_batch',
+      rawId: startResult.task_id,
+      title: 'IYUU 批量查询',
+      message: `准备查询 ${candidates.length} 个种子组`,
+      progressText: '等待进度上报',
+    })
     iyuuBatchDialogVisible.value = true
     startIyuuBatchPolling()
   } catch (error: unknown) {
