@@ -41,6 +41,7 @@
         <el-menu-item index="/info">流量统计</el-menu-item>
         <el-menu-item index="/torrents">一种多站</el-menu-item>
         <el-menu-item index="/data">一站多种</el-menu-item>
+        <el-menu-item index="/seed-maintenance">维护种子</el-menu-item>
         <el-menu-item index="/publish-logs">发种日志</el-menu-item>
         <el-menu-item index="/sites">做种检索</el-menu-item>
         <el-menu-item index="/settings">设置</el-menu-item>
@@ -205,6 +206,7 @@
         <el-menu-item index="/info">流量统计</el-menu-item>
         <el-menu-item index="/torrents">一种多站</el-menu-item>
         <el-menu-item index="/data">一站多种</el-menu-item>
+        <el-menu-item index="/seed-maintenance">维护种子</el-menu-item>
         <el-menu-item index="/publish-logs">发种日志</el-menu-item>
         <el-menu-item index="/sites">做种检索</el-menu-item>
         <el-menu-item index="/settings">设置</el-menu-item>
@@ -374,7 +376,7 @@ let taskMonitorRefreshTimer: ReturnType<typeof window.setInterval> | null = null
 
 type ServerTaskRouteTarget = {
   path?: string
-  query?: Record<string, string>
+  query?: Record<string, unknown>
 }
 
 type ServerTaskItem = {
@@ -419,6 +421,15 @@ const syncTaskMonitor = async () => {
     const response = await axios.get('/api/migrate/task_monitor')
     const payload = response.data
     const tasks = Array.isArray(payload?.tasks) ? (payload.tasks as ServerTaskItem[]) : []
+    const normalizeRouteQuery = (query?: Record<string, unknown>) => {
+      if (!query) return undefined
+      return Object.fromEntries(
+        Object.entries(query)
+          .filter(([, value]) => value !== undefined && value !== null && String(value).trim())
+          .map(([key, value]) => [key, String(value).trim()]),
+      ) as Record<string, string>
+    }
+
     taskMonitorStore.replaceServerTasks(
       tasks.map((task) => ({
         key: String(task.key || '').trim(),
@@ -437,7 +448,7 @@ const syncTaskMonitor = async () => {
           task.route_target?.path && typeof task.route_target.path === 'string'
             ? {
                 path: task.route_target.path,
-                query: task.route_target.query,
+                query: normalizeRouteQuery(task.route_target.query),
               }
             : undefined,
       })),

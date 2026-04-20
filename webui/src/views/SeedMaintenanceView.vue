@@ -17,9 +17,39 @@
         </p>
       </div>
       <div class="seed-maintenance-view__actions">
+        <el-select
+          v-model="selectedSourceSite"
+          class="seed-maintenance-view__source-select"
+          placeholder="选择源站"
+          filterable
+          :disabled="loading"
+        >
+          <el-option
+            v-for="site in sourceSiteOptions"
+            :key="site.site"
+            :label="site.name"
+            :value="site.name"
+          />
+        </el-select>
+        <el-input
+          v-model="sourceTorrentId"
+          class="seed-maintenance-view__source-id"
+          placeholder="源站种子 ID"
+          clearable
+          :disabled="loading"
+        />
         <el-button plain @click="handleBack">返回一站多种</el-button>
         <el-button type="primary" plain :loading="loading" @click="loadSeedInfo">
-          重新加载
+          加载种子
+        </el-button>
+        <el-button
+          type="warning"
+          plain
+          :loading="refetching"
+          :disabled="loading || !canRefetch"
+          @click="refetchSeedInfo"
+        >
+          重新拉取数据
         </el-button>
       </div>
     </div>
@@ -46,6 +76,7 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import CrossSeedPanel from '@/components/CrossSeedPanel.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
+import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import { ElMessage } from '@/utils/uiNotify'
 import '@/assets/styles/glass-morphism.scss'
 
@@ -55,6 +86,11 @@ interface SourceInfo {
   torrentId: string
 }
 
+interface SourceSiteOption {
+  name: string
+  site: string
+}
+
 const emit = defineEmits<{
   (e: 'ready', refreshMethod: () => Promise<void>): void
 }>()
@@ -62,17 +98,45 @@ const emit = defineEmits<{
 const router = useRouter()
 const route = useRoute()
 const crossSeedStore = useCrossSeedStore()
+const torrentsViewState = useTorrentsViewState()
 
 const loading = ref(false)
+const refetching = ref(false)
 const error = ref('')
 const prefetchedDbSeedInfo = ref<Record<string, unknown> | undefined>(undefined)
+const sourceSiteOptions = ref<SourceSiteOption[]>([])
+const selectedSourceSite = ref('')
+const sourceTorrentId = ref('')
 
-const torrentId = computed(() => String(route.query.torrent_id || '').trim())
-const siteName = computed(() => String(route.query.site_name || '').trim())
+const routeTorrentId = computed(() => String(route.query.torrent_id || '').trim())
+const routeSiteName = computed(() => String(route.query.site_name || '').trim())
 const rowId = computed(() => String(route.query.row_id || '').trim())
 const sourcePage = computed(() => String(route.query.from || '/data').trim() || '/data')
 
 const ready = computed(() => !!crossSeedStore.taskId && !!prefetchedDbSeedInfo.value)
+const canRefetch = computed(
+  () =>
+    !!selectedSourceSite.value.trim() &&
+    !!sourceTorrentId.value.trim() &&
+    !!prefetchedDbSeedInfo.value &&
+    !!routeTorrentId.value &&
+    !!routeSiteName.value,
+)
+
+const resolveSiteCode = (siteLabel: string) => {
+  const trimmed = siteLabel.trim()
+  if (!trimmed) return ''
+  const matched = sourceSiteOptions.value.find((item) => item.name === trimmed)
+  return matched?.site || trimmed.toLowerCase()
+}
+
+const loadSourceSites = async () => {
+  const sites = await torrentsViewState.fetchSitesStatus()
+  sourceSiteOptions.value = sites.map((site) => ({
+    name: String(site.name || '').trim(),
+    site: String(site.site || '').trim(),
+  }))
+}
 
 const buildWorkingTorrent = (seedInfo: Record<string, any>) => ({
   ...seedInfo,
@@ -100,13 +164,11 @@ const applySeedInfo = (seedInfoResult: Record<string, any>) => {
   crossSeedStore.reset()
   crossSeedStore.setParams(buildWorkingTorrent(seedInfoResult.data))
 
-  const fallbackSourceName = seedInfoResult.data.site_name
+  const fallbackSourceName = selectedSourceSite.value || seedInfoResult.data.site_name
   const sourceInfo: SourceInfo = {
     name: fallbackSourceName,
-    site: String(seedInfoResult.data.site_name || '')
-      .trim()
-      .toLowerCase(),
-    torrentId: seedInfoResult.data.torrent_id,
+    site: resolveSiteCode(fallbackSourceName),
+    torrentId: sourceTorrentId.value || seedInfoResult.data.torrent_id,
   }
   crossSeedStore.setSourceInfo(sourceInfo)
 
@@ -116,8 +178,11 @@ const applySeedInfo = (seedInfoResult: Record<string, any>) => {
 }
 
 const loadSeedInfo = async () => {
-  if (!torrentId.value || !siteName.value) {
-    error.value = '缺少 torrent_id 或 site_name，无法进入维护页'
+  const effectiveTorrentId = sourceTorrentId.value.trim() || routeTorrentId.value
+  const effectiveSiteName = selectedSourceSite.value.trim() || routeSiteName.value
+
+  if (!effectiveTorrentId || !effectiveSiteName) {
+    error.value = '请选择源站并输入源站种子 ID 后再加载维护页'
     return
   }
 
@@ -128,7 +193,7 @@ const loadSeedInfo = async () => {
 
   try {
     const response = await axios.get(
-      `/api/migrate/get_db_seed_info?torrent_id=${encodeURIComponent(torrentId.value)}&site_name=${encodeURIComponent(siteName.value)}`,
+      `/api/migrate/get_db_seed_info?torrent_id=${encodeURIComponent(effectiveTorrentId)}&site_name=${encodeURIComponent(effectiveSiteName)}`,
     )
     const result = response.data
 
@@ -136,6 +201,8 @@ const loadSeedInfo = async () => {
       throw new Error(result.error || '获取种子参数失败')
     }
 
+    selectedSourceSite.value = effectiveSiteName
+    sourceTorrentId.value = effectiveTorrentId
     applySeedInfo(result)
   } catch (err: unknown) {
     const message = axios.isAxiosError(err)
@@ -152,10 +219,58 @@ const loadSeedInfo = async () => {
   }
 }
 
+const refetchSeedInfo = async () => {
+  if (!canRefetch.value || !prefetchedDbSeedInfo.value) {
+    return
+  }
+
+  refetching.value = true
+  error.value = ''
+
+  try {
+    const prefetchedSeedData = (prefetchedDbSeedInfo.value as any)?.data || {}
+    const payload = {
+      sourceSite: selectedSourceSite.value.trim(),
+      searchTerm: sourceTorrentId.value.trim(),
+      savePath: String(prefetchedSeedData.save_path || ''),
+      torrentName: String(prefetchedSeedData.name || prefetchedSeedData.title || ''),
+      downloaderId: String(prefetchedSeedData.downloader_id || ''),
+      target_torrent_id: routeTorrentId.value,
+      target_site_name: routeSiteName.value,
+      screenshotReviewMode: 'interactive',
+      task_id: crossSeedStore.taskId || undefined,
+    }
+    const response = await axios.post('/api/migrate/refetch_maintenance_seed', payload)
+    const result = response.data
+    if (!result.success) {
+      throw new Error(result.message || result.error || '重新拉取失败')
+    }
+
+    applySeedInfo(result)
+    ElMessage.success('重新拉取完成')
+  } catch (err: unknown) {
+    const message = axios.isAxiosError(err)
+      ? (err.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (err.response?.data as { error?: string } | undefined)?.error ||
+        err.message
+      : err instanceof Error
+        ? err.message
+        : '网络错误'
+    error.value = message
+    ElMessage.error(message)
+  } finally {
+    refetching.value = false
+  }
+}
+
 const handleBack = () => {
   prefetchedDbSeedInfo.value = undefined
   crossSeedStore.reset()
-  void router.push(sourcePage.value)
+  if (route.query.torrent_id || route.query.site_name || route.query.from) {
+    void router.push(sourcePage.value)
+    return
+  }
+  void router.push('/seed-maintenance')
 }
 
 const handleComplete = () => {
@@ -166,7 +281,16 @@ const handleComplete = () => {
 }
 
 onMounted(async () => {
-  await loadSeedInfo()
+  await loadSourceSites()
+  if (routeSiteName.value) {
+    selectedSourceSite.value = routeSiteName.value
+  }
+  if (routeTorrentId.value) {
+    sourceTorrentId.value = routeTorrentId.value
+  }
+  if (routeTorrentId.value && routeSiteName.value) {
+    await loadSeedInfo()
+  }
   emit('ready', loadSeedInfo)
 })
 </script>

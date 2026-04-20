@@ -1347,6 +1347,8 @@ const buildDirectTransferRouteTarget = (
   patch: {
     status?: string
     queueGroupId?: string
+    search?: string
+    targetSite?: string
   } = {},
 ) => ({
   path: '/publish-logs',
@@ -1355,6 +1357,8 @@ const buildDirectTransferRouteTarget = (
       scene: 'multi_site',
       ...(patch.status ? { status: patch.status } : {}),
       ...(patch.queueGroupId ? { queue_group_id: patch.queueGroupId } : {}),
+      ...(patch.search ? { search: patch.search } : {}),
+      ...(patch.targetSite ? { target_site: patch.targetSite } : {}),
     }).filter(([, value]) => typeof value === 'string' && value.trim()),
   ) as Record<string, string>,
 })
@@ -1640,6 +1644,14 @@ const enqueueDirectTransfer = async () => {
       }),
     })
     ElMessage.success(`已加入队列：${response.data.group_id}`)
+    await refreshBackendAndReload()
+    await router.push({
+      path: '/publish-logs',
+      query: buildDirectTransferRouteTarget({
+        status: 'queued',
+        queueGroupId: String(response.data.group_id),
+      }).query,
+    })
     closeDirectTransferDialog()
   } catch (error: unknown) {
     const message = axios.isAxiosError(error)
@@ -1710,9 +1722,19 @@ const publishDirectTransfer = async () => {
       title: '直接转种发布',
       message: `已启动批量发布 ${response.data.batch_id}`,
       progressText: `并发 ${response.data.concurrency || 1}`,
-      routeTarget: buildDirectTransferRouteTarget({ status: 'running' }),
+      routeTarget: buildDirectTransferRouteTarget({
+        status: 'running',
+        search: directTransferTaskId.value,
+      }),
     })
     ElMessage.success('批量发布任务已启动，请到任务面板或发布日志查看进度')
+    await router.push({
+      path: '/publish-logs',
+      query: buildDirectTransferRouteTarget({
+        status: 'running',
+        search: directTransferTaskId.value,
+      }).query,
+    })
     closeDirectTransferDialog()
   } catch (error: unknown) {
     const message = axios.isAxiosError(error)
