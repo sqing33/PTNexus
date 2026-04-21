@@ -9,7 +9,6 @@
       style="margin: 0; border-radius: 0"
     ></el-alert>
 
-    <!-- 搜索和控制栏 -->
     <div class="search-and-controls glass-table">
       <el-input
         v-model="searchQuery"
@@ -19,8 +18,8 @@
         style="width: 300px; margin-right: 15px"
       />
 
-      <!-- 批量转种按钮 -->
       <el-button
+        v-if="isCrossSeedMode"
         type="success"
         @click="handleBatchCrossSeedButtonClick"
         plain
@@ -29,10 +28,51 @@
         {{ batchCrossSeedButtonText }}
       </el-button>
 
-      <!-- 筛选按钮 -->
+      <el-button
+        v-if="isMaintenanceMode"
+        type="info"
+        @click="openRecordViewDialog"
+        plain
+        style="margin-right: 15px"
+      >
+        BDInfo记录
+      </el-button>
+
+      <el-button
+        v-if="isMaintenanceMode"
+        type="warning"
+        @click="openBatchFetchDialog"
+        plain
+        style="margin-right: 15px"
+      >
+        获取数据
+      </el-button>
+
+      <el-button
+        v-if="isMaintenanceMode"
+        type="danger"
+        @click="isDeleteMode && selectedRows.length > 0 ? executeBatchDelete() : toggleDeleteMode()"
+        plain
+        style="margin-right: 15px"
+      >
+        {{ getDeleteButtonText() }}
+      </el-button>
+
       <el-button type="primary" @click="openFilterDialog" plain style="margin-right: 15px">
         筛选
       </el-button>
+
+      <el-radio-group
+        v-if="isMaintenanceMode"
+        v-model="reviewStatusFilter"
+        @change="handleReviewStatusChange"
+        style="margin-right: 15px"
+      >
+        <el-radio-button label="">全部</el-radio-button>
+        <el-radio-button label="reviewed">已检查</el-radio-button>
+        <el-radio-button label="unreviewed">待检查</el-radio-button>
+        <el-radio-button label="error">错误</el-radio-button>
+      </el-radio-group>
 
       <div
         v-if="hasActiveFilters"
@@ -60,7 +100,6 @@
       </div>
     </div>
 
-    <!-- 筛选器弹窗 -->
     <div v-if="filterDialogVisible" class="filter-overlay" @click.self="closeFilterDialog">
       <el-card class="filter-card">
         <template #header>
@@ -85,43 +124,54 @@
             />
           </div>
 
-          <el-divider content-position="left">
-            <span class="target-site-filter-title">
-              <el-icon><WarningFilled /></el-icon>
-              <span>选择批量转种目标站点</span>
-            </span>
-          </el-divider>
-          <div class="target-sites-container">
-            <div class="selected-site-display">
-              <div v-if="selectedTargetSite" class="selected-site-info">
-                <el-tag type="info" size="default" effect="plain"
-                  >已选择: {{ selectedTargetSite }}</el-tag
-                >
-                <el-button
-                  type="danger"
-                  link
-                  style="padding: 0; margin-left: 8px"
-                  @click="clearSelectedTargetSite"
-                  >清除</el-button
-                >
+          <template v-if="isMaintenanceMode">
+            <el-divider content-position="left">删除状态</el-divider>
+            <el-radio-group v-model="tempFilters.isDeleted" style="width: 100%">
+              <el-radio :label="''">全部</el-radio>
+              <el-radio :label="'0'">未删除</el-radio>
+              <el-radio :label="'1'">已删除</el-radio>
+            </el-radio-group>
+          </template>
+
+          <template v-if="isCrossSeedMode">
+            <el-divider content-position="left">
+              <span class="target-site-filter-title">
+                <el-icon><WarningFilled /></el-icon>
+                <span>选择批量转种目标站点</span>
+              </span>
+            </el-divider>
+            <div class="target-sites-container">
+              <div class="selected-site-display">
+                <div v-if="selectedTargetSite" class="selected-site-info">
+                  <el-tag type="info" size="default" effect="plain"
+                    >已选择: {{ selectedTargetSite }}</el-tag
+                  >
+                  <el-button
+                    type="danger"
+                    link
+                    style="padding: 0; margin-left: 8px"
+                    @click="clearSelectedTargetSite"
+                    >清除</el-button
+                  >
+                </div>
+                <div v-else class="selected-site-info">
+                  <el-tag type="info" size="default" effect="plain">未选择</el-tag>
+                </div>
               </div>
-              <div v-else class="selected-site-info">
-                <el-tag type="info" size="default" effect="plain">未选择</el-tag>
+              <div class="target-sites-radio-container">
+                <el-radio-group v-model="selectedTargetSite" class="target-sites-radio-group">
+                  <el-radio
+                    v-for="site in targetSitesList"
+                    :key="site"
+                    :label="site"
+                    class="target-site-radio"
+                  >
+                    {{ site }}
+                  </el-radio>
+                </el-radio-group>
               </div>
             </div>
-            <div class="target-sites-radio-container">
-              <el-radio-group v-model="selectedTargetSite" class="target-sites-radio-group">
-                <el-radio
-                  v-for="site in targetSitesList"
-                  :key="site"
-                  :label="site"
-                  class="target-site-radio"
-                >
-                  {{ site }}
-                </el-radio>
-              </el-radio-group>
-            </div>
-          </div>
+          </template>
         </div>
         <div class="filter-card-footer">
           <el-button @click="closeFilterDialog">取消</el-button>
@@ -136,7 +186,7 @@
         v-loading="loading"
         border
         style="width: 100%"
-        empty-text="暂无转种数据"
+        empty-text="暂无待处理数据"
         :max-height="tableMaxHeight"
         height="100%"
         :row-class-name="tableRowClassName"
@@ -144,6 +194,7 @@
         class="glass-table"
       >
         <el-table-column
+          v-if="isCrossSeedMode || (isMaintenanceMode && isDeleteMode)"
           type="selection"
           width="55"
           align="center"
@@ -179,8 +230,7 @@
             <div
               class="mapped-cell"
               :class="{
-                'invalid-value':
-                  !isValidFormat(scope.row.type) || !isMapped('type', scope.row.type),
+                'invalid-value': !isValidFormat(scope.row.type) || !isMapped('type', scope.row.type),
               }"
             >
               {{ getMappedValue('type', scope.row.type) }}
@@ -247,8 +297,7 @@
             <div
               class="mapped-cell"
               :class="{
-                'invalid-value':
-                  !isValidFormat(scope.row.team) || !isMapped('team', scope.row.team),
+                'invalid-value': !isValidFormat(scope.row.team) || !isMapped('team', scope.row.team),
               }"
             >
               {{ getMappedValue('team', scope.row.team) }}
@@ -302,21 +351,39 @@
           <template #default="scope">
             <div class="mapped-cell datetime-cell">
               {{
-                scope.row.is_deleted
-                  ? getRestrictionText(scope.row)
-                  : formatDateTime(scope.row.updated_at)
+                scope.row.is_deleted ? getRestrictionText(scope.row) : formatDateTime(scope.row.updated_at)
               }}
             </div>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="110" align="center" fixed="right">
           <template #default="scope">
-            <el-button size="small" type="success" @click="handleSingleCrossSeed(scope.row)">
-              转种
+            <el-button
+              size="small"
+              :type="isMaintenanceMode ? 'primary' : 'success'"
+              @click="isMaintenanceMode ? handleMaintain(scope.row) : handleSingleCrossSeed(scope.row)"
+            >
+              {{ isMaintenanceMode ? '维护' : '转种' }}
             </el-button>
           </template>
         </el-table-column>
       </el-table>
+    </div>
+
+    <BDInfoRecordsDialog v-if="isMaintenanceMode" v-model="recordDialogVisible" @closed="fetchData" />
+
+    <div v-if="isMaintenanceMode && batchFetchDialogVisible" class="modal-overlay">
+      <el-card class="batch-fetch-main-card" shadow="always">
+        <template #header>
+          <div class="modal-header">
+            <span>批量获取种子数据</span>
+            <el-button type="danger" circle @click="closeBatchFetchDialog" plain>X</el-button>
+          </div>
+        </template>
+        <div class="batch-fetch-main-content">
+          <BatchFetchPanel @cancel="closeBatchFetchDialog" @fetch-completed="handleFetchCompleted" />
+        </div>
+      </el-card>
     </div>
   </div>
 </template>
@@ -325,8 +392,11 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { WarningFilled } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
+import BatchFetchPanel from '@/components/BatchFetchPanel.vue'
+import BDInfoRecordsDialog from '@/components/cross-seed-data/BDInfoRecordsDialog.vue'
 import '@/assets/styles/glass-morphism.scss'
 import { ElMessage } from '@/utils/uiNotify'
 
@@ -381,20 +451,30 @@ interface ReverseMappings {
   site_name: Record<string, string>
 }
 
+const props = withDefaults(
+  defineProps<{
+    mode?: 'cross-seed' | 'maintenance'
+  }>(),
+  {
+    mode: 'cross-seed',
+  },
+)
+
 const emit = defineEmits<{
   (e: 'ready', refreshMethod: () => Promise<void>): void
+  (e: 'maintain', row: SeedParameter): void
 }>()
 
 const router = useRouter()
+const isMaintenanceMode = computed(() => props.mode === 'maintenance')
+const isCrossSeedMode = computed(() => !isMaintenanceMode.value)
 
 const isAnimationRelatedType = (typeValue: string | undefined | null) => {
   const text = (typeValue || '').trim().toLowerCase()
   if (!text) return false
-
   if (text === 'category.animation') {
     return true
   }
-
   return (
     text.includes('animation') ||
     text.includes('anime') ||
@@ -416,10 +496,13 @@ const reverseMappings = ref<ReverseMappings>({
 })
 
 const tableData = ref<SeedParameter[]>([])
-const loading = ref<boolean>(true)
+const loading = ref(true)
 const error = ref<string | null>(null)
 const selectedRows = ref<SeedParameter[]>([])
 const pendingBatchCrossSeedAfterFilter = ref(false)
+const batchFetchDialogVisible = ref(false)
+const isDeleteMode = ref(false)
+const recordDialogVisible = ref(false)
 const pathTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
 const pathTreeData = ref<PathNode[]>([])
 const uniquePaths = ref<string[]>([])
@@ -429,29 +512,46 @@ const uniquePathsLoading = ref(false)
 let fetchSequence = 0
 let searchDebounceTimer: ReturnType<typeof window.setTimeout> | null = null
 
-const tableMaxHeight = ref<number>(window.innerHeight - 80)
-const currentPage = ref<number>(1)
-const pageSize = ref<number>(20)
-const total = ref<number>(0)
-const searchQuery = ref<string>('')
-const filterDialogVisible = ref<boolean>(false)
+const tableMaxHeight = ref(window.innerHeight - 80)
+const currentPage = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+const searchQuery = ref('')
+const reviewStatusFilter = ref('')
+const filterDialogVisible = ref(false)
 const activeFilters = ref({
   paths: [] as string[],
+  isDeleted: '',
   excludeTargetSites: '',
 })
 const tempFilters = ref({ ...activeFilters.value })
 const targetSitesList = ref<string[]>([])
 const uiInitializing = ref(true)
 
+const handleReviewStatusChange = async (value: string) => {
+  reviewStatusFilter.value = value
+  currentPage.value = 1
+  try {
+    await axios.post('/api/config/cross_seed_review_filter', { review_filter: value })
+  } catch (e) {
+    console.error('保存检查状态筛选失败:', e)
+  }
+  await fetchData()
+}
+
 const currentFilterText = computed(() => {
   const filters = activeFilters.value
   const filterTexts = []
 
-  if (filters.paths && filters.paths.length > 0) {
+  if (filters.paths.length > 0) {
     filterTexts.push(`路径: ${filters.paths.length}`)
   }
-
-  if (filters.excludeTargetSites && filters.excludeTargetSites.trim() !== '') {
+  if (isMaintenanceMode.value && filters.isDeleted === '0') {
+    filterTexts.push('未删除')
+  } else if (isMaintenanceMode.value && filters.isDeleted === '1') {
+    filterTexts.push('已删除')
+  }
+  if (isCrossSeedMode.value && filters.excludeTargetSites.trim() !== '') {
     filterTexts.push(`目标站点: ${filters.excludeTargetSites}`)
   }
 
@@ -461,8 +561,9 @@ const currentFilterText = computed(() => {
 const hasActiveFilters = computed(() => {
   const filters = activeFilters.value
   return (
-    (filters.paths && filters.paths.length > 0) ||
-    (filters.excludeTargetSites && filters.excludeTargetSites.trim() !== '')
+    filters.paths.length > 0 ||
+    (isMaintenanceMode.value && filters.isDeleted !== '') ||
+    (isCrossSeedMode.value && filters.excludeTargetSites.trim() !== '')
   )
 })
 
@@ -484,20 +585,16 @@ const batchCrossSeedButtonText = computed(() => {
   if (selectedCount === 0) {
     return '批量转种'
   }
-
   if (targetSiteName) {
     return `转种到 ${targetSiteName} (${selectedCount})`
   }
-
   return `批量转种 (${selectedCount})`
 })
 
 const getMappedValue = (category: keyof ReverseMappings, standardValue: string) => {
   if (!standardValue) return ''
-
   const mappings = reverseMappings.value[category]
   if (!mappings) return standardValue
-
   return mappings[standardValue] || standardValue
 }
 
@@ -508,10 +605,8 @@ const isValidFormat = (value: string) => {
 
 const isMapped = (category: keyof ReverseMappings, standardValue: string) => {
   if (!standardValue) return true
-
   const mappings = reverseMappings.value[category]
   if (!mappings) return false
-
   return !!mappings[standardValue]
 }
 
@@ -553,26 +648,21 @@ const normalizeAndSortTags = (tags: string[] | string): string[] => {
   return [...tagList].sort(compareTagAZ)
 }
 
-const getTagsSortKey = (row: SeedParameter) => {
-  return normalizeAndSortTags(row.tags).join('|').toLowerCase()
-}
+const getTagsSortKey = (row: SeedParameter) => normalizeAndSortTags(row.tags).join('|').toLowerCase()
 
 const getMappedTags = (tags: string[] | string) => {
   const tagList = normalizeAndSortTags(tags)
   if (tagList.length === 0) {
     return []
   }
-
   return tagList.map((tag: string) => reverseMappings.value.tags[tag] || tag)
 }
 
 const getTagType = (tags: string[] | string, index: number) => {
   const tagList = normalizeAndSortTags(tags)
-
   if (tagList.length === 0 || index >= tagList.length) return 'info'
 
   const originalTag = tagList[index]
-
   if (
     originalTag === '禁转' ||
     originalTag === 'tag.禁转' ||
@@ -583,21 +673,17 @@ const getTagType = (tags: string[] | string, index: number) => {
   ) {
     return 'danger'
   }
-
   if (!isValidFormat(originalTag) || !isMapped('tags', originalTag)) {
     return 'danger'
   }
-
   return 'info'
 }
 
 const getTagClass = (tags: string[] | string, index: number) => {
   const tagList = normalizeAndSortTags(tags)
-
   if (tagList.length === 0 || index >= tagList.length) return ''
 
   const originalTag = tagList[index]
-
   if (
     originalTag === '禁转' ||
     originalTag === 'tag.禁转' ||
@@ -608,11 +694,9 @@ const getTagClass = (tags: string[] | string, index: number) => {
   ) {
     return 'restricted-tag'
   }
-
   if (!isValidFormat(originalTag) || !isMapped('tags', originalTag)) {
     return 'invalid-tag'
   }
-
   return ''
 }
 
@@ -724,6 +808,27 @@ const buildPathTree = (paths: string[]): PathNode[] => {
   return root
 }
 
+const checkSelectable = (row: SeedParameter) => {
+  if (isMaintenanceMode.value && isDeleteMode.value) {
+    return true
+  }
+  if (row.is_deleted) {
+    return false
+  }
+  if (!row.is_reviewed) {
+    return false
+  }
+  if (hasInvalidParams(row)) {
+    return false
+  }
+  if (hasRestrictedTag(row.tags)) {
+    return false
+  }
+  return true
+}
+
+const filterCrossSeedableRows = (rows: SeedParameter[]) => rows.filter((row) => checkSelectable(row))
+
 const fetchData = async () => {
   const requestId = ++fetchSequence
   loading.value = true
@@ -734,7 +839,9 @@ const fetchData = async () => {
       page_size: pageSize.value.toString(),
       search: searchQuery.value,
       path_filters: JSON.stringify(activeFilters.value.paths || []),
-      exclude_target_sites: activeFilters.value.excludeTargetSites,
+      is_deleted: isMaintenanceMode.value ? activeFilters.value.isDeleted : '',
+      exclude_target_sites: isCrossSeedMode.value ? activeFilters.value.excludeTargetSites : '',
+      review_status: isMaintenanceMode.value ? reviewStatusFilter.value : '',
       include_unique_paths: '0',
     })
 
@@ -746,8 +853,10 @@ const fetchData = async () => {
     }
 
     if (result.success) {
-      tableData.value = result.data
-      total.value = result.total
+      const rawRows = Array.isArray(result.data) ? (result.data as SeedParameter[]) : []
+      const visibleRows = isCrossSeedMode.value ? filterCrossSeedableRows(rawRows) : rawRows
+      tableData.value = visibleRows
+      total.value = isCrossSeedMode.value ? visibleRows.length : Number(result.total || rawRows.length)
 
       if (result.reverse_mappings) {
         reverseMappings.value = result.reverse_mappings
@@ -769,7 +878,7 @@ const fetchData = async () => {
             return true
           }
 
-          return result.data.some((row: SeedParameter) => isAnimationRelatedType(row.type))
+          return rawRows.some((row: SeedParameter) => isAnimationRelatedType(row.type))
         })
 
         targetSitesList.value = filteredTargetSites
@@ -843,7 +952,11 @@ const saveUiSettings = async () => {
     const settingsToSave = {
       page_size: pageSize.value,
       search_query: searchQuery.value,
-      active_filters: activeFilters.value,
+      active_filters: {
+        ...activeFilters.value,
+        isDeleted: isMaintenanceMode.value ? activeFilters.value.isDeleted : '',
+        excludeTargetSites: isCrossSeedMode.value ? activeFilters.value.excludeTargetSites : '',
+      },
     }
     await axios.post('/api/ui_settings/cross_seed', settingsToSave)
   } catch (e: unknown) {
@@ -865,11 +978,26 @@ const loadUiSettings = async () => {
     if (settings.active_filters) {
       activeFilters.value = {
         paths: Array.isArray(settings.active_filters.paths) ? settings.active_filters.paths : [],
-        excludeTargetSites: String(settings.active_filters.excludeTargetSites || '').trim(),
+        isDeleted: isMaintenanceMode.value ? String(settings.active_filters.isDeleted || '').trim() : '',
+        excludeTargetSites: isCrossSeedMode.value
+          ? String(settings.active_filters.excludeTargetSites || '').trim()
+          : '',
       }
     }
   } catch (e) {
     console.error('加载UI设置时出错:', e)
+  }
+}
+
+const loadReviewStatusFilter = async () => {
+  try {
+    const response = await axios.get('/api/config/cross_seed_review_filter')
+    const result = response.data
+    if (result.success) {
+      reviewStatusFilter.value = result.data || ''
+    }
+  } catch (e) {
+    console.error('加载检查状态筛选配置失败:', e)
   }
 }
 
@@ -888,6 +1016,7 @@ const handleCurrentChange = (val: number) => {
 const clearFilters = () => {
   activeFilters.value = {
     paths: [],
+    isDeleted: '',
     excludeTargetSites: '',
   }
   currentPage.value = 1
@@ -963,20 +1092,8 @@ const tableRowClassName = ({ row }: { row: SeedParameter }) => {
   return ''
 }
 
-const checkSelectable = (row: SeedParameter) => {
-  if (row.is_deleted) {
-    return false
-  }
-  if (!row.is_reviewed) {
-    return false
-  }
-  if (hasInvalidParams(row)) {
-    return false
-  }
-  if (hasRestrictedTag(row.tags)) {
-    return false
-  }
-  return true
+const handleMaintain = (row: SeedParameter) => {
+  emit('maintain', row)
 }
 
 const handleSelectionChange = (selection: SeedParameter[]) => {
@@ -1109,12 +1226,96 @@ const handleSingleCrossSeed = async (row: SeedParameter) => {
   }
 }
 
+const getDeleteButtonText = () => {
+  if (!isDeleteMode.value) {
+    return '批量删除模式'
+  }
+  if (selectedRows.value.length === 0) {
+    return '退出删除模式'
+  }
+  return `删除选中项 (${selectedRows.value.length})`
+}
+
+const toggleDeleteMode = () => {
+  isDeleteMode.value = !isDeleteMode.value
+  selectedRows.value = []
+}
+
+const executeBatchDelete = async () => {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要删除的行')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedRows.value.length} 条种子数据吗？此操作无法恢复！`,
+      '确认批量删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+
+    const deleteData = {
+      items: selectedRows.value.map((row) => ({
+        torrent_id: row.torrent_id,
+        site_name: row.site_name,
+      })),
+    }
+
+    const response = await axios.post('/api/cross-seed-data/delete', deleteData)
+    const result = response.data
+
+    if (!result.success) {
+      throw new Error(result.error || '批量删除失败')
+    }
+
+    ElMessage.success(result.message || `成功删除 ${result.deleted_count} 条数据`)
+    selectedRows.value = []
+    isDeleteMode.value = false
+    await fetchData()
+  } catch (error: unknown) {
+    if (error === 'cancel' || error === 'close') return
+    const message = axios.isAxiosError(error)
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (error.response?.data as { error?: string } | undefined)?.error ||
+        error.message
+      : error instanceof Error
+        ? error.message
+        : '网络错误'
+    ElMessage.error(message)
+  }
+}
+
+const openBatchFetchDialog = () => {
+  batchFetchDialogVisible.value = true
+}
+
+const closeBatchFetchDialog = () => {
+  batchFetchDialogVisible.value = false
+}
+
+const handleFetchCompleted = async () => {
+  batchFetchDialogVisible.value = false
+  ElMessage.success('批量获取种子数据已完成')
+  await fetchData()
+}
+
+const openRecordViewDialog = () => {
+  recordDialogVisible.value = true
+}
+
 onMounted(() => {
   emit('ready', fetchData)
 })
 
 onMounted(async () => {
   await loadUiSettings()
+  if (isMaintenanceMode.value) {
+    await loadReviewStatusFilter()
+  }
   uiInitializing.value = false
   void fetchData()
   window.addEventListener('resize', handleResize)
@@ -1129,6 +1330,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
+.modal-overlay,
 .filter-overlay {
   position: fixed;
   top: 0;
@@ -1150,7 +1352,8 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-.filter-card-header {
+.filter-card-header,
+.modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1249,6 +1452,18 @@ onUnmounted(() => {
   border-top: 1px solid var(--el-border-color-lighter);
   display: flex;
   justify-content: flex-end;
+}
+
+.batch-fetch-main-card {
+  width: min(1100px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.batch-fetch-main-content {
+  min-height: 0;
+  overflow: auto;
 }
 
 .cross-seed-data-view {
@@ -1378,7 +1593,6 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
-/* 不可选择行的复选框变红 */
 :deep(
   .el-table__body
     tr.selected-row-disabled

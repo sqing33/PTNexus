@@ -9,7 +9,7 @@
       style="margin-bottom: 16px"
     />
 
-    <div class="seed-maintenance-view__header glass-table">
+    <div v-if="ready" class="seed-maintenance-view__header glass-table">
       <div class="seed-maintenance-view__title-block">
         <h2 class="seed-maintenance-view__title">维护种子信息</h2>
         <p class="seed-maintenance-view__subtitle">
@@ -40,7 +40,7 @@
         />
         <el-button type="info" plain @click="openRecordViewDialog">BDInfo记录</el-button>
         <el-button type="warning" plain @click="openBatchFetchDialog">获取数据</el-button>
-        <el-button plain @click="handleBack">返回一站多种</el-button>
+        <el-button plain @click="handleBack">返回列表</el-button>
         <el-button type="primary" plain :loading="loading" @click="loadSeedInfo">
           加载种子
         </el-button>
@@ -56,6 +56,15 @@
       </div>
     </div>
 
+    <div v-else class="seed-maintenance-view__header glass-table">
+      <div class="seed-maintenance-view__title-block">
+        <h2 class="seed-maintenance-view__title">维护种子信息</h2>
+        <p class="seed-maintenance-view__subtitle">
+          默认展示待维护列表，可按路径筛选后进入单条维护。
+        </p>
+      </div>
+    </div>
+
     <div v-if="loading" class="seed-maintenance-view__loading glass-table" v-loading="true">
       <div class="seed-maintenance-view__loading-text">正在加载种子信息...</div>
     </div>
@@ -68,6 +77,10 @@
         @complete="handleComplete"
         @cancel="handleBack"
       />
+    </div>
+
+    <div v-else class="seed-maintenance-view__list-panel">
+      <CrossSeedDataView mode="maintenance" @maintain="handleMaintainRow" @ready="emitReady" />
     </div>
 
     <BDInfoRecordsDialog v-model="recordDialogVisible" @closed="handleRecordDialogClosed" />
@@ -98,6 +111,7 @@ import axios from 'axios'
 import BatchFetchPanel from '@/components/BatchFetchPanel.vue'
 import CrossSeedPanel from '@/components/CrossSeedPanel.vue'
 import BDInfoRecordsDialog from '@/components/cross-seed-data/BDInfoRecordsDialog.vue'
+import CrossSeedDataView from '@/views/CrossSeedDataView.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import { ElMessage } from '@/utils/uiNotify'
@@ -112,6 +126,12 @@ interface SourceInfo {
 interface SourceSiteOption {
   name: string
   site: string
+}
+
+interface MaintenanceRow {
+  torrent_id: string
+  site_name: string
+  nickname?: string
 }
 
 const emit = defineEmits<{
@@ -137,15 +157,25 @@ const routeTorrentId = computed(() => String(route.query.torrent_id || '').trim(
 const routeSiteName = computed(() => String(route.query.site_name || '').trim())
 const rowId = computed(() => String(route.query.row_id || '').trim())
 const sourcePage = computed(() => String(route.query.from || '/data').trim() || '/data')
+const currentMaintenanceRow = ref<MaintenanceRow | null>(null)
 
 const ready = computed(() => !!crossSeedStore.taskId && !!prefetchedDbSeedInfo.value)
+const activeTargetTorrentId = computed(
+  () => currentMaintenanceRow.value?.torrent_id?.trim() || routeTorrentId.value,
+)
+const activeTargetSiteName = computed(
+  () => currentMaintenanceRow.value?.site_name?.trim() || routeSiteName.value,
+)
+const activeRowId = computed(
+  () => currentMaintenanceRow.value?.nickname?.trim() || rowId.value || '',
+)
 const canRefetch = computed(
   () =>
     !!selectedSourceSite.value.trim() &&
     !!sourceTorrentId.value.trim() &&
     !!prefetchedDbSeedInfo.value &&
-    !!routeTorrentId.value &&
-    !!routeSiteName.value,
+    !!activeTargetTorrentId.value &&
+    !!activeTargetSiteName.value,
 )
 
 const resolveSiteCode = (siteLabel: string) => {
@@ -197,8 +227,7 @@ const applySeedInfo = (seedInfoResult: Record<string, any>) => {
   }
   crossSeedStore.setSourceInfo(sourceInfo)
 
-  const idSuffix =
-    rowId.value || `${seedInfoResult.data.site_name}_${seedInfoResult.data.torrent_id}`
+  const idSuffix = activeRowId.value || `${seedInfoResult.data.site_name}_${seedInfoResult.data.torrent_id}`
   crossSeedStore.setTaskId(`seed_maintenance_${idSuffix}_${Date.now()}`)
 }
 
@@ -260,8 +289,8 @@ const refetchSeedInfo = async () => {
       savePath: String(prefetchedSeedData.save_path || ''),
       torrentName: String(prefetchedSeedData.name || prefetchedSeedData.title || ''),
       downloaderId: String(prefetchedSeedData.downloader_id || ''),
-      target_torrent_id: routeTorrentId.value,
-      target_site_name: routeSiteName.value,
+      target_torrent_id: activeTargetTorrentId.value,
+      target_site_name: activeTargetSiteName.value,
       screenshotReviewMode: 'interactive',
       task_id: crossSeedStore.taskId || undefined,
     }
@@ -309,13 +338,29 @@ const closeBatchFetchDialog = () => {
 const handleFetchCompleted = async () => {
   batchFetchDialogVisible.value = false
   ElMessage.success('批量获取种子数据已完成')
-  if (routeTorrentId.value && routeSiteName.value) {
+  if (activeTargetTorrentId.value && activeTargetSiteName.value) {
     await loadSeedInfo()
   }
 }
 
+const handleMaintainRow = async (row: MaintenanceRow) => {
+  currentMaintenanceRow.value = {
+    torrent_id: String(row.torrent_id || '').trim(),
+    site_name: String(row.site_name || '').trim(),
+    nickname: String(row.nickname || '').trim(),
+  }
+  selectedSourceSite.value = currentMaintenanceRow.value.site_name
+  sourceTorrentId.value = currentMaintenanceRow.value.torrent_id
+  await loadSeedInfo()
+}
+
+const emitReady = (refreshMethod: () => Promise<void>) => {
+  emit('ready', refreshMethod)
+}
+
 const handleBack = () => {
   prefetchedDbSeedInfo.value = undefined
+  currentMaintenanceRow.value = null
   crossSeedStore.reset()
   if (route.query.torrent_id || route.query.site_name || route.query.from) {
     void router.push(sourcePage.value)
@@ -327,6 +372,7 @@ const handleBack = () => {
 const handleComplete = () => {
   ElMessage.success('种子信息维护已完成！')
   prefetchedDbSeedInfo.value = undefined
+  currentMaintenanceRow.value = null
   crossSeedStore.reset()
   void router.push(sourcePage.value)
 }
@@ -340,6 +386,11 @@ onMounted(async () => {
     sourceTorrentId.value = routeTorrentId.value
   }
   if (routeTorrentId.value && routeSiteName.value) {
+    currentMaintenanceRow.value = {
+      torrent_id: routeTorrentId.value,
+      site_name: routeSiteName.value,
+      nickname: rowId.value,
+    }
     await loadSeedInfo()
   }
   emit('ready', loadSeedInfo)
@@ -406,13 +457,18 @@ onMounted(async () => {
   color: var(--el-text-color-secondary);
 }
 
-.seed-maintenance-view__panel {
+.seed-maintenance-view__panel,
+.seed-maintenance-view__list-panel {
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
 .seed-maintenance-view__panel :deep(.cross-seed-panel) {
+  height: 100%;
+}
+
+.seed-maintenance-view__list-panel :deep(.cross-seed-data-view) {
   height: 100%;
 }
 
