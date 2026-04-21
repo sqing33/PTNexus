@@ -1,38 +1,48 @@
 {
   "schema": 2,
+  "note": "repo-root metadata only; production updater must use release UPDATE_MANIFEST.json",
   "latest": {
-    "version": "v4.0.30",
+    "version": "v4.0.31",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.26/ptnexus-runtime-linux-amd64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.31/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
         "size": 11163781,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.26/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.26/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.26/ptnexus-runtime-linux-amd64.tar.gz"
+          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.31/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.31/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.31/ptnexus-runtime-linux-amd64.tar.gz"
         ]
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.26/ptnexus-runtime-linux-arm64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.31/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
         "size": 10104449,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.26/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.26/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.26/ptnexus-runtime-linux-arm64.tar.gz"
+          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.31/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.31/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.31/ptnexus-runtime-linux-arm64.tar.gz"
         ]
       }
     ],
-    "date": "2026.04.20"
+    "date": "2026.04.21"
   },
   "history": [
+    {
+      "version": "v4.0.31",
+      "date": "2026.04.21",
+      "changes": [
+        "调整：维护种子信息页独立为顶层导航页面，一站多种页仅保留转种能力",
+        "新增：右上角全局任务监控支持显示刷新等后台任务，并可查看失败错误详情",
+        "修复：已完成转种到目标站的种子按 hash 排除，不再继续出现在待转种列表中"
+      ]
+    },
     {
       "version": "v4.0.30",
       "date": "2026.04.20",
@@ -42,6 +52,22 @@
         "调整：一站多种页移除重新拉取入口，避免继续与转种页职责混用",
         "调整：维护种子信息页补回源站与种子 ID 的独立加载能力，并将重新拉取数据能力收回维护页统一处理",
         "优化：维护入口提升为与一种多站、一站多种并列的顶层导航，便于把维护视图作为独立操作面使用"
+      ]
+    },
+    {
+      "version": "v4.0.27",
+      "date": "2026.04.18",
+      "changes": [
+        "修复：候选媒体路径缺少扩展名时，可自动回退命中同名媒体文件，避免截图与媒体分析误报未找到可分析媒体文件",
+        "新增：辅种详情面板支持手动重新从源站拉取数据，并在抓取后整包刷新当前面板内容"
+      ]
+    },
+    {
+      "version": "v4.0.26",
+      "date": "2026.04.18",
+      "changes": [
+        "修复：保存路径已是最终内容目录时，截图与媒体解析可直接扫描该目录，避免误报未找到可分析媒体文件",
+        "修复：数据库种子信息回填保存路径时优先按 hash 匹配当前本地种子，避免不同站点同名任务拿错路径"
       ]
     },
     {

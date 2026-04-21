@@ -770,6 +770,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, reactive, watch, nextTick, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import type { TableInstance, Sort } from 'element-plus'
 import type { ElTree } from 'element-plus'
@@ -814,7 +815,7 @@ interface PathNode {
 
 type SourceSiteOption = { siteName: string } & SiteData
 
-// const router = useRouter();
+const router = useRouter()
 
 const tableRef = ref<TableInstance | null>(null)
 const loading = ref<boolean>(true)

@@ -761,6 +761,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           }),
         })
 
+        const dbSeedData = dbResponse.data.data
+        const compositeSeedId = `${dbSeedData.hash || torrentId}_${torrentId}_${englishSiteName}`
+
         // 检查 BDInfo 进度状态（从数据库读取，使用默认重试设置）
         checkAndStartBDInfoProgress(compositeSeedId, false)
 

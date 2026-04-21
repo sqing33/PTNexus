@@ -38,6 +38,8 @@
           clearable
           :disabled="loading"
         />
+        <el-button type="info" plain @click="openRecordViewDialog">BDInfo记录</el-button>
+        <el-button type="warning" plain @click="openBatchFetchDialog">获取数据</el-button>
         <el-button plain @click="handleBack">返回一站多种</el-button>
         <el-button type="primary" plain :loading="loading" @click="loadSeedInfo">
           加载种子
@@ -67,6 +69,25 @@
         @cancel="handleBack"
       />
     </div>
+
+    <BDInfoRecordsDialog v-model="recordDialogVisible" @closed="handleRecordDialogClosed" />
+
+    <div v-if="batchFetchDialogVisible" class="seed-maintenance-view__overlay">
+      <el-card class="seed-maintenance-view__modal" shadow="always">
+        <template #header>
+          <div class="seed-maintenance-view__modal-header">
+            <span>批量获取种子数据</span>
+            <el-button type="danger" circle plain @click="closeBatchFetchDialog">X</el-button>
+          </div>
+        </template>
+        <div class="seed-maintenance-view__modal-body">
+          <BatchFetchPanel
+            @cancel="closeBatchFetchDialog"
+            @fetch-completed="handleFetchCompleted"
+          />
+        </div>
+      </el-card>
+    </div>
   </div>
 </template>
 
@@ -74,7 +95,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
+import BatchFetchPanel from '@/components/BatchFetchPanel.vue'
 import CrossSeedPanel from '@/components/CrossSeedPanel.vue'
+import BDInfoRecordsDialog from '@/components/cross-seed-data/BDInfoRecordsDialog.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
 import { ElMessage } from '@/utils/uiNotify'
@@ -107,6 +130,8 @@ const prefetchedDbSeedInfo = ref<Record<string, unknown> | undefined>(undefined)
 const sourceSiteOptions = ref<SourceSiteOption[]>([])
 const selectedSourceSite = ref('')
 const sourceTorrentId = ref('')
+const recordDialogVisible = ref(false)
+const batchFetchDialogVisible = ref(false)
 
 const routeTorrentId = computed(() => String(route.query.torrent_id || '').trim())
 const routeSiteName = computed(() => String(route.query.site_name || '').trim())
@@ -263,6 +288,32 @@ const refetchSeedInfo = async () => {
   }
 }
 
+const openRecordViewDialog = () => {
+  recordDialogVisible.value = true
+}
+
+const handleRecordDialogClosed = async () => {
+  if (routeTorrentId.value && routeSiteName.value) {
+    await loadSeedInfo()
+  }
+}
+
+const openBatchFetchDialog = () => {
+  batchFetchDialogVisible.value = true
+}
+
+const closeBatchFetchDialog = () => {
+  batchFetchDialogVisible.value = false
+}
+
+const handleFetchCompleted = async () => {
+  batchFetchDialogVisible.value = false
+  ElMessage.success('批量获取种子数据已完成')
+  if (routeTorrentId.value && routeSiteName.value) {
+    await loadSeedInfo()
+  }
+}
+
 const handleBack = () => {
   prefetchedDbSeedInfo.value = undefined
   crossSeedStore.reset()
@@ -363,6 +414,36 @@ onMounted(async () => {
 
 .seed-maintenance-view__panel :deep(.cross-seed-panel) {
   height: 100%;
+}
+
+.seed-maintenance-view__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 2000;
+}
+
+.seed-maintenance-view__modal {
+  width: min(1100px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.seed-maintenance-view__modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.seed-maintenance-view__modal-body {
+  min-height: 0;
+  overflow: auto;
 }
 
 @media (max-width: 768px) {

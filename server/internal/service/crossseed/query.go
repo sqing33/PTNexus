@@ -216,16 +216,15 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		txSiteCondition := buildAliasMatchCondition(dbType, "tx.sites", targetAliases)
 		aliasArgs := aliasMatchArgs(dbType, targetAliases)
 
-		conditionParts := []string{
-			fmt.Sprintf(`ct.hash IS NOT NULL AND NOT EXISTS (
-				SELECT 1
-				FROM torrents tx
-				WHERE (tx.is_hidden = 0 OR tx.is_hidden IS NULL)
-				  AND %s
-				  AND tx.name = ct.name
-				  AND tx.size = ct.size
-			)`, txSiteCondition),
-		}
+			conditionParts := []string{
+				fmt.Sprintf(`ct.hash IS NOT NULL AND NOT EXISTS (
+					SELECT 1
+					FROM torrents tx
+					WHERE (tx.is_hidden = 0 OR tx.is_hidden IS NULL)
+					  AND %s
+					  AND (tx.hash = ct.hash OR (tx.name = ct.name AND tx.size = ct.size))
+				)`, txSiteCondition),
+			}
 		args = append(args, aliasArgs...)
 
 		if hasPublishQueueTable {

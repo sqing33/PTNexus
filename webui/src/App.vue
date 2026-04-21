@@ -503,7 +503,25 @@ const handleGlobalRefresh = async () => {
     return
   }
 
+  const refreshTaskKey = `global_refresh:${route.path}`
+  const refreshRouteTarget = {
+    path: route.path,
+    query: Object.fromEntries(
+      Object.entries(route.query)
+        .filter(([, value]) => value !== undefined && value !== null && String(value).trim())
+        .map(([key, value]) => [key, String(value).trim()]),
+    ),
+  }
+
   isRefreshing.value = true
+  taskMonitorStore.markRunning({
+    key: refreshTaskKey,
+    kind: 'refresh',
+    title: '刷新缓存',
+    message: `正在刷新${currentRouteTitle.value}`,
+    progressText: '已提交刷新请求',
+    routeTarget: refreshRouteTarget,
+  })
   ElMessage.info('后台正在刷新缓存...')
 
   try {
@@ -516,6 +534,13 @@ const handleGlobalRefresh = async () => {
       }
     }
 
+    taskMonitorStore.markSuccess(refreshTaskKey, {
+      kind: 'refresh',
+      title: '刷新缓存',
+      message: `${currentRouteTitle.value}已刷新`,
+      progressText: '刷新完成',
+      routeTarget: refreshRouteTarget,
+    })
     ElMessage.success('数据已刷新！')
   } catch (error: unknown) {
     const message = axios.isAxiosError(error)
@@ -523,6 +548,14 @@ const handleGlobalRefresh = async () => {
       : error instanceof Error
         ? error.message
         : '数据更新失败'
+    taskMonitorStore.markFailed(refreshTaskKey, {
+      kind: 'refresh',
+      title: '刷新缓存',
+      message: `刷新${currentRouteTitle.value}失败`,
+      error: message || '数据更新失败',
+      progressText: '刷新失败',
+      routeTarget: refreshRouteTarget,
+    })
     ElMessage.error(message || '数据更新失败')
   } finally {
     isRefreshing.value = false

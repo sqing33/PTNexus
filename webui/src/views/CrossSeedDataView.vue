@@ -25,47 +25,14 @@
         @click="handleBatchCrossSeedButtonClick"
         plain
         style="margin-right: 15px"
-        :disabled="isDeleteMode"
       >
         {{ batchCrossSeedButtonText }}
-      </el-button>
-
-      <!-- 查看BDInfo记录按钮 -->
-      <el-button type="info" @click="openRecordViewDialog" plain style="margin-right: 15px">
-        BDInfo记录
-      </el-button>
-
-      <!-- 批量获取数据按钮 -->
-      <el-button type="warning" @click="openBatchFetchDialog" plain style="margin-right: 15px">
-        获取数据
-      </el-button>
-
-      <!-- 批量删除模式切换按钮 -->
-      <el-button
-        type="danger"
-        @click="isDeleteMode && selectedRows.length > 0 ? executeBatchDelete() : toggleDeleteMode()"
-        plain
-        style="margin-right: 15px"
-      >
-        {{ getDeleteButtonText() }}
       </el-button>
 
       <!-- 筛选按钮 -->
       <el-button type="primary" @click="openFilterDialog" plain style="margin-right: 15px">
         筛选
       </el-button>
-
-      <!-- 检查状态筛选单选组 -->
-      <el-radio-group
-        v-model="reviewStatusFilter"
-        @change="handleReviewStatusChange"
-        style="margin-right: 15px"
-      >
-        <el-radio-button label="">全部</el-radio-button>
-        <el-radio-button label="reviewed">已检查</el-radio-button>
-        <el-radio-button label="unreviewed">待检查</el-radio-button>
-        <el-radio-button label="error">错误</el-radio-button>
-      </el-radio-group>
 
       <div
         v-if="hasActiveFilters"
@@ -117,13 +84,6 @@
               :props="{ class: 'path-tree-node' }"
             />
           </div>
-
-          <el-divider content-position="left">删除状态</el-divider>
-          <el-radio-group v-model="tempFilters.isDeleted" style="width: 100%">
-            <el-radio :label="''">全部</el-radio>
-            <el-radio :label="'0'">未删除</el-radio>
-            <el-radio :label="'1'">已删除</el-radio>
-          </el-radio-group>
 
           <el-divider content-position="left">
             <span class="target-site-filter-title">
@@ -349,40 +309,14 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="130" align="center" fixed="right">
+        <el-table-column label="操作" width="110" align="center" fixed="right">
           <template #default="scope">
-            <el-button size="small" type="primary" @click="handleEdit(scope.row)">维护</el-button>
-            <el-button
-              size="small"
-              type="danger"
-              @click="handleDelete(scope.row)"
-              style="margin-left: 5px"
-              >删除</el-button
-            >
+            <el-button size="small" type="success" @click="handleSingleCrossSeed(scope.row)">
+              转种
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
-    </div>
-
-    <!-- 处理记录查看弹窗 -->
-    <BDInfoRecordsDialog v-model="recordDialogVisible" @closed="fetchData" />
-
-    <!-- 批量获取数据弹窗 -->
-    <div v-if="batchFetchDialogVisible" class="modal-overlay">
-      <el-card class="batch-fetch-main-card" shadow="always">
-        <template #header>
-          <div class="modal-header">
-            <span>批量获取种子数据</span>
-            <el-button type="danger" circle @click="closeBatchFetchDialog" plain>X</el-button>
-          </div>
-        </template>
-        <div class="batch-fetch-main-content">
-          <BatchFetchPanel
-            @cancel="closeBatchFetchDialog"
-            @fetch-completed="handleFetchCompleted"
-          />
-        </div>
-      </el-card>
     </div>
   </div>
 </template>
@@ -391,47 +325,10 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { WarningFilled } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
-import BatchFetchPanel from '../components/BatchFetchPanel.vue'
-import BDInfoRecordsDialog from '../components/cross-seed-data/BDInfoRecordsDialog.vue'
 import '@/assets/styles/glass-morphism.scss'
 import { ElMessage } from '@/utils/uiNotify'
-
-/**
- * Interface for the source site information used during cross-seeding.
- */
-interface ISourceInfo {
-  /**
-   * The site's nickname, e.g., 'MTeam'.
-   * This is used for display purposes.
-   */
-  name: string
-
-  /**
-   * The site's internal identifier, e.g., 'mteam'.
-   * This is used for API calls.
-   */
-  site: string
-
-  /**
-   * The torrent ID on the source site.
-   */
-  torrentId: string
-}
-
-// 定义emit事件
-const emit = defineEmits<{
-  (e: 'ready', refreshMethod: () => Promise<void>): void
-}>()
-
-const router = useRouter()
-
-// 在组件挂载时发送ready事件
-onMounted(() => {
-  emit('ready', fetchData)
-})
 
 interface SeedParameter {
   id: number
@@ -463,23 +360,7 @@ interface SeedParameter {
   created_at: string
   updated_at: string
   is_deleted: boolean
-  is_reviewed: boolean // 新增：是否已检查
-}
-
-const isAnimationRelatedType = (typeValue: string | undefined | null) => {
-  const text = (typeValue || '').trim().toLowerCase()
-  if (!text) return false
-
-  if (text === 'category.animation') {
-    return true
-  }
-
-  return (
-    text.includes('animation') ||
-    text.includes('anime') ||
-    text.includes('动漫') ||
-    text.includes('动画')
-  )
+  is_reviewed: boolean
 }
 
 interface PathNode {
@@ -500,7 +381,28 @@ interface ReverseMappings {
   site_name: Record<string, string>
 }
 
-// 反向映射表，用于将标准值映射到中文显示名称
+const emit = defineEmits<{
+  (e: 'ready', refreshMethod: () => Promise<void>): void
+}>()
+
+const router = useRouter()
+
+const isAnimationRelatedType = (typeValue: string | undefined | null) => {
+  const text = (typeValue || '').trim().toLowerCase()
+  if (!text) return false
+
+  if (text === 'category.animation') {
+    return true
+  }
+
+  return (
+    text.includes('animation') ||
+    text.includes('anime') ||
+    text.includes('动漫') ||
+    text.includes('动画')
+  )
+}
+
 const reverseMappings = ref<ReverseMappings>({
   type: {},
   medium: {},
@@ -516,21 +418,8 @@ const reverseMappings = ref<ReverseMappings>({
 const tableData = ref<SeedParameter[]>([])
 const loading = ref<boolean>(true)
 const error = ref<string | null>(null)
-
-// 批量转种相关
 const selectedRows = ref<SeedParameter[]>([])
 const pendingBatchCrossSeedAfterFilter = ref(false)
-
-// 批量获取数据相关
-const batchFetchDialogVisible = ref<boolean>(false)
-
-// 删除模式相关
-const isDeleteMode = ref<boolean>(false)
-
-// BDInfo记录查看相关
-const recordDialogVisible = ref<boolean>(false)
-
-// 路径树相关
 const pathTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
 const pathTreeData = ref<PathNode[]>([])
 const uniquePaths = ref<string[]>([])
@@ -540,89 +429,50 @@ const uniquePathsLoading = ref(false)
 let fetchSequence = 0
 let searchDebounceTimer: ReturnType<typeof window.setTimeout> | null = null
 
-// 表格高度
 const tableMaxHeight = ref<number>(window.innerHeight - 80)
-
-// 分页相关
 const currentPage = ref<number>(1)
 const pageSize = ref<number>(20)
 const total = ref<number>(0)
-
-// 搜索相关
 const searchQuery = ref<string>('')
+const filterDialogVisible = ref<boolean>(false)
+const activeFilters = ref({
+  paths: [] as string[],
+  excludeTargetSites: '',
+})
+const tempFilters = ref({ ...activeFilters.value })
+const targetSitesList = ref<string[]>([])
+const uiInitializing = ref(true)
 
-// 检查状态筛选
-const reviewStatusFilter = ref<string>('')
-
-// 处理检查状态筛选变化
-const handleReviewStatusChange = async (value: string) => {
-  reviewStatusFilter.value = value
-  currentPage.value = 1
-  // 调用后端API保存筛选状态到配置文件
-  try {
-    await axios.post('/api/config/cross_seed_review_filter', { review_filter: value })
-  } catch (e) {
-    console.error('保存检查状态筛选失败:', e)
-  }
-  fetchData()
-}
-
-// 计算当前筛选条件的显示文本
 const currentFilterText = computed(() => {
   const filters = activeFilters.value
   const filterTexts = []
 
-  // 处理保存路径筛选
   if (filters.paths && filters.paths.length > 0) {
     filterTexts.push(`路径: ${filters.paths.length}`)
   }
 
-  // 处理删除状态筛选
-  if (filters.isDeleted === '0') {
-    filterTexts.push('未删除')
-  } else if (filters.isDeleted === '1') {
-    filterTexts.push('已删除')
-  }
-
-  // 处理不存在种子筛选
   if (filters.excludeTargetSites && filters.excludeTargetSites.trim() !== '') {
-    filterTexts.push(`不存在于: ${filters.excludeTargetSites}`)
+    filterTexts.push(`目标站点: ${filters.excludeTargetSites}`)
   }
 
   return filterTexts.join(', ')
 })
 
-// 检查是否有任何筛选条件被应用
 const hasActiveFilters = computed(() => {
   const filters = activeFilters.value
   return (
     (filters.paths && filters.paths.length > 0) ||
-    filters.isDeleted !== '' ||
     (filters.excludeTargetSites && filters.excludeTargetSites.trim() !== '')
   )
 })
 
-// 筛选相关
-const filterDialogVisible = ref<boolean>(false)
-const activeFilters = ref({
-  paths: [] as string[], // 修改：改为数组类型
-  isDeleted: '',
-  excludeTargetSites: '', // 新增：排除目标站点筛选
-})
-const tempFilters = ref({ ...activeFilters.value })
-const targetSitesList = ref<string[]>([]) // 新增：目标站点列表
-
-// 计算属性：选中的目标站点（单选）
 const selectedTargetSite = computed({
-  get: () => {
-    return tempFilters.value.excludeTargetSites || ''
-  },
+  get: () => tempFilters.value.excludeTargetSites || '',
   set: (site) => {
     tempFilters.value.excludeTargetSites = site
   },
 })
 
-// 清除选中的目标站点
 const clearSelectedTargetSite = () => {
   tempFilters.value.excludeTargetSites = ''
 }
@@ -642,7 +492,6 @@ const batchCrossSeedButtonText = computed(() => {
   return `批量转种 (${selectedCount})`
 })
 
-// 辅助函数：获取映射后的中文值
 const getMappedValue = (category: keyof ReverseMappings, standardValue: string) => {
   if (!standardValue) return ''
 
@@ -652,21 +501,18 @@ const getMappedValue = (category: keyof ReverseMappings, standardValue: string) 
   return mappings[standardValue] || standardValue
 }
 
-// 检查值是否符合 *.* 格式
 const isValidFormat = (value: string) => {
-  if (!value) return true // 空值认为是有效的
-  const regex = /^[^.]+[.][^.]+$/ // 匹配 *.* 格式
-  return regex.test(value)
+  if (!value) return true
+  return /^[^.]+[.][^.]+$/.test(value)
 }
 
-// 检查值是否已正确映射
 const isMapped = (category: keyof ReverseMappings, standardValue: string) => {
-  if (!standardValue) return true // 空值认为是有效的
+  if (!standardValue) return true
 
   const mappings = reverseMappings.value[category]
-  if (!mappings) return false // 没有映射表则认为未映射
+  if (!mappings) return false
 
-  return !!mappings[standardValue] // 检查是否有对应的映射
+  return !!mappings[standardValue]
 }
 
 const compareTagAZ = (left: string, right: string) => {
@@ -679,6 +525,23 @@ const compareTagAZ = (left: string, right: string) => {
     return left < right ? -1 : 1
   }
   return 0
+}
+
+const normalizeTagList = (tags: string[] | string): string[] => {
+  if (typeof tags === 'string') {
+    try {
+      return JSON.parse(tags)
+    } catch {
+      return tags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter((tag) => tag)
+    }
+  }
+  if (Array.isArray(tags)) {
+    return tags
+  }
+  return []
 }
 
 const normalizeAndSortTags = (tags: string[] | string): string[] => {
@@ -694,29 +557,22 @@ const getTagsSortKey = (row: SeedParameter) => {
   return normalizeAndSortTags(row.tags).join('|').toLowerCase()
 }
 
-// 辅助函数：获取映射后的标签列表
 const getMappedTags = (tags: string[] | string) => {
   const tagList = normalizeAndSortTags(tags)
   if (tagList.length === 0) {
     return []
   }
 
-  // 映射标签到中文名称
-  return tagList.map((tag: string) => {
-    return reverseMappings.value.tags[tag] || tag
-  })
+  return tagList.map((tag: string) => reverseMappings.value.tags[tag] || tag)
 }
 
-// 获取标签的类型（用于显示不同颜色）
 const getTagType = (tags: string[] | string, index: number) => {
-  // 获取原始标签值
   const tagList = normalizeAndSortTags(tags)
 
   if (tagList.length === 0 || index >= tagList.length) return 'info'
 
   const originalTag = tagList[index]
 
-  // 检查是否为禁转标签，如果是则显示为红色
   if (
     originalTag === '禁转' ||
     originalTag === 'tag.禁转' ||
@@ -725,27 +581,23 @@ const getTagType = (tags: string[] | string, index: number) => {
     originalTag === '分集' ||
     originalTag === 'tag.分集'
   ) {
-    return 'danger' // 红色
+    return 'danger'
   }
 
-  // 检查标签是否符合 *.* 格式且已映射
   if (!isValidFormat(originalTag) || !isMapped('tags', originalTag)) {
-    return 'danger' // 红色
+    return 'danger'
   }
 
-  return 'info' // 默认蓝色
+  return 'info'
 }
 
-// 获取标签的自定义CSS类（用于背景色）
 const getTagClass = (tags: string[] | string, index: number) => {
-  // 获取原始标签值
   const tagList = normalizeAndSortTags(tags)
 
   if (tagList.length === 0 || index >= tagList.length) return ''
 
   const originalTag = tagList[index]
 
-  // 检查是否为禁转标签
   if (
     originalTag === '禁转' ||
     originalTag === 'tag.禁转' ||
@@ -754,24 +606,22 @@ const getTagClass = (tags: string[] | string, index: number) => {
     originalTag === '分集' ||
     originalTag === 'tag.分集'
   ) {
-    return 'restricted-tag' // 返回禁转标签的自定义类名
+    return 'restricted-tag'
   }
 
-  // 检查标签是否符合 *.* 格式且已映射
   if (!isValidFormat(originalTag) || !isMapped('tags', originalTag)) {
-    return 'invalid-tag' // 返回自定义类名
+    return 'invalid-tag'
   }
 
-  return '' // 返回空字符串表示使用默认样式
+  return ''
 }
 
-// 格式化日期时间为完整的年月日时分秒格式，并支持换行显示
 const formatDateTime = (dateString: string) => {
   if (!dateString) return ''
 
   try {
     const date = new Date(dateString)
-    if (isNaN(date.getTime())) return dateString // 如果日期无效，返回原始字符串
+    if (isNaN(date.getTime())) return dateString
 
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -781,11 +631,10 @@ const formatDateTime = (dateString: string) => {
     const seconds = String(date.getSeconds()).padStart(2, '0')
     return `${year}-${month}-${day}\n${hours}:${minutes}:${seconds}`
   } catch {
-    return dateString // 如果解析失败，返回原始字符串
+    return dateString
   }
 }
 
-// 检查行是否有无效参数
 const hasInvalidParams = (row: SeedParameter): boolean => {
   const categories: (keyof Omit<ReverseMappings, 'tags' | 'site_name'>)[] = [
     'type',
@@ -804,31 +653,45 @@ const hasInvalidParams = (row: SeedParameter): boolean => {
     }
   }
 
-  let tagList: string[] = []
-  if (typeof row.tags === 'string') {
-    try {
-      tagList = JSON.parse(row.tags)
-    } catch {
-      tagList = row.tags
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter((tag) => tag)
-    }
-  } else if (Array.isArray(row.tags)) {
-    tagList = row.tags
-  }
-
-  for (const tag of tagList) {
+  for (const tag of normalizeTagList(row.tags)) {
     if (!isValidFormat(tag) || !isMapped('tags', tag)) {
       return true
     }
   }
 
-  if (row.unrecognized) {
-    return true
+  return !!row.unrecognized
+}
+
+const hasRestrictedTag = (tags: string[] | string): boolean => {
+  const tagList = normalizeTagList(tags)
+  return tagList.some(
+    (tag) =>
+      tag === '禁转' ||
+      tag === 'tag.禁转' ||
+      tag === '限转' ||
+      tag === 'tag.限转' ||
+      tag === '分集' ||
+      tag === 'tag.分集',
+  )
+}
+
+const getRestrictionText = (row: SeedParameter) => {
+  const labels: string[] = []
+
+  if (row.is_deleted) {
+    labels.push('已删除做种文件')
+  }
+  if (!row.is_reviewed) {
+    labels.push('待检查')
+  }
+  if (hasRestrictedTag(row.tags)) {
+    labels.push('禁转标签')
+  }
+  if (hasInvalidParams(row)) {
+    labels.push('参数异常')
   }
 
-  return false
+  return labels.join('\n')
 }
 
 const buildPathTree = (paths: string[]): PathNode[] => {
@@ -871,16 +734,9 @@ const fetchData = async () => {
       page_size: pageSize.value.toString(),
       search: searchQuery.value,
       path_filters: JSON.stringify(activeFilters.value.paths || []),
-      is_deleted: activeFilters.value.isDeleted,
       exclude_target_sites: activeFilters.value.excludeTargetSites,
-      review_status: reviewStatusFilter.value, // 新增：检查状态筛选参数
       include_unique_paths: '0',
     })
-
-    // 调试日志：检查筛选参数
-    if (activeFilters.value.excludeTargetSites) {
-      console.log('发送目标站点排除参数:', activeFilters.value.excludeTargetSites)
-    }
 
     const response = await axios.get(`/api/cross-seed-data?${params.toString()}`)
     const result = response.data
@@ -893,19 +749,16 @@ const fetchData = async () => {
       tableData.value = result.data
       total.value = result.total
 
-      // 更新反向映射表
       if (result.reverse_mappings) {
         reverseMappings.value = result.reverse_mappings
       }
 
-      // 更新唯一路径数据并构建路径树
       if (result.unique_paths) {
         uniquePaths.value = result.unique_paths
         pathTreeData.value = buildPathTree(result.unique_paths)
         uniquePathsLoaded.value = true
       }
 
-      // 更新目标站点列表
       if (result.target_sites) {
         const filteredTargetSites = (result.target_sites || []).filter((site: string) => {
           const normalized = String(site || '')
@@ -1010,7 +863,10 @@ const loadUiSettings = async () => {
     pageSize.value = settings.page_size ?? 20
     searchQuery.value = settings.search_query ?? ''
     if (settings.active_filters) {
-      Object.assign(activeFilters.value, settings.active_filters)
+      activeFilters.value = {
+        paths: Array.isArray(settings.active_filters.paths) ? settings.active_filters.paths : [],
+        excludeTargetSites: String(settings.active_filters.excludeTargetSites || '').trim(),
+      }
     }
   } catch (e) {
     console.error('加载UI设置时出错:', e)
@@ -1020,25 +876,23 @@ const loadUiSettings = async () => {
 const handleSizeChange = (val: number) => {
   pageSize.value = val
   currentPage.value = 1
-  fetchData()
-  saveUiSettings()
+  void fetchData()
+  void saveUiSettings()
 }
 
 const handleCurrentChange = (val: number) => {
   currentPage.value = val
-  fetchData()
+  void fetchData()
 }
 
-// 清除筛选条件
 const clearFilters = () => {
   activeFilters.value = {
     paths: [],
-    isDeleted: '',
-    excludeTargetSites: '', // 新增：清除目标站点排除筛选
+    excludeTargetSites: '',
   }
   currentPage.value = 1
-  fetchData()
-  saveUiSettings()
+  void fetchData()
+  void saveUiSettings()
 }
 
 const closeFilterDialog = () => {
@@ -1046,9 +900,7 @@ const closeFilterDialog = () => {
   pendingBatchCrossSeedAfterFilter.value = false
 }
 
-// 打开筛选对话框
 const openFilterDialog = async () => {
-  // 将当前活动的筛选条件复制到临时筛选条件
   tempFilters.value = { ...activeFilters.value }
   filterDialogVisible.value = true
 
@@ -1063,15 +915,11 @@ const openFilterDialog = async () => {
   }
 }
 
-// 应用筛选条件
 const applyFilters = () => {
-  // 从路径树中获取选中的路径
   if (pathTreeRef.value) {
-    const selectedPaths = pathTreeRef.value.getCheckedKeys(false) as string[]
-    tempFilters.value.paths = selectedPaths
+    tempFilters.value.paths = pathTreeRef.value.getCheckedKeys(false) as string[]
   }
 
-  // 将临时筛选条件应用为活动筛选条件
   activeFilters.value = { ...tempFilters.value }
   filterDialogVisible.value = false
   const shouldContinueBatchCrossSeed =
@@ -1079,19 +927,15 @@ const applyFilters = () => {
     selectedRows.value.length > 0 &&
     activeFilters.value.excludeTargetSites.trim() !== ''
   pendingBatchCrossSeedAfterFilter.value = false
-  // 重置到第一页并获取数据
   currentPage.value = 1
-  fetchData()
-  saveUiSettings()
+  void fetchData()
+  void saveUiSettings()
 
   if (shouldContinueBatchCrossSeed) {
     void handleBatchCrossSeed(activeFilters.value.excludeTargetSites.trim())
   }
 }
 
-const uiInitializing = ref(true)
-
-// 监听搜索查询的变化，自动触发搜索
 watch(searchQuery, () => {
   if (uiInitializing.value) return
   if (searchDebounceTimer !== null) {
@@ -1105,190 +949,95 @@ watch(searchQuery, () => {
   }, 300)
 })
 
-// 处理编辑按钮点击
-const handleEdit = async (row: SeedParameter) => {
-  await router.push({
-    path: '/seed-maintenance',
-    query: {
-      torrent_id: row.torrent_id,
-      site_name: row.site_name,
-      row_id: String(row.id),
-      from: '/data',
-    },
-  })
-}
-
-// 处理删除按钮点击
-const handleDelete = async (row: SeedParameter) => {
-  try {
-    // 确认是否删除
-    await ElMessageBox.confirm(
-      `确定要永久删除种子数据 "${row.title}" 吗？此操作无法恢复！`,
-      '确认永久删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    )
-
-    // 向后端发送删除请求 - 使用统一的 delete API
-    const deleteData = {
-      torrent_id: row.torrent_id,
-      site_name: row.site_name,
-    }
-    const response = await axios.post('/api/cross-seed-data/delete', deleteData)
-
-    const result = response.data
-
-    if (result.success) {
-      ElMessage.success(result.message || `删除成功`)
-      // 重新获取数据，以更新表格
-      fetchData()
-    } else {
-      ElMessage.error(result.error || '删除失败')
-    }
-  } catch (error: unknown) {
-    if (error === 'cancel' || error === 'close') return
-    const message = axios.isAxiosError(error)
-      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
-        (error.response?.data as { error?: string } | undefined)?.error ||
-        error.message
-      : error instanceof Error
-        ? error.message
-        : '网络错误'
-    ElMessage.error(message)
-  }
-}
-
-// 处理窗口大小变化
 const handleResize = () => {
   tableMaxHeight.value = window.innerHeight - 80
 }
 
-onMounted(async () => {
-  // 加载UI设置
-  await loadUiSettings()
-  // 加载检查状态筛选配置
-  await loadReviewStatusFilter()
-  uiInitializing.value = false
-  // 获取数据
-  fetchData()
-  window.addEventListener('resize', handleResize)
-})
-
-// 加载检查状态筛选配置
-const loadReviewStatusFilter = async () => {
-  try {
-    const response = await axios.get('/api/config/cross_seed_review_filter')
-    const result = response.data
-    if (result.success) {
-      reviewStatusFilter.value = result.data || ''
-    }
-  } catch (e) {
-    console.error('加载检查状态筛选配置失败:', e)
-  }
-}
-
-// 为表格行设置CSS类名
 const tableRowClassName = ({ row }: { row: SeedParameter }) => {
-  // 红色背景：已删除或有无法识别的内容
   if (row.is_deleted || row.unrecognized) {
     return 'deleted-row'
   }
-  // 如果未检查，添加unreviewed-row类（蓝色背景）
-  if (!row.is_reviewed) {
-    return 'unreviewed-row'
-  }
-  // 如果行不可选择，添加selected-row-disabled类
   if (!checkSelectable(row)) {
     return 'selected-row-disabled'
   }
   return ''
 }
 
-const normalizeTagList = (tags: string[] | string): string[] => {
-  if (typeof tags === 'string') {
-    try {
-      return JSON.parse(tags)
-    } catch {
-      return tags
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter((tag) => tag)
-    }
-  }
-  if (Array.isArray(tags)) {
-    return tags
-  }
-  return []
-}
-
-// 检查标签中是否包含禁转标签
-const hasRestrictedTag = (tags: string[] | string): boolean => {
-  const tagList = normalizeTagList(tags)
-
-  // 检查是否包含"禁转"或"tag.禁转"
-  return tagList.some(
-    (tag) =>
-      tag === '禁转' ||
-      tag === 'tag.禁转' ||
-      tag === '限转' ||
-      tag === 'tag.限转' ||
-      tag === '分集' ||
-      tag === 'tag.分集',
-  )
-}
-
-const getRestrictionText = (row: SeedParameter) => {
-  const labels: string[] = []
-
-  if (row.is_deleted) {
-    labels.push('已删除做种文件')
-  }
-
-  return labels.join('\n')
-}
-
-// 控制表格行是否可选择
 const checkSelectable = (row: SeedParameter) => {
-  // 在删除模式下，所有行都可以被选择
-  if (isDeleteMode.value) {
-    return true
+  if (row.is_deleted) {
+    return false
   }
-
-  // 如果已删除筛选处于活动状态，则允许选择已删除的行 - 便于批量操作
-  if (activeFilters.value.isDeleted === '1') {
-    // 但仍需检查是否有无效参数
-    return !hasInvalidParams(row)
-  } else {
-    // 在正常模式下，已删除的行不可选择；有无效参数的行也不可选择
-    if (row.is_deleted) {
-      return false
-    }
-    // 如果有无效参数，则不可选择
-    if (hasInvalidParams(row)) {
-      return false
-    }
-    // 如果未检查（is_reviewed 为 false 或 0），则不可选择
-    if (!row.is_reviewed) {
-      return false
-    }
-    return true
+  if (!row.is_reviewed) {
+    return false
   }
+  if (hasInvalidParams(row)) {
+    return false
+  }
+  if (hasRestrictedTag(row.tags)) {
+    return false
+  }
+  return true
 }
 
-// 处理表格选中行变化
 const handleSelectionChange = (selection: SeedParameter[]) => {
   selectedRows.value = selection
+}
 
-  // 在删除模式下，根据选择状态更新按钮文字
-  if (isDeleteMode.value) {
-    // 这里会通过计算属性自动更新按钮文字
+const buildBatchCrossSeedPayload = (rows: SeedParameter[], targetSiteName: string) => ({
+  target_site_name: targetSiteName,
+  seeds: rows.map((row) => ({
+    hash: row.hash,
+    torrent_id: row.torrent_id,
+    site_name: row.site_name,
+    nickname: row.nickname,
+    downloader_id: row.downloader_id || '',
+  })),
+})
+
+const routeToPublishLogs = async (
+  publishTrigger: string,
+  targetSiteName: string,
+  queueGroupId?: string,
+) => {
+  await router.push({
+    path: '/publish-logs',
+    query: {
+      trigger: publishTrigger,
+      scene: 'multi_torrent',
+      status: 'queued',
+      target_site: targetSiteName,
+      ...(queueGroupId ? { queue_group_id: queueGroupId } : {}),
+    },
+  })
+}
+
+const enqueueCrossSeedRows = async (rows: SeedParameter[], targetSiteName: string) => {
+  const response = await axios.post('/api/migrate/publish_queue/enqueue_batch', {
+    ...buildBatchCrossSeedPayload(rows, targetSiteName),
+    publish_scene: 'multi_torrent',
+  })
+
+  const result = response.data
+  if (!result.success) {
+    throw new Error(result.message || result.error || '批量入队失败')
+  }
+
+  const publishTrigger = String(result?.publish_trigger || '').trim()
+  const groupID = String(result?.group_id || '').trim()
+  const queued = Number(result?.queued || 0)
+  const requested = Number(result?.requested || rows.length)
+
+  ElMessage.success(
+    `${result.message || `批量加入队列完成（${queued}/${requested}）`}${publishTrigger ? `（${publishTrigger}）` : ''}`,
+  )
+
+  await fetchData()
+
+  if (publishTrigger) {
+    await routeToPublishLogs(publishTrigger, targetSiteName, groupID || undefined)
   }
 }
 
-// 处理批量转种按钮点击
 const handleBatchCrossSeedButtonClick = () => {
   if (selectedRows.value.length === 0) {
     ElMessage.warning('请先选择要批量转种的条目')
@@ -1305,9 +1054,7 @@ const handleBatchCrossSeedButtonClick = () => {
   void handleBatchCrossSeed()
 }
 
-// 处理批量转种
 const handleBatchCrossSeed = async (targetSiteOverride?: string) => {
-  // 直接使用筛选中的站点
   const targetSiteName = (targetSiteOverride || activeFilters.value.excludeTargetSites).trim()
 
   if (!targetSiteName) {
@@ -1321,51 +1068,7 @@ const handleBatchCrossSeed = async (targetSiteOverride?: string) => {
   }
 
   try {
-    // 1. 构造要传递给后端的数据
-    const batchData = {
-      target_site_name: targetSiteName,
-      seeds: selectedRows.value.map((row) => ({
-        hash: row.hash,
-        torrent_id: row.torrent_id,
-        site_name: row.site_name,
-        nickname: row.nickname,
-        downloader_id: row.downloader_id || '',
-      })),
-    }
-
-    console.log('批量转种数据:', batchData)
-
-    // 2. 调用批量入队接口
-    const response = await axios.post('/api/migrate/publish_queue/enqueue_batch', {
-      ...batchData,
-      publish_scene: 'multi_torrent',
-    })
-
-    const result = response.data
-    if (result.success) {
-      const publishTrigger = String(result?.publish_trigger || '').trim()
-      const groupID = String(result?.group_id || '').trim()
-      const queued = Number(result?.queued || 0)
-      const requested = Number(result?.requested || selectedRows.value.length)
-      ElMessage.success(
-        `${result.message || `批量加入队列完成（${queued}/${requested}）`}${publishTrigger ? `（${publishTrigger}）` : ''}`,
-      )
-      await fetchData()
-      if (publishTrigger) {
-        await router.push({
-          path: '/publish-logs',
-          query: {
-            trigger: publishTrigger,
-            scene: 'multi_torrent',
-            status: 'queued',
-            target_site: targetSiteName,
-            ...(groupID ? { queue_group_id: groupID } : {}),
-          },
-        })
-      }
-    } else {
-      ElMessage.error(result.message || result.error || '批量入队失败')
-    }
+    await enqueueCrossSeedRows(selectedRows.value, targetSiteName)
   } catch (error: unknown) {
     const message = axios.isAxiosError(error)
       ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
@@ -1378,75 +1081,23 @@ const handleBatchCrossSeed = async (targetSiteOverride?: string) => {
   }
 }
 
-// 获取删除按钮文字
-const getDeleteButtonText = () => {
-  if (!isDeleteMode.value) {
-    return '批量删除模式'
+const handleSingleCrossSeed = async (row: SeedParameter) => {
+  const targetSiteName = activeFilters.value.excludeTargetSites.trim()
+
+  if (!targetSiteName) {
+    ElMessage.warning('请先在筛选中选择目标站点')
+    void openFilterDialog()
+    return
   }
 
-  if (selectedRows.value.length === 0) {
-    return '退出删除模式'
-  }
-
-  return `删除选中项 (${selectedRows.value.length})`
-}
-
-// 切换删除模式
-const toggleDeleteMode = async () => {
-  if (isDeleteMode.value) {
-    // 当前处于删除模式，退出删除模式
-    isDeleteMode.value = false
-    // 清空选中行
-    selectedRows.value = []
-  } else {
-    // 进入删除模式
-    isDeleteMode.value = true
-    // 清空之前的选择
-    selectedRows.value = []
-  }
-}
-
-// 执行批量删除
-const executeBatchDelete = async () => {
-  if (selectedRows.value.length === 0) {
-    ElMessage.warning('请先选择要删除的行')
+  if (!checkSelectable(row)) {
+    ElMessage.warning('当前条目不可转种，请检查删除状态、检查状态或参数映射')
     return
   }
 
   try {
-    await ElMessageBox.confirm(
-      `确定要删除选中的 ${selectedRows.value.length} 条种子数据吗？此操作无法恢复！`,
-      '确认批量删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    )
-
-    const deleteData = {
-      items: selectedRows.value.map((row) => ({
-        torrent_id: row.torrent_id,
-        site_name: row.site_name,
-      })),
-    }
-
-    const response = await axios.post('/api/cross-seed-data/delete', deleteData)
-
-    const result = response.data
-
-    if (result.success) {
-      ElMessage.success(result.message || `成功删除 ${result.deleted_count} 条数据`)
-      // 清空选中行并退出删除模式
-      selectedRows.value = []
-      isDeleteMode.value = false
-      // 重新获取数据
-      fetchData()
-    } else {
-      ElMessage.error(result.error || '批量删除失败')
-    }
+    await enqueueCrossSeedRows([row], targetSiteName)
   } catch (error: unknown) {
-    if (error === 'cancel' || error === 'close') return
     const message = axios.isAxiosError(error)
       ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (error.response?.data as { error?: string } | undefined)?.error ||
@@ -1458,27 +1109,16 @@ const executeBatchDelete = async () => {
   }
 }
 
-// 打开批量获取数据对话框
-const openBatchFetchDialog = () => {
-  batchFetchDialogVisible.value = true
-}
+onMounted(() => {
+  emit('ready', fetchData)
+})
 
-// 关闭批量获取数据对话框
-const closeBatchFetchDialog = () => {
-  batchFetchDialogVisible.value = false
-}
-
-// 处理批量获取完成事件
-const handleFetchCompleted = () => {
-  ElMessage.success('批量获取种子数据已完成，正在刷新列表...')
-  // 刷新种子列表
-  fetchData()
-}
-
-// 打开记录查看对话框
-const openRecordViewDialog = () => {
-  recordDialogVisible.value = true
-}
+onMounted(async () => {
+  await loadUiSettings()
+  uiInitializing.value = false
+  void fetchData()
+  window.addEventListener('resize', handleResize)
+})
 
 onUnmounted(() => {
   if (searchDebounceTimer !== null) {
@@ -1489,19 +1129,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 2000;
-}
-
 .filter-overlay {
   position: fixed;
   top: 0;
@@ -1624,34 +1251,6 @@ onUnmounted(() => {
   justify-content: flex-end;
 }
 
-.cross-seed-card {
-  width: 90vw;
-  max-width: 1200px;
-  height: 90vh;
-  display: flex;
-  flex-direction: column;
-}
-
-:deep(.cross-seed-card .el-card__body) {
-  padding: 10px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.cross-seed-content {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
 .cross-seed-data-view {
   height: 100%;
   display: flex;
@@ -1753,11 +1352,6 @@ onUnmounted(() => {
   background-color: #fde2e2 !important;
 }
 
-/* 未检查行的样式（黄色背景） */
-:deep(.unreviewed-row) {
-  background-color: #aadbf3 !important;
-}
-
 .title-cell {
   display: flex;
   flex-direction: column;
@@ -1782,17 +1376,6 @@ onUnmounted(() => {
 
 .main-title-line {
   font-weight: 500;
-}
-
-.tags-cell {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 2px;
-  margin: -8px -12px;
-  padding: 8px 12px;
-  height: calc(100% + 16px);
-  align-items: center;
 }
 
 /* 不可选择行的复选框变红 */
@@ -1825,31 +1408,6 @@ onUnmounted(() => {
   gap: 6px;
   color: var(--el-color-danger);
   font-weight: 600;
-}
-
-/* 批量获取数据弹窗样式 */
-.batch-fetch-main-card {
-  width: 95vw;
-  max-width: 1400px;
-  height: 85vh;
-  max-height: 900px;
-  display: flex;
-  flex-direction: column;
-}
-
-:deep(.batch-fetch-main-card .el-card__body) {
-  padding: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.batch-fetch-main-content {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 @media (max-width: 768px) {
