@@ -220,6 +220,7 @@ export interface CrossSeedPanelContext {
 
   // Footer
   showCompleteButton: ComputedRef<boolean>
+  isCompleteButtonDisabled: ComputedRef<boolean>
   isLoading: Ref<boolean>
   isEnqueueing: Ref<boolean>
   isNextButtonDisabled: ComputedRef<boolean>

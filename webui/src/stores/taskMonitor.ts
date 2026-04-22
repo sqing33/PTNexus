@@ -37,8 +37,14 @@ type UpsertTaskInput = {
   }
 }
 
+type ClearedServerTaskState = {
+  updatedAt: number
+  status: TaskMonitorStatus
+}
+
 const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 const TASK_MONITOR_STORAGE_KEY = 'ptnexus.taskMonitor.v1'
+const TASK_MONITOR_CLEARED_STORAGE_KEY = 'ptnexus.taskMonitor.cleared.v1'
 
 const loadPersistedTasks = (): Record<string, TaskMonitorItem> => {
   if (typeof window === 'undefined') {
@@ -109,8 +115,58 @@ const persistTasks = (tasks: Record<string, TaskMonitorItem>) => {
   }
 }
 
+const loadClearedServerTasks = (): Record<string, ClearedServerTaskState> => {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+
+  try {
+    const raw = window.localStorage.getItem(TASK_MONITOR_CLEARED_STORAGE_KEY)
+    if (!raw) {
+      return {}
+    }
+
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') {
+      return {}
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([key, value]) => {
+        if (!value || typeof value !== 'object') {
+          return []
+        }
+        const task = value as Partial<ClearedServerTaskState>
+        if (typeof task.updatedAt !== 'number') {
+          return []
+        }
+        const status =
+          task.status === 'running' || task.status === 'success' || task.status === 'failed'
+            ? task.status
+            : 'success'
+        return [[key, { updatedAt: task.updatedAt, status } satisfies ClearedServerTaskState]]
+      }),
+    )
+  } catch {
+    return {}
+  }
+}
+
+const persistClearedServerTasks = (clearedTasks: Record<string, ClearedServerTaskState>) => {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(TASK_MONITOR_CLEARED_STORAGE_KEY, JSON.stringify(clearedTasks))
+  } catch {
+    // ignore storage failures to avoid blocking task updates
+  }
+}
+
 export const useTaskMonitorStore = defineStore('taskMonitor', () => {
   const tasks = ref<Record<string, TaskMonitorItem>>(loadPersistedTasks())
+  const clearedServerTasks = ref<Record<string, ClearedServerTaskState>>(loadClearedServerTasks())
 
   const taskList = computed(() =>
     Object.values(tasks.value).sort((a, b) => b.updatedAt - a.updatedAt),
@@ -192,7 +248,26 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
     persistTasks(tasks.value)
   }
 
+  const rememberClearedServerTask = (task: TaskMonitorItem) => {
+    if (task.source !== 'server') {
+      return
+    }
+    clearedServerTasks.value = {
+      ...clearedServerTasks.value,
+      [task.key]: {
+        updatedAt: task.updatedAt,
+        status: task.status,
+      },
+    }
+    persistClearedServerTasks(clearedServerTasks.value)
+  }
+
   const clearFinished = () => {
+    Object.values(tasks.value).forEach((task) => {
+      if (task.status !== 'running') {
+        rememberClearedServerTask(task)
+      }
+    })
     const nextTasks = Object.fromEntries(
       Object.entries(tasks.value).filter(([, task]) => task.status === 'running'),
     )
@@ -206,11 +281,12 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
     )
 
     const nextTasks: Record<string, TaskMonitorItem> = { ...preservedLocalTasks }
+    const nextClearedServerTasks: Record<string, ClearedServerTaskState> = {}
     for (const task of serverTasks) {
       const key = normalizeText(task.key)
       if (!key) continue
       const existing = tasks.value[key]
-      nextTasks[key] = {
+      const normalizedTask: TaskMonitorItem = {
         key,
         kind: normalizeText(task.kind) || existing?.kind || 'generic',
         rawId: task.rawId ?? existing?.rawId ?? null,
@@ -229,8 +305,25 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
         updatedAt: Date.now(),
         routeTarget: task.routeTarget ?? existing?.routeTarget,
       }
+      const clearedState = clearedServerTasks.value[key]
+      const shouldKeepCleared =
+        !!clearedState &&
+        normalizedTask.status !== 'running' &&
+        clearedState.status === normalizedTask.status &&
+        normalizedTask.message === (tasks.value[key]?.message || '') &&
+        normalizedTask.error === (tasks.value[key]?.error || '') &&
+        normalizedTask.progressText === (tasks.value[key]?.progressText || '')
+
+      if (shouldKeepCleared) {
+        nextClearedServerTasks[key] = clearedState
+        continue
+      }
+
+      nextTasks[key] = normalizedTask
     }
 
+    clearedServerTasks.value = nextClearedServerTasks
+    persistClearedServerTasks(clearedServerTasks.value)
     tasks.value = nextTasks
     persistTasks(tasks.value)
   }

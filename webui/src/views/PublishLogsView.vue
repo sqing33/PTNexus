@@ -639,7 +639,7 @@ const readQuery = (key: string) => {
   return String(raw)
 }
 
-const applyRouteFilters = () => {
+const applyRouteFilters = (mode: 'merge' | 'replace' = 'merge') => {
   let changed = false
 
   const queryTrigger = readQuery('trigger').trim()
@@ -648,6 +648,43 @@ const applyRouteFilters = () => {
   const querySearch = readQuery('search').trim()
   const queryTargetSite = readQuery('target_site').trim()
   const queryQueueGroupID = readQuery('queue_group_id').trim()
+
+  const nextFilters = {
+    trigger: queryTrigger,
+    scene: queryScene,
+    status: queryStatus,
+    search: querySearch,
+    targetSite: queryTargetSite,
+    queueGroup: queryQueueGroupID,
+  }
+
+  if (mode === 'replace') {
+    if (triggerFilter.value !== nextFilters.trigger) {
+      triggerFilter.value = nextFilters.trigger
+      changed = true
+    }
+    if (sceneFilter.value !== nextFilters.scene) {
+      sceneFilter.value = nextFilters.scene
+      changed = true
+    }
+    if (statusFilter.value !== nextFilters.status) {
+      statusFilter.value = nextFilters.status
+      changed = true
+    }
+    if (searchQuery.value !== nextFilters.search) {
+      searchQuery.value = nextFilters.search
+      changed = true
+    }
+    if (targetSiteFilter.value !== nextFilters.targetSite) {
+      targetSiteFilter.value = nextFilters.targetSite
+      changed = true
+    }
+    if (queueGroupFilter.value !== nextFilters.queueGroup) {
+      queueGroupFilter.value = nextFilters.queueGroup
+      changed = true
+    }
+    return changed
+  }
 
   if (queryTrigger && triggerFilter.value !== queryTrigger) {
     triggerFilter.value = queryTrigger
@@ -713,7 +750,7 @@ onMounted(async () => {
   await loadUiSettings()
 
   let routeFiltersApplied = false
-  if (applyRouteFilters()) {
+  if (applyRouteFilters('replace')) {
     currentPage.value = 1
     routeFiltersApplied = true
   }
@@ -733,7 +770,7 @@ onBeforeUnmount(() => {
 watch(
   () => route.query,
   async () => {
-    if (applyRouteFilters()) {
+    if (applyRouteFilters('replace')) {
       currentPage.value = 1
       await fetchLogs()
       void saveUiSettings()

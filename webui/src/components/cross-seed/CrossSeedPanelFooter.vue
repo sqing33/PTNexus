@@ -13,7 +13,7 @@
         v-if="showCompleteButton"
         type="primary"
         @click="handleCompleteClick"
-        :disabled="isLoading || isNextButtonDisabled"
+        :disabled="isCompleteButtonDisabled"
       >
         修改完成
       </el-button>
@@ -45,7 +45,7 @@
         type="primary"
         @click="handleCompleteClick"
         v-if="showCompleteButton"
-        :disabled="isLoading || (isNextButtonDisabled && !isScrolledToBottom)"
+        :disabled="isCompleteButtonDisabled"
       >
         修改完成
       </el-button>
@@ -100,6 +100,7 @@ const {
   activeStep,
   maintenanceOnly,
   showCompleteButton,
+  isCompleteButtonDisabled,
   isLoading,
   isEnqueueing,
   selectedTargetSites,

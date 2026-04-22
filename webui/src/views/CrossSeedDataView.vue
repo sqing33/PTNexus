@@ -543,6 +543,14 @@ const currentFilterText = computed(() => {
   const filters = activeFilters.value
   const filterTexts = []
 
+  if (reviewStatusFilter.value === 'reviewed') {
+    filterTexts.push('已检查')
+  } else if (reviewStatusFilter.value === 'unreviewed') {
+    filterTexts.push('待检查')
+  } else if (reviewStatusFilter.value === 'error') {
+    filterTexts.push('错误')
+  }
+
   if (filters.paths.length > 0) {
     filterTexts.push(`路径: ${filters.paths.length}`)
   }
@@ -561,6 +569,7 @@ const currentFilterText = computed(() => {
 const hasActiveFilters = computed(() => {
   const filters = activeFilters.value
   return (
+    reviewStatusFilter.value !== '' ||
     filters.paths.length > 0 ||
     (isMaintenanceMode.value && filters.isDeleted !== '') ||
     (isCrossSeedMode.value && filters.excludeTargetSites.trim() !== '')
@@ -1013,13 +1022,19 @@ const handleCurrentChange = (val: number) => {
   void fetchData()
 }
 
-const clearFilters = () => {
+const clearFilters = async () => {
   activeFilters.value = {
     paths: [],
     isDeleted: '',
     excludeTargetSites: '',
   }
+  reviewStatusFilter.value = ''
   currentPage.value = 1
+  try {
+    await axios.post('/api/config/cross_seed_review_filter', { review_filter: '' })
+  } catch (e) {
+    console.error('保存检查状态筛选失败:', e)
+  }
   void fetchData()
   void saveUiSettings()
 }

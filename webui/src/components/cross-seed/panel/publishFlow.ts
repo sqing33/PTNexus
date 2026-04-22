@@ -89,6 +89,7 @@ export type PublishFlowApi = {
   getTagType: (tag: string) => 'danger' | 'info'
   handleTagClose: (tag: string) => void
   isNextButtonDisabled: ComputedRef<boolean>
+  isCompleteButtonDisabled: ComputedRef<boolean>
   nextButtonTooltipContent: ComputedRef<string>
   groupedResults: ComputedRef<PublishDisplayResult[][]>
   showSiteLog: (siteName: string, logs: string | undefined) => void
@@ -1402,7 +1403,18 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     return false
   })
 
-  // 计算属性：获取下一步按钮的提示文本
+  const isCompleteButtonDisabled = computed(() => {
+    if (isLoading.value) {
+      return true
+    }
+    if (publishScene === 'maintenance') {
+      return false
+    }
+    return activeStep.value === 1
+      ? isNextButtonDisabled.value && !isScrolledToBottom.value
+      : isNextButtonDisabled.value
+  })
+
   const nextButtonTooltipContent = computed(() => {
     // 1. 检查是否存在"无法识别"的内容
     const unrecognized = torrentData.value.title_components.find(
@@ -1903,6 +1915,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     getTagType,
     handleTagClose,
     isNextButtonDisabled,
+    isCompleteButtonDisabled,
     nextButtonTooltipContent,
     groupedResults,
     showSiteLog,
