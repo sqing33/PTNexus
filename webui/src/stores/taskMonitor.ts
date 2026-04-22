@@ -40,6 +40,9 @@ type UpsertTaskInput = {
 type ClearedServerTaskState = {
   updatedAt: number
   status: TaskMonitorStatus
+  message: string
+  error: string
+  progressText: string
 }
 
 const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
@@ -144,7 +147,18 @@ const loadClearedServerTasks = (): Record<string, ClearedServerTaskState> => {
           task.status === 'running' || task.status === 'success' || task.status === 'failed'
             ? task.status
             : 'success'
-        return [[key, { updatedAt: task.updatedAt, status } satisfies ClearedServerTaskState]]
+        return [
+          [
+            key,
+            {
+              updatedAt: task.updatedAt,
+              status,
+              message: normalizeText((task as Partial<ClearedServerTaskState>).message),
+              error: normalizeText((task as Partial<ClearedServerTaskState>).error),
+              progressText: normalizeText((task as Partial<ClearedServerTaskState>).progressText),
+            } satisfies ClearedServerTaskState,
+          ],
+        ]
       }),
     )
   } catch {
@@ -257,6 +271,9 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
       [task.key]: {
         updatedAt: task.updatedAt,
         status: task.status,
+        message: task.message,
+        error: task.error,
+        progressText: task.progressText,
       },
     }
     persistClearedServerTasks(clearedServerTasks.value)
@@ -310,9 +327,9 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
         !!clearedState &&
         normalizedTask.status !== 'running' &&
         clearedState.status === normalizedTask.status &&
-        normalizedTask.message === (tasks.value[key]?.message || '') &&
-        normalizedTask.error === (tasks.value[key]?.error || '') &&
-        normalizedTask.progressText === (tasks.value[key]?.progressText || '')
+        normalizedTask.message === clearedState.message &&
+        normalizedTask.error === clearedState.error &&
+        normalizedTask.progressText === clearedState.progressText
 
       if (shouldKeepCleared) {
         nextClearedServerTasks[key] = clearedState

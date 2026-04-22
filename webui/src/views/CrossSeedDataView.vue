@@ -850,7 +850,7 @@ const fetchData = async () => {
       path_filters: JSON.stringify(activeFilters.value.paths || []),
       is_deleted: isMaintenanceMode.value ? activeFilters.value.isDeleted : '',
       exclude_target_sites: isCrossSeedMode.value ? activeFilters.value.excludeTargetSites : '',
-      review_status: isMaintenanceMode.value ? reviewStatusFilter.value : '',
+      review_status: isMaintenanceMode.value || isCrossSeedMode.value ? reviewStatusFilter.value : '',
       include_unique_paths: '0',
     })
 
@@ -863,9 +863,8 @@ const fetchData = async () => {
 
     if (result.success) {
       const rawRows = Array.isArray(result.data) ? (result.data as SeedParameter[]) : []
-      const visibleRows = isCrossSeedMode.value ? filterCrossSeedableRows(rawRows) : rawRows
-      tableData.value = visibleRows
-      total.value = isCrossSeedMode.value ? visibleRows.length : Number(result.total || rawRows.length)
+      tableData.value = rawRows
+      total.value = Number(result.total || rawRows.length)
 
       if (result.reverse_mappings) {
         reverseMappings.value = result.reverse_mappings

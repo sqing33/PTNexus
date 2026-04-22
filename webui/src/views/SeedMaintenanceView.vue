@@ -156,7 +156,7 @@ const batchFetchDialogVisible = ref(false)
 const routeTorrentId = computed(() => String(route.query.torrent_id || '').trim())
 const routeSiteName = computed(() => String(route.query.site_name || '').trim())
 const rowId = computed(() => String(route.query.row_id || '').trim())
-const sourcePage = computed(() => String(route.query.from || '/data').trim() || '/data')
+const sourcePage = computed(() => String(route.query.from || '/seed-maintenance').trim() || '/seed-maintenance')
 const currentMaintenanceRow = ref<MaintenanceRow | null>(null)
 
 const ready = computed(() => !!crossSeedStore.taskId && !!prefetchedDbSeedInfo.value)
