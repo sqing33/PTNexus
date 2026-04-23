@@ -863,12 +863,8 @@ const fetchData = async () => {
 
     if (result.success) {
       const rawRows = Array.isArray(result.data) ? (result.data as SeedParameter[]) : []
-<<<<<<< HEAD
-      tableData.value = rawRows
-=======
       const visibleRows = rawRows
       tableData.value = visibleRows
->>>>>>> c2e5ec8 (release: ship v4.0.34 todolist fixes)
       total.value = Number(result.total || rawRows.length)
 
       if (result.reverse_mappings) {
