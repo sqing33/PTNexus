@@ -74,12 +74,6 @@ func buildBatchPublishTaskEntry(task publishworkflow.BatchTask) map[string]any {
 		"progress_text": fmt.Sprintf("%d/%d", task.Processed, task.Total),
 		"started_at":    strings.TrimSpace(task.CreatedAt),
 		"updated_at":    firstNonEmptyString(strings.TrimSpace(task.FinishedAt), strings.TrimSpace(task.CreatedAt)),
-		"route_target": map[string]any{
-			"path": "/publish-logs",
-			"query": map[string]any{
-				"scene": "multi_site",
-			},
-		},
 	}
 }
 
