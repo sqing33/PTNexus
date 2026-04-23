@@ -225,6 +225,7 @@ export interface CrossSeedPanelContext {
   isEnqueueing: Ref<boolean>
   isNextButtonDisabled: ComputedRef<boolean>
   nextButtonTooltipContent: ComputedRef<string>
+  completeButtonTooltipContent: ComputedRef<string>
   isScrolledToBottom: Ref<boolean>
   handleCancelClick: () => void
   goToPublishPreviewStep: () => Promise<void>

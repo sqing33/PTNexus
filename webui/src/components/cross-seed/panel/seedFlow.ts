@@ -196,7 +196,31 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
   const buildFetchRouteTarget = (_patch?: { taskId?: string; status?: string }) => undefined
 
-  const createFetchMonitorKey = (rawId: string) => `seed_fetch:${rawId}`
+  const createFetchMonitorKey = (siteName: string, torrentId: string) =>
+    `seed_fetch:${siteName}:${torrentId}`
+
+  const createRefetchMonitorKey = (siteName: string, torrentId: string) =>
+    `seed_refetch:${siteName}:${torrentId}`
+
+  const updateFetchTaskStage = (
+    key: string,
+    rawId: string | null | undefined,
+    patch: {
+      message: string
+      progressText: string
+      routeTarget?: { path: string; query?: Record<string, string> }
+    },
+  ) => {
+    taskMonitorStore.markRunning({
+      key,
+      kind: key.startsWith('seed_refetch:') ? 'seed_refetch' : 'seed_fetch',
+      rawId: rawId || undefined,
+      title: key.startsWith('seed_refetch:') ? '重新抓取源种子信息' : '抓取源种子信息',
+      message: patch.message,
+      progressText: patch.progressText,
+      routeTarget: patch.routeTarget,
+    })
+  }
 
   const getEnglishSiteName = async (chineseSiteName: string): Promise<string> => {
     // 优先从当前种子携带的站点信息中读取，避免重复请求 /api/sites/status。
@@ -289,6 +313,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       successNotification?: { title: string; message: string } | null
       checkBdinfoFromFetch: boolean
       screenshotPreviewRequired?: boolean
+      monitorKey?: string
+      monitorTitle?: string
+      monitorKind?: 'seed_fetch' | 'seed_refetch'
     },
   ) => {
     if (options.successNotification) {
@@ -308,6 +335,18 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
     const normalizedMedia = normalizeIntroBodyAndMediainfo(dbData.body || '', dbData.mediainfo || '')
     const compositeSeedId = `${dbData.hash || options.torrentId}_${options.torrentId}_${options.englishSiteName}`
+    const monitorRouteTarget =
+      options.monitorKey && options.taskIdValue
+        ? buildFetchRouteTarget({ taskId: options.taskIdValue, status: 'running' })
+        : undefined
+
+    if (options.monitorKey && options.monitorTitle) {
+      updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+        message: `${options.monitorTitle}：正在填充维护表单`,
+        progressText: '正在整理抓取结果并写入面板',
+        routeTarget: monitorRouteTarget,
+      })
+    }
 
     torrentData.value = {
       seed_id: compositeSeedId,
@@ -394,10 +433,31 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
     isDataFromDatabase.value = true
     activeStep.value = 0
+    if (options.monitorKey && options.monitorTitle) {
+      updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+        message: `${options.monitorTitle}：正在检查 BDInfo 与截图`,
+        progressText: options.checkBdinfoFromFetch ? '正在触发 BDInfo 检查' : '正在检查截图有效性',
+        routeTarget: monitorRouteTarget,
+      })
+    }
     checkAndStartBDInfoProgress(compositeSeedId, options.checkBdinfoFromFetch)
     await nextTick()
+    if (options.monitorKey && options.monitorTitle) {
+      updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+        message: `${options.monitorTitle}：正在校验截图有效性`,
+        progressText: '正在逐张检查截图链接',
+        routeTarget: monitorRouteTarget,
+      })
+    }
     await checkScreenshotValidity()
     if (options.screenshotPreviewRequired) {
+      if (options.monitorKey && options.monitorTitle) {
+        updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+          message: `${options.monitorTitle}：等待截图人工确认`,
+          progressText: '请在截图预览中确认或补充截图',
+          routeTarget: monitorRouteTarget,
+        })
+      }
       await openFetchedScreenshotPreview()
     }
   }
@@ -431,6 +491,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
   }
 
   const fetchAndReloadFromSource = async (options: {
+    monitorKey: string
+    monitorTitle: string
+    monitorKind: 'seed_fetch' | 'seed_refetch'
     torrentId: string
     englishSiteName: string
     taskIdValue?: string | null
@@ -447,6 +510,14 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       { timeout: 600000 },
     )
 
+    const backendTaskId = storeResponse.data.task_id || options.taskIdValue || null
+    updateFetchTaskStage(options.monitorKey, backendTaskId, {
+      message: `${options.monitorTitle}：源站抓取已返回，正在等待数据库回读`,
+      progressText:
+        (options.maxDbReadAttempts ?? 1) > 1 ? '正在轮询数据库回读结果' : '正在从数据库回读最新数据',
+      routeTarget: buildFetchRouteTarget({ taskId: backendTaskId || undefined, status: 'running' }),
+    })
+
     if (!storeResponse.data.success) {
       ElNotification.closeAll()
       setFetchFlowError(storeResponse.data.message || '从源站点抓取失败')
@@ -458,6 +529,14 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     let finalDbResponse: { data?: DbSeedInfoResponse } | null = null
 
     for (let attempt = 1; attempt <= maxDbReadAttempts; attempt++) {
+      updateFetchTaskStage(options.monitorKey, backendTaskId, {
+        message: `${options.monitorTitle}：正在等待数据库写入结果`,
+        progressText:
+          maxDbReadAttempts > 1
+            ? `数据库回读重试 ${attempt}/${maxDbReadAttempts}`
+            : '正在从数据库回读最新数据',
+        routeTarget: buildFetchRouteTarget({ taskId: backendTaskId || undefined, status: 'running' }),
+      })
       try {
         if (maxDbReadAttempts > 1) {
           console.log(
@@ -508,6 +587,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       checkBdinfoFromFetch: true,
       screenshotPreviewRequired:
         options.screenshotPreviewRequired ?? !!storeResponse.data.screenshot_preview_required,
+      monitorKey: options.monitorKey,
+      monitorTitle: options.monitorTitle,
+      monitorKind: options.monitorKind,
     })
 
     return true
@@ -556,13 +638,26 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     isLoading.value = true
     fetchFlowErrorMessage.value = ''
 
-    const refetchTaskId = `refetch_${torrentId}_${Date.now()}`
+    const refetchMonitorKey = createRefetchMonitorKey(sourceSite.value, torrentId)
+    const refetchTaskId = taskId.value || refetchMonitorKey
+    taskMonitorStore.markRunning({
+      key: refetchMonitorKey,
+      kind: 'seed_refetch',
+      rawId: refetchTaskId,
+      title: '重新抓取源种子信息',
+      message: `正在重新抓取 ${sourceSite.value} 种子信息`,
+      progressText: '正在准备日志流',
+      routeTarget: buildFetchRouteTarget({ taskId: refetchTaskId, status: 'running' }),
+    })
     logProgressTaskId.value = refetchTaskId
     showLogProgress.value = true
 
     try {
       const englishSiteName = await getEnglishSiteName(sourceSite.value)
       const reloaded = await fetchAndReloadFromSource({
+        monitorKey: refetchMonitorKey,
+        monitorTitle: '重新抓取源种子信息',
+        monitorKind: 'seed_refetch',
         torrentId,
         englishSiteName,
         taskIdValue: refetchTaskId,
@@ -575,7 +670,29 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       if (!reloaded) {
         return
       }
+      taskMonitorStore.markSuccess(refetchMonitorKey, {
+        kind: 'seed_refetch',
+        rawId: refetchTaskId,
+        title: '重新抓取源种子信息',
+        message: '已重新从源站拉取并覆盖当前面板数据',
+        progressText: '可继续核对并修改完成',
+        routeTarget: buildFetchRouteTarget({ taskId: refetchTaskId, status: 'success' }),
+      })
     } catch (error: unknown) {
+      taskMonitorStore.markFailed(refetchMonitorKey, {
+        kind: 'seed_refetch',
+        rawId: refetchTaskId,
+        title: '重新抓取源种子信息',
+        message: '重新抓取源种子信息失败',
+        progressText: `来源站点 ${sourceSite.value}`,
+        error:
+          axios.isAxiosError(error)
+            ? ((error.response?.data as { message?: string } | undefined)?.message || error.message)
+            : error instanceof Error
+              ? error.message
+              : '重新从源站拉取时发生错误，请查看后台日志。',
+        routeTarget: buildFetchRouteTarget({ taskId: refetchTaskId, status: 'failed' }),
+      })
       ElNotification.closeAll()
       handleApiError(error, '重新从源站拉取时发生错误，请查看后台日志。')
     } finally {
@@ -618,10 +735,10 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       })
     }
 
-    const tempTaskId = `fetch_${torrentId}_${Date.now()}`
+    const fetchMonitorKey = createFetchMonitorKey(sourceSite.value, torrentId)
+    const tempTaskId = taskId.value || fetchMonitorKey
     const initialTaskId = taskId.value || tempTaskId
     let activeFetchTaskId = initialTaskId
-    const fetchMonitorKey = createFetchMonitorKey(activeFetchTaskId)
     const baseRouteTarget = buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'running' })
     taskMonitorStore.markRunning({
       key: fetchMonitorKey,
@@ -695,6 +812,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         // 直接调用 fetch_and_store，传入相同的 task_id
         try {
           const reloaded = await fetchAndReloadFromSource({
+            monitorKey: fetchMonitorKey,
+            monitorTitle: '抓取源种子信息',
+            monitorKind: 'seed_fetch',
             torrentId,
             englishSiteName,
             taskIdValue: continuedTaskId,
@@ -867,6 +987,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       }
 
       const reloaded = await fetchAndReloadFromSource({
+        monitorKey: fetchMonitorKey,
+        monitorTitle: '抓取源种子信息',
+        monitorKind: 'seed_fetch',
         torrentId,
         englishSiteName,
         successNotification: {

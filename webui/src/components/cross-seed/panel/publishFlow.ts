@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
+import { computed, ref, watch, onBeforeUnmount, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
 import axios from 'axios'
 import { ElNotification } from '@/utils/uiNotify'
 import { openSSE, type EventSourceLike } from '@/desktop/sse'
@@ -91,6 +91,7 @@ export type PublishFlowApi = {
   isNextButtonDisabled: ComputedRef<boolean>
   isCompleteButtonDisabled: ComputedRef<boolean>
   nextButtonTooltipContent: ComputedRef<string>
+  completeButtonTooltipContent: ComputedRef<string>
   groupedResults: ComputedRef<PublishDisplayResult[][]>
   showSiteLog: (siteName: string, logs: string | undefined) => void
   filterUploadedParam: (url: string) => string
@@ -135,6 +136,35 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
   } = deps
 
   const taskMonitorStore = useTaskMonitorStore()
+  const blockingToastHandler = ref<{ close: () => void } | null>(null)
+  const blockingTaskKinds = new Set(['seed_fetch', 'seed_refetch'])
+
+  const blockingTask = computed(() =>
+    taskMonitorStore.taskList.find(
+      (task) => task.status === 'running' && blockingTaskKinds.has(task.kind),
+    ) || null,
+  )
+
+  const blockingTaskMessage = computed(() => {
+    const task = blockingTask.value
+    if (!task) return ''
+    const progress = task.progressText?.trim()
+    const message = task.message?.trim()
+    if (progress && message && progress !== message) {
+      return `${message}：${progress}`
+    }
+    return progress || message || '后台任务仍在处理中'
+  })
+
+  const blockingTaskToastMessage = computed(() => {
+    const task = blockingTask.value
+    if (!task) return ''
+    const lines = [blockingTaskMessage.value]
+    if (task.routeTarget?.path) {
+      lines.push('可前往任务中心或日志页查看详细进度。')
+    }
+    return lines.filter(Boolean).join('\n')
+  })
 
   const stopPublishBatchSSE = () => {
     if (publishBatchEventSource.value) {
@@ -1407,12 +1437,25 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     if (isLoading.value) {
       return true
     }
+    if (blockingTask.value) {
+      return true
+    }
     if (publishScene === 'maintenance') {
       return false
     }
     return activeStep.value === 1
       ? isNextButtonDisabled.value && !isScrolledToBottom.value
       : isNextButtonDisabled.value
+  })
+
+  const completeButtonTooltipContent = computed(() => {
+    if (blockingTask.value) {
+      return blockingTaskMessage.value
+    }
+    if (isLoading.value) {
+      return '正在处理中，请稍候'
+    }
+    return nextButtonTooltipContent.value
   })
 
   const nextButtonTooltipContent = computed(() => {
@@ -1815,6 +1858,30 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     return grouped
   })
 
+  watch(
+    blockingTaskToastMessage,
+    (message) => {
+      blockingToastHandler.value?.close()
+      blockingToastHandler.value = null
+      if (!message) {
+        return
+      }
+      blockingToastHandler.value = ElNotification({
+        title: '修改完成暂不可用',
+        message,
+        type: 'info',
+        duration: 0,
+        showClose: true,
+      })
+    },
+    { immediate: true },
+  )
+
+  onBeforeUnmount(() => {
+    blockingToastHandler.value?.close()
+    blockingToastHandler.value = null
+  })
+
   const isResultWithUrl = (
     result: PublishDisplayResult,
   ): result is PublishDisplayResult & { url: string } =>
@@ -1917,6 +1984,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     isNextButtonDisabled,
     isCompleteButtonDisabled,
     nextButtonTooltipContent,
+    completeButtonTooltipContent,
     groupedResults,
     showSiteLog,
     filterUploadedParam,

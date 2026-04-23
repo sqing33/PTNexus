@@ -9,6 +9,15 @@
       </transition>
       <el-button @click="handleCancelClick">取消</el-button>
 
+      <transition name="el-fade-in-linear">
+        <div v-if="showCompleteButton && isCompleteButtonDisabled" class="validation-hint">
+          <el-icon class="hint-icon">
+            <Warning />
+          </el-icon>
+          <span>{{ completeButtonTooltipContent }}</span>
+        </div>
+      </transition>
+
       <el-button
         v-if="showCompleteButton"
         type="primary"
@@ -40,6 +49,15 @@
     <!-- 步骤 1 的按钮 -->
     <div v-if="!maintenanceOnly && activeStep === 1" class="button-group">
       <el-button @click="handlePreviousStep" :disabled="isLoading">上一步</el-button>
+
+      <transition name="el-fade-in-linear">
+        <div v-if="showCompleteButton && isCompleteButtonDisabled" class="validation-hint">
+          <el-icon class="hint-icon">
+            <Warning />
+          </el-icon>
+          <span>{{ completeButtonTooltipContent }}</span>
+        </div>
+      </transition>
 
       <el-button
         type="primary"
@@ -106,6 +124,7 @@ const {
   selectedTargetSites,
   isNextButtonDisabled,
   nextButtonTooltipContent,
+  completeButtonTooltipContent,
   isScrolledToBottom,
   handleCancelClick,
   goToPublishPreviewStep,
