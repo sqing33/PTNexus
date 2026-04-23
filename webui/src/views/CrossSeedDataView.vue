@@ -850,7 +850,7 @@ const fetchData = async () => {
       path_filters: JSON.stringify(activeFilters.value.paths || []),
       is_deleted: isMaintenanceMode.value ? activeFilters.value.isDeleted : '',
       exclude_target_sites: isCrossSeedMode.value ? activeFilters.value.excludeTargetSites : '',
-      review_status: isMaintenanceMode.value || isCrossSeedMode.value ? reviewStatusFilter.value : '',
+      review_status: isCrossSeedMode.value ? 'reviewed' : isMaintenanceMode.value ? reviewStatusFilter.value : '',
       include_unique_paths: '0',
     })
 
@@ -863,7 +863,12 @@ const fetchData = async () => {
 
     if (result.success) {
       const rawRows = Array.isArray(result.data) ? (result.data as SeedParameter[]) : []
+<<<<<<< HEAD
       tableData.value = rawRows
+=======
+      const visibleRows = rawRows
+      tableData.value = visibleRows
+>>>>>>> c2e5ec8 (release: ship v4.0.34 todolist fixes)
       total.value = Number(result.total || rawRows.length)
 
       if (result.reverse_mappings) {

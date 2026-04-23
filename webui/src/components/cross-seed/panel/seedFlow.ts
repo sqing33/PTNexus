@@ -194,16 +194,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
   const taskMonitorStore = useTaskMonitorStore()
 
-  const buildFetchRouteTarget = (patch: { taskId?: string; status?: string } = {}) => ({
-    path: '/publish-logs',
-    query: Object.fromEntries(
-      Object.entries({
-        scene: 'multi_torrent',
-        ...(patch.status ? { status: patch.status } : {}),
-        ...(patch.taskId ? { search: patch.taskId } : {}),
-      }).filter(([, value]) => typeof value === 'string' && value.trim()),
-    ) as Record<string, string>,
-  })
+  const buildFetchRouteTarget = (_patch?: { taskId?: string; status?: string }) => undefined
 
   const createFetchMonitorKey = (rawId: string) => `seed_fetch:${rawId}`
 
@@ -618,6 +609,14 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
     isLoading.value = true
 
+    if (prefetchedDbSeedInfo) {
+      ElNotification.info({
+        title: '正在准备维护表单',
+        message: '正在读取缓存并填充维护表单，完成后即可点击修改完成。',
+        duration: 2500,
+      })
+    }
+
     const tempTaskId = `fetch_${torrentId}_${Date.now()}`
     const initialTaskId = taskId.value || tempTaskId
     let activeFetchTaskId = initialTaskId
@@ -661,6 +660,18 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
             timeout: 600000, // 10分钟超时
           })
 
+      if (prefetchedDbSeedInfo) {
+        taskMonitorStore.markRunning({
+          key: fetchMonitorKey,
+          kind: 'seed_fetch',
+          rawId: activeFetchTaskId,
+          title: '抓取源种子信息',
+          message: '正在填充维护表单',
+          progressText: '即将完成，可直接修改并保存',
+          routeTarget: undefined,
+        })
+      }
+
       if (dbResponse.data.task_id) {
         activeFetchTaskId = dbResponse.data.task_id
         taskMonitorStore.markRunning({
@@ -668,8 +679,8 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           kind: 'seed_fetch',
           rawId: activeFetchTaskId,
           title: '抓取源种子信息',
-          message: prefetchedDbSeedInfo ? '正在加载缓存种子信息' : `正在处理 ${sourceSite.value} 种子信息`,
-          progressText: dbResponse.status === 202 ? '正在等待源站抓取完成' : '正在读取数据库缓存',
+          message: prefetchedDbSeedInfo ? '正在整理缓存种子信息' : `正在处理 ${sourceSite.value} 种子信息`,
+          progressText: dbResponse.status === 202 ? '正在等待源站抓取完成' : '正在校验并填充维护表单',
           routeTarget: buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'running' }),
         })
       }
@@ -753,8 +764,8 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           kind: 'seed_fetch',
           rawId: taskId.value || activeFetchTaskId,
           title: '抓取源种子信息',
-          message: prefetchedDbSeedInfo ? '缓存种子信息已加载' : '数据库缓存读取完成',
-          progressText: '可继续核对并发布',
+          message: prefetchedDbSeedInfo ? '维护数据已加载完成' : '数据库缓存读取完成',
+          progressText: '可继续核对并修改完成',
           routeTarget: buildFetchRouteTarget({
             taskId: taskId.value || activeFetchTaskId,
             status: 'success',

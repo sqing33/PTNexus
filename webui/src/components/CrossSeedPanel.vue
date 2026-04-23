@@ -683,11 +683,8 @@ const rebindDetailsTabsDrag = debounce(() => {
 // 在组件挂载时添加监听器
 onMounted(() => {
   void fetchCrossSeedSettings()
-  void (async () => {
-    // 先获取站点状态，避免 fetchTorrentInfo 内部再次触发 /api/sites/status
-    await fetchSitesStatus()
-    await fetchTorrentInfo(props.prefetchedDbSeedInfo || undefined)
-  })()
+  void fetchSitesStatus()
+  void fetchTorrentInfo(props.prefetchedDbSeedInfo || undefined)
 
   // 在下一个tick添加滚动监听器，确保DOM已经渲染
   nextTick(() => {
@@ -807,16 +804,9 @@ const formatFileSize = (bytes: number) => {
   return `${size.toFixed(2)} ${units[unitIndex]}`
 }
 
-const buildBdinfoRouteTarget = (patch: { taskId?: string; status?: string } = {}) => ({
-  path: '/publish-logs',
-  query: Object.fromEntries(
-    Object.entries({
-      scene: props.publishScene || 'multi_torrent',
-      ...(patch.status ? { status: patch.status } : {}),
-      ...(patch.taskId ? { search: patch.taskId } : {}),
-    }).filter(([, value]) => typeof value === 'string' && value.trim()),
-  ) as Record<string, string>,
-})
+const buildBdinfoRouteTarget = (_patch?: { taskId?: string; status?: string }) => undefined
+
+const hasUsableMediainfo = () => String(torrentData.value.mediainfo || '').trim().length > 0
 
 const createBdinfoMonitorKey = (seedId: string, rawId?: string | null) =>
   `bdinfo:${seedId}:${rawId || 'pending'}`
@@ -1912,6 +1902,10 @@ const checkAndStartBDInfoProgress = async (seedId: string, isFromFetch: boolean 
       if (data && !data.error) {
         // 修复：从正确的字段获取状态
         const status = data.mediainfo_status || data.task_status?.status
+        const hasCompletedMedia =
+          hasUsableMediainfo() ||
+          String(data.mediainfo || '').trim().length > 0 ||
+          String(data.task_status?.mediainfo || '').trim().length > 0
 
         if (status === 'processing_bdinfo') {
           const taskId = String(data.bdinfo_task_id || '').trim()
@@ -1963,6 +1957,15 @@ const checkAndStartBDInfoProgress = async (seedId: string, isFromFetch: boolean 
           })
           clearBdinfoMonitorRuntime()
           return
+        } else if (hasCompletedMedia) {
+          console.log('已检测到可用 MediaInfo，跳过 BDInfo 状态失败提示')
+          markBdinfoSuccess(seedId, {
+            rawId: bdinfoTaskId.value || seedId,
+            message: 'MediaInfo 已可用',
+            progressText: '无需继续等待后台状态',
+          })
+          clearBdinfoMonitorRuntime()
+          return
         } else {
           console.log(`BDInfo 任务状态: ${status}，尝试 ${attempt}/${maxRetries}`)
         }
@@ -1998,6 +2001,17 @@ const checkAndStartBDInfoProgress = async (seedId: string, isFromFetch: boolean 
   }
 
   // 所有重试都失败了
+  if (hasUsableMediainfo()) {
+    console.log('轮询结束时已存在可用 MediaInfo，跳过 BDInfo 失败标记')
+    markBdinfoSuccess(seedId, {
+      rawId: bdinfoTaskId.value || seedId,
+      message: 'MediaInfo 已可用',
+      progressText: '无需继续等待后台状态',
+    })
+    clearBdinfoMonitorRuntime()
+    return
+  }
+
   console.warn(`经过 ${maxRetries} 次尝试，未能检测到 BDInfo 任务`)
   markBdinfoFailed(seedId, {
     rawId: bdinfoTaskId.value || seedId,
