@@ -612,8 +612,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     if (prefetchedDbSeedInfo) {
       ElNotification.info({
         title: '正在准备维护表单',
-        message: '正在读取缓存并填充维护表单，完成后即可点击修改完成。',
-        duration: 2500,
+        message: '缓存已命中，正在整理字段并检查截图有效性；检查完成前“修改完成”按钮会暂时禁用。',
+        duration: 0,
+        showClose: true,
       })
     }
 
@@ -666,8 +667,8 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           kind: 'seed_fetch',
           rawId: activeFetchTaskId,
           title: '抓取源种子信息',
-          message: '正在填充维护表单',
-          progressText: '即将完成，可直接修改并保存',
+          message: '正在填充维护表单并检查截图有效性',
+          progressText: '缓存已命中，正在执行截图校验',
           routeTarget: undefined,
         })
       }
@@ -754,7 +755,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         if (dbResponse.data.task_id) {
           ElNotification.success({
             title: '缓存准备完成',
-            message: '发布任务已准备就绪',
+            message: '维护表单已就绪，可继续修改并保存',
           })
         } else {
           console.warn('后端未返回taskId，使用标识符')

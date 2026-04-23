@@ -207,7 +207,9 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
       progressText: normalizeText(input.progressText) || '',
       startedAt: existing?.startedAt ?? now,
       updatedAt: now,
-      routeTarget: input.routeTarget ?? existing?.routeTarget,
+      routeTarget: Object.prototype.hasOwnProperty.call(input, 'routeTarget')
+        ? input.routeTarget
+        : existing?.routeTarget,
     }
     persistTasks(tasks.value)
   }
@@ -227,7 +229,10 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
       kind: patch.kind ?? existing?.kind ?? 'generic',
       title: patch.title ?? existing?.title ?? '后台任务',
       rawId: patch.rawId ?? existing?.rawId,
-      routeTarget: patch.routeTarget ?? existing?.routeTarget,
+      routeTarget:
+        Object.prototype.hasOwnProperty.call(patch, 'routeTarget') || !existing
+          ? patch.routeTarget
+          : existing?.routeTarget,
       message: patch.message ?? existing?.message ?? '',
       progressText: patch.progressText ?? existing?.progressText ?? '',
       error: '',
@@ -246,7 +251,10 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
       kind: patch.kind ?? existing?.kind ?? 'generic',
       title: patch.title ?? existing?.title ?? '后台任务',
       rawId: patch.rawId ?? existing?.rawId,
-      routeTarget: patch.routeTarget ?? existing?.routeTarget,
+      routeTarget:
+        Object.prototype.hasOwnProperty.call(patch, 'routeTarget') || !existing
+          ? patch.routeTarget
+          : existing?.routeTarget,
       message: patch.message ?? existing?.message ?? '',
       progressText: patch.progressText ?? existing?.progressText ?? '',
       error: patch.error ?? existing?.error ?? patch.message ?? '',
@@ -320,7 +328,9 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
               ? Date.now()
               : Date.now(),
         updatedAt: Date.now(),
-        routeTarget: task.routeTarget ?? existing?.routeTarget,
+        routeTarget: Object.prototype.hasOwnProperty.call(task, 'routeTarget')
+          ? task.routeTarget
+          : existing?.routeTarget,
       }
       const clearedState = clearedServerTasks.value[key]
       const shouldKeepCleared =
