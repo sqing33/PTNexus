@@ -122,6 +122,16 @@ type DbSeedInfoResponse = {
   data?: DbSeedRecord
 }
 
+type ScreenshotValidationResult = {
+  allValid: boolean
+  checkedCount: number
+  totalCount: number
+  failedIndex?: number
+  failedUrl?: string
+  failureReason?: 'timeout' | 'load_error'
+  detailMessage?: string
+}
+
 export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
   const {
     sourceSite,
@@ -162,29 +172,119 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     return 'none'
   }
 
-  const checkScreenshotValidity = async () => {
+  const screenshotValidateTimeoutMs = 15000
+
+  const formatScreenshotUrlForMessage = (url: string) => {
+    const normalized = String(url || '').trim()
+    if (!normalized) return '空链接'
+
+    try {
+      const parsed = new URL(normalized)
+      const compactPath = `${parsed.hostname}${parsed.pathname}`.replace(/\/{2,}/g, '/')
+      return compactPath.length > 96 ? `${compactPath.slice(0, 96)}...` : compactPath
+    } catch {
+      return normalized.length > 96 ? `${normalized.slice(0, 96)}...` : normalized
+    }
+  }
+
+  const buildScreenshotValidationMessage = (
+    failedIndex: number,
+    totalCount: number,
+    failedUrl: string,
+    failureReason: 'timeout' | 'load_error',
+  ) => {
+    const reasonText =
+      failureReason === 'timeout'
+        ? `加载超过 ${Math.round(screenshotValidateTimeoutMs / 1000)} 秒`
+        : '图片加载失败'
+    return `第 ${failedIndex}/${totalCount} 张截图校验失败：${reasonText}（${formatScreenshotUrlForMessage(
+      failedUrl,
+    )}）`
+  }
+
+  const validateSingleScreenshot = async (
+    url: string,
+    index: number,
+    totalCount: number,
+  ): Promise<ScreenshotValidationResult> =>
+    await new Promise((resolve) => {
+      const img = new Image()
+      let settled = false
+
+      const finalize = (result: ScreenshotValidationResult) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        img.onload = null
+        img.onerror = null
+        resolve(result)
+      }
+
+      const timer = setTimeout(() => {
+        finalize({
+          allValid: false,
+          checkedCount: index - 1,
+          totalCount,
+          failedIndex: index,
+          failedUrl: url,
+          failureReason: 'timeout',
+          detailMessage: buildScreenshotValidationMessage(index, totalCount, url, 'timeout'),
+        })
+      }, screenshotValidateTimeoutMs)
+
+      img.onload = () => {
+        finalize({
+          allValid: true,
+          checkedCount: index,
+          totalCount,
+        })
+      }
+
+      img.onerror = () => {
+        finalize({
+          allValid: false,
+          checkedCount: index - 1,
+          totalCount,
+          failedIndex: index,
+          failedUrl: url,
+          failureReason: 'load_error',
+          detailMessage: buildScreenshotValidationMessage(index, totalCount, url, 'load_error'),
+        })
+      }
+
+      img.src = url
+    })
+
+  const checkScreenshotValidity = async (
+    onProgress?: (payload: { index: number; totalCount: number; url: string }) => void,
+  ): Promise<ScreenshotValidationResult> => {
     const screenshots = screenshotImages.value
     if (screenshots.length === 0) {
       screenshotValid.value = true
-      return
-    }
-
-    let allValid = true
-    for (const url of screenshots) {
-      try {
-        await new Promise((resolve, reject) => {
-          const img = new Image()
-          img.onload = () => resolve(true)
-          img.onerror = () => reject(new Error('Image load failed'))
-          img.src = url
-        })
-      } catch {
-        allValid = false
-        break
+      return {
+        allValid: true,
+        checkedCount: 0,
+        totalCount: 0,
       }
     }
 
-    screenshotValid.value = allValid
+    const totalCount = screenshots.length
+    for (const [index, url] of screenshots.entries()) {
+      const currentIndex = index + 1
+      onProgress?.({ index: currentIndex, totalCount, url })
+      const validationResult = await validateSingleScreenshot(url, currentIndex, totalCount)
+      if (!validationResult.allValid) {
+        screenshotValid.value = false
+        return validationResult
+      }
+    }
+
+    screenshotValid.value = true
+    return {
+      allValid: true,
+      checkedCount: totalCount,
+      totalCount,
+    }
   }
 
   const setFetchFlowError = (message: string) => {
@@ -317,7 +417,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       monitorTitle?: string
       monitorKind?: 'seed_fetch' | 'seed_refetch'
     },
-  ) => {
+  ): Promise<ScreenshotValidationResult> => {
     if (options.successNotification) {
       ElNotification.closeAll()
       ElNotification.success(options.successNotification)
@@ -449,7 +549,31 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         routeTarget: monitorRouteTarget,
       })
     }
-    await checkScreenshotValidity()
+    const screenshotValidationResult = await checkScreenshotValidity(({ index, totalCount, url }) => {
+      if (!options.monitorKey || !options.monitorTitle) return
+      updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+        message: `${options.monitorTitle}：正在校验截图有效性`,
+        progressText: `正在校验第 ${index}/${totalCount} 张截图（${formatScreenshotUrlForMessage(url)}）`,
+        routeTarget: monitorRouteTarget,
+      })
+    })
+    if (!screenshotValidationResult.allValid) {
+      const validationMessage =
+        screenshotValidationResult.detailMessage || '截图校验失败，请手动修复或重新获取截图。'
+      if (options.monitorKey && options.monitorTitle) {
+        updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+          message: `${options.monitorTitle}：截图校验异常`,
+          progressText: validationMessage,
+          routeTarget: monitorRouteTarget,
+        })
+      }
+      ElNotification.warning({
+        title: '截图校验异常',
+        message: `${validationMessage}。维护表单已继续加载，请手动修复或重新获取截图。`,
+        duration: 0,
+        showClose: true,
+      })
+    }
     if (options.screenshotPreviewRequired) {
       if (options.monitorKey && options.monitorTitle) {
         updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
@@ -460,6 +584,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       }
       await openFetchedScreenshotPreview()
     }
+    return screenshotValidationResult
   }
 
   const buildFetchStorePayload = (
@@ -861,7 +986,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           console.warn('后端未返回反向映射表，将使用空的默认映射')
         }
 
-        await applyDbSeedData(dbResponse.data.data, {
+        const screenshotValidationResult = await applyDbSeedData(dbResponse.data.data, {
           torrentId,
           englishSiteName,
           taskIdValue: dbResponse.data.task_id || `db_${torrentId}_${englishSiteName}`,
@@ -885,8 +1010,14 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           kind: 'seed_fetch',
           rawId: taskId.value || activeFetchTaskId,
           title: '抓取源种子信息',
-          message: prefetchedDbSeedInfo ? '维护数据已加载完成' : '数据库缓存读取完成',
-          progressText: '可继续核对并修改完成',
+          message: prefetchedDbSeedInfo
+            ? screenshotValidationResult.allValid
+              ? '维护数据已加载完成'
+              : '维护数据已加载，截图需人工检查'
+            : '数据库缓存读取完成',
+          progressText: screenshotValidationResult.allValid
+            ? '可继续核对并修改完成'
+            : screenshotValidationResult.detailMessage || '截图校验异常，请手动修复或重新获取',
           routeTarget: buildFetchRouteTarget({
             taskId: taskId.value || activeFetchTaskId,
             status: 'success',
