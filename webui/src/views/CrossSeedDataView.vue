@@ -1126,18 +1126,10 @@ const buildBatchCrossSeedPayload = (rows: SeedParameter[], targetSiteName: strin
   })),
 })
 
-const routeToPublishLogs = async (
-  publishTrigger: string,
-  targetSiteName: string,
-  queueGroupId?: string,
-) => {
+const routeToPublishLogs = async (queueGroupId?: string) => {
   await router.push({
     path: '/publish-logs',
     query: {
-      trigger: publishTrigger,
-      scene: 'multi_torrent',
-      status: 'queued',
-      target_site: targetSiteName,
       ...(queueGroupId ? { queue_group_id: queueGroupId } : {}),
     },
   })
@@ -1166,7 +1158,7 @@ const enqueueCrossSeedRows = async (rows: SeedParameter[], targetSiteName: strin
   await fetchData()
 
   if (publishTrigger) {
-    await routeToPublishLogs(publishTrigger, targetSiteName, groupID || undefined)
+    await routeToPublishLogs(groupID || undefined)
   }
 }
 
