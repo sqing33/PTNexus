@@ -122,3 +122,49 @@ func TestQueryDataExcludeTargetSitesMatchesSiteAliases(t *testing.T) {
 		t.Fatalf("expected total 0 when target alias already exists, got %d", total)
 	}
 }
+
+func insertCrossSeedReviewRow(t *testing.T, db *gorm.DB, torrentID string, title string, team string, tags string, titleComponents string, isReviewed int) {
+	t.Helper()
+	hash := "hash-" + torrentID
+	mustExecCrossSeedTest(t, db, `INSERT INTO seed_parameters (
+		hash, torrent_id, site_name, nickname, title, subtitle, type, medium, video_codec,
+		audio_codec, resolution, team, source, tags, title_components,
+		screenshot_review_status, is_reviewed, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		hash, torrentID, "hdsky", "HDSky", title, "", "category.movie", "medium.bluray", "video.h264",
+		"audio.dts", "resolution.r1080p", team, "", tags, titleComponents, "none", isReviewed, "2026-04-14 10:00:00", "2026-04-14 10:00:00")
+	mustExecCrossSeedTest(t, db, `INSERT INTO torrents (hash, name, size, save_path, downloader_id, state, last_seen, sites, is_hidden)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		hash, title, 100, "/downloads", "qb-1", "做种中", "2026-04-14 10:00:00", "HDSky")
+}
+
+func TestQueryDataReviewStatusUsesPublishableClassification(t *testing.T) {
+	store := newCrossSeedTestStore(t)
+	repo := repository.NewCrossSeedRepository(store)
+	service := NewCrossSeedService(repo)
+
+	insertCrossSeedReviewRow(t, store.DB, "1001", "Valid", "team.other", `[]`, `[]`, 1)
+	insertCrossSeedReviewRow(t, store.DB, "1002", "BadTeam", "badteam", `[]`, `[]`, 1)
+	insertCrossSeedReviewRow(t, store.DB, "1003", "Restricted", "team.other", `["禁转"]`, `[]`, 1)
+	insertCrossSeedReviewRow(t, store.DB, "1004", "Unrecognized", "team.other", `[]`, `[{"key":"无法识别","value":"bad"}]`, 1)
+
+	reviewed, err := service.QueryData(CrossSeedQueryParams{Page: 1, PageSize: 20, ReviewStatus: "reviewed"})
+	if err != nil {
+		t.Fatalf("QueryData reviewed returned error: %v", err)
+	}
+	if reviewed["total"].(int) != 1 {
+		t.Fatalf("expected reviewed total 1, got %#v", reviewed["total"])
+	}
+	data := reviewed["data"].([]map[string]any)
+	if len(data) != 1 || data[0]["torrent_id"] != "1001" {
+		t.Fatalf("expected only publishable row in reviewed data, got %#v", data)
+	}
+
+	unreviewed, err := service.QueryData(CrossSeedQueryParams{Page: 1, PageSize: 20, ReviewStatus: "unreviewed"})
+	if err != nil {
+		t.Fatalf("QueryData unreviewed returned error: %v", err)
+	}
+	if unreviewed["total"].(int) != 3 {
+		t.Fatalf("expected unreviewed total 3, got %#v", unreviewed["total"])
+	}
+}
