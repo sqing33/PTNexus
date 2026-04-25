@@ -2687,6 +2687,7 @@ const confirmScreenshotReview = async () => {
       torrentData.value.screenshot_review_status = normalizeScreenshotReviewStatus(
         response.data.screenshot_review_status,
       )
+      screenshotValid.value = true
       ElNotification.success({
         title: '截图已确认',
         message: '已确认当前截图时间点，可继续下一步。',

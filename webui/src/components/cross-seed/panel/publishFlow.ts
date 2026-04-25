@@ -1437,11 +1437,11 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     if (isLoading.value) {
       return true
     }
-    if (blockingTask.value) {
-      return true
-    }
     if (publishScene === 'maintenance') {
       return false
+    }
+    if (blockingTask.value) {
+      return true
     }
     return activeStep.value === 1
       ? isNextButtonDisabled.value && !isScrolledToBottom.value
