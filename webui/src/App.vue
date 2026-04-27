@@ -105,6 +105,20 @@
                       终止
                     </el-button>
                     <el-button
+                      v-if="task.status === 'running'"
+                      link
+                      @click="clearTaskMonitorItem(task)"
+                    >
+                      隐藏
+                    </el-button>
+                    <el-button
+                      v-else
+                      link
+                      @click="clearTaskMonitorItem(task)"
+                    >
+                      清理
+                    </el-button>
+                    <el-button
                       v-if="task.routeTarget"
                       link
                       type="primary"
@@ -458,6 +472,10 @@ const formatTaskTime = (timestamp: number) => {
 
 const clearFinishedTasks = () => {
   taskMonitorStore.clearFinished()
+}
+
+const clearTaskMonitorItem = (task: TaskMonitorItem) => {
+  taskMonitorStore.clearTask(task.key)
 }
 
 const normalizeTaskMonitorActions = (actions?: unknown[]) => {

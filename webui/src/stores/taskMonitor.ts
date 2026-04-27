@@ -313,6 +313,13 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
     persistClearedServerTasks(clearedServerTasks.value)
   }
 
+  const clearTask = (key: string) => {
+    const task = tasks.value[key]
+    if (!task) return
+    rememberClearedServerTask(task)
+    removeTask(key)
+  }
+
   const clearFinished = () => {
     Object.values(tasks.value).forEach((task) => {
       if (task.status !== 'running') {
@@ -396,6 +403,7 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
     markSuccess,
     markFailed,
     removeTask,
+    clearTask,
     clearFinished,
     replaceServerTasks,
   }
