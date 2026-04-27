@@ -87,14 +87,32 @@
                 <div v-if="task.error" class="task-monitor-item__error">{{ task.error }}</div>
                 <div class="task-monitor-item__footer">
                   <span>{{ formatTaskTime(task.updatedAt) }}</span>
-                  <el-button
-                    v-if="task.routeTarget"
-                    link
-                    type="primary"
-                    @click="openTaskRoute(task.routeTarget)"
-                  >
-                    查看详情
-                  </el-button>
+                  <div class="task-monitor-item__actions">
+                    <el-button
+                      v-if="task.actions?.includes('finish')"
+                      link
+                      type="success"
+                      @click="handleTaskMonitorAction(task, 'finish')"
+                    >
+                      完成
+                    </el-button>
+                    <el-button
+                      v-if="task.actions?.includes('terminate')"
+                      link
+                      type="danger"
+                      @click="handleTaskMonitorAction(task, 'terminate')"
+                    >
+                      终止
+                    </el-button>
+                    <el-button
+                      v-if="task.routeTarget"
+                      link
+                      type="primary"
+                      @click="openTaskRoute(task.routeTarget)"
+                    >
+                      查看详情
+                    </el-button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -275,14 +293,32 @@
             <div v-if="task.error" class="task-monitor-item__error">{{ task.error }}</div>
             <div class="task-monitor-item__footer">
               <span>{{ formatTaskTime(task.updatedAt) }}</span>
-              <el-button
-                v-if="task.routeTarget"
-                link
-                type="primary"
-                @click="openTaskRoute(task.routeTarget)"
-              >
-                查看详情
-              </el-button>
+              <div class="task-monitor-item__actions">
+                <el-button
+                  v-if="task.actions?.includes('finish')"
+                  link
+                  type="success"
+                  @click="handleTaskMonitorAction(task, 'finish')"
+                >
+                  完成
+                </el-button>
+                <el-button
+                  v-if="task.actions?.includes('terminate')"
+                  link
+                  type="danger"
+                  @click="handleTaskMonitorAction(task, 'terminate')"
+                >
+                  终止
+                </el-button>
+                <el-button
+                  v-if="task.routeTarget"
+                  link
+                  type="primary"
+                  @click="openTaskRoute(task.routeTarget)"
+                >
+                  查看详情
+                </el-button>
+              </div>
             </div>
           </div>
         </div>
@@ -310,11 +346,17 @@
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Download, Link, Menu } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import DesktopWindowControls from '@/components/desktop/DesktopWindowControls.vue'
 import { useDesktopWindowControls } from '@/desktop/windowControls'
 import VersionUpdate from '@/components/VersionUpdate.vue'
-import { useTaskMonitorStore, type TaskMonitorStatus } from '@/stores/taskMonitor'
+import {
+  useTaskMonitorStore,
+  type TaskMonitorAction,
+  type TaskMonitorItem,
+  type TaskMonitorStatus,
+} from '@/stores/taskMonitor'
 import { ElMessage } from '@/utils/uiNotify'
 
 const route = useRoute()
@@ -388,6 +430,8 @@ type ServerTaskItem = {
   message?: string
   error?: string
   progress_text?: string
+  actions?: unknown[]
+  action_hint?: string
   route_target?: ServerTaskRouteTarget
 }
 
@@ -414,6 +458,47 @@ const formatTaskTime = (timestamp: number) => {
 
 const clearFinishedTasks = () => {
   taskMonitorStore.clearFinished()
+}
+
+const normalizeTaskMonitorActions = (actions?: unknown[]) => {
+  if (!Array.isArray(actions)) return undefined
+  const normalized = actions.filter(
+    (action): action is TaskMonitorAction => action === 'finish' || action === 'terminate',
+  )
+  return normalized.length > 0 ? normalized : undefined
+}
+
+const handleTaskMonitorAction = async (task: TaskMonitorItem, action: TaskMonitorAction) => {
+  const actionText = action === 'finish' ? '完成' : '终止'
+  try {
+    await ElMessageBox.confirm(
+      task.actionHint || '此操作会请求取消或将监控状态标记为结束，不保证强制终止底层进程。',
+      `${actionText}后台任务`,
+      { confirmButtonText: actionText, cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const response = await axios.post('/api/migrate/task_monitor/action', {
+      kind: task.kind,
+      raw_id: task.rawId,
+      action,
+    })
+    const payload = response.data
+    if (payload?.success === false) {
+      ElMessage.error(String(payload?.message || '任务操作失败'))
+      return
+    }
+    ElMessage.success(String(payload?.message || '任务操作已提交'))
+    await syncTaskMonitor()
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.message || error.message || '任务操作失败')
+      : '任务操作失败'
+    ElMessage.error(message)
+  }
 }
 
 const syncTaskMonitor = async () => {
@@ -444,6 +529,8 @@ const syncTaskMonitor = async () => {
         message: String(task.message || '').trim(),
         error: String(task.error || '').trim(),
         progressText: String(task.progress_text || '').trim(),
+        actions: normalizeTaskMonitorActions(task.actions),
+        actionHint: String(task.action_hint || '').trim(),
         routeTarget:
           task.route_target?.path && typeof task.route_target.path === 'string'
             ? {
@@ -1126,6 +1213,13 @@ body {
 
 .task-monitor-item__footer span {
   min-width: 0;
+}
+
+.task-monitor-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .main-content {
