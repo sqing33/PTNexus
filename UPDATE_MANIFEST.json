@@ -2,38 +2,78 @@
   "schema": 2,
   "note": "repo-root metadata only; production updater must use release UPDATE_MANIFEST.json",
   "latest": {
-    "version": "v4.0.38",
+    "version": "v4.0.43",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.38/ptnexus-runtime-linux-amd64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.43/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
         "size": 11163781,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.38/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.38/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.38/ptnexus-runtime-linux-amd64.tar.gz"
+          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.43/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.43/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.43/ptnexus-runtime-linux-amd64.tar.gz"
         ]
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.38/ptnexus-runtime-linux-arm64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.43/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
         "size": 10104449,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.38/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.38/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.38/ptnexus-runtime-linux-arm64.tar.gz"
+          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.43/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.43/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.43/ptnexus-runtime-linux-arm64.tar.gz"
         ]
       }
     ],
-    "date": "2026.04.24"
+    "date": "2026.04.30"
   },
   "history": [
+    {
+      "version": "v4.0.43",
+      "date": "2026.04.30",
+      "changes": [
+        "修复：维护种子获取数据页的源站点筛选与列表展示统一按站点管理配置判断，避免筛选存在源站点后仍出现无可用源站点数据",
+        "优化：批量获取源站点优先级设置不再硬编码排除我堡/OurBits，已配置为源站点且有 Cookie 时可正常参与获取"
+      ]
+    },
+    {
+      "version": "v4.0.42",
+      "date": "2026.04.27",
+      "changes": [
+        "修复：任务监控列表新增单条隐藏/清理操作，运行中任务可从面板临时隐藏，已结束或失败任务可单独清理",
+        "优化：清理服务端任务时记录已清理状态，避免刷新任务监控后已处理条目反复出现"
+      ]
+    },
+    {
+      "version": "v4.0.41",
+      "date": "2026.04.27",
+      "changes": [
+        "新增：任务监控支持对异常卡住的后台任务执行手动完成或终止操作，便于清理长期运行的监控条目",
+        "优化：任务操作前增加确认提示，并明确终止为请求取消或标记监控状态，不误导为强制结束底层进程"
+      ]
+    },
+    {
+      "version": "v4.0.40",
+      "date": "2026.04.25",
+      "changes": [
+        "修复：一站多种已检查列表改为仅展示实际可转种数据，避免参数异常、禁转限转分集或无法识别内容混入已检查",
+        "优化：后端统一输出可转种判定并按未检查/错误分类不可转种数据，保持列表分类与转种按钮状态一致"
+      ]
+    },
+    {
+      "version": "v4.0.39",
+      "date": "2026.04.25",
+      "changes": [
+        "修复：维护种子详情页人工确认截图有效后同步清除前端截图异常状态，避免图片校验超时残留导致无法保存",
+        "修复：维护模式的修改完成按钮不再被已残留的源种抓取任务状态阻塞，人工核验后可正常保存"
+      ]
+    },
     {
       "version": "v4.0.38",
       "date": "2026.04.24",

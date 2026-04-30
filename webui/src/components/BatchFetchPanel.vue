@@ -856,11 +856,7 @@ const handleSelectionChange = (selection: Torrent[]) => {
 
 const getSourceSites = (sites: Record<string, SiteData>) => {
   const sourceSites: Record<string, SiteData> = {}
-  const excludedSites = new Set(["我堡", "OurBits"])
   for (const [siteName, siteData] of Object.entries(sites || {})) {
-    // 过滤掉被排除的站点
-    if (excludedSites.has(siteName)) continue
-
     if (
       (siteData.migration === 1 || siteData.migration === 3) &&
       siteStatuses.value.find((s) => s.name === siteName)?.has_cookie
@@ -899,11 +895,8 @@ const loadPrioritySettings = async () => {
     const sitesResponse = await axios.get('/api/sites/status')
     const allSites = sitesResponse.data
 
-    // 过滤出有cookie的源站点，并排除"我堡"和"OurBits"站点
-    const excludedSites = new Set(["我堡", "OurBits"])
-    const availableSites = allSites.filter((s: SiteStatus) =>
-      s.is_source && s.has_cookie && !excludedSites.has(s.name)
-    )
+    // 过滤出有 cookie 的源站点
+    const availableSites = allSites.filter((s: SiteStatus) => s.is_source && s.has_cookie)
 
     // 加载已保存的优先级配置
     const configResponse = await axios.get('/api/config/source_priority')
@@ -916,9 +909,6 @@ const loadPrioritySettings = async () => {
 
     // 先添加按优先级排序的站点
     savedPriority.forEach((siteName: string) => {
-      // 过滤掉被排除的站点
-      if (excludedSites.has(siteName)) return
-
       const site = availableSites.find((s: SiteStatus) => s.name === siteName)
       if (site && !usedSites.has(site.name)) {
         orderedSites.push(site)
@@ -944,11 +934,7 @@ const loadPrioritySettings = async () => {
 const savePrioritySettings = async () => {
   prioritySaving.value = true
   try {
-    // 过滤掉被排除的站点后再保存
-    const excludedSites = new Set(["我堡", "OurBits"])
-    const sourcePriority = sourceSitesOrder.value
-      .map((site) => site.name)
-      .filter((siteName) => !excludedSites.has(siteName))
+    const sourcePriority = sourceSitesOrder.value.map((site) => site.name)
 
     const response = await axios.post('/api/config/source_priority', {
       source_priority: sourcePriority,
