@@ -444,9 +444,18 @@ type ServerTaskItem = {
   message?: string
   error?: string
   progress_text?: string
+  started_at?: string | number | null
+  updated_at?: string | number | null
   actions?: unknown[]
   action_hint?: string
   route_target?: ServerTaskRouteTarget
+}
+
+const parseServerTaskTime = (value: string | number | null | undefined) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  const timestamp = Date.parse(value.trim())
+  return Number.isNaN(timestamp) ? undefined : timestamp
 }
 
 const taskStatusText = (status: TaskMonitorStatus) => {
@@ -547,6 +556,8 @@ const syncTaskMonitor = async () => {
         message: String(task.message || '').trim(),
         error: String(task.error || '').trim(),
         progressText: String(task.progress_text || '').trim(),
+        startedAt: parseServerTaskTime(task.started_at),
+        updatedAt: parseServerTaskTime(task.updated_at),
         actions: normalizeTaskMonitorActions(task.actions),
         actionHint: String(task.action_hint || '').trim(),
         routeTarget:
@@ -593,11 +604,7 @@ const handleComponentReady = (refreshMethod: () => Promise<void>) => {
 }
 
 const shouldDelegateRefreshToComponent = (path: string) => {
-  return (
-    path.startsWith('/torrents') ||
-    path.startsWith('/seed-maintenance') ||
-    path.startsWith('/publish-logs')
-  )
+  return path.startsWith('/torrents') || path.startsWith('/publish-logs')
 }
 
 const handleGlobalRefresh = async () => {

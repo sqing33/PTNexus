@@ -34,6 +34,8 @@ type UpsertTaskInput = {
   message?: string
   error?: string
   progressText?: string
+  startedAt?: number
+  updatedAt?: number
   actions?: TaskMonitorAction[]
   actionHint?: string
   routeTarget?: {
@@ -227,8 +229,8 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
       actionHint: Object.prototype.hasOwnProperty.call(input, 'actionHint')
         ? normalizeText(input.actionHint)
         : existing?.actionHint,
-      startedAt: existing?.startedAt ?? now,
-      updatedAt: now,
+      startedAt: input.startedAt ?? existing?.startedAt ?? now,
+      updatedAt: input.updatedAt ?? now,
       routeTarget: Object.prototype.hasOwnProperty.call(input, 'routeTarget')
         ? input.routeTarget
         : existing?.routeTarget,
@@ -356,13 +358,8 @@ export const useTaskMonitorStore = defineStore('taskMonitor', () => {
         progressText: normalizeText(task.progressText) || '',
         actions: normalizeActions(task.actions),
         actionHint: normalizeText(task.actionHint),
-        startedAt:
-          typeof existing?.startedAt === 'number'
-            ? existing.startedAt
-            : typeof task.rawId === 'string'
-              ? Date.now()
-              : Date.now(),
-        updatedAt: Date.now(),
+        startedAt: task.startedAt ?? existing?.startedAt ?? task.updatedAt ?? Date.now(),
+        updatedAt: task.updatedAt ?? existing?.updatedAt ?? Date.now(),
         routeTarget: Object.prototype.hasOwnProperty.call(task, 'routeTarget')
           ? task.routeTarget
           : existing?.routeTarget,

@@ -152,6 +152,7 @@ const selectedSourceSite = ref('')
 const sourceTorrentId = ref('')
 const recordDialogVisible = ref(false)
 const batchFetchDialogVisible = ref(false)
+const listRefreshMethod = ref<(() => Promise<void>) | null>(null)
 
 const routeTorrentId = computed(() => String(route.query.torrent_id || '').trim())
 const routeSiteName = computed(() => String(route.query.site_name || '').trim())
@@ -354,8 +355,18 @@ const handleMaintainRow = async (row: MaintenanceRow) => {
   await loadSeedInfo()
 }
 
+const refreshMaintenanceView = async () => {
+  error.value = ''
+  if (ready.value) {
+    await loadSeedInfo()
+    return
+  }
+  await listRefreshMethod.value?.()
+}
+
 const emitReady = (refreshMethod: () => Promise<void>) => {
-  emit('ready', refreshMethod)
+  listRefreshMethod.value = refreshMethod
+  emit('ready', refreshMaintenanceView)
 }
 
 const handleBack = () => {
@@ -393,7 +404,7 @@ onMounted(async () => {
     }
     await loadSeedInfo()
   }
-  emit('ready', loadSeedInfo)
+  emit('ready', refreshMaintenanceView)
 })
 </script>
 
