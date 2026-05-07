@@ -74,6 +74,7 @@ func (s *CrossSeedService) UniquePaths() (map[string]any, error) {
 			SELECT 1
 			FROM seed_parameters sp
 			WHERE sp.hash = t.hash
+			  AND sp.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')
 		  )
 		ORDER BY t.save_path
 	`
@@ -108,6 +109,9 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 
 	whereConditions := make([]string, 0)
 	args := make([]any, 0)
+
+	// 过滤仅保留视频类型，排除电子书、有声书、音乐、软件、游戏等非视频内容
+	whereConditions = append(whereConditions, "sp.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')")
 
 	search := strings.TrimSpace(params.Search)
 	if search != "" {

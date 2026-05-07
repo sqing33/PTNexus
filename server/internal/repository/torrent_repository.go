@@ -18,7 +18,17 @@ func (r *TorrentRepository) DistinctPaths() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := sqlDB.Query("SELECT DISTINCT save_path FROM torrents WHERE save_path IS NOT NULL AND save_path != '' AND (is_hidden = 0 OR is_hidden IS NULL) ORDER BY save_path")
+	rows, err := sqlDB.Query(`
+		SELECT DISTINCT t.save_path
+		FROM torrents t
+		WHERE t.save_path IS NOT NULL AND t.save_path != '' AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
+		  AND EXISTS (
+			SELECT 1 FROM seed_parameters sp
+			WHERE sp.hash = t.hash
+			  AND sp.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')
+		  )
+		ORDER BY t.save_path
+	`)
 	if err != nil {
 		return nil, err
 	}

@@ -330,10 +330,17 @@ func (r *TorrentDataRepository) UpdateIYUUCheckAndFillDetails(name string, size 
 
 func (r *TorrentDataRepository) ListTorrents(onlyCompleted bool) ([]TorrentRecord, error) {
 	groupColumn := r.store.GroupColumn()
-	query := "SELECT hash, name, save_path, size, progress, state, sites, " + groupColumn + " AS torrent_group, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders FROM torrents WHERE state != ? AND (is_hidden = 0 OR is_hidden IS NULL)"
+	query := `SELECT hash, name, save_path, size, progress, state, sites, ` + groupColumn + ` AS torrent_group, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders
+		FROM torrents t
+		WHERE t.state != ? AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
+		  AND EXISTS (
+			SELECT 1 FROM seed_parameters sp
+			WHERE sp.hash = t.hash
+			  AND sp.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')
+		  )`
 	args := []any{"不存在"}
 	if onlyCompleted {
-		query += " AND progress >= 100"
+		query += " AND t.progress >= 100"
 	}
 
 	rows := make([]TorrentRecord, 0)
