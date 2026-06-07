@@ -2,59 +2,87 @@
   "schema": 2,
   "note": "repo-root metadata only; production updater must use release UPDATE_MANIFEST.json",
   "latest": {
-    "version": "v4.0.45",
+    "version": "v4.0.51",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.45/ptnexus-runtime-linux-amd64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
         "size": 11163781,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.45/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.45/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.45/ptnexus-runtime-linux-amd64.tar.gz"
+          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-amd64.tar.gz"
         ]
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.45/ptnexus-runtime-linux-arm64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
         "size": 10104449,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.45/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.45/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.45/ptnexus-runtime-linux-arm64.tar.gz"
+          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-arm64.tar.gz"
         ]
       }
     ],
-    "date": "2026.05.04"
+    "date": "2026.06.07"
   },
   "history": [
+    {
+      "version": "v4.0.51",
+      "date": "2026.06.07",
+      "changes": [
+        "修复：拉取新种后批量获取列表现在会展示尚未补全种子参数的数据，避免新种子刷不出来",
+        "优化：跨站点数据页与维护页刷新时同步刷新已打开的批量获取弹窗列表"
+      ]
+    },
+    {
+      "version": "v4.0.50",
+      "date": "2026.05.12",
+      "changes": [
+        "修复：转种上传失败页不再误提取其他种子详情链接，避免失败被显示为发布成功"
+      ]
+    },
+    {
+      "version": "v4.0.49",
+      "date": "2026.05.07",
+      "changes": [
+        "修复：维护种子标题中的 ￡cXcY@FRDS 后缀现在会作为完整制作组识别，不再残留 ￡cXcY 为无法识别"
+      ]
+    },
+    {
+      "version": "v4.0.48",
+      "date": "2026.05.07",
+      "changes": [
+        "优化：所有列表页面默认过滤非视频类种子（电子书、有声书、音乐、软件、游戏等），仅展示视频内容（电影、电视剧、动画、纪录片、综艺）"
+      ]
+    },
+    {
+      "version": "v4.0.47",
+      "date": "2026.05.07",
+      "changes": [
+        "修复：FRDS官组作品标题中的 xxx@FRDS 格式（如 ￡cXcY@FRDS、Yumi@FRDS）现在能正确识别并映射到 team.frds"
+      ]
+    },
+    {
+      "version": "v4.0.46",
+      "date": "2026.05.07",
+      "changes": [
+        "修复：做种检索页路径选择器返回所有配置的下载器，不再遗漏无路径数据的下载器"
+      ]
+    },
     {
       "version": "v4.0.45",
       "date": "2026.05.04",
       "changes": [
         "修复：任务监控同步服务端任务时保留后端时间，旧任务不再被刷新成当前时间",
         "修复：维护种子信息页右上角刷新改为刷新全部维护页数据，不再要求源站和源站种子 ID"
-      ]
-    },
-    {
-      "version": "v4.0.44",
-      "date": "2026.05.01",
-      "changes": [
-        "修复：下载器刷新站点识别优先匹配详情页精确域名，避免我堡种子因共享馒头 tracker 被误判为馒头"
-      ]
-    },
-    {
-      "version": "v4.0.43",
-      "date": "2026.04.30",
-      "changes": [
-        "修复：维护种子获取数据页的源站点筛选与列表展示统一按站点管理配置判断，避免筛选存在源站点后仍出现无可用源站点数据",
-        "优化：批量获取源站点优先级设置不再硬编码排除我堡/OurBits，已配置为源站点且有 Cookie 时可正常参与获取"
       ]
     },
     {
