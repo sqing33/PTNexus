@@ -95,6 +95,7 @@
         </template>
         <div class="seed-maintenance-view__modal-body">
           <BatchFetchPanel
+            ref="batchFetchPanelRef"
             @cancel="closeBatchFetchDialog"
             @fetch-completed="handleFetchCompleted"
           />
@@ -152,6 +153,7 @@ const selectedSourceSite = ref('')
 const sourceTorrentId = ref('')
 const recordDialogVisible = ref(false)
 const batchFetchDialogVisible = ref(false)
+const batchFetchPanelRef = ref<InstanceType<typeof BatchFetchPanel> | null>(null)
 const listRefreshMethod = ref<(() => Promise<void>) | null>(null)
 
 const routeTorrentId = computed(() => String(route.query.torrent_id || '').trim())
@@ -357,6 +359,10 @@ const handleMaintainRow = async (row: MaintenanceRow) => {
 
 const refreshMaintenanceView = async () => {
   error.value = ''
+  if (batchFetchDialogVisible.value && batchFetchPanelRef.value) {
+    await batchFetchPanelRef.value.refreshList()
+    return
+  }
   if (ready.value) {
     await loadSeedInfo()
     return

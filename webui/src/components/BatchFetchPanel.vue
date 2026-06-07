@@ -24,6 +24,16 @@
       <el-button type="primary" @click="openFilterDialog" plain style="margin-right: 15px">
         筛选
       </el-button>
+      <el-button
+        type="primary"
+        :icon="Refresh"
+        :loading="loading"
+        @click="handleRefreshListClick"
+        plain
+        style="margin-right: 15px"
+      >
+        刷新列表
+      </el-button>
       <div
         v-if="hasActiveFilters"
         class="current-filters"
@@ -407,7 +417,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
-import { Setting } from '@element-plus/icons-vue'
+import { Refresh, Setting } from '@element-plus/icons-vue'
 import axios from 'axios'
 import type { ElTree } from 'element-plus'
 import { useTaskMonitorStore } from '@/stores/taskMonitor'
@@ -485,6 +495,10 @@ interface BatchProgress {
   isRunning: boolean
   results: BatchProgressResult[]
   bdinfo_stats?: BdinfoStats
+}
+
+interface RefreshListOptions {
+  refreshBackend?: boolean
 }
 
 const tableData = ref<Torrent[]>([])
@@ -761,6 +775,25 @@ const fetchAllPaths = async () => {
     }
   } catch (caught: unknown) {
     console.error('获取路径列表失败:', caught)
+  }
+}
+
+const refreshList = async (options: RefreshListOptions = {}) => {
+  if (options.refreshBackend) {
+    await axios.post('/api/refresh_data')
+  }
+  await Promise.all([fetchDownloadersList(), loadSiteStatuses(), fetchAllPaths()])
+  await fetchData()
+}
+
+const handleRefreshListClick = async () => {
+  try {
+    await refreshList({ refreshBackend: true })
+    if (!error.value) {
+      ElMessage.success('种子列表已刷新')
+    }
+  } catch (caught: unknown) {
+    ElMessage.error(getErrorMessage(caught) || '刷新列表失败')
   }
 }
 
@@ -1198,6 +1231,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopAutoRefresh()
+})
+
+defineExpose({
+  refreshList,
 })
 
 watch(nameSearch, () => {

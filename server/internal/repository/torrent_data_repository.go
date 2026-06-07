@@ -328,15 +328,25 @@ func (r *TorrentDataRepository) UpdateIYUUCheckAndFillDetails(name string, size 
 	return filled, nil
 }
 
+// ListTorrents 读取当前可展示的下载器种子记录。
+// 参数/返回：onlyCompleted 为 true 时仅返回完成进度达到 100% 的记录；返回值按数据库原始行返回，聚合由 Service 层完成。
+// 失败场景：数据库查询失败时返回错误。
+// 副作用：仅读取 torrents/seed_parameters，不写入数据。
 func (r *TorrentDataRepository) ListTorrents(onlyCompleted bool) ([]TorrentRecord, error) {
 	groupColumn := r.store.GroupColumn()
 	query := `SELECT hash, name, save_path, size, progress, state, sites, ` + groupColumn + ` AS torrent_group, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders
 		FROM torrents t
 		WHERE t.state != ? AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
-		  AND EXISTS (
-			SELECT 1 FROM seed_parameters sp
-			WHERE sp.hash = t.hash
-			  AND sp.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')
+		  AND (
+			NOT EXISTS (
+				SELECT 1 FROM seed_parameters sp_any
+				WHERE sp_any.hash = t.hash
+			)
+			OR EXISTS (
+				SELECT 1 FROM seed_parameters sp
+				WHERE sp.hash = t.hash
+				  AND sp.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')
+			)
 		  )`
 	args := []any{"不存在"}
 	if onlyCompleted {

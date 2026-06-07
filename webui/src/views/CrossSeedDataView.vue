@@ -381,7 +381,11 @@
           </div>
         </template>
         <div class="batch-fetch-main-content">
-          <BatchFetchPanel @cancel="closeBatchFetchDialog" @fetch-completed="handleFetchCompleted" />
+          <BatchFetchPanel
+            ref="batchFetchPanelRef"
+            @cancel="closeBatchFetchDialog"
+            @fetch-completed="handleFetchCompleted"
+          />
         </div>
       </el-card>
     </div>
@@ -501,6 +505,7 @@ const error = ref<string | null>(null)
 const selectedRows = ref<SeedParameter[]>([])
 const pendingBatchCrossSeedAfterFilter = ref(false)
 const batchFetchDialogVisible = ref(false)
+const batchFetchPanelRef = ref<InstanceType<typeof BatchFetchPanel> | null>(null)
 const isDeleteMode = ref(false)
 const recordDialogVisible = ref(false)
 const pathTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
@@ -1314,8 +1319,16 @@ const openRecordViewDialog = () => {
   recordDialogVisible.value = true
 }
 
+const refreshCurrentView = async () => {
+  if (isMaintenanceMode.value && batchFetchDialogVisible.value && batchFetchPanelRef.value) {
+    await batchFetchPanelRef.value.refreshList()
+    return
+  }
+  await fetchData()
+}
+
 onMounted(() => {
-  emit('ready', fetchData)
+  emit('ready', refreshCurrentView)
 })
 
 onMounted(async () => {
