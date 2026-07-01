@@ -2,38 +2,46 @@
   "schema": 2,
   "note": "repo-root metadata only; production updater must use release UPDATE_MANIFEST.json",
   "latest": {
-    "version": "v4.0.51",
+    "version": "v4.0.52",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-amd64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.52/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
         "size": 11163781,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-amd64.tar.gz"
+          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.52/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.52/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.52/ptnexus-runtime-linux-amd64.tar.gz"
         ]
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-arm64.tar.gz",
+        "url": "https://github.com/jadylc/PTNexus/releases/download/v4.0.52/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
         "size": 10104449,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.51/ptnexus-runtime-linux-arm64.tar.gz"
+          "https://gitee.com/jadylc/PTNexus/releases/download/v4.0.52/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/v4.0.52/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/v4.0.52/ptnexus-runtime-linux-arm64.tar.gz"
         ]
       }
     ],
-    "date": "2026.06.07"
+    "date": "2026.07.01"
   },
   "history": [
+    {
+      "version": "v4.0.52",
+      "date": "2026.07.01",
+      "changes": [
+        "修复：批量获取新种列表按种名和大小判断已有种子，避免同名不同体积的新种被误过滤",
+        "修复：仅显示已完成时按种名和大小保留整组来源数据，避免未补全来源行导致新种列表缺失"
+      ]
+    },
     {
       "version": "v4.0.51",
       "date": "2026.06.07",
