@@ -42,6 +42,12 @@ type TorrentUploadTotal struct {
 	TotalUploaded int64
 }
 
+// TorrentNameSizeKey 表示按种子名与体积聚合后的唯一业务分组。
+type TorrentNameSizeKey struct {
+	Name string `gorm:"column:name"`
+	Size int64  `gorm:"column:size"`
+}
+
 type TorrentDataRepository struct {
 	store *Store
 }
@@ -329,7 +335,7 @@ func (r *TorrentDataRepository) UpdateIYUUCheckAndFillDetails(name string, size 
 }
 
 // ListTorrents 读取当前可展示的下载器种子记录。
-// 参数/返回：onlyCompleted 为 true 时仅返回完成进度达到 100% 的记录；返回值按数据库原始行返回，聚合由 Service 层完成。
+// 参数/返回：onlyCompleted 为 true 时保留“同 name+size 组内存在完成记录”的全组数据；返回值按数据库原始行返回，聚合由 Service 层完成。
 // 失败场景：数据库查询失败时返回错误。
 // 副作用：仅读取 torrents/seed_parameters，不写入数据。
 func (r *TorrentDataRepository) ListTorrents(onlyCompleted bool) ([]TorrentRecord, error) {
@@ -350,7 +356,15 @@ func (r *TorrentDataRepository) ListTorrents(onlyCompleted bool) ([]TorrentRecor
 		  )`
 	args := []any{"不存在"}
 	if onlyCompleted {
-		query += " AND t.progress >= 100"
+		query += ` AND EXISTS (
+			SELECT 1 FROM torrents completed
+			WHERE completed.name = t.name
+			  AND completed.size = t.size
+			  AND completed.state != ?
+			  AND (completed.is_hidden = 0 OR completed.is_hidden IS NULL)
+			  AND completed.progress >= 100
+		)`
+		args = append(args, "不存在")
 	}
 
 	rows := make([]TorrentRecord, 0)
@@ -378,6 +392,27 @@ func (r *TorrentDataRepository) DistinctSeedParameterNames() ([]string, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// ExistingSeedParameterGroups 查询已存在 seed_parameters 的 name+size 分组。
+// 参数/返回：返回 seed_parameters 关联 torrents 后得到的去重 name+size，用于避免同名不同体积互相误排除。
+// 失败场景：数据库查询失败时返回错误。
+// 副作用：仅读取 seed_parameters/torrents，不写入数据。
+func (r *TorrentDataRepository) ExistingSeedParameterGroups() ([]TorrentNameSizeKey, error) {
+	rows := make([]TorrentNameSizeKey, 0)
+	err := r.store.DB.Raw(`
+		SELECT DISTINCT sp.name AS name, t.size AS size
+		FROM seed_parameters sp
+		INNER JOIN torrents t ON t.hash = sp.hash
+		WHERE sp.name IS NOT NULL
+		  AND TRIM(sp.name) != ''
+		  AND t.size > 0
+		  AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
+	`).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (r *TorrentDataRepository) CachedSitesByNameAndSize(name string, size int64) ([]string, []string, error) {
