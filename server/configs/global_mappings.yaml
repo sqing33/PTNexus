@@ -678,6 +678,7 @@ global_standard_keys:
     "EPSiLON": "team.epsilon"
     "FraMeSToR": "team.framestor"
     "FRDS": "team.frds"
+    "@FRDS": "team.frds"
     "FFansDIY": "team.ffansdiy"
     "FROG": "team.frog"
     "FROGE": "team.froge"

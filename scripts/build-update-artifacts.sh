@@ -73,7 +73,7 @@ ARCHES="${ARCHES:-amd64 arm64}"
 OS_NAME="${OS_NAME:-linux}"
 
 OUT_DIR="${OUT_DIR:-${REPO_ROOT}/dist/updates/${VERSION}}"
-BASE_URL="${BASE_URL:-https://github.com/sqing33/PTNexus/releases/download/${VERSION}}"
+BASE_URL="${BASE_URL:-https://github.com/jadylc/PTNexus/releases/download/${VERSION}}"
 
 mkdir -p "$OUT_DIR"
 

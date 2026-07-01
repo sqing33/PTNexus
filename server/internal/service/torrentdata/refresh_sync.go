@@ -25,6 +25,7 @@ var (
 type refreshSiteMatcher struct {
 	hostMap map[string]string
 	coreMap map[string]string
+	uniqueCoreMap map[string]string
 }
 
 type refreshGroupEntry struct {
@@ -436,12 +437,17 @@ func (m refreshGroupMatcher) Match(name string, snapshotGroup string) string {
 	if len(partialMatches) > 0 {
 		return longestString(partialMatches)
 	}
+
+	// 兜底只接受显式“后缀样式”的 group（如 -WiKi），避免将下载器分类/站点标签误判为官组。
 	return m.matchSnapshotGroup(snapshotGroup)
 }
 
 func (m refreshGroupMatcher) matchSnapshotGroup(snapshotGroup string) string {
 	trimmed := strings.TrimSpace(snapshotGroup)
 	if trimmed == "" {
+		return ""
+	}
+	if !strings.HasPrefix(trimmed, "-") {
 		return ""
 	}
 	if strings.Contains(trimmed, ",") {
@@ -500,8 +506,9 @@ func longestString(values []string) string {
 
 func newRefreshSiteMatcher(rows []repository.SiteIdentity) refreshSiteMatcher {
 	matcher := refreshSiteMatcher{
-		hostMap: map[string]string{},
-		coreMap: map[string]string{},
+		hostMap:       map[string]string{},
+		coreMap:       map[string]string{},
+		uniqueCoreMap: map[string]string{},
 	}
 	for _, row := range rows {
 		nickname := strings.TrimSpace(row.Nickname)
@@ -519,10 +526,19 @@ func newRefreshSiteMatcher(rows []repository.SiteIdentity) refreshSiteMatcher {
 			}
 			core := extractCoreDomain(host)
 			if core != "" {
-				if _, exists := matcher.coreMap[core]; !exists {
+				if existing, exists := matcher.coreMap[core]; exists {
+					if existing != nickname {
+						matcher.coreMap[core] = ""
+					}
+				} else {
 					matcher.coreMap[core] = nickname
 				}
 			}
+		}
+	}
+	for core, nickname := range matcher.coreMap {
+		if nickname != "" {
+			matcher.uniqueCoreMap[core] = nickname
 		}
 	}
 	return matcher
@@ -546,11 +562,17 @@ func (m refreshSiteMatcher) Match(trackers []string, detail string, comment stri
 		if nickname, exists := m.hostMap[host]; exists {
 			return nickname
 		}
+	}
+	for _, candidate := range candidates {
+		host := parseHostCandidate(candidate)
+		if host == "" {
+			continue
+		}
 		core := extractCoreDomain(host)
 		if core == "" {
 			continue
 		}
-		if nickname, exists := m.coreMap[core]; exists {
+		if nickname, exists := m.uniqueCoreMap[core]; exists {
 			return nickname
 		}
 	}
@@ -607,15 +629,15 @@ func extractCoreDomain(host string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	if len(parts) > 2 {
+	if len(parts) >= 3 {
 		last := parts[len(parts)-1]
 		prev := parts[len(parts)-2]
-		if len(last) <= 3 && len(prev) <= 3 && len(parts) >= 3 {
-			return parts[len(parts)-3]
+		if len(last) <= 3 && len(prev) <= 3 {
+			return parts[len(parts)-3] + "." + prev + "." + last
 		}
 	}
 	if len(parts) > 1 {
-		return parts[len(parts)-2]
+		return parts[len(parts)-2] + "." + parts[len(parts)-1]
 	}
 	return parts[0]
 }

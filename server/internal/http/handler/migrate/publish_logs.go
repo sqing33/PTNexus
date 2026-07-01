@@ -40,6 +40,26 @@ func (h *Handler) PublishLogs(c *gin.Context) {
 	c.JSON(status, result)
 }
 
+func (h *Handler) DeletePublishLog(c *gin.Context) {
+	rawID := strings.TrimSpace(c.Param("id"))
+	if rawID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "缺少日志 ID"})
+		return
+	}
+
+	logID, err := strconv.ParseUint(rawID, 10, 64)
+	if err != nil || logID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "日志 ID 非法"})
+		return
+	}
+
+	result, status := h.service.DeletePublishLog(logID)
+	if status == 0 {
+		status = http.StatusOK
+	}
+	c.JSON(status, result)
+}
+
 func parsePositiveInt(raw string, fallback int) int {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

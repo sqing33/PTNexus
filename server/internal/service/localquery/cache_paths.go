@@ -40,9 +40,6 @@ func (s *Service) GetDownloadersWithPaths() (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(pathRows) == 0 {
-			continue
-		}
 
 		merged := map[string]int64{}
 		for _, row := range pathRows {
@@ -71,9 +68,6 @@ func (s *Service) GetDownloadersWithPaths() (map[string]any, error) {
 				}
 			}
 			paths = append(paths, map[string]any{"path": path, "count": count})
-		}
-		if len(paths) == 0 {
-			continue
 		}
 		sort.Slice(paths, func(i, j int) bool {
 			return stringFromAny(paths[i]["path"]) < stringFromAny(paths[j]["path"])

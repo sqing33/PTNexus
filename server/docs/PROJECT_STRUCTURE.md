@@ -119,6 +119,7 @@
 | `internal/http/handler/migrate/batch_fetch_logs.go` | 批量抓取与日志流接口 |
 | `internal/http/handler/migrate/publish_batch_stream.go` | 发布批任务 SSE 流 |
 | `internal/http/handler/migrate/bdinfo.go` | BDInfo 状态/回调/任务管理接口 |
+| `internal/http/handler/migrate/task_monitor.go` | 全局任务监控聚合接口 |
 
 #### `internal/http/handler/settings`
 
@@ -175,6 +176,7 @@
 | `internal/service/migrationflow/mediainfo_refresh.go` | MediaInfo 异步刷新调度 |
 | `internal/service/migrationflow/tagging_helpers.go` | 标签重算与持久化辅助 |
 | `internal/service/migrationflow/publish_batch.go` | 单发/批发发布编排与事件流 |
+| `internal/service/migrationflow/task_monitor.go` | 聚合批量抓取/发布/BDInfo/发布队列任务快照 |
 | `internal/service/migrationflow/bdinfo_status.go` | BDInfo 状态/列表查询入口 |
 | `internal/service/migrationflow/bdinfo_callbacks.go` | BDInfo 回调接入入口 |
 | `internal/service/migrationflow/bdinfo_task_ops.go` | BDInfo 任务启动/重启/清理 |

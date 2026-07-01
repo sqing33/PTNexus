@@ -10,7 +10,7 @@
     class="update-dialog"
   >
     <el-card shadow="never" class="update-card">
-      <div class="update-content">
+      <div class="update-content" v-loading="isDialogLoading">
         <!-- Version Info -->
         <div class="version-info-box">
           <div class="version-item">
@@ -22,15 +22,15 @@
             <div class="version-label">最新版本</div>
             <div class="version-value new-version">{{ updateInfo.remoteVersion }}</div>
           </div>
-          <div v-if="!updateInfo.hasUpdate" class="version-status">
-            <el-icon color="#67c23a" size="20"><SuccessFilled /></el-icon>
-            <span>已是最新版本</span>
+          <div v-if="!updateInfo.hasUpdate && !isDialogLoading" class="version-status">
+            <el-icon :color="versionStatusColor" size="20"><SuccessFilled /></el-icon>
+            <span>{{ versionStatusText }}</span>
           </div>
         </div>
 
         <!-- 强制更新提示 -->
         <div
-          v-if="isForceUpdate && !updateInfo.updateControl.disable_update"
+          v-if="!isDialogLoading && isForceUpdate && !updateInfo.updateControl.disable_update"
           class="force-update-notice"
           style="color: #f56c6c; background: #fef0f0; border-color: #fde2e2"
         >
@@ -39,7 +39,7 @@
         </div>
 
         <div
-          v-else-if="updateInfo.updateControl.disable_update && updateInfo.hasUpdate"
+          v-else-if="!isDialogLoading && updateInfo.updateControl.disable_update && updateInfo.hasUpdate"
           class="force-update-notice"
         >
           <el-icon color="#e6a23c" size="18"><WarningFilled /></el-icon>
@@ -48,45 +48,65 @@
 
         <!-- All Versions Timeline -->
         <div class="all-versions-section">
-          <div v-if="updateInfo.history.length === 0" class="no-history">暂无版本记录</div>
-          <div v-else class="history-timeline">
-            <div
-              v-for="(version, versionIndex) in updateInfo.history"
-              :key="versionIndex"
-              class="history-version"
-              :class="{
-                'latest-version': compareVersions(version.version, updateInfo.currentVersion) > 0,
-              }"
+          <div v-if="isDialogLoading" class="dialog-loading-text">正在加载版本信息...</div>
+          <template v-else>
+            <el-alert
+              v-if="historyStatusBarVisible"
+              :title="historyStatusText"
+              :type="historyStatusType"
+              :closable="false"
+              show-icon
+              class="history-status-alert"
             >
-              <div class="version-header">
-                <div class="version-title">
-                  <span class="version-name">{{ version.version }}</span>
-                  <span class="version-date"
-                    >{{ version.date
-                    }}{{
-                      compareVersions(version.version, updateInfo.currentVersion) > 0 ? ' 新' : ''
-                    }}</span
-                  >
-                </div>
-              </div>
+              <template v-if="showHistoryRetry" #default>
+                <el-button link type="primary" :disabled="isHistoryLoading" @click="retryChangelog">
+                  重试
+                </el-button>
+              </template>
+            </el-alert>
+            <div v-if="updateInfo.history.length === 0 && !hasLoadedHistoryOnce" class="dialog-loading-text">
+              正在加载版本记录...
+            </div>
+            <div v-else-if="updateInfo.history.length === 0" class="no-history">暂无版本记录</div>
+            <div v-else class="history-timeline">
               <div
-                v-if="version.note"
-                class="version-note"
-                @click="handleNoteClick"
-                v-html="formatNote(version.note)"
-              ></div>
-              <div class="version-changes">
+                v-for="(version, versionIndex) in updateInfo.history"
+                :key="versionIndex"
+                class="history-version"
+                :class="{
+                  'latest-version': compareVersions(version.version, updateInfo.currentVersion) > 0,
+                }"
+              >
+                <div class="version-header">
+                  <div class="version-title">
+                    <span class="version-name">{{ version.version }}</span>
+                    <span class="version-date"
+                      >{{ version.date
+                      }}{{
+                        compareVersions(version.version, updateInfo.currentVersion) > 0 ? ' 新' : ''
+                      }}</span
+                    >
+                  </div>
+                </div>
                 <div
-                  v-for="(change, changeIndex) in version.changes"
-                  :key="changeIndex"
-                  class="changelog-item"
-                >
-                  <div class="changelog-number">{{ changeIndex + 1 }}</div>
-                  <div class="changelog-text" v-html="change.replace(/\n/g, '<br>')"></div>
+                  v-if="version.note"
+                  class="version-note"
+                  @click="handleNoteClick"
+                  v-html="formatNote(version.note)"
+                ></div>
+                <div class="version-changes">
+                  <div
+                    v-for="(change, changeIndex) in version.changes"
+                    :key="changeIndex"
+                    class="changelog-item"
+                  >
+                    <div class="changelog-number">{{ changeIndex + 1 }}</div>
+                    <div class="changelog-text" v-html="change.replace(/\n/g, '<br>')"></div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          </template>
         </div>
       </div>
     </el-card>
@@ -114,7 +134,7 @@
           <el-button
             v-if="!isBlockingForceUpdate || updateInfo.updateControl.disable_update"
             @click="updateDialogVisible = false"
-            :disabled="isUpdating"
+            :disabled="isDialogLoading || isUpdating"
           >
             {{ updateInfo.hasUpdate ? '稍后更新' : '确定' }}
           </el-button>
@@ -125,7 +145,7 @@
             type="primary"
             @click="performUpdate"
             :loading="isUpdating"
-            :disabled="isUpdating || updateInfo.updateControl.disable_update"
+            :disabled="isDialogLoading || isUpdating || updateInfo.updateControl.disable_update"
             :title="disableUpdateButtonTitle"
           >
             {{ primaryActionLabel }}
@@ -147,6 +167,11 @@ import { getDesktopBridge } from '@/desktop/bridge'
 const isUpdating = ref(false)
 const updateProgress = ref(0)
 const updateStatus = ref('')
+const isDialogLoading = ref(false)
+const isHistoryLoading = ref(false)
+const changelogLoadError = ref('')
+const hasLoadedHistoryOnce = ref(false)
+let changelogRequestSeq = 0
 
 const emit = defineEmits<{
   'version-loaded': [version: string]
@@ -179,6 +204,8 @@ const updateInfo = reactive({
   },
   updateMode: 'runtime_install' as UpdateMode,
   desktopInstaller: null as DesktopInstallerData | null,
+  reasonCode: 'already_latest',
+  reasonMessage: '',
 })
 
 type UpdateControlSchedule = {
@@ -207,13 +234,87 @@ type DesktopInstallerData = {
   size?: number
 }
 
+type LocalVersionData = {
+  success?: boolean
+  local_version?: string
+  local_version_source?: string
+}
+
 type UpdateCheckData = {
+  success?: boolean
+  has_update?: boolean
+  local_version?: string
   remote_version?: string
+  reason_code?: string
+  reason_message?: string
   update_control?: UpdateControlData
   update_mode?: string
   desktop_installer?: DesktopInstallerData | null
   [key: string]: unknown
 }
+
+const versionStatusText = computed(() => {
+  if (updateInfo.reasonMessage) {
+    switch (updateInfo.reasonCode) {
+      case 'already_latest':
+      case 'local_version_unknown':
+      case 'remote_manifest_unavailable':
+        return updateInfo.reasonMessage
+    }
+  }
+
+  switch (updateInfo.reasonCode) {
+    case 'local_version_unknown':
+      return '当前实例版本未知，暂时无法准确判断更新状态'
+    case 'remote_manifest_unavailable':
+      return '更新信息暂时不可用，请稍后重试'
+    case 'platform_artifact_missing':
+      return '检测到新版本，但当前平台缺少可用更新产物'
+    case 'platform_installer_missing':
+      return '检测到新版本，但当前平台缺少可用安装包'
+    case 'update_explicitly_disabled':
+      return '检测到新版本，但当前版本暂时禁止在线更新'
+    default:
+      return '已是最新版本'
+  }
+})
+
+const versionStatusColor = computed(() => {
+  switch (updateInfo.reasonCode) {
+    case 'already_latest':
+      return '#67c23a'
+    case 'local_version_unknown':
+    case 'remote_manifest_unavailable':
+    case 'platform_artifact_missing':
+    case 'platform_installer_missing':
+    case 'update_explicitly_disabled':
+      return '#e6a23c'
+    default:
+      return '#67c23a'
+  }
+})
+
+const historyStatusBarVisible = computed(() => {
+  return isHistoryLoading.value || !!changelogLoadError.value
+})
+
+const historyStatusType = computed<'info' | 'warning'>(() => {
+  return changelogLoadError.value ? 'warning' : 'info'
+})
+
+const historyStatusText = computed(() => {
+  if (changelogLoadError.value) {
+    return changelogLoadError.value
+  }
+  if (isHistoryLoading.value) {
+    return updateInfo.history.length > 0 ? '正在刷新版本记录...' : '正在加载版本记录...'
+  }
+  return ''
+})
+
+const showHistoryRetry = computed(() => {
+  return !!changelogLoadError.value
+})
 
 // 计算属性：判断是否为强制更新
 const isForceUpdate = computed(() => {
@@ -302,7 +403,7 @@ const formatNote = (note: string) => {
   let html = note.replace(/\n/g, '<br>')
 
   // 匹配 curl 命令
-  const cmdRegex = /(curl -sL https:\/\/github\.com\/sqing33\/.*?\| sudo bash)/g
+  const cmdRegex = /(curl -sL https:\/\/github\.com\/jadylc\/.*?\| sudo bash)/g
 
   // 修改结构：使用 div 布局，添加提示文本
   html = html.replace(cmdRegex, (match) => {
@@ -375,35 +476,81 @@ const handleNoteClick = async (e: MouseEvent) => {
   }
 }
 
+const loadLocalVersion = async () => {
+  try {
+    const timestamp = new Date().getTime()
+    const response = await axios.get(`/update/local-version?t=${timestamp}`)
+    const data = response.data as LocalVersionData
+    currentVersion.value = data.local_version || 'unknown'
+    emit('version-loaded', currentVersion.value)
+  } catch (error) {
+    console.error('加载本地版本失败:', error)
+    currentVersion.value = 'unknown'
+    emit('version-loaded', currentVersion.value)
+  }
+}
+
+const loadChangelog = async () => {
+  const requestId = ++changelogRequestSeq
+  isHistoryLoading.value = true
+  changelogLoadError.value = ''
+
+  try {
+    const timestamp = new Date().getTime()
+    const changelogResponse = await axios.get(`/update/changelog?t=${timestamp}`)
+    const changelogData = changelogResponse.data as Record<string, any>
+    if (requestId !== changelogRequestSeq) {
+      return
+    }
+    updateInfo.changelog = Array.isArray(changelogData.changelog) ? changelogData.changelog : []
+    updateInfo.history = Array.isArray(changelogData.history) ? changelogData.history : []
+    hasLoadedHistoryOnce.value = true
+    changelogLoadError.value = ''
+  } catch (error) {
+    if (requestId !== changelogRequestSeq) {
+      return
+    }
+    console.error('加载更新日志失败:', error)
+    changelogLoadError.value = '版本记录加载失败，可重试'
+  } finally {
+    if (requestId === changelogRequestSeq) {
+      isHistoryLoading.value = false
+    }
+  }
+}
+
+const retryChangelog = () => {
+  void loadChangelog()
+}
+
 const loadVersionInfo = async () => {
   try {
     const timestamp = new Date().getTime()
     const response = await axios.get(`/update/check?t=${timestamp}`)
-    const data = response.data
+    const data = response.data as UpdateCheckData
 
     if (data.success) {
-      currentVersion.value = data.local_version
-      emit('version-loaded', currentVersion.value)
+      if (!currentVersion.value || currentVersion.value === '加载中...' || currentVersion.value === 'unknown') {
+        currentVersion.value = data.local_version || 'unknown'
+        emit('version-loaded', currentVersion.value)
+      }
 
-      // 计算版本差异
-      // compareResult > 0 : 远程 > 本地 (有更新)
-      // compareResult < 0 : 远程 < 本地 (本地是开发版或更新版)
-      const compareResult = compareVersions(data.remote_version || '', data.local_version)
-      const isReallyHasUpdate = compareResult > 0
+      const localVersion = data.local_version || currentVersion.value
+      const backendHasUpdate = data.has_update === true
+      const compareResult = compareVersions(data.remote_version || '', localVersion)
+      const isReallyHasUpdate = backendHasUpdate || compareResult > 0
       const isLocalNewer = compareResult < 0
 
       console.log('版本检查结果:', {
-        local: data.local_version,
+        local: localVersion,
         remote: data.remote_version,
         hasUpdate: isReallyHasUpdate,
-        isLocalNewer: isLocalNewer, // 调试看是否识别为本地更新
+        backendHasUpdate,
+        isLocalNewer: isLocalNewer,
         forceUpdate: data.update_control?.force_update,
         updateMode: data.update_mode,
       })
 
-      // 核心修复：
-      // 只有在 (有真实更新 OR (强制更新 AND 本地不比远程新)) 时才弹窗
-      // 这样就屏蔽了 3.3.4 (Local) > 3.3.3 (Remote) 但带有 force_update 标志的情况
       const shouldShowDialog =
         isReallyHasUpdate || (data.update_control?.force_update && !isLocalNewer)
 
@@ -414,7 +561,7 @@ const loadVersionInfo = async () => {
           data.update_control &&
           data.update_control.force_update &&
           !data.update_control.disable_update &&
-          !isLocalNewer && // 再次确保本地较新时不自动更新
+          !isLocalNewer &&
           data.update_mode !== 'installer_download'
         ) {
           console.log('检测到强制更新，自动触发更新流程...')
@@ -426,66 +573,100 @@ const loadVersionInfo = async () => {
     }
   } catch (error) {
     console.error('加载版本信息失败:', error)
-    currentVersion.value = 'unknown'
-    emit('version-loaded', currentVersion.value)
   }
+}
+
+const resetDialogDisplayState = () => {
+  updateInfo.hasUpdate = false
+  updateInfo.currentVersion = currentVersion.value
+  updateInfo.remoteVersion = ''
+  updateInfo.reasonCode = 'already_latest'
+  updateInfo.reasonMessage = ''
+  updateInfo.updateMode = 'runtime_install'
+  updateInfo.desktopInstaller = null
+  updateInfo.updateControl = {
+    force_update: false,
+    disable_update: false,
+    schedule: {
+      enabled: false,
+      timezone: 'Asia/Shanghai',
+      time: '06:00',
+      last_run: null,
+    },
+  }
+  activeUpdateTab.value = 'latest'
+}
+
+const applyUpdateDialogData = (
+  versionData: UpdateCheckData,
+  changelogData?: Record<string, any> | null,
+) => {
+  const localVersion = versionData.local_version || currentVersion.value
+  const compareResult = compareVersions(versionData.remote_version || '', localVersion)
+  const isLocalNewer = compareResult < 0
+  const updateMode: UpdateMode =
+    versionData.update_mode === 'installer_download' ? 'installer_download' : 'runtime_install'
+
+  updateInfo.hasUpdate = versionData.has_update === true || compareResult > 0
+  updateInfo.currentVersion = localVersion
+  updateInfo.remoteVersion = versionData.remote_version || ''
+  updateInfo.reasonCode = String(versionData.reason_code || '').trim() || 'already_latest'
+  updateInfo.reasonMessage = String(versionData.reason_message || '').trim()
+  if (changelogData) {
+    updateInfo.changelog = Array.isArray(changelogData.changelog) ? changelogData.changelog : []
+    updateInfo.history = Array.isArray(changelogData.history) ? changelogData.history : []
+    hasLoadedHistoryOnce.value = true
+  }
+  updateInfo.updateMode = updateMode
+  updateInfo.desktopInstaller = versionData.desktop_installer || null
+
+  const schedule = versionData.update_control?.schedule
+  updateInfo.updateControl = {
+    force_update: isLocalNewer ? false : versionData.update_control?.force_update || false,
+    disable_update: versionData.update_control?.disable_update || false,
+    schedule: {
+      enabled: schedule?.enabled ?? false,
+      timezone: schedule?.timezone ?? 'Asia/Shanghai',
+      time: schedule?.time ?? '06:00',
+      last_run: schedule?.last_run ?? null,
+    },
+  }
+
+  activeUpdateTab.value = 'latest'
 }
 
 // 修改：接收可选的 preLoadedData
 const showUpdateDialog = async (preLoadedData: UpdateCheckData | null = null) => {
+  updateDialogVisible.value = true
+  resetDialogDisplayState()
+  isDialogLoading.value = true
+
   try {
     const timestamp = new Date().getTime()
-    const changelogPromise = axios.get(`/update/changelog?t=${timestamp}`)
+    const versionResponse = preLoadedData
+      ? { data: preLoadedData as UpdateCheckData }
+      : await axios.get(`/update/check?t=${timestamp}`)
+    const versionData = versionResponse.data as UpdateCheckData
 
-    let versionData: UpdateCheckData = preLoadedData ?? {}
-    if (!preLoadedData) {
-      const versionResponse = await axios.get(`/update/check?t=${timestamp}`)
-      versionData = versionResponse.data as UpdateCheckData
-    }
-
-    const changelogResponse = await changelogPromise
-    const changelogData = changelogResponse.data
-
-    const compareResult = compareVersions(versionData.remote_version || '', currentVersion.value)
-    // 如果 compareResult < 0，说明本地版本比远程新
-    const isLocalNewer = compareResult < 0
-    const updateMode: UpdateMode =
-      versionData.update_mode === 'installer_download' ? 'installer_download' : 'runtime_install'
-
-    updateInfo.hasUpdate = compareResult > 0
-    updateInfo.currentVersion = currentVersion.value
-    updateInfo.remoteVersion = versionData.remote_version || ''
-    updateInfo.changelog = changelogData.changelog || []
-    updateInfo.history = changelogData.history || []
-    updateInfo.updateMode = updateMode
-    updateInfo.desktopInstaller = versionData.desktop_installer || null
-
-    const schedule = versionData.update_control?.schedule
-    updateInfo.updateControl = {
-      // 修复：如果本地版本比远程新，强行关闭 force_update 标志，防止UI显示错误
-      force_update: isLocalNewer ? false : versionData.update_control?.force_update || false,
-      disable_update: versionData.update_control?.disable_update || false,
-      schedule: {
-        enabled: schedule?.enabled ?? false,
-        timezone: schedule?.timezone ?? 'Asia/Shanghai',
-        time: schedule?.time ?? '06:00',
-        last_run: schedule?.last_run ?? null,
-      },
-    }
-
-    activeUpdateTab.value = 'latest'
-
-    // 如果是手动点击检查更新(versionData为空进来)，且本地比远程新，可以弹窗提示"已是最新"
-    // 但如果是自动检查(loadVersionInfo)，上面的逻辑已经拦截了
-    updateDialogVisible.value = true
+    applyUpdateDialogData(versionData)
+    isDialogLoading.value = false
+    void loadChangelog()
   } catch (error) {
     console.error('检查更新失败:', error)
+    resetDialogDisplayState()
     ElMessage.error('检查更新失败，请稍后重试')
+    isDialogLoading.value = false
+    return
   }
 }
 
 // 实际执行更新的逻辑 (发送请求)
 const performUpdate = async () => {
+  if (isDialogLoading.value) {
+    ElMessage.warning('版本信息加载中，请稍候再试')
+    return
+  }
+
   // 防卫：如果已经禁止更新，直接返回
   if (updateInfo.updateControl.disable_update) {
     ElMessage.warning(disableUpdateNoticeText.value)
@@ -615,12 +796,19 @@ const performUpdate = async () => {
       await new Promise((resolve) => setTimeout(resolve, 300))
 
       updateProgress.value = 100
-      updateStatus.value = '更新成功'
+      const targetVersion = updateInfo.remoteVersion || currentVersion.value || 'unknown'
+      const refreshedVersion = await refreshLocalVersionState(targetVersion)
+      updateInfo.hasUpdate = false
+      updateInfo.currentVersion = refreshedVersion
+      updateInfo.remoteVersion = targetVersion
+      updateInfo.reasonCode = 'already_latest'
+      updateInfo.reasonMessage = '更新已完成，正在刷新页面'
+      updateInfo.updateControl.force_update = false
+      updateInfo.updateControl.disable_update = true
+      updateStatus.value = '更新成功，正在刷新页面...'
       ElMessage.success('更新成功！页面将在5秒后刷新...')
 
       setTimeout(() => {
-        // 如果不是强制更新，可以让用户自己点，或者自动关闭
-        // 强制更新一般自动刷新
         updateDialogVisible.value = false
         window.location.reload()
       }, 5000)
@@ -639,7 +827,31 @@ const performUpdate = async () => {
 }
 
 const show = () => {
+  if (isDialogLoading.value) {
+    updateDialogVisible.value = true
+    return
+  }
   showUpdateDialog()
+}
+
+const refreshLocalVersionState = async (preferredVersion?: string) => {
+  try {
+    const timestamp = new Date().getTime()
+    const response = await axios.get(`/update/local-version?t=${timestamp}`)
+    const data = response.data as LocalVersionData
+    const nextVersion = data.local_version || preferredVersion || currentVersion.value || 'unknown'
+    currentVersion.value = nextVersion
+    emit('version-loaded', nextVersion)
+    updateInfo.currentVersion = nextVersion
+    return nextVersion
+  } catch (error) {
+    console.error('刷新本地版本失败:', error)
+    const fallbackVersion = preferredVersion || currentVersion.value || 'unknown'
+    currentVersion.value = fallbackVersion
+    emit('version-loaded', fallbackVersion)
+    updateInfo.currentVersion = fallbackVersion
+    return fallbackVersion
+  }
 }
 
 const getCurrentVersion = () => {
@@ -652,7 +864,9 @@ defineExpose({
 })
 
 onMounted(() => {
-  loadVersionInfo()
+  void loadLocalVersion()
+  void loadChangelog()
+  void loadVersionInfo()
 })
 </script>
 
@@ -663,10 +877,21 @@ onMounted(() => {
   border: none;
 }
 
-.update-content {
+ .update-content {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-height: 220px;
+}
+
+.history-status-alert {
+  margin-bottom: 12px;
+}
+
+.dialog-loading-text {
+  color: #606266;
+  font-size: 14px;
+  padding: 32px 0;
 }
 
 .version-info-box {

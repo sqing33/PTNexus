@@ -49,7 +49,7 @@ func ExecuteDBSeedQueryEntry(input DBSeedQueryEntryInput, deps DBSeedQueryEntryD
 			}
 			return map[string]any{
 				"success":      false,
-				"message":      "数据库中未找到种子信息",
+				"message":      "数据库中未找到种子信息，准备转源站抓取",
 				"should_fetch": true,
 				"task_id":      taskID,
 			}, 202, nil

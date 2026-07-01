@@ -140,6 +140,29 @@ func (r *PublishQueueRepository) CountActiveTasks() (int64, error) {
 	return count, nil
 }
 
+// ListActiveTasks 读取当前处于 queued/running/success 的队列任务。
+// 参数/返回：limit 为最大返回数量；返回任务切片与 error。
+// 失败场景：数据库未初始化或查询失败返回 error。
+// 副作用：读取 publish_queue_tasks。
+func (r *PublishQueueRepository) ListActiveTasks(limit int) ([]PublishQueueTask, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("publish queue repo is nil")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows := make([]PublishQueueTask, 0)
+	if err := r.store.DB.Table("publish_queue_tasks").
+		Where("status IN ?", []string{PublishQueueStatusQueued, PublishQueueStatusRunning, PublishQueueStatusSuccess}).
+		Order("updated_at DESC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // ClaimNextRunnableTask 原子领取下一条可执行的 queued 任务，并标记为 running。
 // 参数/返回：now 为当前时间；返回任务、是否命中与 error。
 // 失败场景：事务/更新/查询失败返回 error。

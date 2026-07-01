@@ -5,3 +5,7 @@ updater/updater -text -diff merge=ours
 proxy/pt-nexus-box-proxy -text -diff merge=ours
 proxy/pt-nexus-box-proxy-amd64 -text -diff merge=ours
 proxy/pt-nexus-box-proxy-arm64 -text -diff merge=ours
+
+# Keep shell scripts runnable inside Linux containers.
+*.sh text eol=lf
+Dockerfile text eol=lf

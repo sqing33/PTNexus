@@ -8,7 +8,6 @@ import (
 	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 	publishchecker "github.com/pt-nexus/server/internal/service/publish/checker"
 	publishdownloader "github.com/pt-nexus/server/internal/service/publish/downloader"
-	publishguard "github.com/pt-nexus/server/internal/service/publish/guard"
 	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
 
@@ -36,7 +35,7 @@ type PublishExecutionDeps struct {
 
 // ExecutePublish 执行单站发布主流程（上传、URL标准化、自动加下载器）。
 // 参数/返回：输入需包含目标站配置、发布参数和种子路径；返回与原迁移接口一致的发布结果结构。
-// 失败场景：标签限制命中、上传失败、自动加下载器参数不足时返回对应状态与提示。
+// 失败场景：上传失败、自动加下载器参数不足时返回对应状态与提示。
 // 副作用：会向目标站点发起上传请求，并可选调用下载器添加任务。
 func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map[string]any, int) {
 	targetSite := strings.TrimSpace(input.TargetSite)
@@ -50,16 +49,6 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 		payload = map[string]any{}
 	}
 
-	if restricted := publishuploader.DetectRestrictedTags(uploadData); len(restricted) > 0 {
-		return map[string]any{
-			"success":       false,
-			"logs":          fmt.Sprintf("🚫 发布前标签限制: 检测到禁转/限转/分集标签 %v", restricted),
-			"limit_reached": true,
-			"pre_check":     true,
-			"url":           nil,
-		}, 200
-	}
-
 	resolvedSavePath, resolvedDownloaderID := publishdownloader.ResolveEffectiveTarget(
 		payload,
 		strings.TrimSpace(input.FallbackSavePath),
@@ -69,9 +58,9 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 	buildPreCheckFailure := func(reason string) (map[string]any, int) {
 		trimmedReason := strings.TrimSpace(reason)
 		if trimmedReason == "" {
-			trimmedReason = "已触发限制"
+			trimmedReason = "参数校验未通过"
 		}
-		message := fmt.Sprintf("🚫 发布前预检查触发限制: %s", trimmedReason)
+		message := fmt.Sprintf("发布前校验失败: %s", trimmedReason)
 		return map[string]any{
 			"success":       false,
 			"logs":          message,
@@ -86,14 +75,6 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 	}
 	if resolvedDownloaderID == "" {
 		return buildPreCheckFailure("缺少有效 downloaderId，已停止发布")
-	}
-
-	canContinue, limitMessage := publishguard.CheckDownloaderGate(resolvedDownloaderID)
-	if !canContinue {
-		if strings.TrimSpace(limitMessage) == "" {
-			limitMessage = "已触发限制"
-		}
-		return buildPreCheckFailure(limitMessage)
 	}
 
 	publishURL, directDownloadURL, logs, isExistingTorrent, uploadFormFields, publishErr := PublishTorrentToTarget(
@@ -276,14 +257,6 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 				addPayload["useDefaultDownloader"] = raw
 			} else if raw, exists := payload["use_default_downloader"]; exists {
 				addPayload["useDefaultDownloader"] = raw
-			}
-			if tags, exists := uploadData["tags"]; exists {
-				addPayload["tags"] = tags
-			}
-			if standardized, ok := uploadData["standardized_params"].(map[string]any); ok && standardized != nil {
-				if tags, exists := standardized["tags"]; exists {
-					addPayload["tags"] = tags
-				}
 			}
 
 			addResult, _ := deps.AddToDownloader(addPayload)

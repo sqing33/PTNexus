@@ -1,5 +1,7 @@
 import { computed, nextTick, type ComputedRef, type Ref } from 'vue'
 import axios from 'axios'
+import { ElMessageBox } from 'element-plus'
+import { useTaskMonitorStore } from '@/stores/taskMonitor'
 import { ElNotification } from '@/utils/uiNotify'
 import { resolveSourceTorrentId } from '@/utils/sourceTorrentId'
 
@@ -31,6 +33,7 @@ export type SeedFlowDeps = {
   isLoading: Ref<boolean>
   isDataFromDatabase: Ref<boolean>
   taskId: Ref<string | null>
+  isRefetchingFromSource: Ref<boolean>
 
   torrentData: Ref<TorrentData>
   reverseMappings: Ref<ReverseMappings>
@@ -62,7 +65,9 @@ export type SeedFlowApi = {
   saveAutoAddExistingSetting: () => Promise<void>
   saveAutoUpdateExistingTorrentSetting: () => Promise<void>
   fetchTorrentInfo: (prefetchedDbSeedInfo?: unknown) => Promise<void>
+  refetchFromSource: () => Promise<void>
   handleTeamInput: (param: TitleComponent, value: string) => void
+  saveCurrentSeedEdits: () => Promise<boolean>
   goToPublishPreviewStep: () => Promise<void>
   goToSelectSiteStep: () => Promise<void>
   toggleSiteSelection: (siteName: string) => void
@@ -70,6 +75,12 @@ export type SeedFlowApi = {
   clearAllTargetSites: () => void
   invalidStandardParams: ComputedRef<Array<StandardParamKey | 'tags'>>
   allTagOptions: ComputedRef<TagOption[]>
+}
+
+type SaveSeedEditsOptions = {
+  loadingMessage: string
+  successMessage: string
+  moveToPreview: boolean
 }
 
 type DbSeedRecord = {
@@ -106,8 +117,19 @@ type DbSeedInfoResponse = {
   should_fetch?: boolean
   task_id?: string
   success?: boolean
+  message?: string
   reverse_mappings?: ReverseMappings
   data?: DbSeedRecord
+}
+
+type ScreenshotValidationResult = {
+  allValid: boolean
+  checkedCount: number
+  totalCount: number
+  failedIndex?: number
+  failedUrl?: string
+  failureReason?: 'timeout' | 'load_error'
+  detailMessage?: string
 }
 
 export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
@@ -125,6 +147,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     isLoading,
     isDataFromDatabase,
     taskId,
+    isRefetchingFromSource,
     torrentData,
     reverseMappings,
     logProgressTaskId,
@@ -149,54 +172,154 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     return 'none'
   }
 
-  const isRestrictedTag = (tag: string): boolean => {
-    return (
-      tag === '禁转' ||
-      tag === 'tag.禁转' ||
-      tag === '限转' ||
-      tag === 'tag.限转' ||
-      tag === '分集' ||
-      tag === 'tag.分集'
-    )
-  }
+  const screenshotValidateTimeoutMs = 15000
 
-  const hasRestrictedTags = (): boolean => {
-    const tags = torrentData.value.standardized_params.tags || []
-    return tags.some((tag) => typeof tag === 'string' && isRestrictedTag(tag))
-  }
+  const formatScreenshotUrlForMessage = (url: string) => {
+    const normalized = String(url || '').trim()
+    if (!normalized) return '空链接'
 
-  const checkScreenshotValidity = async () => {
-    if (hasRestrictedTags()) {
-      screenshotValid.value = true
-      return
+    try {
+      const parsed = new URL(normalized)
+      const compactPath = `${parsed.hostname}${parsed.pathname}`.replace(/\/{2,}/g, '/')
+      return compactPath.length > 96 ? `${compactPath.slice(0, 96)}...` : compactPath
+    } catch {
+      return normalized.length > 96 ? `${normalized.slice(0, 96)}...` : normalized
     }
+  }
+
+  const buildScreenshotValidationMessage = (
+    failedIndex: number,
+    totalCount: number,
+    failedUrl: string,
+    failureReason: 'timeout' | 'load_error',
+  ) => {
+    const reasonText =
+      failureReason === 'timeout'
+        ? `加载超过 ${Math.round(screenshotValidateTimeoutMs / 1000)} 秒`
+        : '图片加载失败'
+    return `第 ${failedIndex}/${totalCount} 张截图校验失败：${reasonText}（${formatScreenshotUrlForMessage(
+      failedUrl,
+    )}）`
+  }
+
+  const validateSingleScreenshot = async (
+    url: string,
+    index: number,
+    totalCount: number,
+  ): Promise<ScreenshotValidationResult> =>
+    await new Promise((resolve) => {
+      const img = new Image()
+      let settled = false
+
+      const finalize = (result: ScreenshotValidationResult) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        img.onload = null
+        img.onerror = null
+        resolve(result)
+      }
+
+      const timer = setTimeout(() => {
+        finalize({
+          allValid: false,
+          checkedCount: index - 1,
+          totalCount,
+          failedIndex: index,
+          failedUrl: url,
+          failureReason: 'timeout',
+          detailMessage: buildScreenshotValidationMessage(index, totalCount, url, 'timeout'),
+        })
+      }, screenshotValidateTimeoutMs)
+
+      img.onload = () => {
+        finalize({
+          allValid: true,
+          checkedCount: index,
+          totalCount,
+        })
+      }
+
+      img.onerror = () => {
+        finalize({
+          allValid: false,
+          checkedCount: index - 1,
+          totalCount,
+          failedIndex: index,
+          failedUrl: url,
+          failureReason: 'load_error',
+          detailMessage: buildScreenshotValidationMessage(index, totalCount, url, 'load_error'),
+        })
+      }
+
+      img.src = url
+    })
+
+  const checkScreenshotValidity = async (
+    onProgress?: (payload: { index: number; totalCount: number; url: string }) => void,
+  ): Promise<ScreenshotValidationResult> => {
     const screenshots = screenshotImages.value
     if (screenshots.length === 0) {
       screenshotValid.value = true
-      return
-    }
-
-    let allValid = true
-    for (const url of screenshots) {
-      try {
-        await new Promise((resolve, reject) => {
-          const img = new Image()
-          img.onload = () => resolve(true)
-          img.onerror = () => reject(new Error('Image load failed'))
-          img.src = url
-        })
-      } catch {
-        allValid = false
-        break
+      return {
+        allValid: true,
+        checkedCount: 0,
+        totalCount: 0,
       }
     }
 
-    screenshotValid.value = allValid
+    const totalCount = screenshots.length
+    for (const [index, url] of screenshots.entries()) {
+      const currentIndex = index + 1
+      onProgress?.({ index: currentIndex, totalCount, url })
+      const validationResult = await validateSingleScreenshot(url, currentIndex, totalCount)
+      if (!validationResult.allValid) {
+        screenshotValid.value = false
+        return validationResult
+      }
+    }
+
+    screenshotValid.value = true
+    return {
+      allValid: true,
+      checkedCount: totalCount,
+      totalCount,
+    }
   }
 
   const setFetchFlowError = (message: string) => {
     fetchFlowErrorMessage.value = message.trim() || '获取种子信息时发生错误，请查看后台日志。'
     showLogProgress.value = true
+  }
+
+  const taskMonitorStore = useTaskMonitorStore()
+
+  const buildFetchRouteTarget = (_patch?: { taskId?: string; status?: string }) => undefined
+
+  const createFetchMonitorKey = (siteName: string, torrentId: string) =>
+    `seed_fetch:${siteName}:${torrentId}`
+
+  const createRefetchMonitorKey = (siteName: string, torrentId: string) =>
+    `seed_refetch:${siteName}:${torrentId}`
+
+  const updateFetchTaskStage = (
+    key: string,
+    rawId: string | null | undefined,
+    patch: {
+      message: string
+      progressText: string
+      routeTarget?: { path: string; query?: Record<string, string> }
+    },
+  ) => {
+    taskMonitorStore.markRunning({
+      key,
+      kind: key.startsWith('seed_refetch:') ? 'seed_refetch' : 'seed_fetch',
+      rawId: rawId || undefined,
+      title: key.startsWith('seed_refetch:') ? '重新抓取源种子信息' : '抓取源种子信息',
+      message: patch.message,
+      progressText: patch.progressText,
+      routeTarget: patch.routeTarget,
+    })
   }
 
   const getEnglishSiteName = async (chineseSiteName: string): Promise<string> => {
@@ -281,6 +404,428 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     }
   }
 
+  const applyDbSeedData = async (
+    dbData: DbSeedRecord,
+    options: {
+      torrentId: string
+      englishSiteName: string
+      taskIdValue: string | null
+      successNotification?: { title: string; message: string } | null
+      checkBdinfoFromFetch: boolean
+      screenshotPreviewRequired?: boolean
+      monitorKey?: string
+      monitorTitle?: string
+      monitorKind?: 'seed_fetch' | 'seed_refetch'
+    },
+  ): Promise<ScreenshotValidationResult> => {
+    if (options.successNotification) {
+      ElNotification.closeAll()
+      ElNotification.success(options.successNotification)
+    }
+
+    if (!dbData || !dbData.title) {
+      throw new Error('数据库返回的种子信息不完整')
+    }
+
+    if (options.taskIdValue) {
+      taskId.value = options.taskIdValue
+    } else {
+      taskId.value = `db_${options.torrentId}_${options.englishSiteName}`
+    }
+
+    const normalizedMedia = normalizeIntroBodyAndMediainfo(dbData.body || '', dbData.mediainfo || '')
+    const compositeSeedId = `${dbData.hash || options.torrentId}_${options.torrentId}_${options.englishSiteName}`
+    const monitorRouteTarget =
+      options.monitorKey && options.taskIdValue
+        ? buildFetchRouteTarget({ taskId: options.taskIdValue, status: 'running' })
+        : undefined
+
+    if (options.monitorKey && options.monitorTitle) {
+      updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+        message: `${options.monitorTitle}：正在填充维护表单`,
+        progressText: '正在整理抓取结果并写入面板',
+        routeTarget: monitorRouteTarget,
+      })
+    }
+
+    torrentData.value = {
+      seed_id: compositeSeedId,
+      original_main_title: dbData.title || '',
+      title_components: dbData.title_components || [],
+      subtitle: dbData.subtitle || '',
+      imdb_link: dbData.imdb_link || '',
+      douban_link: dbData.douban_link || '',
+      tmdb_link: dbData.tmdb_link || '',
+      screenshot_review_status: normalizeScreenshotReviewStatus(dbData.screenshot_review_status),
+      intro: {
+        statement: filterExtraEmptyLines(dbData.statement || '') || '',
+        poster: dbData.poster || '',
+        body: normalizedMedia.body || '',
+        screenshots: dbData.screenshots || '',
+        removed_ardtudeclarations: dbData.removed_ardtudeclarations || [],
+      },
+      mediainfo: normalizedMedia.mediainfo || '',
+      source_params: dbData.source_params || {},
+      standardized_params: {
+        type: dbData.type || '',
+        medium: dbData.medium || '',
+        video_codec: dbData.video_codec || '',
+        audio_codec: dbData.audio_codec || '',
+        resolution: dbData.resolution || '',
+        team: dbData.team || '',
+        source: dbData.source || '',
+        tags: (dbData.tags || []).sort((a: string, b: string) => {
+          const restricted = ['禁转', 'tag.禁转', '限转', 'tag.限转', '分集', 'tag.分集']
+          const isRa = restricted.includes(a)
+          const isRb = restricted.includes(b)
+          return isRa === isRb ? 0 : isRa ? -1 : 1
+        }),
+      },
+      final_publish_parameters: dbData.final_publish_parameters || {},
+      complete_publish_params: dbData.complete_publish_params || {},
+      raw_params_for_preview: dbData.raw_params_for_preview || {},
+    }
+
+    if ((!dbData.title_components || dbData.title_components.length === 0) && dbData.title) {
+      try {
+        const parseResponse = await axios.post('/api/utils/parse_title', { title: dbData.title })
+        if (parseResponse.data.success) {
+          torrentData.value.title_components = parseResponse.data.components
+          ElNotification.info({
+            title: '标题解析',
+            message: '已自动解析主标题为组件信息。',
+          })
+        }
+      } catch (error) {
+        console.warn('自动解析标题失败:', error)
+      }
+    }
+
+    if ((!torrentData.value.imdb_link || !torrentData.value.douban_link) && torrentData.value.intro.body) {
+      let imdbExtracted = false
+      let doubanExtracted = false
+      if (!torrentData.value.imdb_link) {
+        const imdbRegex = /(https?:\/\/www\.imdb\.com\/title\/tt\d+)/
+        const imdbMatch = torrentData.value.intro.body.match(imdbRegex)
+        if (imdbMatch && imdbMatch[1]) {
+          torrentData.value.imdb_link = imdbMatch[1]
+          imdbExtracted = true
+        }
+      }
+      if (!torrentData.value.douban_link) {
+        const doubanRegex = /(https:\/\/movie\.douban\.com\/subject\/\d+)/
+        const doubanMatch = torrentData.value.intro.body.match(doubanRegex)
+        if (doubanMatch && doubanMatch[1]) {
+          torrentData.value.douban_link = doubanMatch[1]
+          doubanExtracted = true
+        }
+      }
+      if (imdbExtracted || doubanExtracted) {
+        const messages = []
+        if (imdbExtracted) messages.push('IMDb链接')
+        if (doubanExtracted) messages.push('豆瓣链接')
+        ElNotification.info({
+          title: '自动填充',
+          message: `已从简介正文中自动提取并填充 ${messages.join(' 和 ')}。`,
+        })
+      }
+    }
+
+    isDataFromDatabase.value = true
+    activeStep.value = 0
+    if (options.monitorKey && options.monitorTitle) {
+      updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+        message: `${options.monitorTitle}：正在检查 BDInfo 与截图`,
+        progressText: options.checkBdinfoFromFetch ? '正在触发 BDInfo 检查' : '正在检查截图有效性',
+        routeTarget: monitorRouteTarget,
+      })
+    }
+    checkAndStartBDInfoProgress(compositeSeedId, options.checkBdinfoFromFetch)
+    await nextTick()
+    if (options.monitorKey && options.monitorTitle) {
+      updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+        message: `${options.monitorTitle}：正在校验截图有效性`,
+        progressText: '正在逐张检查截图链接',
+        routeTarget: monitorRouteTarget,
+      })
+    }
+    const screenshotValidationResult = await checkScreenshotValidity(({ index, totalCount, url }) => {
+      if (!options.monitorKey || !options.monitorTitle) return
+      updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+        message: `${options.monitorTitle}：正在校验截图有效性`,
+        progressText: `正在校验第 ${index}/${totalCount} 张截图（${formatScreenshotUrlForMessage(url)}）`,
+        routeTarget: monitorRouteTarget,
+      })
+    })
+    if (!screenshotValidationResult.allValid) {
+      const validationMessage =
+        screenshotValidationResult.detailMessage || '截图校验失败，请手动修复或重新获取截图。'
+      if (options.monitorKey && options.monitorTitle) {
+        updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+          message: `${options.monitorTitle}：截图校验异常`,
+          progressText: validationMessage,
+          routeTarget: monitorRouteTarget,
+        })
+      }
+      ElNotification.warning({
+        title: '截图校验异常',
+        message: `${validationMessage}。维护表单已继续加载，请手动修复或重新获取截图。`,
+        duration: 0,
+        showClose: true,
+      })
+    }
+    if (options.screenshotPreviewRequired) {
+      if (options.monitorKey && options.monitorTitle) {
+        updateFetchTaskStage(options.monitorKey, options.taskIdValue, {
+          message: `${options.monitorTitle}：等待截图人工确认`,
+          progressText: '请在截图预览中确认或补充截图',
+          routeTarget: monitorRouteTarget,
+        })
+      }
+      await openFetchedScreenshotPreview()
+    }
+    return screenshotValidationResult
+  }
+
+  const buildFetchStorePayload = (
+    torrentId: string,
+    taskIdValue?: string | null,
+    forceRefresh?: boolean,
+  ) => {
+    const currentTorrent = torrent.value
+    if (!currentTorrent) {
+      throw new Error('当前种子为空，请刷新后重试')
+    }
+
+    const fallbackDownloaderId =
+      currentTorrent.downloaderIds && currentTorrent.downloaderIds.length > 0
+        ? currentTorrent.downloaderIds[0]
+        : null
+    const primaryDownloaderId = currentTorrent.downloaderId || fallbackDownloaderId
+
+    return {
+      sourceSite: sourceSite.value,
+      searchTerm: torrentId,
+      savePath: currentTorrent.save_path,
+      torrentName: currentTorrent.name,
+      downloaderId: primaryDownloaderId,
+      screenshotReviewMode: 'interactive',
+      ...(taskIdValue ? { task_id: taskIdValue } : {}),
+      ...(forceRefresh ? { force_refresh: true } : {}),
+    }
+  }
+
+  const fetchAndReloadFromSource = async (options: {
+    monitorKey: string
+    monitorTitle: string
+    monitorKind: 'seed_fetch' | 'seed_refetch'
+    torrentId: string
+    englishSiteName: string
+    taskIdValue?: string | null
+    forceRefresh?: boolean
+    successNotification: { title: string; message: string }
+    screenshotPreviewRequired?: boolean
+    maxDbReadAttempts?: number
+    dbRetryDelayMs?: number
+    dbReadFailureMessage?: string
+  }) => {
+    const storeResponse = await axios.post(
+      '/api/migrate/fetch_and_store',
+      buildFetchStorePayload(options.torrentId, options.taskIdValue, options.forceRefresh),
+      { timeout: 600000 },
+    )
+
+    const backendTaskId = storeResponse.data.task_id || options.taskIdValue || null
+    updateFetchTaskStage(options.monitorKey, backendTaskId, {
+      message: `${options.monitorTitle}：源站抓取已返回，正在等待数据库回读`,
+      progressText:
+        (options.maxDbReadAttempts ?? 1) > 1 ? '正在轮询数据库回读结果' : '正在从数据库回读最新数据',
+      routeTarget: buildFetchRouteTarget({ taskId: backendTaskId || undefined, status: 'running' }),
+    })
+
+    if (!storeResponse.data.success) {
+      ElNotification.closeAll()
+      setFetchFlowError(storeResponse.data.message || '从源站点抓取失败')
+      return false
+    }
+
+    const maxDbReadAttempts = Math.max(options.maxDbReadAttempts ?? 1, 1)
+    const dbRetryDelayMs = Math.max(options.dbRetryDelayMs ?? 1000, 0)
+    let finalDbResponse: { data?: DbSeedInfoResponse } | null = null
+
+    for (let attempt = 1; attempt <= maxDbReadAttempts; attempt++) {
+      updateFetchTaskStage(options.monitorKey, backendTaskId, {
+        message: `${options.monitorTitle}：正在等待数据库写入结果`,
+        progressText:
+          maxDbReadAttempts > 1
+            ? `数据库回读重试 ${attempt}/${maxDbReadAttempts}`
+            : '正在从数据库回读最新数据',
+        routeTarget: buildFetchRouteTarget({ taskId: backendTaskId || undefined, status: 'running' }),
+      })
+      try {
+        if (maxDbReadAttempts > 1) {
+          console.log(
+            `重试从数据库读取种子信息: ${options.torrentId} from ${sourceSite.value} (${options.englishSiteName}) attempt=${attempt}/${maxDbReadAttempts}`,
+          )
+        }
+        finalDbResponse = await axios.get<DbSeedInfoResponse>('/api/migrate/get_db_seed_info', {
+          params: {
+            torrent_id: options.torrentId,
+            site_name: options.englishSiteName,
+          },
+          timeout: 600000,
+        })
+
+        if (finalDbResponse.data?.success && finalDbResponse.data?.data) {
+          break
+        }
+
+        const failureMessage = finalDbResponse.data?.message
+        console.warn(`数据库读取第${attempt}次失败：${failureMessage || '响应数据不完整'}`)
+      } catch (error) {
+        console.warn(`数据库读取第${attempt}次失败：`, error)
+        if (attempt === maxDbReadAttempts) {
+          throw error
+        }
+      }
+
+      if (attempt < maxDbReadAttempts && dbRetryDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, dbRetryDelayMs))
+      }
+    }
+
+    if (!finalDbResponse?.data?.success || !finalDbResponse.data.data) {
+      ElNotification.closeAll()
+      setFetchFlowError(options.dbReadFailureMessage || '数据抓取成功但从数据库读取失败')
+      return false
+    }
+
+    if (finalDbResponse.data.reverse_mappings) {
+      reverseMappings.value = finalDbResponse.data.reverse_mappings
+    }
+
+    await applyDbSeedData(finalDbResponse.data.data, {
+      torrentId: options.torrentId,
+      englishSiteName: options.englishSiteName,
+      taskIdValue: storeResponse.data.task_id || options.taskIdValue || null,
+      successNotification: options.successNotification,
+      checkBdinfoFromFetch: true,
+      screenshotPreviewRequired:
+        options.screenshotPreviewRequired ?? !!storeResponse.data.screenshot_preview_required,
+      monitorKey: options.monitorKey,
+      monitorTitle: options.monitorTitle,
+      monitorKind: options.monitorKind,
+    })
+
+    return true
+  }
+
+  const refetchFromSource = async () => {
+    if (!sourceSite.value || !torrent.value || isLoading.value || isRefetchingFromSource.value) return
+
+    const confirmed = await ElMessageBox.confirm(
+      '重新从源站拉取后，当前面板内未保存的手动修改将被最新抓取结果覆盖，是否继续？',
+      '确认重新拉取',
+      {
+        type: 'warning',
+        confirmButtonText: '继续拉取',
+        cancelButtonText: '取消',
+      },
+    ).catch(() => false)
+    if (!confirmed) return
+
+    const siteDetails = torrent.value.sites[sourceSite.value]
+    if (!siteDetails) {
+      ElNotification.error({
+        title: '参数错误',
+        message: `无法获取源站点 ${sourceSite.value} 的详情信息。`,
+        duration: 0,
+        showClose: true,
+      })
+      return
+    }
+
+    const torrentId = resolveSourceTorrentId({
+      sourceInfoTorrentId: sourceTorrentId.value,
+      siteDetails,
+    })
+    if (!torrentId) {
+      ElNotification.error({
+        title: '参数错误',
+        message: `无法从源站点 ${sourceSite.value} 的链接或种子ID中提取有效的源站ID。`,
+        duration: 0,
+        showClose: true,
+      })
+      return
+    }
+
+    isRefetchingFromSource.value = true
+    isLoading.value = true
+    fetchFlowErrorMessage.value = ''
+
+    const refetchMonitorKey = createRefetchMonitorKey(sourceSite.value, torrentId)
+    const refetchTaskId = taskId.value || refetchMonitorKey
+    taskMonitorStore.markRunning({
+      key: refetchMonitorKey,
+      kind: 'seed_refetch',
+      rawId: refetchTaskId,
+      title: '重新抓取源种子信息',
+      message: `正在重新抓取 ${sourceSite.value} 种子信息`,
+      progressText: '正在准备日志流',
+      routeTarget: buildFetchRouteTarget({ taskId: refetchTaskId, status: 'running' }),
+    })
+    logProgressTaskId.value = refetchTaskId
+    showLogProgress.value = true
+
+    try {
+      const englishSiteName = await getEnglishSiteName(sourceSite.value)
+      const reloaded = await fetchAndReloadFromSource({
+        monitorKey: refetchMonitorKey,
+        monitorTitle: '重新抓取源种子信息',
+        monitorKind: 'seed_refetch',
+        torrentId,
+        englishSiteName,
+        taskIdValue: refetchTaskId,
+        forceRefresh: true,
+        successNotification: {
+          title: '拉取成功',
+          message: '已重新从源站拉取并覆盖当前面板数据，请重新核对。',
+        },
+      })
+      if (!reloaded) {
+        return
+      }
+      taskMonitorStore.markSuccess(refetchMonitorKey, {
+        kind: 'seed_refetch',
+        rawId: refetchTaskId,
+        title: '重新抓取源种子信息',
+        message: '已重新从源站拉取并覆盖当前面板数据',
+        progressText: '可继续核对并修改完成',
+        routeTarget: buildFetchRouteTarget({ taskId: refetchTaskId, status: 'success' }),
+      })
+    } catch (error: unknown) {
+      taskMonitorStore.markFailed(refetchMonitorKey, {
+        kind: 'seed_refetch',
+        rawId: refetchTaskId,
+        title: '重新抓取源种子信息',
+        message: '重新抓取源种子信息失败',
+        progressText: `来源站点 ${sourceSite.value}`,
+        error:
+          axios.isAxiosError(error)
+            ? ((error.response?.data as { message?: string } | undefined)?.message || error.message)
+            : error instanceof Error
+              ? error.message
+              : '重新从源站拉取时发生错误，请查看后台日志。',
+        routeTarget: buildFetchRouteTarget({ taskId: refetchTaskId, status: 'failed' }),
+      })
+      ElNotification.closeAll()
+      handleApiError(error, '重新从源站拉取时发生错误，请查看后台日志。')
+    } finally {
+      isRefetchingFromSource.value = false
+      isLoading.value = false
+    }
+  }
+
   const fetchTorrentInfo = async (prefetchedDbSeedInfo?: unknown) => {
     if (!sourceSite.value || !torrent.value) return
     fetchFlowErrorMessage.value = ''
@@ -306,8 +851,30 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
     isLoading.value = true
 
-    // 生成任务ID并显示进度组件
-    const tempTaskId = `fetch_${torrentId}_${Date.now()}`
+    if (prefetchedDbSeedInfo) {
+      ElNotification.info({
+        title: '正在准备维护表单',
+        message: '缓存已命中，正在整理字段并检查截图有效性；检查完成前“修改完成”按钮会暂时禁用。',
+        duration: 0,
+        showClose: true,
+      })
+    }
+
+    const fetchMonitorKey = createFetchMonitorKey(sourceSite.value, torrentId)
+    const tempTaskId = taskId.value || fetchMonitorKey
+    const initialTaskId = taskId.value || tempTaskId
+    let activeFetchTaskId = initialTaskId
+    const baseRouteTarget = buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'running' })
+    taskMonitorStore.markRunning({
+      key: fetchMonitorKey,
+      kind: 'seed_fetch',
+      rawId: activeFetchTaskId,
+      title: '抓取源种子信息',
+      message: prefetchedDbSeedInfo ? '正在加载缓存种子信息' : `正在抓取 ${sourceSite.value} 种子信息`,
+      progressText: prefetchedDbSeedInfo ? '正在读取数据库缓存' : '正在准备日志流',
+      routeTarget: baseRouteTarget,
+    })
+
     if (!prefetchedDbSeedInfo) {
       logProgressTaskId.value = tempTaskId
       showLogProgress.value = true
@@ -336,6 +903,31 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
             timeout: 600000, // 10分钟超时
           })
 
+      if (prefetchedDbSeedInfo) {
+        taskMonitorStore.markRunning({
+          key: fetchMonitorKey,
+          kind: 'seed_fetch',
+          rawId: activeFetchTaskId,
+          title: '抓取源种子信息',
+          message: '正在填充维护表单并检查截图有效性',
+          progressText: '缓存已命中，正在执行截图校验',
+          routeTarget: undefined,
+        })
+      }
+
+      if (dbResponse.data.task_id) {
+        activeFetchTaskId = dbResponse.data.task_id
+        taskMonitorStore.markRunning({
+          key: fetchMonitorKey,
+          kind: 'seed_fetch',
+          rawId: activeFetchTaskId,
+          title: '抓取源种子信息',
+          message: prefetchedDbSeedInfo ? '正在整理缓存种子信息' : `正在处理 ${sourceSite.value} 种子信息`,
+          progressText: dbResponse.status === 202 ? '正在等待源站抓取完成' : '正在校验并填充维护表单',
+          routeTarget: buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'running' }),
+        })
+      }
+
       // 检查是否需要继续抓取（202状态码）
       if (!prefetchedDbSeedInfo && dbResponse.status === 202 && dbResponse.data.should_fetch) {
         console.log('数据库中没有缓存，继续使用同一日志流从源站点抓取...')
@@ -344,234 +936,96 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
         // 直接调用 fetch_and_store，传入相同的 task_id
         try {
-          const storeResponse = await axios.post(
-            '/api/migrate/fetch_and_store',
-            {
-              sourceSite: sourceSite.value,
-              searchTerm: torrentId,
-              savePath: torrent.value.save_path,
-              torrentName: torrent.value.name,
-              downloaderId: torrent.value.downloaderId,
-              screenshotReviewMode: 'interactive',
-              task_id: continuedTaskId, // 传递相同的task_id以继续使用同一日志流
+          const reloaded = await fetchAndReloadFromSource({
+            monitorKey: fetchMonitorKey,
+            monitorTitle: '抓取源种子信息',
+            monitorKind: 'seed_fetch',
+            torrentId,
+            englishSiteName,
+            taskIdValue: continuedTaskId,
+            successNotification: {
+              title: '抓取成功',
+              message: '种子信息已成功抓取并存储到数据库，请核对。',
             },
-            {
-              timeout: 600000,
-            },
-          )
-
-          if (!storeResponse.data.success) {
-            ElNotification.closeAll()
-
-            // 1. 获取错误消息
-            const errorMsg = storeResponse.data.message || '从源站点抓取失败'
-
-            // 2. 在抓取流程里展示错误
-            setFetchFlowError(errorMsg)
-
-            // 4. 停止加载，但不触发取消（修复问题：避免组件销毁导致弹窗无法显示）
+          })
+          if (!reloaded) {
             isLoading.value = false
             return
           }
-
-          // 抓取成功后，再次从数据库读取（使用相同逻辑）
-          const finalDbResponse = await axios.get('/api/migrate/get_db_seed_info', {
-            params: {
-              torrent_id: torrentId,
-              site_name: englishSiteName,
-            },
-            timeout: 600000,
-          })
-
-          if (!finalDbResponse.data.success) {
-            ElNotification.closeAll()
-
-            // 1. 获取错误消息
-            const errorMsg = '数据抓取成功但从数据库读取失败'
-
-            // 2. 在抓取流程里展示错误
-            setFetchFlowError(errorMsg)
-
-            // 4. 停止加载，但不触发取消（修复问题：避免组件销毁导致弹窗无法显示）
-            isLoading.value = false
-            return
-          }
-
-          // 处理成功的数据（与下面的逻辑相同）
-          ElNotification.closeAll()
-          ElNotification.success({
-            title: '抓取成功',
-            message: '种子信息已成功抓取并存储到数据库，请核对。',
-          })
-
-          const dbData = finalDbResponse.data.data
-          if (finalDbResponse.data.reverse_mappings) {
-            reverseMappings.value = finalDbResponse.data.reverse_mappings
-          }
-
-          // 构建复合主键作为seed_id
-          const compositeSeedId = `${dbData.hash || torrentId}_${torrentId}_${englishSiteName}`
-
-          torrentData.value = {
-            seed_id: compositeSeedId,
-            original_main_title: dbData.title || '',
-            title_components: dbData.title_components || [],
-            subtitle: dbData.subtitle,
-            imdb_link: dbData.imdb_link,
-            douban_link: dbData.douban_link,
-            tmdb_link: dbData.tmdb_link,
-            screenshot_review_status: normalizeScreenshotReviewStatus(
-              dbData.screenshot_review_status,
-            ),
-            intro: {
-              statement: filterExtraEmptyLines(dbData.statement) || '',
-              poster: dbData.poster || '',
-              body: normalizeIntroBodyAndMediainfo(dbData.body, dbData.mediainfo).body || '',
-              screenshots: dbData.screenshots || '',
-              removed_ardtudeclarations: dbData.removed_ardtudeclarations || [],
-            },
-            mediainfo: normalizeIntroBodyAndMediainfo(dbData.body, dbData.mediainfo).mediainfo || '',
-            source_params: dbData.source_params || {},
-            standardized_params: {
-              type: dbData.type || '',
-              medium: dbData.medium || '',
-              video_codec: dbData.video_codec || '',
-              audio_codec: dbData.audio_codec || '',
-              resolution: dbData.resolution || '',
-              team: dbData.team || '',
-              source: dbData.source || '',
-              tags: (dbData.tags || []).sort((a: string, b: string) => {
-                const restricted = ['禁转', 'tag.禁转', '限转', 'tag.限转', '分集', 'tag.分集']
-                const isRa = restricted.includes(a)
-                const isRb = restricted.includes(b)
-                return isRa === isRb ? 0 : isRa ? -1 : 1
-              }),
-            },
-            final_publish_parameters: dbData.final_publish_parameters || {},
-            complete_publish_params: dbData.complete_publish_params || {},
-            raw_params_for_preview: dbData.raw_params_for_preview || {},
-          }
-
-          taskId.value = storeResponse.data.task_id
-          isDataFromDatabase.value = true
-          activeStep.value = 0
-
-          // 检查 BDInfo 进度状态（从抓取流程调用，增加重试次数和延迟）
-          checkAndStartBDInfoProgress(compositeSeedId, true)
-
           isLoading.value = false
-          await nextTick()
-          await checkScreenshotValidity()
-          if (!hasRestrictedTags() && storeResponse.data.screenshot_preview_required) {
-            await openFetchedScreenshotPreview()
-          }
           return
         } catch (error: unknown) {
           ElNotification.closeAll()
+          const message = axios.isAxiosError(error)
+            ? ((error.response?.data as { message?: string } | undefined)?.message || error.message)
+            : error instanceof Error
+              ? error.message
+              : '从源站点抓取时发生错误，请查看后台日志。'
+          taskMonitorStore.markFailed(fetchMonitorKey, {
+            kind: 'seed_fetch',
+            rawId: activeFetchTaskId,
+            title: '抓取源种子信息',
+            message: '源站抓取失败',
+            progressText: `来源站点 ${sourceSite.value}`,
+            error: message,
+            routeTarget: buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'failed' }),
+          })
           handleApiError(error, '从源站点抓取时发生错误，请查看后台日志。')
           isLoading.value = false
           return
         }
-      } else if (dbResponse.data.success) {
+      } else if (dbResponse.data.success && dbResponse.data.data) {
         ElNotification.closeAll()
-        ElNotification.success({
-          title: '读取成功',
-          message: '种子信息已从数据库成功加载，请核对。',
-        })
 
-        // 验证数据库返回的数据完整性
-        const dbData = dbResponse.data.data
-        if (!dbData || !dbData.title) {
-          throw new Error('数据库返回的种子信息不完整')
-        }
-
-        // 从后端响应中提取反向映射表
         if (dbResponse.data.reverse_mappings) {
           reverseMappings.value = dbResponse.data.reverse_mappings
           console.log('成功加载反向映射表:', reverseMappings.value)
           console.log('type映射数量:', Object.keys(reverseMappings.value.type || {}).length)
-          console.log('当前standardized_params:', dbData.standardized_params)
+          console.log('当前standardized_params:', dbResponse.data.data.standardized_params)
         } else {
           console.warn('后端未返回反向映射表，将使用空的默认映射')
         }
 
-        // 构建复合主键作为seed_id
-        const compositeSeedId = `${dbData.hash || torrentId}_${torrentId}_${englishSiteName}`
-
-        // 从数据库返回的数据中提取相关信息
-        torrentData.value = {
-          seed_id: compositeSeedId,
-          original_main_title: dbData.title || '',
-          title_components: dbData.title_components || [],
-          subtitle: dbData.subtitle || '',
-          imdb_link: dbData.imdb_link || '',
-          douban_link: dbData.douban_link || '',
-          tmdb_link: dbData.tmdb_link || '',
-          screenshot_review_status: normalizeScreenshotReviewStatus(dbData.screenshot_review_status),
-          intro: {
-            statement: filterExtraEmptyLines(dbData.statement || '') || '',
-            poster: dbData.poster || '',
-            body: normalizeIntroBodyAndMediainfo(dbData.body || '', dbData.mediainfo || '').body || '',
-            screenshots: dbData.screenshots || '',
-            removed_ardtudeclarations: dbData.removed_ardtudeclarations || [],
+        const screenshotValidationResult = await applyDbSeedData(dbResponse.data.data, {
+          torrentId,
+          englishSiteName,
+          taskIdValue: dbResponse.data.task_id || `db_${torrentId}_${englishSiteName}`,
+          successNotification: {
+            title: '读取成功',
+            message: '种子信息已从数据库成功加载，请核对。',
           },
-          mediainfo:
-            normalizeIntroBodyAndMediainfo(dbData.body || '', dbData.mediainfo || '').mediainfo ||
-            '',
-          source_params: dbData.source_params || {},
-          standardized_params: {
-            type: dbData.type || '',
-            medium: dbData.medium || '',
-            video_codec: dbData.video_codec || '',
-            audio_codec: dbData.audio_codec || '',
-            resolution: dbData.resolution || '',
-            team: dbData.team || '',
-            source: dbData.source || '',
-            tags: (dbData.tags || []).sort((a: string, b: string) => {
-              const restricted = ['禁转', 'tag.禁转', '限转', 'tag.限转', '分集', 'tag.分集']
-              const isRa = restricted.includes(a)
-              const isRb = restricted.includes(b)
-              return isRa === isRb ? 0 : isRa ? -1 : 1
-            }),
-          },
-          final_publish_parameters: dbData.final_publish_parameters || {},
-          complete_publish_params: dbData.complete_publish_params || {},
-          raw_params_for_preview: dbData.raw_params_for_preview || {},
-        }
+          checkBdinfoFromFetch: false,
+        })
 
-        // 如果没有解析过的标题组件，自动解析主标题
-        if ((!dbData.title_components || dbData.title_components.length === 0) && dbData.title) {
-          try {
-            const parseResponse = await axios.post('/api/utils/parse_title', { title: dbData.title })
-            if (parseResponse.data.success) {
-              torrentData.value.title_components = parseResponse.data.components
-              ElNotification.info({
-                title: '标题解析',
-                message: '已自动解析主标题为组件信息。',
-              })
-            }
-          } catch (error) {
-            console.warn('自动解析标题失败:', error)
-          }
-        }
-
-        console.log('设置torrentData.standardized_params:', torrentData.value.standardized_params)
-        console.log('检查绑定 - type:', torrentData.value.standardized_params.type)
-        console.log('检查绑定 - medium:', torrentData.value.standardized_params.medium)
-
-        // 直接使用从数据库返回的 taskId，如果后端没有返回则生成标识符
         if (dbResponse.data.task_id) {
-          taskId.value = dbResponse.data.task_id // 使用从数据库返回的 taskId
           ElNotification.success({
             title: '缓存准备完成',
-            message: '发布任务已准备就绪',
+            message: '维护表单已就绪，可继续修改并保存',
           })
         } else {
-          // 如果后端未返回task_id，回退到标识符
-          taskId.value = `db_${torrentId}_${englishSiteName}`
           console.warn('后端未返回taskId，使用标识符')
         }
-        isDataFromDatabase.value = true // Mark that data was loaded from database
+
+        taskMonitorStore.markSuccess(fetchMonitorKey, {
+          kind: 'seed_fetch',
+          rawId: taskId.value || activeFetchTaskId,
+          title: '抓取源种子信息',
+          message: prefetchedDbSeedInfo
+            ? screenshotValidationResult.allValid
+              ? '维护数据已加载完成'
+              : '维护数据已加载，截图需人工检查'
+            : '数据库缓存读取完成',
+          progressText: screenshotValidationResult.allValid
+            ? '可继续核对并修改完成'
+            : screenshotValidationResult.detailMessage || '截图校验异常，请手动修复或重新获取',
+          routeTarget: buildFetchRouteTarget({
+            taskId: taskId.value || activeFetchTaskId,
+            status: 'success',
+          }),
+        })
+
+        const dbSeedData = dbResponse.data.data
+        const compositeSeedId = `${dbSeedData.hash || torrentId}_${torrentId}_${englishSiteName}`
 
         // 检查 BDInfo 进度状态（从数据库读取，使用默认重试设置）
         checkAndStartBDInfoProgress(compositeSeedId, false)
@@ -611,15 +1065,11 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         }
 
         activeStep.value = 0
-        // Check screenshot validity after loading data
         nextTick(() => {
           void checkScreenshotValidity()
         })
-        // Set flag to indicate data was loaded from database
         isDataFromDatabase.value = true
-        // 【修复】在从数据库成功读取后关闭加载动画
         isLoading.value = false
-        // Skip the scraping part since we have data from database
         return
       } else {
         // 数据库中不存在该记录，这是正常情况，不需要记录为错误
@@ -657,12 +1107,6 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         duration: 0,
       })
 
-      const fallbackDownloaderId =
-        torrent.value.downloaderIds && torrent.value.downloaderIds.length > 0
-          ? torrent.value.downloaderIds[0]
-          : null
-      const primaryDownloaderId = torrent.value.downloaderId || fallbackDownloaderId
-
       // 如果有数据库错误，显示警告信息
       if (dbReadErrorMessage) {
         console.warn(`由于数据库读取失败（${dbReadErrorMessage}），正在直接抓取数据...`)
@@ -673,220 +1117,26 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         })
       }
 
-      const storeResponse = await axios.post(
-        '/api/migrate/fetch_and_store',
-        {
-          sourceSite: sourceSite.value,
-          searchTerm: torrentId,
-          savePath: torrent.value.save_path,
-          torrentName: torrent.value.name,
-          downloaderId: primaryDownloaderId,
-          screenshotReviewMode: 'interactive',
+      const reloaded = await fetchAndReloadFromSource({
+        monitorKey: fetchMonitorKey,
+        monitorTitle: '抓取源种子信息',
+        monitorKind: 'seed_fetch',
+        torrentId,
+        englishSiteName,
+        successNotification: {
+          title: '抓取成功',
+          message: dbReadErrorMessage
+            ? '种子信息已成功抓取，请核对。由于数据库读取失败，数据未持久化存储。'
+            : '种子信息已成功抓取并存储到数据库，请核对。',
         },
-        {
-          timeout: 600000, // 10分钟超时，用于抓取和存储
-        },
-      )
+        maxDbReadAttempts: 3,
+        dbRetryDelayMs: 1000,
+        dbReadFailureMessage: '数据抓取成功但数据库读取失败，已重试3次。请检查数据库连接或稍后重试。',
+      })
 
-      if (storeResponse.data.success) {
-        // 抓取成功后，立即从数据库读取数据
-        console.log('数据抓取成功，立即从数据库读取...')
-        let dbReadAttempt = 0
-        const maxDbReadAttempts = 3
-        let dbResponseAfterStore = null
-
-        // 重试机制：多次尝试从数据库读取
-        while (dbReadAttempt < maxDbReadAttempts) {
-          dbReadAttempt++
-          try {
-            const retryEnglishSiteName = await getEnglishSiteName(sourceSite.value)
-            console.log(
-              `重试从数据库读取种子信息: ${torrentId} from ${sourceSite.value} (${retryEnglishSiteName})`,
-            )
-            dbResponseAfterStore = await axios.get('/api/migrate/get_db_seed_info', {
-              params: {
-                torrent_id: torrentId,
-                site_name: retryEnglishSiteName,
-              },
-              timeout: 600000, // 10分钟超时
-            })
-
-            if (dbResponseAfterStore.data.success) {
-              break // 成功读取，退出重试循环
-            } else {
-              console.warn(`数据库读取第${dbReadAttempt}次失败：${dbResponseAfterStore.data.message}`)
-              if (dbReadAttempt < maxDbReadAttempts) {
-                await new Promise((resolve) => setTimeout(resolve, 1000)) // 等待1秒后重试
-              }
-            }
-          } catch (readError) {
-            console.warn(`数据库读取第${dbReadAttempt}次失败：`, readError)
-            if (dbReadAttempt < maxDbReadAttempts) {
-              await new Promise((resolve) => setTimeout(resolve, 1000)) // 等待1秒后重试
-            } else {
-              throw readError // 重试次数用尽，抛出错误
-            }
-          }
-        }
-
-        if (dbResponseAfterStore && dbResponseAfterStore.data.success) {
-          ElNotification.closeAll()
-
-          // 验证数据完整性
-          const dbData = dbResponseAfterStore.data.data
-          if (!dbData || !dbData.title) {
-            throw new Error('数据库返回的种子信息不完整')
-          }
-
-          // 从后端响应中提取反向映射表
-          if (dbResponseAfterStore.data.reverse_mappings) {
-            reverseMappings.value = dbResponseAfterStore.data.reverse_mappings
-            console.log('成功加载反向映射表:', reverseMappings.value)
-          } else {
-            console.warn('后端未返回反向映射表，将使用空的默认映射')
-          }
-
-          ElNotification.success({
-            title: '抓取成功',
-            message: dbReadErrorMessage
-              ? '种子信息已成功抓取，请核对。由于数据库读取失败，数据未持久化存储。'
-              : '种子信息已成功抓取并存储到数据库，请核对。',
-          })
-
-          // 构建复合主键作为seed_id
-          const compositeSeedId = `${dbData.hash || torrentId}_${torrentId}_${englishSiteName}`
-
-          torrentData.value = {
-            seed_id: compositeSeedId,
-            original_main_title: dbData.title || '',
-            title_components: dbData.title_components || [],
-            subtitle: dbData.subtitle,
-            imdb_link: dbData.imdb_link,
-            douban_link: dbData.douban_link,
-            tmdb_link: dbData.tmdb_link,
-            screenshot_review_status: normalizeScreenshotReviewStatus(
-              dbData.screenshot_review_status,
-            ),
-            intro: {
-              statement: filterExtraEmptyLines(dbData.statement) || '',
-              poster: dbData.poster || '',
-              body: normalizeIntroBodyAndMediainfo(dbData.body, dbData.mediainfo).body || '',
-              screenshots: dbData.screenshots || '',
-              removed_ardtudeclarations: dbData.removed_ardtudeclarations || [],
-            },
-            mediainfo: normalizeIntroBodyAndMediainfo(dbData.body, dbData.mediainfo).mediainfo || '',
-            source_params: dbData.source_params || {},
-            standardized_params: {
-              type: dbData.type || '',
-              medium: dbData.medium || '',
-              video_codec: dbData.video_codec || '',
-              audio_codec: dbData.audio_codec || '',
-              resolution: dbData.resolution || '',
-              team: dbData.team || '',
-              source: dbData.source || '',
-              tags: (dbData.tags || []).sort((a: string, b: string) => {
-                const restricted = ['禁转', 'tag.禁转', '限转', 'tag.限转', '分集', 'tag.分集']
-                const isRa = restricted.includes(a)
-                const isRb = restricted.includes(b)
-                return isRa === isRb ? 0 : isRa ? -1 : 1
-              }),
-            },
-            final_publish_parameters: dbData.final_publish_parameters || {},
-            complete_publish_params: dbData.complete_publish_params || {},
-            raw_params_for_preview: dbData.raw_params_for_preview || {},
-          }
-
-          // 如果没有解析过的标题组件，自动解析主标题
-          if ((!dbData.title_components || dbData.title_components.length === 0) && dbData.title) {
-            try {
-              const parseResponse = await axios.post('/api/utils/parse_title', {
-                title: dbData.title,
-              })
-              if (parseResponse.data.success) {
-                torrentData.value.title_components = parseResponse.data.components
-                ElNotification.info({
-                  title: '标题解析',
-                  message: '已自动解析主标题为组件信息。',
-                })
-              }
-            } catch (error) {
-              console.warn('自动解析标题失败:', error)
-            }
-          }
-
-          taskId.value = storeResponse.data.task_id
-          isDataFromDatabase.value = true // Mark that data was loaded from database
-
-          // 自动提取链接的逻辑保持不变
-          if (
-            (!torrentData.value.imdb_link || !torrentData.value.douban_link) &&
-            torrentData.value.intro.body
-          ) {
-            let imdbExtracted = false
-            let doubanExtracted = false
-            if (!torrentData.value.imdb_link) {
-              const imdbRegex = /(https?:\/\/www\.imdb\.com\/title\/tt\d+)/
-              const imdbMatch = torrentData.value.intro.body.match(imdbRegex)
-              if (imdbMatch && imdbMatch[1]) {
-                torrentData.value.imdb_link = imdbMatch[1]
-                imdbExtracted = true
-              }
-            }
-            if (!torrentData.value.douban_link) {
-              const doubanRegex = /(https:\/\/movie\.douban\.com\/subject\/\d+)/
-              const doubanMatch = torrentData.value.intro.body.match(doubanRegex)
-              if (doubanMatch && doubanMatch[1]) {
-                torrentData.value.douban_link = doubanMatch[1]
-                doubanExtracted = true
-              }
-            }
-            if (imdbExtracted || doubanExtracted) {
-              const messages = []
-              if (imdbExtracted) messages.push('IMDb链接')
-              if (doubanExtracted) messages.push('豆瓣链接')
-              ElNotification.info({
-                title: '自动填充',
-                message: `已从简介正文中自动提取并填充 ${messages.join(' 和 ')}。`,
-              })
-            }
-          }
-
-          activeStep.value = 0
-          isLoading.value = false
-          await nextTick()
-          await checkScreenshotValidity()
-          if (!hasRestrictedTags() && storeResponse.data.screenshot_preview_required) {
-            await openFetchedScreenshotPreview()
-          }
-        } else {
-          ElNotification.closeAll()
-
-          // 1. 获取错误消息
-          const errorMsg = `数据抓取成功但数据库读取失败，已重试${maxDbReadAttempts}次。请检查数据库连接或稍后重试。`
-
-          // 2. 在抓取流程里展示错误
-          setFetchFlowError(errorMsg)
-
-          // 4. 停止加载，但不触发取消（修复问题：避免组件销毁导致弹窗无法显示）
-          isLoading.value = false
-        }
-      } else {
-        ElNotification.closeAll()
-        const errorMessage = storeResponse.data.message || '抓取种子信息失败'
-
-        // 1. 获取错误消息
-        let errorMsg = errorMessage
-
-        // 2. 如果是数据库相关的错误，提供更详细的建议
-        if (errorMessage.includes('数据库') || dbReadErrorMessage) {
-          errorMsg = `${errorMessage}。可能由于数据库连接问题导致，请检查数据库状态。`
-        }
-
-        // 3. 在抓取流程里展示错误
-        setFetchFlowError(errorMsg)
-
-        // 5. 停止加载，但不触发取消（修复问题：避免组件销毁导致弹窗无法显示）
+      if (!reloaded) {
         isLoading.value = false
+        return
       }
     } catch (error: unknown) {
       ElNotification.closeAll()
@@ -900,24 +1150,28 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       const code = axios.isAxiosError(error) ? error.code : undefined
       const status = axios.isAxiosError(error) ? error.response?.status : undefined
 
+      let fetchErrorMessage = message || '获取种子信息时发生错误，请查看后台日志。'
+
       // 区分不同类型的错误并提供更具体的错误信息
       if (code === 'ECONNABORTED' || message.includes('timeout')) {
-        // 1. 获取错误消息
-        const msg = '抓取种子信息超时，请检查网络连接或稍后重试。'
-        setFetchFlowError(msg)
+        fetchErrorMessage = '抓取种子信息超时，请检查网络连接或稍后重试。'
       } else if (status === 404) {
-        // 1. 获取错误消息
-        const msg = '在源站点未找到指定的种子，请检查种子ID是否正确。'
-        setFetchFlowError(msg)
+        fetchErrorMessage = '在源站点未找到指定的种子，请检查种子ID是否正确。'
       } else if (typeof status === 'number' && status >= 500) {
-        // 1. 获取错误消息
-        const msg = '后端服务器发生错误，请稍后重试或联系管理员。'
-        setFetchFlowError(msg)
-      } else {
-        // 使用原有的错误处理
-        const msg = message || '获取种子信息时发生错误，请查看后台日志。'
-        setFetchFlowError(msg)
+        fetchErrorMessage = '后端服务器发生错误，请稍后重试或联系管理员。'
       }
+
+      taskMonitorStore.markFailed(fetchMonitorKey, {
+        kind: 'seed_fetch',
+        rawId: activeFetchTaskId,
+        title: '抓取源种子信息',
+        message: '抓取源种子信息失败',
+        progressText: `来源站点 ${sourceSite.value}`,
+        error: fetchErrorMessage,
+        routeTarget: buildFetchRouteTarget({ taskId: activeFetchTaskId, status: 'failed' }),
+      })
+
+      setFetchFlowError(fetchErrorMessage)
     } finally {
       isLoading.value = false
     }
@@ -967,8 +1221,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     const currentTags = torrentData.value.standardized_params.tags || []
     const combined = [...new Set([...predefinedTags, ...currentTags])]
 
-    const filtered = combined.filter((tag) => !isRestrictedTag(tag))
-    return filtered.map((tagValue) => ({
+    return combined.map((tagValue) => ({
       value: tagValue,
       label: reverseMappings.value.tags[tagValue] || tagValue,
     }))
@@ -989,7 +1242,11 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     }
   }
 
-  const goToPublishPreviewStep = async () => {
+  const saveSeedEdits = async ({
+    loadingMessage,
+    successMessage,
+    moveToPreview,
+  }: SaveSeedEditsOptions): Promise<boolean> => {
     // 打印从store获取的已存在站点信息
     console.log('=== 从store获取的已存在站点信息 ===')
     console.log('torrent.value:', torrent.value)
@@ -1027,7 +1284,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         duration: 0,
         showClose: true,
       })
-      return
+      return false
     }
 
     const currentTorrent = torrent.value
@@ -1038,14 +1295,14 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         duration: 0,
         showClose: true,
       })
-      return
+      return false
     }
 
     isLoading.value = true
     try {
       ElNotification({
         title: '正在处理',
-        message: '正在更新参数并生成预览...',
+        message: loadingMessage,
         type: 'info',
         duration: 0,
       })
@@ -1089,7 +1346,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           duration: 0,
           showClose: true,
         })
-        return
+        return false
       }
 
       console.log(`更新种子参数: ${torrentId} from ${siteName}`)
@@ -1166,24 +1423,46 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
         ElNotification.success({
           title: '更新成功',
-          message: '参数已更新并重新标准化，请核对预览内容。',
+          message: successMessage,
         })
 
-        activeStep.value = 1
-      } else {
-        ElNotification.error({
-          title: '更新失败',
-          message: response.data.message || '更新参数失败',
-          duration: 0,
-          showClose: true,
-        })
+        if (moveToPreview) {
+          activeStep.value = 1
+        }
+
+        return true
       }
+
+      ElNotification.error({
+        title: '更新失败',
+        message: response.data.message || '更新参数失败',
+        duration: 0,
+        showClose: true,
+      })
+      return false
     } catch (error) {
       ElNotification.closeAll()
       handleApiError(error, '更新预览数据时发生错误，请查看后台日志。')
+      return false
     } finally {
       isLoading.value = false
     }
+  }
+
+  const saveCurrentSeedEdits = async () => {
+    return saveSeedEdits({
+      loadingMessage: '正在保存种子修改...',
+      successMessage: '种子修改已保存。',
+      moveToPreview: false,
+    })
+  }
+
+  const goToPublishPreviewStep = async () => {
+    await saveSeedEdits({
+      loadingMessage: '正在更新参数并生成预览...',
+      successMessage: '参数已更新并重新标准化，请核对预览内容。',
+      moveToPreview: true,
+    })
   }
 
   // 【新增】计算属性：整合预设标签和当前已选标签，用于渲染下拉列表
@@ -1296,7 +1575,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     saveAutoAddExistingSetting,
     saveAutoUpdateExistingTorrentSetting,
     fetchTorrentInfo,
+    refetchFromSource,
     handleTeamInput,
+    saveCurrentSeedEdits,
     goToPublishPreviewStep,
     goToSelectSiteStep,
     toggleSiteSelection,

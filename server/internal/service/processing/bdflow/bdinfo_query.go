@@ -206,7 +206,8 @@ func QueryBDInfoRecords(db *gorm.DB, statusFilter string, page int, pageSize int
 			COALESCE(s.nickname, sp.site_name) AS nickname,
 			sp.mediainfo_status, sp.bdinfo_task_id, sp.bdinfo_started_at, sp.bdinfo_completed_at, sp.bdinfo_error, sp.mediainfo`).
 		Joins("LEFT JOIN sites s ON sp.site_name = s.site").
-		Where("sp.bdinfo_task_id IS NOT NULL")
+		Where("sp.bdinfo_task_id IS NOT NULL").
+		Where("sp.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')")
 
 	if filter != "" {
 		switch filter {

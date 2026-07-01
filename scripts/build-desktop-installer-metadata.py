@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 
-DEFAULT_BASE_URL = "https://github.com/sqing33/PTNexus/releases/download/{version}"
+DEFAULT_BASE_URL = "https://github.com/jadylc/PTNexus/releases/download/{version}"
 DEFAULT_PLATFORM = "windows-desktop"
 
 

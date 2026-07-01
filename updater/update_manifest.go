@@ -117,7 +117,50 @@ func validateUpdateManifest(manifest *UpdateManifest) error {
 	return nil
 }
 
-func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {
+func validateUpdateManifestForMode(manifest *UpdateManifest, updateMode string) error {
+	if err := validateUpdateManifest(manifest); err != nil {
+		return err
+	}
+	switch strings.TrimSpace(updateMode) {
+	case updateModeInstallerDownload:
+		_, err := resolveDesktopInstallerForCurrentPlatform(manifest)
+		if err != nil {
+			return fmt.Errorf("桌面安装包信息不可用: %w", err)
+		}
+	default:
+		_, err := resolveManifestArtifactForCurrentPlatform(manifest)
+		if err != nil {
+			return fmt.Errorf("运行时更新产物不可用: %w", err)
+		}
+	}
+	return nil
+}
+
+type ManifestLookupDiagnostics struct {
+	Strategy              string                     `json:"strategy,omitempty"`
+	HintRefreshAttempted  bool                       `json:"hint_refresh_attempted,omitempty"`
+	HintRefreshApplied    bool                       `json:"hint_refresh_applied,omitempty"`
+	ForwardProbeAttempted bool                       `json:"forward_probe_attempted,omitempty"`
+	ForwardProbeApplied   bool                       `json:"forward_probe_applied,omitempty"`
+	ManifestSource        string                     `json:"manifest_source,omitempty"`
+	InitialCandidates     []string                   `json:"initial_candidates,omitempty"`
+	HintCandidates        []string                   `json:"hint_candidates,omitempty"`
+	ForwardProbeCandidates []string                  `json:"forward_probe_candidates,omitempty"`
+	ForwardProbeVersions  []string                   `json:"forward_probe_versions,omitempty"`
+	InitialFetch          *candidateFetchDiagnostics `json:"initial_fetch,omitempty"`
+	HintFetch             *candidateFetchDiagnostics `json:"hint_fetch,omitempty"`
+	ForwardProbeFetch     *candidateFetchDiagnostics `json:"forward_probe_fetch,omitempty"`
+	HintRefreshError      string                     `json:"hint_refresh_error,omitempty"`
+	ForwardProbeError     string                     `json:"forward_probe_error,omitempty"`
+}
+
+type RemoteManifestResult struct {
+	Manifest    *UpdateManifest           `json:"manifest,omitempty"`
+	Source      string                    `json:"source,omitempty"`
+	Diagnostics ManifestLookupDiagnostics `json:"diagnostics"`
+}
+
+func getRemoteManifestResultForMode(updateMode string, versionHints ...string) (*RemoteManifestResult, error) {
 	cleanHints := make([]string, 0, len(versionHints))
 	for _, hint := range versionHints {
 		if v := strings.TrimSpace(hint); v != "" {
@@ -125,13 +168,130 @@ func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {
 		}
 	}
 
-	manifest, source, err := fetchJSONFromCandidates[UpdateManifest](context.Background(), manifestCandidates(cleanHints...), 15*time.Second)
+	validator := func(manifest *UpdateManifest) error {
+		return validateUpdateManifest(manifest)
+	}
+
+	candidates := manifestCandidates()
+	result := &RemoteManifestResult{
+		Diagnostics: ManifestLookupDiagnostics{
+			Strategy:          "latest_first",
+			InitialCandidates: append([]string(nil), candidates...),
+		},
+	}
+
+	manifest, source, initialDiag, err := fetchJSONFromCandidatesWithDiagnostics[UpdateManifest](
+		context.Background(),
+		candidates,
+		15*time.Second,
+		validator,
+	)
+	result.Diagnostics.InitialFetch = initialDiag
+	if err != nil && len(cleanHints) > 0 {
+		hintCandidates := manifestVersionHintCandidates(cleanHints...)
+		result.Diagnostics.Strategy = "version_hint_fallback"
+		result.Diagnostics.HintCandidates = append([]string(nil), hintCandidates...)
+		var hintDiag *candidateFetchDiagnostics
+		manifest, source, hintDiag, err = fetchJSONFromCandidatesWithDiagnostics[UpdateManifest](
+			context.Background(),
+			hintCandidates,
+			15*time.Second,
+			validator,
+		)
+		result.Diagnostics.HintFetch = hintDiag
+	}
+	if err == nil && manifest != nil && len(cleanHints) > 0 {
+		currentVersion := strings.TrimSpace(manifest.Latest.Version)
+		needHintRefresh := currentVersion == ""
+		if !needHintRefresh {
+			for _, hint := range cleanHints {
+				if !isNewerVersion(currentVersion, hint) {
+					needHintRefresh = true
+					break
+				}
+			}
+		}
+		if needHintRefresh {
+			result.Diagnostics.HintRefreshAttempted = true
+			hintCandidates := manifestVersionHintCandidates(cleanHints...)
+			if len(result.Diagnostics.HintCandidates) == 0 {
+				result.Diagnostics.HintCandidates = append([]string(nil), hintCandidates...)
+			}
+			if hintedManifest, hintedSource, hintedDiag, hintedErr := fetchJSONFromCandidatesWithDiagnostics[UpdateManifest](
+				context.Background(),
+				hintCandidates,
+				15*time.Second,
+				validator,
+			); hintedErr == nil && hintedManifest != nil {
+				result.Diagnostics.HintFetch = hintedDiag
+				hintedVersion := strings.TrimSpace(hintedManifest.Latest.Version)
+				if currentVersion == "" || isNewerVersion(hintedVersion, currentVersion) {
+					manifest = hintedManifest
+					source = hintedSource
+					currentVersion = hintedVersion
+					result.Diagnostics.HintRefreshApplied = true
+					result.Diagnostics.Strategy = "version_hint_refresh"
+				}
+			} else {
+				result.Diagnostics.HintFetch = hintedDiag
+				result.Diagnostics.HintRefreshError = hintedErr.Error()
+			}
+		}
+
+		needForwardProbe := currentVersion == ""
+		if !needForwardProbe {
+			for _, hint := range cleanHints {
+				if !isNewerVersion(currentVersion, hint) {
+					needForwardProbe = true
+					break
+				}
+			}
+		}
+		if needForwardProbe {
+			forwardCandidates, probeVersions := manifestForwardProbeCandidates(cleanHints...)
+			if len(forwardCandidates) > 0 {
+				result.Diagnostics.ForwardProbeAttempted = true
+				result.Diagnostics.ForwardProbeCandidates = append([]string(nil), forwardCandidates...)
+				result.Diagnostics.ForwardProbeVersions = append([]string(nil), probeVersions...)
+				if probedManifest, probedSource, probedDiag, probedErr := fetchJSONFromCandidatesWithDiagnostics[UpdateManifest](
+					context.Background(),
+					forwardCandidates,
+					15*time.Second,
+					validator,
+				); probedErr == nil && probedManifest != nil {
+					result.Diagnostics.ForwardProbeFetch = probedDiag
+					probedVersion := strings.TrimSpace(probedManifest.Latest.Version)
+					if currentVersion == "" || isNewerVersion(probedVersion, currentVersion) {
+						manifest = probedManifest
+						source = probedSource
+						result.Diagnostics.ForwardProbeApplied = true
+						result.Diagnostics.Strategy = "forward_patch_probe"
+					}
+				} else {
+					result.Diagnostics.ForwardProbeFetch = probedDiag
+					result.Diagnostics.ForwardProbeError = probedErr.Error()
+				}
+			}
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败: %w", err)
 	}
-	if err := validateUpdateManifest(manifest); err != nil {
+	result.Manifest = manifest
+	result.Source = source
+	result.Diagnostics.ManifestSource = source
+	log.Printf("获取更新清单成功，使用源: %s (mode=%s strategy=%s)", source, strings.TrimSpace(updateMode), result.Diagnostics.Strategy)
+	return result, nil
+}
+
+func getRemoteManifestForMode(updateMode string, versionHints ...string) (*UpdateManifest, error) {
+	result, err := getRemoteManifestResultForMode(updateMode, versionHints...)
+	if err != nil {
 		return nil, err
 	}
-	log.Printf("获取更新清单成功，使用源: %s", source)
-	return manifest, nil
+	return result.Manifest, nil
+}
+
+func getRemoteManifest(versionHints ...string) (*UpdateManifest, error) {
+	return getRemoteManifestForMode(updateModeRuntimeInstall, versionHints...)
 }

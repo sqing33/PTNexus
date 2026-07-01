@@ -1,7 +1,8 @@
-import { computed, ref, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
+import { computed, ref, watch, onBeforeUnmount, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
 import axios from 'axios'
 import { ElNotification } from '@/utils/uiNotify'
 import { openSSE, type EventSourceLike } from '@/desktop/sse'
+import { useTaskMonitorStore } from '@/stores/taskMonitor'
 
 import type {
   LimitAlert,
@@ -61,6 +62,7 @@ export type PublishFlowDeps = {
   showLogProgress: Ref<boolean>
 
   goToSelectSiteStep: () => Promise<void>
+  saveCurrentSeedEdits: () => Promise<boolean>
 
   invalidStandardParams: ComputedRef<Array<StandardParamKey | 'tags'>>
   screenshotValid: Ref<boolean>
@@ -75,7 +77,7 @@ export type PublishFlowApi = {
   handlePreviousStep: () => void
   handleCancelClick: () => void
   handleScrollOrNextStep: () => void
-  handleCompleteClick: () => void
+  handleCompleteClick: () => Promise<void>
   getMappedValue: (category: StandardParamKey) => string
   getMappedTags: () => string[]
   filteredTitleComponents: ComputedRef<TitleComponent[]>
@@ -87,7 +89,9 @@ export type PublishFlowApi = {
   getTagType: (tag: string) => 'danger' | 'info'
   handleTagClose: (tag: string) => void
   isNextButtonDisabled: ComputedRef<boolean>
+  isCompleteButtonDisabled: ComputedRef<boolean>
   nextButtonTooltipContent: ComputedRef<string>
+  completeButtonTooltipContent: ComputedRef<string>
   groupedResults: ComputedRef<PublishDisplayResult[][]>
   showSiteLog: (siteName: string, logs: string | undefined) => void
   filterUploadedParam: (url: string) => string
@@ -126,9 +130,41 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     logProgressTaskId,
     showLogProgress,
     goToSelectSiteStep,
+    saveCurrentSeedEdits,
     invalidStandardParams,
     screenshotValid,
   } = deps
+
+  const taskMonitorStore = useTaskMonitorStore()
+  const blockingToastHandler = ref<{ close: () => void } | null>(null)
+  const blockingTaskKinds = new Set(['seed_fetch', 'seed_refetch'])
+
+  const blockingTask = computed(() =>
+    taskMonitorStore.taskList.find(
+      (task) => task.status === 'running' && blockingTaskKinds.has(task.kind),
+    ) || null,
+  )
+
+  const blockingTaskMessage = computed(() => {
+    const task = blockingTask.value
+    if (!task) return ''
+    const progress = task.progressText?.trim()
+    const message = task.message?.trim()
+    if (progress && message && progress !== message) {
+      return `${message}：${progress}`
+    }
+    return progress || message || '后台任务仍在处理中'
+  })
+
+  const blockingTaskToastMessage = computed(() => {
+    const task = blockingTask.value
+    if (!task) return ''
+    const lines = [blockingTaskMessage.value]
+    if (task.routeTarget?.path) {
+      lines.push('可前往任务中心或日志页查看详细进度。')
+    }
+    return lines.filter(Boolean).join('\n')
+  })
 
   const stopPublishBatchSSE = () => {
     if (publishBatchEventSource.value) {
@@ -156,12 +192,12 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       result.isExisted = true
     }
 
-    // 🚫 发布前预检查限制
+    // 发布前校验失败
     if (rawResult.pre_check === true && rawResult.limit_reached === true) {
       result.downloaderStatus = {
         success: false,
-        message: logs || '发布前预检查触发限制',
-        downloaderName: '发布前限制',
+        message: logs || '发布前校验失败',
+        downloaderName: '发布前校验',
       }
       return result
     }
@@ -202,6 +238,56 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
 
   const isBatchPublishing = ref(false)
   const batchPublishConcurrency = ref(1)
+
+  const buildPublishLogsRouteTarget = (patch: {
+    trigger?: string
+    scene?: string
+    status?: string
+    search?: string
+    targetSite?: string
+    queueGroupId?: string
+  } = {}) => {
+    const query = Object.fromEntries(
+      Object.entries({
+        ...(patch.trigger ? { trigger: patch.trigger } : {}),
+        scene: patch.scene || publishScene,
+        ...(patch.status ? { status: patch.status } : {}),
+        ...(patch.search ? { search: patch.search } : {}),
+        ...(patch.targetSite ? { target_site: patch.targetSite } : {}),
+        ...(patch.queueGroupId ? { queue_group_id: patch.queueGroupId } : {}),
+      }).filter(([, value]) => typeof value === 'string' && value.trim()),
+    ) as Record<string, string>
+
+    return {
+      path: '/publish-logs',
+      query,
+    }
+  }
+
+  const createPublishMonitorKey = (mode: 'batch' | 'serial' | 'queue', rawId?: string | null) =>
+    `publish:${mode}:${rawId || taskId.value || Date.now()}`
+
+  const buildFetchLogRouteTarget = (patch: { taskId?: string; status?: string } = {}) => ({
+    path: '/publish-logs',
+    query: Object.fromEntries(
+      Object.entries({
+        scene: publishScene,
+        ...(patch.status ? { status: patch.status } : {}),
+        ...(patch.taskId ? { search: patch.taskId } : {}),
+      }).filter(([, value]) => typeof value === 'string' && value.trim()),
+    ) as Record<string, string>,
+  })
+
+  const batchPublishMonitorKey = ref('')
+  const serialPublishMonitorKey = ref('')
+  const queuePublishMonitorKey = ref('')
+
+  const getPublishProgressText = () => {
+    const total = selectedTargetSites.value.length
+    const published = publishProgress.value.current
+    const downloaderDone = downloaderProgress.value.current
+    return `已完成 ${published}/${total}，下载器添加成功 ${downloaderDone}/${total}`
+  }
 
   const resetBatchPublishRuntime = () => {
     isBatchPublishing.value = false
@@ -252,6 +338,22 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     }
 
     try {
+      const monitorKey = createPublishMonitorKey('batch', taskId.value)
+      batchPublishMonitorKey.value = monitorKey
+      taskMonitorStore.markRunning({
+        key: monitorKey,
+        kind: 'publish_batch',
+        rawId: taskId.value,
+        title: '批量发布种子',
+        message: `准备向 ${siteCount} 个站点发布`,
+        progressText: '等待任务启动',
+        routeTarget: buildPublishLogsRouteTarget({
+          trigger: 'batch_publish',
+          scene: publishScene,
+          status: 'running',
+        }),
+      })
+
       const startResponse = await axios.post('/api/migrate/publish_batch/start', {
         task_id: taskId.value,
         upload_data: {
@@ -304,6 +406,21 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
                 title,
                 message: message || '',
               }
+              if (batchPublishMonitorKey.value) {
+                taskMonitorStore.markFailed(batchPublishMonitorKey.value, {
+                  kind: 'publish_batch',
+                  rawId: publishBatchId.value || taskId.value,
+                  title: '批量发布种子',
+                  message: title,
+                  progressText: getPublishProgressText(),
+                  error: message || title,
+                  routeTarget: buildPublishLogsRouteTarget({
+                    trigger: 'batch_publish',
+                    scene: publishScene,
+                    status: 'failed',
+                  }),
+                })
+              }
               return
             }
 
@@ -311,6 +428,22 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
               const siteName = data.siteName as string
               if (siteName && !publishingSites.value.includes(siteName)) {
                 publishingSites.value.push(siteName)
+              }
+              if (batchPublishMonitorKey.value) {
+                taskMonitorStore.markRunning({
+                  key: batchPublishMonitorKey.value,
+                  kind: 'publish_batch',
+                  rawId: publishBatchId.value || taskId.value,
+                  title: '批量发布种子',
+                  message: siteName ? `正在发布到 ${siteName}` : `正在发布到 ${siteCount} 个站点`,
+                  progressText: getPublishProgressText(),
+                  routeTarget: buildPublishLogsRouteTarget({
+                    trigger: 'batch_publish',
+                    scene: publishScene,
+                    status: 'running',
+                    targetSite: siteName || undefined,
+                  }),
+                })
               }
               return
             }
@@ -325,6 +458,23 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
               publishResultsBySite.value[siteName] = normalizePublishResult(siteName, data.result)
               rebuildFinalResultsList()
               rebuildProgress()
+              if (batchPublishMonitorKey.value) {
+                const latestResult = publishResultsBySite.value[siteName]
+                taskMonitorStore.markRunning({
+                  key: batchPublishMonitorKey.value,
+                  kind: 'publish_batch',
+                  rawId: publishBatchId.value || taskId.value,
+                  title: '批量发布种子',
+                  message: latestResult?.message || (siteName ? `${siteName} 已完成` : '站点发布已完成'),
+                  progressText: getPublishProgressText(),
+                  routeTarget: buildPublishLogsRouteTarget({
+                    trigger: 'batch_publish',
+                    scene: publishScene,
+                    status: 'running',
+                    targetSite: siteName || undefined,
+                  }),
+                })
+              }
               return
             }
 
@@ -345,6 +495,20 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
                 title: '发布完成',
                 message: `发布成功 ${publishSuccessCount} / ${totalCount}，下载器添加成功 ${addSuccessCount} / ${totalCount}。`,
               })
+              if (batchPublishMonitorKey.value) {
+                taskMonitorStore.markSuccess(batchPublishMonitorKey.value, {
+                  kind: 'publish_batch',
+                  rawId: publishBatchId.value || taskId.value,
+                  title: '批量发布种子',
+                  message: `发布成功 ${publishSuccessCount} / ${totalCount}`,
+                  progressText: `下载器添加成功 ${addSuccessCount} / ${totalCount}`,
+                  routeTarget: buildPublishLogsRouteTarget({
+                    trigger: 'batch_publish',
+                    scene: publishScene,
+                    status: publishSuccessCount === totalCount ? 'success' : 'failed',
+                  }),
+                })
+              }
 
               const siteLogs = results.map((r) => {
                 const logs = r.logs || 'No logs available.'
@@ -395,6 +559,21 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
           duration: 0,
           showClose: true,
         })
+        if (batchPublishMonitorKey.value) {
+          taskMonitorStore.markFailed(batchPublishMonitorKey.value, {
+            kind: 'publish_batch',
+            rawId: taskId.value,
+            title: '批量发布种子',
+            message: '批量发布进度连接中断',
+            progressText: getPublishProgressText(),
+            error: '批量发布进度连接中断，请稍后重试',
+            routeTarget: buildPublishLogsRouteTarget({
+              trigger: 'batch_publish',
+              scene: publishScene,
+              status: 'failed',
+            }),
+          })
+        }
         isLoading.value = false
       }
 
@@ -404,6 +583,29 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       resetBatchPublishRuntime()
       stopPublishBatchSSE()
       ElNotification.closeAll()
+      const message = axios.isAxiosError(error)
+        ? (error.response?.data as { logs?: string; message?: string } | undefined)?.logs ||
+          (error.response?.data as { message?: string } | undefined)?.message ||
+          error.message ||
+          '批量发布启动失败'
+        : error instanceof Error
+          ? error.message || '批量发布启动失败'
+          : '批量发布启动失败'
+      if (batchPublishMonitorKey.value) {
+        taskMonitorStore.markFailed(batchPublishMonitorKey.value, {
+          kind: 'publish_batch',
+          rawId: taskId.value,
+          title: '批量发布种子',
+          message: '批量发布启动失败',
+          progressText: getPublishProgressText(),
+          error: message,
+          routeTarget: buildPublishLogsRouteTarget({
+            trigger: 'batch_publish',
+            scene: publishScene,
+            status: 'failed',
+          }),
+        })
+      }
       handleApiError(error, '批量发布启动失败')
       isLoading.value = false
       return false
@@ -415,6 +617,24 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     activeStep.value = 3
     isLoading.value = true
     finalResultsList.value = []
+    publishResultsBySite.value = {}
+    publishingSites.value = []
+
+    const serialMonitorKey = createPublishMonitorKey('serial', taskId.value)
+    serialPublishMonitorKey.value = serialMonitorKey
+    taskMonitorStore.markRunning({
+      key: serialMonitorKey,
+      kind: 'publish_serial',
+      rawId: taskId.value,
+      title: '串行发布种子',
+      message: `准备向 ${selectedTargetSites.value.length} 个站点发布`,
+      progressText: '等待逐站发布',
+      routeTarget: buildPublishLogsRouteTarget({
+        trigger: 'serial_publish',
+        scene: publishScene,
+        status: 'running',
+      }),
+    })
 
     // Initialize progress tracking - 确保进度条立即显示
     const siteCount = selectedTargetSites.value.length
@@ -437,6 +657,19 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
         duration: 0,
         showClose: true,
       })
+      taskMonitorStore.markFailed(serialMonitorKey, {
+        kind: 'publish_serial',
+        rawId: taskId.value,
+        title: '串行发布种子',
+        message: '参数错误',
+        progressText: getPublishProgressText(),
+        error: '当前种子为空，请刷新后重试',
+        routeTarget: buildPublishLogsRouteTarget({
+          trigger: 'serial_publish',
+          scene: publishScene,
+          status: 'failed',
+        }),
+      })
       isLoading.value = false
       return
     }
@@ -444,6 +677,21 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     const results = []
 
     for (const siteName of selectedTargetSites.value) {
+      publishingSites.value = [siteName]
+      taskMonitorStore.markRunning({
+        key: serialMonitorKey,
+        kind: 'publish_serial',
+        rawId: taskId.value,
+        title: '串行发布种子',
+        message: `正在发布到 ${siteName}`,
+        progressText: getPublishProgressText(),
+        routeTarget: buildPublishLogsRouteTarget({
+          trigger: 'serial_publish',
+          scene: publishScene,
+          status: 'running',
+          targetSite: siteName,
+        }),
+      })
       try {
         const response = await axios.post('/api/migrate/publish', {
           task_id: taskId.value,
@@ -490,6 +738,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
 
           results.push(result)
           finalResultsList.value = [...results]
+          publishResultsBySite.value[siteName] = result
 
           // 🚫 显示限制提示
           limitAlert.value = {
@@ -502,6 +751,21 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
           logContent.value =
             `\n\n=== 🚫 发种限制触发 ===\n${limitInfo}\n\n=== 🛑 批量发布已停止 ===\n由于发种限制触发，后续 ${selectedTargetSites.value.length - results.length} 个站点发布已暂停。\n\n` +
             logContent.value
+
+          taskMonitorStore.markFailed(serialMonitorKey, {
+            kind: 'publish_serial',
+            rawId: taskId.value,
+            title: '串行发布种子',
+            message: `${siteName} 触发发种限制`,
+            progressText: getPublishProgressText(),
+            error: limitInfo,
+            routeTarget: buildPublishLogsRouteTarget({
+              trigger: 'serial_publish',
+              scene: publishScene,
+              status: 'failed',
+              targetSite: siteName,
+            }),
+          })
 
           // 显示限制通知
           ElNotification({
@@ -516,38 +780,53 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
           break
         }
 
-        // 🚫 检查发布前预检查状态
+        // 检查发布前校验状态
         if (result.pre_check && result.limit_reached) {
-          // 提取限制信息用于突出显示
-          const limitInfo = result.message.replace('🚫 发布前预检查触发限制: ', '')
+          const limitInfo = result.message.replace(/^发布前校验失败:\s*/, '')
 
           result.downloaderStatus = {
             success: false,
             message: result.message,
-            downloaderName: '发布前限制',
+            downloaderName: '发布前校验',
             limit_reached: true,
             pre_check: true,
           }
 
           results.push(result)
           finalResultsList.value = [...results]
+          publishResultsBySite.value[siteName] = result
 
-          // 🚫 显示限制提示
+          // 显示校验提示
           limitAlert.value = {
             visible: true,
-            title: '发布前限制触发',
+            title: '发布前校验失败',
             message: limitInfo,
           }
 
-          // 在日志顶部突出显示限制信息
+          // 在日志顶部突出显示校验信息
           logContent.value =
-            `\n\n=== 🚫 发种限制触发 ===\n${limitInfo}\n\n=== 🛑 批量发布已停止 ===\n由于发种限制触发，后续 ${selectedTargetSites.value.length - results.length} 个站点发布已暂停。\n\n` +
+            `\n\n=== ⚠️ 发布前校验失败 ===\n${limitInfo}\n\n=== 🛑 批量发布已停止 ===\n由于发布前校验失败，后续 ${selectedTargetSites.value.length - results.length} 个站点发布已暂停。\n\n` +
             logContent.value
 
-          // 显示发布前限制通知
+          taskMonitorStore.markFailed(serialMonitorKey, {
+            kind: 'publish_serial',
+            rawId: taskId.value,
+            title: '串行发布种子',
+            message: `${siteName} 发布前校验失败`,
+            progressText: getPublishProgressText(),
+            error: limitInfo,
+            routeTarget: buildPublishLogsRouteTarget({
+              trigger: 'serial_publish',
+              scene: publishScene,
+              status: 'failed',
+              targetSite: siteName,
+            }),
+          })
+
+          // 显示发布前校验通知
           ElNotification({
-            title: '发布前限制触发',
-            message: `${siteName} 因发种限制无法发布\n${limitInfo}\n后续站点发布已自动停止。`,
+            title: '发布前校验失败',
+            message: `${siteName} 因发布前校验失败无法发布\n${limitInfo}\n后续站点发布已自动停止。`,
             type: 'warning',
             duration: 0,
             showClose: true,
@@ -584,6 +863,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
 
         results.push(result)
         finalResultsList.value = [...results]
+        publishResultsBySite.value[siteName] = result
 
         if (result.success) {
           if (result.downloaderStatus?.success === false) {
@@ -620,6 +900,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
         }
         results.push(result)
         finalResultsList.value = [...results]
+        publishResultsBySite.value[siteName] = result
         ElNotification.error({
           title: `发布失败 - ${siteName}`,
           message: result.message,
@@ -634,6 +915,38 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     const totalCount = selectedTargetSites.value.length
     const publishSuccessCount = results.filter((r) => r.success).length
     const addSuccessCount = results.filter((r) => r?.downloaderStatus?.success).length
+    const failedResults = results.filter((r) => !r.success)
+    const shouldMarkSerialFailed = failedResults.length > 0 || limitAlert.value.visible
+    if (serialMonitorKey) {
+      const latestFailed = failedResults[failedResults.length - 1]
+      const failureError = limitAlert.value.message || latestFailed?.message || ''
+      const routeTarget = buildPublishLogsRouteTarget({
+        trigger: 'serial_publish',
+        scene: publishScene,
+        status: shouldMarkSerialFailed ? 'failed' : 'success',
+        targetSite: latestFailed?.siteName,
+      })
+      if (shouldMarkSerialFailed) {
+        taskMonitorStore.markFailed(serialMonitorKey, {
+          kind: 'publish_serial',
+          rawId: taskId.value,
+          title: '串行发布种子',
+          message: `发布成功 ${publishSuccessCount} / ${totalCount}`,
+          progressText: `下载器添加成功 ${addSuccessCount} / ${totalCount}`,
+          error: failureError,
+          routeTarget,
+        })
+      } else {
+        taskMonitorStore.markSuccess(serialMonitorKey, {
+          kind: 'publish_serial',
+          rawId: taskId.value,
+          title: '串行发布种子',
+          message: `发布成功 ${publishSuccessCount} / ${totalCount}`,
+          progressText: `下载器添加成功 ${addSuccessCount} / ${totalCount}`,
+          routeTarget,
+        })
+      }
+    }
     ElNotification.success({
       title: '发布完成',
       message: `发布成功 ${publishSuccessCount} / ${totalCount}，下载器添加成功 ${addSuccessCount} / ${totalCount}。`,
@@ -727,6 +1040,20 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     }
 
     isEnqueueing.value = true
+    const queueMonitorKey = createPublishMonitorKey('queue', taskId.value)
+    queuePublishMonitorKey.value = queueMonitorKey
+    taskMonitorStore.markRunning({
+      key: queueMonitorKey,
+      kind: 'publish_queue',
+      rawId: taskId.value,
+      title: '发布任务入队',
+      message: `准备加入 ${selectedTargetSites.value.length} 个站点的发布队列`,
+      progressText: '正在创建队列分组',
+      routeTarget: buildPublishLogsRouteTarget({
+        scene: publishScene,
+        status: 'running',
+      }),
+    })
     try {
       const response = await axios.post('/api/migrate/publish_queue/enqueue', {
         task_id: taskId.value,
@@ -747,6 +1074,19 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
         throw new Error(response.data?.message || '加入队列失败')
       }
 
+      taskMonitorStore.markSuccess(queueMonitorKey, {
+        kind: 'publish_queue',
+        rawId: response.data.group_id,
+        title: '发布任务入队',
+        message: `已加入队列分组 ${response.data.group_id}`,
+        progressText: `共 ${response.data.count || 0} 个站点`,
+        routeTarget: buildPublishLogsRouteTarget({
+          scene: publishScene,
+          status: 'running',
+          queueGroupId: String(response.data.group_id),
+        }),
+      })
+
       ElNotification.success({
         title: '已加入队列',
         message: `队列分组: ${response.data.group_id}（${response.data.count || 0} 个站点）`,
@@ -754,6 +1094,26 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       })
       emit('cancel')
     } catch (error: unknown) {
+      const message = axios.isAxiosError(error)
+        ? (error.response?.data as { logs?: string; message?: string } | undefined)?.logs ||
+          (error.response?.data as { message?: string } | undefined)?.message ||
+          error.message ||
+          '加入队列失败'
+        : error instanceof Error
+          ? error.message || '加入队列失败'
+          : '加入队列失败'
+      taskMonitorStore.markFailed(queueMonitorKey, {
+        kind: 'publish_queue',
+        rawId: taskId.value,
+        title: '发布任务入队',
+        message: '加入队列失败',
+        progressText: `目标站点 ${selectedTargetSites.value.length} 个`,
+        error: message,
+        routeTarget: buildPublishLogsRouteTarget({
+          scene: publishScene,
+          status: 'failed',
+        }),
+      })
       handleApiError(error, '加入队列失败')
     } finally {
       isEnqueueing.value = false
@@ -803,9 +1163,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     requestAnimationFrame(animate)
   }
 
-  // 步骤1：点击"下一步"按钮的处理（未到底先滚动，到底再跳转）
+  // 步骤1：点击"下一步"按钮的处理（仅在存在自动校验异常时要求先完整浏览）
   const handleScrollOrNextStep = () => {
-    if (isScrolledToBottom.value) {
+    if (!isNextButtonDisabled.value || isScrolledToBottom.value) {
       goToSelectSiteStep()
     } else {
       scrollPreviewToBottom()
@@ -813,7 +1173,14 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
   }
 
   // 处理完成按钮点击
-  const handleCompleteClick = () => {
+  const handleCompleteClick = async () => {
+    if (activeStep.value === 0) {
+      const saved = await saveCurrentSeedEdits()
+      if (!saved) {
+        return
+      }
+    }
+
     emit('complete')
   }
 
@@ -937,22 +1304,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     )
   }
 
-  // 检查是否包含受限标签
-  const hasRestrictedTag = computed(() => {
-    const tags = torrentData.value.standardized_params.tags || []
-    return tags.some((tag) => isRestrictedTag(tag))
-  })
-
   const handleTagClose = (tagToRemove: string) => {
-    if (isRestrictedTag(tagToRemove)) {
-      ElNotification.warning({
-        title: '无法删除',
-        message: '禁转/限转/分集标签不允许删除',
-        duration: 2000,
-      })
-      return
-    }
-
     const index = torrentData.value.standardized_params.tags.indexOf(tagToRemove)
     if (index > -1) {
       torrentData.value.standardized_params.tags.splice(index, 1)
@@ -1001,12 +1353,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     )
     const hasUnrecognized = unrecognized && unrecognized.value !== ''
 
-    // 2. 检查禁转标签
-    if (hasRestrictedTag.value) {
-      return true
-    }
-
-    // 3. 【新增】检查简介、海报、截图是否为空
+    // 2. 【新增】检查简介、海报、截图是否为空
     const intro = torrentData.value.intro
     const hasEmptyPoster = !intro.poster || intro.poster.trim() === ''
     const hasEmptyScreenshots = !intro.screenshots || intro.screenshots.trim() === ''
@@ -1086,14 +1433,33 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     return false
   })
 
-  // 计算属性：获取下一步按钮的提示文本
-  const nextButtonTooltipContent = computed(() => {
-    // 1. 优先级最高：检查禁转标签
-    if (hasRestrictedTag.value) {
-      return '检测到禁转/限转/分集标签，不允许继续发布'
+  const isCompleteButtonDisabled = computed(() => {
+    if (isLoading.value) {
+      return true
     }
+    if (publishScene === 'maintenance') {
+      return false
+    }
+    if (blockingTask.value) {
+      return true
+    }
+    return activeStep.value === 1
+      ? isNextButtonDisabled.value && !isScrolledToBottom.value
+      : isNextButtonDisabled.value
+  })
 
-    // 2. 检查是否存在"无法识别"的内容
+  const completeButtonTooltipContent = computed(() => {
+    if (blockingTask.value) {
+      return blockingTaskMessage.value
+    }
+    if (isLoading.value) {
+      return '正在处理中，请稍候'
+    }
+    return nextButtonTooltipContent.value
+  })
+
+  const nextButtonTooltipContent = computed(() => {
+    // 1. 检查是否存在"无法识别"的内容
     const unrecognized = torrentData.value.title_components.find(
       (param) => param.key === '无法识别',
     )
@@ -1101,7 +1467,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       return '存在无法识别的标题内容，请手动修正或删除'
     }
 
-    // 3. 检查制作组是否为空或为NOGROUP
+    // 2. 检查制作组是否为空或为NOGROUP
     const team = torrentData.value.title_components.find((param) => param.key === '制作组')
     const hasEmptyTeam = !team || !team.value || team.value.trim() === ''
     const isNoGroup = team && team.value.trim().toUpperCase() === 'NOGROUP'
@@ -1114,7 +1480,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       return '制作组为NOGROUP，禁止发布'
     }
 
-    // 4. 检查必填参数是否为空 (包含：简介信息 + 标准化参数)
+    // 3. 检查必填参数是否为空 (包含：简介信息 + 标准化参数)
     const params = torrentData.value.standardized_params
     const intro = torrentData.value.intro
     const missingFields: string[] = []
@@ -1139,7 +1505,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       return `请补充必填项：${missingFields.join('、')}`
     }
 
-    // 4.5 检查简介正文完整性
+    // 3.5 检查简介正文完整性
     const introCompleteness = checkIntroCompleteness(intro.body)
     if (!introCompleteness.isComplete) {
       const criticalFields = ['片名', '产地', '简介']
@@ -1492,6 +1858,30 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     return grouped
   })
 
+  watch(
+    blockingTaskToastMessage,
+    (message) => {
+      blockingToastHandler.value?.close()
+      blockingToastHandler.value = null
+      if (!message) {
+        return
+      }
+      blockingToastHandler.value = ElNotification({
+        title: '修改完成暂不可用',
+        message,
+        type: 'info',
+        duration: 0,
+        showClose: true,
+      })
+    },
+    { immediate: true },
+  )
+
+  onBeforeUnmount(() => {
+    blockingToastHandler.value?.close()
+    blockingToastHandler.value = null
+  })
+
   const isResultWithUrl = (
     result: PublishDisplayResult,
   ): result is PublishDisplayResult & { url: string } =>
@@ -1592,7 +1982,9 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     getTagType,
     handleTagClose,
     isNextButtonDisabled,
+    isCompleteButtonDisabled,
     nextButtonTooltipContent,
+    completeButtonTooltipContent,
     groupedResults,
     showSiteLog,
     filterUploadedParam,

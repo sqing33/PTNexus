@@ -6,4 +6,4 @@
   - [设置](docs/功能介绍/设置.md)
   - [转种](docs/功能介绍/转种.md)
   - [API](docs/API.md)
-- [GitHub](https://github.com/sqing33/pt-nexus)
+- [GitHub](https://github.com/jadylc/PTNexus)

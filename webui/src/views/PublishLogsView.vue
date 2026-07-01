@@ -124,13 +124,23 @@
         </el-table-column>
         <el-table-column prop="source_site" label="源站" width="90" align="center" />
         <el-table-column prop="target_site" label="目标站" width="90" align="center" />
-        <el-table-column prop="torrent_id" label="ID" width="90" align="center" show-overflow-tooltip />
+        <el-table-column
+          prop="torrent_id"
+          label="ID"
+          width="90"
+          align="center"
+          show-overflow-tooltip
+        />
 
         <el-table-column label="标题" min-width="360">
           <template #default="scope">
             <div class="title-cell">
-              <div class="subtitle-line" :title="scope.row.subtitle">{{ scope.row.subtitle || '' }}</div>
-              <div class="main-title-line" :title="scope.row.title">{{ scope.row.title || '' }}</div>
+              <div class="subtitle-line" :title="scope.row.subtitle">
+                {{ scope.row.subtitle || '' }}
+              </div>
+              <div class="main-title-line" :title="scope.row.title">
+                {{ scope.row.title || '' }}
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -177,8 +187,8 @@
                 size="small"
                 type="danger"
                 style="margin-left: 5px"
-                :disabled="!canDeleteQueued(scope.row)"
-                @click="deleteQueuedTask(scope.row)"
+                :disabled="!canDeleteLog(scope.row)"
+                @click="deleteLog(scope.row)"
               >
                 删除
               </el-button>
@@ -382,8 +392,13 @@ const parseAutoAddResult = (row: PublishLogRow | null | undefined): ParsedAutoAd
       success: parsed.success === true,
       message: typeof parsed.message === 'string' ? parsed.message : String(parsed.message || ''),
       downloaderName:
-        typeof parsed.downloader_name === 'string' ? parsed.downloader_name : String(parsed.downloader_name || ''),
-      downloaderId: typeof parsed.downloader_id === 'string' ? parsed.downloader_id : String(parsed.downloader_id || ''),
+        typeof parsed.downloader_name === 'string'
+          ? parsed.downloader_name
+          : String(parsed.downloader_name || ''),
+      downloaderId:
+        typeof parsed.downloader_id === 'string'
+          ? parsed.downloader_id
+          : String(parsed.downloader_id || ''),
     }
   } catch {
     return { success: false, message: raw, downloaderName: '', downloaderId: '' }
@@ -503,9 +518,9 @@ const fetchLogs = async (options: { silent?: boolean } = {}) => {
     if (currentFetchSeq !== fetchSeq) return
     if (!silent) {
       const message = axios.isAxiosError(e)
-        ? ((e.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        ? (e.response?.data as { message?: string; error?: string } | undefined)?.message ||
           (e.response?.data as { error?: string } | undefined)?.error ||
-          e.message)
+          e.message
         : e instanceof Error
           ? e.message
           : '获取发种日志失败'
@@ -577,35 +592,39 @@ const openResultURL = (row: PublishLogRow) => {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-const canDeleteQueued = (row: PublishLogRow) => {
-  const status = String(row?.status || '').trim()
-  const queueTaskID = Number(row?.queue_task_id || 0)
-  return status === 'queued' && queueTaskID > 0
+const canDeleteLog = (row: PublishLogRow) => {
+  return Number(row?.id || 0) > 0
 }
 
-const deleteQueuedTask = async (row: PublishLogRow) => {
-  if (!canDeleteQueued(row)) return
-  const queueTaskID = Number(row.queue_task_id)
+const deleteLog = async (row: PublishLogRow) => {
+  if (!canDeleteLog(row)) return
+  const logID = Number(row.id || 0)
+  const isQueued =
+    String(row?.status || '').trim() === 'queued' && Number(row?.queue_task_id || 0) > 0
   try {
-    await ElMessageBox.confirm('确认从队列移除该待发布任务？', '删除待发布任务', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      isQueued ? '确认删除该日志并取消对应待发布任务？' : '确认删除该发种日志条目？',
+      isQueued ? '删除待发布日志' : '删除发种日志',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
 
-    const response = await axios.delete(`/api/migrate/publish_queue/tasks/${queueTaskID}`)
+    const response = await axios.delete(`/api/publish_logs/${logID}`)
     if (!response.data?.success) {
       throw new Error(response.data?.message || '删除失败')
     }
 
-    ElMessage.success(response.data?.message || '队列任务已移除')
+    ElMessage.success(response.data?.message || '发种日志已删除')
     await fetchLogs()
   } catch (error: unknown) {
     if (error === 'cancel' || error === 'close') return
     const message = axios.isAxiosError(error)
-      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+      ? (error.response?.data as { message?: string; error?: string } | undefined)?.message ||
         (error.response?.data as { error?: string } | undefined)?.error ||
-        error.message)
+        error.message
       : error instanceof Error
         ? error.message
         : '删除失败'
@@ -620,7 +639,7 @@ const readQuery = (key: string) => {
   return String(raw)
 }
 
-const applyRouteFilters = () => {
+const applyRouteFilters = (mode: 'merge' | 'replace' = 'merge') => {
   let changed = false
 
   const queryTrigger = readQuery('trigger').trim()
@@ -629,6 +648,43 @@ const applyRouteFilters = () => {
   const querySearch = readQuery('search').trim()
   const queryTargetSite = readQuery('target_site').trim()
   const queryQueueGroupID = readQuery('queue_group_id').trim()
+
+  const nextFilters = {
+    trigger: queryTrigger,
+    scene: queryScene,
+    status: queryStatus,
+    search: querySearch,
+    targetSite: queryTargetSite,
+    queueGroup: queryQueueGroupID,
+  }
+
+  if (mode === 'replace') {
+    if (triggerFilter.value !== nextFilters.trigger) {
+      triggerFilter.value = nextFilters.trigger
+      changed = true
+    }
+    if (sceneFilter.value !== nextFilters.scene) {
+      sceneFilter.value = nextFilters.scene
+      changed = true
+    }
+    if (statusFilter.value !== nextFilters.status) {
+      statusFilter.value = nextFilters.status
+      changed = true
+    }
+    if (searchQuery.value !== nextFilters.search) {
+      searchQuery.value = nextFilters.search
+      changed = true
+    }
+    if (targetSiteFilter.value !== nextFilters.targetSite) {
+      targetSiteFilter.value = nextFilters.targetSite
+      changed = true
+    }
+    if (queueGroupFilter.value !== nextFilters.queueGroup) {
+      queueGroupFilter.value = nextFilters.queueGroup
+      changed = true
+    }
+    return changed
+  }
 
   if (queryTrigger && triggerFilter.value !== queryTrigger) {
     triggerFilter.value = queryTrigger
@@ -694,7 +750,7 @@ onMounted(async () => {
   await loadUiSettings()
 
   let routeFiltersApplied = false
-  if (applyRouteFilters()) {
+  if (applyRouteFilters('replace')) {
     currentPage.value = 1
     routeFiltersApplied = true
   }
@@ -714,7 +770,7 @@ onBeforeUnmount(() => {
 watch(
   () => route.query,
   async () => {
-    if (applyRouteFilters()) {
+    if (applyRouteFilters('replace')) {
       currentPage.value = 1
       await fetchLogs()
       void saveUiSettings()

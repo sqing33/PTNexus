@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -13,16 +12,13 @@ import (
 	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
 	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
-	publishguard "github.com/pt-nexus/server/internal/service/publish/guard"
 	publishworkflow "github.com/pt-nexus/server/internal/service/publish/workflow"
 	"gorm.io/gorm"
 )
 
 const (
-	publishQueueLogModule        = "发布-队列"
-	queueVideoSizeThresholdBytes = int64(1024 * 1024 * 1024)
-	queueBytesPerGB              = float64(1024 * 1024 * 1024)
-	queueAutoAddNotRunJSON       = `{"success": false, "message": "未执行"}`
+	publishQueueLogModule  = "发布-队列"
+	queueAutoAddNotRunJSON = `{"success": false, "message": "未执行"}`
 )
 
 type publishQueueConfig struct {
@@ -663,19 +659,6 @@ func (s *MigrateService) drainPublishQueueOnce(cfg publishQueueConfig) {
 	workers := clampInt(cfg.MaxWorkers, 1, 20)
 	now := time.Now()
 
-	latestSpeeds := map[string]float64{}
-	if cfg.TriggerUploadSpeedBelowMBps > 0 && s.statsRepo != nil {
-		if rows, err := s.statsRepo.QueryLatestSpeeds(); err == nil {
-			for _, row := range rows {
-				id := strings.TrimSpace(row.DownloaderID)
-				if id == "" {
-					continue
-				}
-				latestSpeeds[id] = row.UploadSpeed
-			}
-		}
-	}
-
 	for i := 0; i < workers; i++ {
 		task, ok, err := s.queueRepo.ClaimNextRunnableTask(now)
 		if err != nil {
@@ -685,11 +668,11 @@ func (s *MigrateService) drainPublishQueueOnce(cfg publishQueueConfig) {
 		if !ok || task == nil {
 			return
 		}
-		s.executePublishQueueTask(cfg, *task, latestSpeeds)
+		s.executePublishQueueTask(cfg, *task)
 	}
 }
 
-func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRecord repository.PublishQueueTask, latestSpeeds map[string]float64) {
+func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRecord repository.PublishQueueTask) {
 	if s == nil || s.queueRepo == nil {
 		return
 	}
@@ -721,61 +704,6 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	payload["upload_data"] = uploadData
 	payload = s.normalizePublishPayloadWithCrossSeedDefaults(payload)
 
-	downloaderID := s.resolveQueueTaskDownloaderID(taskRecord, payload, ctx)
-	if strings.TrimSpace(downloaderID) != "" {
-		stats, err := publishguard.CheckDownloaderGateStats(downloaderID)
-		if err != nil {
-			nextRunAt := time.Now().Add(time.Duration(clampInt(cfg.MonitorIntervalSec, 5, 3600)) * time.Second)
-			reason := "预检查统计失败: " + err.Error()
-			_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, reason, "")
-			if s.publishLogRepo != nil {
-				_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", reason)
-			}
-			logx.Warnf(publishQueueLogModule, "队列任务等待预检查恢复 id=%d downloader_id=%s err=%v", taskID, downloaderID, err)
-			return
-		}
-		if !stats.CanContinue {
-			nextRunAt := time.Now().Add(time.Duration(clampInt(cfg.MonitorIntervalSec, 5, 3600)) * time.Second)
-			reason := strings.TrimSpace(stats.Message)
-			if reason == "" {
-				reason = "已触发限制"
-			}
-			waitMessage := "发布前限制: " + reason
-			_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, waitMessage, "")
-			if s.publishLogRepo != nil {
-				_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", waitMessage)
-			}
-			logx.Infof(publishQueueLogModule, "队列任务等待限制解除 id=%d downloader_id=%s next_run_at=%s", taskID, downloaderID, nextRunAt.Format(time.RFC3339))
-			return
-		}
-
-		recentOK := false
-		if cfg.TriggerRecentCountBelow > 0 {
-			recentOK = stats.RecentCount < cfg.TriggerRecentCountBelow
-		}
-
-		speedOK := false
-		if cfg.TriggerUploadSpeedBelowMBps > 0 {
-			thresholdBytes := cfg.TriggerUploadSpeedBelowMBps * 1024 * 1024
-			currentSpeed := latestSpeeds[strings.TrimSpace(downloaderID)]
-			speedOK = currentSpeed <= thresholdBytes
-		}
-
-		if cfg.TriggerRecentCountBelow <= 0 && cfg.TriggerUploadSpeedBelowMBps <= 0 {
-			recentOK = true
-		}
-
-		if !recentOK && !speedOK {
-			nextRunAt := time.Now().Add(time.Duration(clampInt(cfg.MonitorIntervalSec, 5, 3600)) * time.Second)
-			reason := "等待触发条件"
-			_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, nextRunAt, reason, "")
-			if s.publishLogRepo != nil {
-				_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", reason)
-			}
-			return
-		}
-	}
-
 	targetSite := strings.TrimSpace(processingshared.ToString(payload["targetSite"], taskRecord.TargetSite))
 	torrentID := strings.TrimSpace(processingshared.ToString(payload["torrent_id"], taskRecord.TorrentID))
 	if torrentID == "" {
@@ -785,22 +713,6 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	execTaskID := strings.TrimSpace(taskRecord.TaskID)
 	if execTaskID == "" {
 		execTaskID = fmt.Sprintf("queue-%d", taskID)
-	}
-
-	preCheckPassed, preCheckMessage := s.checkQueueVideoSizePrecondition(taskRecord, payload, ctx)
-	if !preCheckPassed {
-		preCheckResult := map[string]any{
-			"success":       false,
-			"pre_check":     true,
-			"limit_reached": true,
-			"logs":          preCheckMessage,
-			"message":       preCheckMessage,
-		}
-		encodedResult, _ := json.Marshal(preCheckResult)
-		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, preCheckMessage, strings.TrimSpace(string(encodedResult)))
-		s.appendPublishLog(payload, execTaskID, torrentID, preCheckResult, 200, 0)
-		logx.Warnf(publishQueueLogModule, "队列任务预检查失败 id=%d torrent_id=%s target_site=%s reason=%s", taskID, torrentID, targetSite, preCheckMessage)
-		return
 	}
 
 	logx.Infof(publishQueueLogModule, "开始执行队列任务 id=%d torrent_id=%s target_site=%s attempt=%d", taskID, torrentID, targetSite, taskRecord.AttemptCount)
@@ -897,72 +809,6 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 		_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", logText)
 	}
 	logx.Warnf(publishQueueLogModule, "队列任务失败，已重试入队 id=%d attempt=%d next_run_at=%s", taskID, attempt, nextRunAt.Format(time.RFC3339))
-}
-
-func (s *MigrateService) checkQueueVideoSizePrecondition(task repository.PublishQueueTask, payload map[string]any, ctx publishworkflow.Context) (bool, string) {
-	if s == nil || s.repo == nil {
-		return false, "发布前预检查触发限制: 队列服务未初始化"
-	}
-
-	ctxCopy := ctx
-	if strings.TrimSpace(ctxCopy.TorrentID) == "" {
-		ctxCopy.TorrentID = strings.TrimSpace(firstNonEmptyString(task.TorrentID, processingshared.ToString(payload["torrent_id"], "")))
-	}
-	if strings.TrimSpace(ctxCopy.SiteName) == "" {
-		ctxCopy.SiteName = strings.TrimSpace(firstNonEmptyString(task.SourceSite, processingshared.ToString(payload["sourceSite"], "")))
-	}
-	if strings.TrimSpace(ctxCopy.SourceNickname) == "" {
-		ctxCopy.SourceNickname = strings.TrimSpace(firstNonEmptyString(task.SourceSite, ctxCopy.SiteName))
-	}
-	if strings.TrimSpace(ctxCopy.SourceDetailURL) == "" {
-		ctxCopy.SourceDetailURL = strings.TrimSpace(ctxCopy.TorrentID)
-	}
-
-	torrentPath := acquirefetch.ResolvePublishTorrentPath(s.repo, acquirefetch.ResolvePublishTorrentPathInput{
-		OriginalTorrentPath: ctxCopy.OriginalTorrentPath,
-		TorrentDir:          ctxCopy.TorrentDir,
-		SiteName:            ctxCopy.SiteName,
-		TorrentID:           ctxCopy.TorrentID,
-		SourceNickname:      ctxCopy.SourceNickname,
-		SourceDetailURL:     ctxCopy.SourceDetailURL,
-	})
-	if strings.TrimSpace(torrentPath) == "" {
-		return false, "发布前预检查触发限制: 无法获取 torrent 文件"
-	}
-
-	videoBytes, _, err := s.ExtractVideoSizeFromTorrentFile(torrentPath)
-	if err != nil {
-		return false, "发布前预检查触发限制: 视频文件大小解析失败: " + err.Error()
-	}
-	if videoBytes < queueVideoSizeThresholdBytes {
-		videoGB := float64(videoBytes) / queueBytesPerGB
-		videoGB = math.Round(videoGB*100) / 100
-		return false, fmt.Sprintf("发布前预检查触发限制: 视频文件总大小小于 1GB（%.2fGB）", videoGB)
-	}
-
-	return true, ""
-}
-
-func (s *MigrateService) resolveQueueTaskDownloaderID(task repository.PublishQueueTask, payload map[string]any, ctx publishworkflow.Context) string {
-	downloaderID := strings.TrimSpace(task.DownloaderID)
-	if downloaderID == "" {
-		downloaderID = strings.TrimSpace(processingshared.ToString(payload["downloaderId"], processingshared.ToString(payload["downloader_id"], "")))
-	}
-	if downloaderID == "" {
-		downloaderID = strings.TrimSpace(ctx.DownloaderID)
-	}
-
-	root := map[string]any{}
-	if s != nil && s.cfg != nil {
-		root = s.cfg.Get()
-	}
-	if crossSeed, ok := root["cross_seed"].(map[string]any); ok && crossSeed != nil {
-		if defaultID := strings.TrimSpace(processingshared.ToString(crossSeed["default_downloader"], "")); defaultID != "" {
-			return defaultID
-		}
-	}
-
-	return downloaderID
 }
 
 func (s *MigrateService) resolvePublishQueueConfig() publishQueueConfig {

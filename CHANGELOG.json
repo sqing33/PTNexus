@@ -2,22 +2,308 @@
   "artifact_sources": [
     {
       "name": "github",
-      "url": "https://github.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+      "url": "https://github.com/jadylc/PTNexus/releases/download/{version}/{filename}"
     },
     {
       "name": "gitee",
-      "url": "https://gitee.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+      "url": "https://gitee.com/jadylc/PTNexus/releases/download/{version}/{filename}"
     },
     {
       "name": "github-proxy",
-      "url": "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+      "url": "https://gh.ddlc.top/https://github.com/jadylc/PTNexus/releases/download/{version}/{filename}"
     },
     {
       "name": "github-proxy2",
-      "url": "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/{version}/{filename}"
+      "url": "https://ghproxy.net/https://github.com/jadylc/PTNexus/releases/download/{version}/{filename}"
     }
   ],
   "history": [
+    {
+      "version": "v4.0.52",
+      "date": "2026.07.01",
+      "changes": [
+        "修复：批量获取新种列表按种名和大小判断已有种子，避免同名不同体积的新种被误过滤",
+        "修复：仅显示已完成时按种名和大小保留整组来源数据，避免未补全来源行导致新种列表缺失"
+      ]
+    },
+    {
+      "version": "v4.0.51",
+      "date": "2026.06.07",
+      "changes": [
+        "修复：拉取新种后批量获取列表现在会展示尚未补全种子参数的数据，避免新种子刷不出来",
+        "优化：跨站点数据页与维护页刷新时同步刷新已打开的批量获取弹窗列表"
+      ]
+    },
+    {
+      "version": "v4.0.50",
+      "date": "2026.05.12",
+      "changes": [
+        "修复：转种上传失败页不再误提取其他种子详情链接，避免失败被显示为发布成功"
+      ]
+    },
+    {
+      "version": "v4.0.49",
+      "date": "2026.05.07",
+      "changes": [
+        "修复：维护种子标题中的 ￡cXcY@FRDS 后缀现在会作为完整制作组识别，不再残留 ￡cXcY 为无法识别"
+      ]
+    },
+    {
+      "version": "v4.0.48",
+      "date": "2026.05.07",
+      "changes": [
+        "优化：所有列表页面默认过滤非视频类种子（电子书、有声书、音乐、软件、游戏等），仅展示视频内容（电影、电视剧、动画、纪录片、综艺）"
+      ]
+    },
+    {
+      "version": "v4.0.47",
+      "date": "2026.05.07",
+      "changes": [
+        "修复：FRDS官组作品标题中的 xxx@FRDS 格式（如 ￡cXcY@FRDS、Yumi@FRDS）现在能正确识别并映射到 team.frds"
+      ]
+    },
+    {
+      "version": "v4.0.46",
+      "date": "2026.05.07",
+      "changes": [
+        "修复：做种检索页路径选择器返回所有配置的下载器，不再遗漏无路径数据的下载器"
+      ]
+    },
+    {
+      "version": "v4.0.45",
+      "date": "2026.05.04",
+      "changes": [
+        "修复：任务监控同步服务端任务时保留后端时间，旧任务不再被刷新成当前时间",
+        "修复：维护种子信息页右上角刷新改为刷新全部维护页数据，不再要求源站和源站种子 ID"
+      ]
+    },
+    {
+      "version": "v4.0.42",
+      "date": "2026.04.27",
+      "changes": [
+        "修复：任务监控列表新增单条隐藏/清理操作，运行中任务可从面板临时隐藏，已结束或失败任务可单独清理",
+        "优化：清理服务端任务时记录已清理状态，避免刷新任务监控后已处理条目反复出现"
+      ]
+    },
+    {
+      "version": "v4.0.41",
+      "date": "2026.04.27",
+      "changes": [
+        "新增：任务监控支持对异常卡住的后台任务执行手动完成或终止操作，便于清理长期运行的监控条目",
+        "优化：任务操作前增加确认提示，并明确终止为请求取消或标记监控状态，不误导为强制结束底层进程"
+      ]
+    },
+    {
+      "version": "v4.0.40",
+      "date": "2026.04.25",
+      "changes": [
+        "修复：一站多种已检查列表改为仅展示实际可转种数据，避免参数异常、禁转限转分集或无法识别内容混入已检查",
+        "优化：后端统一输出可转种判定并按未检查/错误分类不可转种数据，保持列表分类与转种按钮状态一致"
+      ]
+    },
+    {
+      "version": "v4.0.39",
+      "date": "2026.04.25",
+      "changes": [
+        "修复：维护种子详情页人工确认截图有效后同步清除前端截图异常状态，避免图片校验超时残留导致无法保存",
+        "修复：维护模式的修改完成按钮不再被已残留的源种抓取任务状态阻塞，人工核验后可正常保存"
+      ]
+    },
+    {
+      "version": "v4.0.38",
+      "date": "2026.04.24",
+      "changes": [
+        "修复：维护种子详情页校验截图时为单张截图增加超时保护，避免异常图片链接导致维护表单一直停在“正在校验并填充维护表单”",
+        "优化：维护种子详情页的截图校验进度改为逐张展示，并在任务提示中明确暴露第几张截图、对应链接以及超时或加载失败等具体卡点原因",
+        "优化：截图校验异常时允许维护表单继续加载，并提示用户手动修复或重新获取截图"
+      ]
+    },
+    {
+      "version": "v4.0.37",
+      "date": "2026.04.23",
+      "changes": [
+        "修复：维护种子详情页的源种抓取任务改为按站点与种子稳定去重，重复进入同一种子时不再在任务中心累积多条抓取任务",
+        "修复：维护面板的修改完成按钮会明确显示后台阻塞原因，并通过右侧常驻提示持续暴露当前卡在数据库回读、截图校验或人工确认等阶段",
+        "优化：数据库未命中时明确提示将转源站抓取，便于定位维护表单加载慢在哪一步"
+      ]
+    },
+    {
+      "version": "v4.0.36",
+      "date": "2026.04.23",
+      "changes": [
+        "修复：任务监控中的 MediaInfo 与源种抓取任务不再错误跳转到发种日志，避免无意义详情入口干扰操作",
+        "修复：一站多种页未筛选时默认展示全部已检查数据，避免列表被额外前端条件误筛",
+        "修复：维护种子详情页检测到可用 MediaInfo 时跳过 BDInfo 失败提示，并优化维护表单加载提示与完成按钮可用时机"
+      ]
+    },
+    {
+      "version": "v4.0.34",
+      "date": "2026.04.22",
+      "changes": [
+        "修复：维护页修改完成后默认返回维护列表，避免从待检查进入后跳回一站多种标签",
+        "修复：任务监控清除后的服务端任务会记住完成态文案，避免轮询同步后再次出现",
+        "修复：一站多种页默认直接展示后端返回的已检查数据，避免前端二次裁剪导致列表异常缩量"
+      ]
+    },
+    {
+      "version": "v4.0.33",
+      "date": "2026.04.22",
+      "changes": [
+        "修复：维护页的修改完成按钮独立于发布校验状态，避免进入维护后按钮被错误禁用",
+        "修复：任务监控清除已完成服务端任务后会记住清除状态，避免轮询同步时重复出现",
+        "修复：发种日志页按当前路由 query 全量覆盖筛选条件，避免清空后仍残留旧筛选",
+        "修复：一站多种页将检查状态纳入可见筛选并在清除时同步重置，避免未显式筛选时数据被隐藏条件缩量"
+      ]
+    },
+    {
+      "version": "v4.0.32",
+      "date": "2026.04.21",
+      "changes": [
+        "修复：维护种子信息页默认复用一站多种列表与筛选，可直接从待维护数据进入单条维护",
+        "修复：一站多种页仅展示可转种数据，避免不可处理条目继续出现在列表中",
+        "修复：右上角刷新操作会写入全局任务监控，并保留可见状态与页面跳转信息"
+      ]
+    },
+    {
+      "version": "v4.0.31",
+      "date": "2026.04.21",
+      "changes": [
+        "调整：维护种子信息页独立为顶层导航页面，一站多种页仅保留转种能力",
+        "新增：右上角全局任务监控支持显示刷新等后台任务，并可查看失败错误详情",
+        "修复：已完成转种到目标站的种子按 hash 排除，不再继续出现在待转种列表中"
+      ]
+    },
+    {
+      "version": "v4.0.30",
+      "date": "2026.04.18",
+      "changes": [
+        "修复：候选媒体路径缺少扩展名时，可自动回退命中同名媒体文件，避免截图与媒体分析误报未找到可分析媒体文件",
+        "新增：辅种详情面板支持手动重新从源站拉取数据，并在抓取后整包刷新当前面板内容"
+      ]
+    },
+    {
+      "version": "v4.0.26",
+      "date": "2026.04.18",
+      "changes": [
+        "修复：保存路径已是最终内容目录时，截图与媒体解析可直接扫描该目录，避免误报未找到可分析媒体文件",
+        "修复：数据库种子信息回填保存路径时优先按 hash 匹配当前本地种子，避免不同站点同名任务拿错路径"
+      ]
+    },
+    {
+      "version": "v4.0.25",
+      "date": "2026.04.17",
+      "changes": [
+        "优化：版本更新页进入时预取版本历史，保留旧记录并补充顶部加载/失败重试提示"
+      ]
+    },
+    {
+      "version": "v4.0.24",
+      "date": "2026.04.17",
+      "changes": [
+        "测试：空版本升级，用于验证在线更新链路"
+      ]
+    },
+    {
+      "version": "v4.0.23",
+      "date": "2026.04.17",
+      "changes": [
+        "测试：空版本升级，用于继续验证在线更新检测链路"
+      ]
+    },
+    {
+      "version": "v4.0.20",
+      "date": "2026.04.17",
+      "changes": [
+        "测试：空版本升级，用于验证修复后的在线更新检测链路"
+      ]
+    },
+    {
+      "version": "v4.0.19",
+      "date": "2026.04.16",
+      "changes": [
+        "测试：空版本升级，用于验证修复后的跨设备在线更新链路"
+      ]
+    },
+    {
+      "version": "v4.0.18",
+      "date": "2026.04.16",
+      "changes": [
+        "修复：点击版本号时先立即弹出版本更新窗口，再异步加载更新信息，避免用户误以为点击无响应"
+      ]
+    },
+    {
+      "version": "v4.0.17",
+      "date": "2026.04.16",
+      "changes": [
+        "测试：空版本升级，用于验证修复后的在线更新链路"
+      ]
+    },
+    {
+      "version": "v4.0.15",
+      "date": "2026.04.16",
+      "changes": [
+        "测试：空版本升级，用于验证在线更新链路"
+      ]
+    },
+    {
+      "version": "v4.0.14",
+      "date": "2026.04.16",
+      "changes": [
+        "修复：Gitee Release 仅同步内部升级所需 runtime 包与 UPDATE_MANIFEST.json，避免非必需产物上传导致超时卡住",
+        "修复：收紧 Gitee 更新侧资产范围，减少发布后国内更新链路的不稳定因素"
+      ]
+    },
+    {
+      "version": "v4.0.13",
+      "date": "2026.04.15",
+      "changes": [
+        "修复：收紧 Gitee Release 上传超时并补充成功日志，避免同步完成后工作流长时间挂起",
+        "修复：在线更新清单优先使用 go 分支与 Gitee 候选源，提升国内更新成功率"
+      ]
+    },
+    {
+      "version": "v4.0.12",
+      "date": "2026.04.15",
+      "changes": [
+        "修复：在线更新优先使用版本化更新清单地址，避免 latest/raw 地址失效导致获取 UPDATE_MANIFEST 失败",
+        "修复：发布 release_assets 到 Gitee Release 时改用共享脚本上传，避免内联上传器长时间卡住不结束"
+      ]
+    },
+    {
+      "version": "v4.0.11",
+      "date": "2026.04.15",
+      "changes": [
+        "修复：编辑种子第一步直接点击修改完成时会先保存修改内容，避免数据丢失"
+      ]
+    },
+    {
+      "version": "v4.0.10",
+      "date": "2026.04.15",
+      "changes": [
+        "优化：编辑种子时无异常可直接完成，仅在检测到异常时要求浏览完整预览"
+      ]
+    },
+    {
+      "version": "v4.0.9",
+      "date": "2026.04.15",
+      "changes": [
+        "新增：恢复 Gitee 更新源（gitee.com/jadylc/PTNexus），支持 GitHub + Gitee 双源并行探测"
+      ]
+    },
+    {
+      "version": "v4.0.8",
+      "date": "2026.04.15",
+      "changes": [
+        "修复：种子官组字段仅匹配后缀样式，避免将站点分组误写入 torrents.group"
+      ]
+    },
+    {
+      "version": "v4.0.7",
+      "date": "2026.04.15",
+      "changes": [
+        "修复：同步在线更新元数据与镜像版本号，避免版本显示与镜像实际版本不一致"
+      ]
+    },
     {
       "version": "v4.0.2",
       "date": "2026.03.21",
@@ -88,7 +374,7 @@
     {
       "version": "v3.6.1",
       "date": "2026.02.10",
-      "note": "注：Win 版本正在测试ing...\n盒子端需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：Win 版本正在测试ing...\n盒子端需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "新增：转种目标站点-爱萝莉",
         "新增：出种限速功能",
@@ -104,7 +390,7 @@
     {
       "version": "v3.6.0",
       "date": "2026.01.29",
-      "note": "注：(可选)盒子端修改获取截图和 MediaInfo 和 BDInfo 的超时时间需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：(可选)盒子端修改获取截图和 MediaInfo 和 BDInfo 的超时时间需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "新增：修改了下载进度的计算逻辑，对于拆包下载作种的种子添加了一个‘部分做种’的状态",
         "新增：基于媒介（medium）规范视频编码 AVC / HEVC、H.264 / H.265、x264/x265",
@@ -117,7 +403,7 @@
     {
       "version": "v3.5.9",
       "date": "2026.01.27",
-      "note": "注：盒子端修复截图上传功能需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：盒子端修复截图上传功能需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "修复：pixhost 图床更换 img1 直链为 img2 导致新发图片无法显示"
       ]
@@ -167,7 +453,7 @@
     {
       "version": "v3.5.3",
       "date": "2026.01.13",
-      "note": "注：盒子端新增自动选择中文字幕流功能需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：盒子端新增自动选择中文字幕流功能需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "新增：禁转规则-空官组禁转至 ub",
         "新增：自动选择中文字幕流，盒子端需要一同更新",
@@ -210,10 +496,10 @@
     {
       "version": "v3.4.7",
       "date": "2026.01.08",
-      "note": "注：修改 Github 仓库地址为 'https://github.com/sqing33/PTNexus'，因为 'pt-nexus' 缺失横杠无法搜索到，以至于有人在安装的时候安装到了 'nexusphp'。\n结算画面： 'https://img1.pixhost.to/images/11481/682419724_4ba3b6c6-d528-471d-b898-c05c88ea4332.png' \n新的盒子端安装地址为 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash",
+      "note": "注：修改 Github 仓库地址为 'https://github.com/jadylc/PTNexus'，因为 'pt-nexus' 缺失横杠无法搜索到，以至于有人在安装的时候安装到了 'nexusphp'。\n结算画面： 'https://img1.pixhost.to/images/11481/682419724_4ba3b6c6-d528-471d-b898-c05c88ea4332.png' \n新的盒子端安装地址为 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash",
       "changes": [
         "修改：从 mediainfo 与 bdinfo 获取音频编码的选择",
-        "修改：Github 仓库地址为 'https://github.com/sqing33/PTNexus'"
+        "修改：Github 仓库地址为 'https://github.com/jadylc/PTNexus'"
       ]
     },
     {
@@ -281,7 +567,7 @@
     {
       "version": "v3.3.4",
       "date": "2025.12.25",
-      "note": "注：修复盒子端获取原盘的截图有概率会报错失败的问题需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：修复盒子端获取原盘的截图有概率会报错失败的问题需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "新增：转种目标站点-劳改所",
         "修复：部分站点丢失 HDR 标签",
@@ -318,7 +604,7 @@
     {
       "version": "v3.3.0",
       "date": "2025.12.15",
-      "note": "注:若报错“ModuleNotFoundError: No module named 'PIL'”则需要重新下载镜像进行更新，如仍然报错则删除 data 目录下的 updates 文件夹。\n13City限速12.5MB/s，代码不会修改非0的限速，需要手动修改。\n盒子获取 bdinfo 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注:若报错“ModuleNotFoundError: No module named 'PIL'”则需要重新下载镜像进行更新，如仍然报错则删除 data 目录下的 updates 文件夹。\n13City限速12.5MB/s，代码不会修改非0的限速，需要手动修改。\n盒子获取 bdinfo 需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "修复：“ModuleNotFoundError: No module named 'PIL'”报错",
         "修复：青蛙、三月传媒主标题出现重复制作组的问题",
@@ -336,7 +622,7 @@
     {
       "version": "v3.2.4",
       "date": "2025.12.11",
-      "note": "注：盒子优化截图速度需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：盒子优化截图速度需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "优化：截图速度，截图名称用时间点命名",
         "新增：转种目标站点-PTSkit"
@@ -345,7 +631,7 @@
     {
       "version": "v3.2.3",
       "date": "2025.12.11",
-      "note": "注：（需要更新 docker 镜像）新增环境变量 UPDATE_SOURCE，可选值 github 或 gitee，默认为 gitee，用于选择更新的源。\n盒子截图 png 需要重新执行 curl -sL https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
+      "note": "注：（需要更新 docker 镜像）新增环境变量 UPDATE_SOURCE，可选值 github 或 gitee，默认为 gitee，用于选择更新的源。\n盒子截图 png 需要重新执行 curl -sL https://github.com/jadylc/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash 以更新盒子端脚本。",
       "changes": [
         "修复：数据库迁移错误",
         "修复：标题参数 DTS 无法正确识别",

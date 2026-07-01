@@ -105,6 +105,119 @@ func extractUnrecognized(titleComponents []any) string {
 	return ""
 }
 
+func isValidStandardValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return trimmed == "" || (strings.Contains(trimmed, ".") && !strings.HasPrefix(trimmed, ".") && !strings.HasSuffix(trimmed, "."))
+}
+
+func hasRestrictedStandardTag(tags []string) bool {
+	for _, raw := range tags {
+		switch strings.TrimSpace(raw) {
+		case "禁转", "tag.禁转", "限转", "tag.限转", "分集", "tag.分集":
+			return true
+		}
+	}
+	return false
+}
+
+func hasUnrecognizedValue(titleComponents []any) bool {
+	return strings.TrimSpace(extractUnrecognized(titleComponents)) != ""
+}
+
+func isRowPublishable(item map[string]any, reverseMappings map[string]any) bool {
+	if boolFromAny(item["is_deleted"]) || !boolFromAny(item["is_reviewed"]) {
+		return false
+	}
+
+	fieldCategories := []string{"type", "medium", "video_codec", "audio_codec", "resolution", "team", "source"}
+	for _, category := range fieldCategories {
+		value := strings.TrimSpace(toString(item[category], ""))
+		if value == "" {
+			continue
+		}
+		if !isValidStandardValue(value) || !isStandardValueMapped(reverseMappings, category, value) {
+			return false
+		}
+	}
+
+	tags := parseStringArray(item["tags"])
+	if hasRestrictedStandardTag(tags) {
+		return false
+	}
+	for _, tag := range tags {
+		if !isValidStandardValue(tag) || !isStandardValueMapped(reverseMappings, "tags", tag) {
+			return false
+		}
+	}
+
+	return !hasUnrecognizedValue(parseAnyArray(item["title_components"]))
+}
+
+func isStandardValueMapped(reverseMappings map[string]any, category string, standardValue string) bool {
+	categoryMap := toStringMapAny(reverseMappings[category])
+	if len(categoryMap) == 0 {
+		return false
+	}
+	_, ok := categoryMap[standardValue]
+	return ok
+}
+
+func toStringMapAny(value any) map[string]string {
+	result := map[string]string{}
+	switch typed := value.(type) {
+	case map[string]string:
+		return typed
+	case map[string]any:
+		for key, item := range typed {
+			result[strings.TrimSpace(key)] = strings.TrimSpace(toString(item, ""))
+		}
+	case map[any]any:
+		for key, item := range typed {
+			result[strings.TrimSpace(toString(key, ""))] = strings.TrimSpace(toString(item, ""))
+		}
+	}
+	return result
+}
+
+func normalizeQueryRow(item map[string]any, reverseMappings map[string]any) {
+	item["tags"] = parseStringArray(item["tags"])
+	item["is_deleted"] = boolFromAny(item["is_deleted"])
+	item["is_reviewed"] = boolFromAny(item["is_reviewed"])
+
+	titleComponents := parseAnyArray(item["title_components"])
+	item["unrecognized"] = extractUnrecognized(titleComponents)
+	item["is_publishable"] = isRowPublishable(item, reverseMappings)
+}
+
+func paginateMaps(items []map[string]any, offset int, pageSize int) []map[string]any {
+	if offset >= len(items) {
+		return []map[string]any{}
+	}
+	end := offset + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[offset:end]
+}
+
+func matchesReviewStatus(item map[string]any, reviewStatus string) bool {
+	publishable, ok := item["is_publishable"].(bool)
+	if !ok {
+		publishable = false
+	}
+
+	switch reviewStatus {
+	case "reviewed":
+		return publishable
+	case "unreviewed":
+		return !boolFromAny(item["is_deleted"]) && !publishable
+	case "error":
+		return boolFromAny(item["is_deleted"])
+	default:
+		return true
+	}
+}
+
 func boolFromAny(value any) bool {
 	switch typed := value.(type) {
 	case bool:

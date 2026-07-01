@@ -284,20 +284,26 @@ func runAutoUpdate() {
 		return
 	}
 
-	localVersion := getLocalVersion()
+	localVersion := getLocalVersionDetails().Version
 
-	manifest, err := getRemoteManifest()
+	manifest, err := getRemoteManifestForMode(updateModeRuntimeInstall, localVersion)
 	if err != nil {
-		log.Printf("自动更新失败：无法获取更新清单: %v", err)
+		log.Printf("自动更新时获取更新清单失败: %v", err)
 		return
 	}
 
-	remoteVersion := strings.TrimSpace(manifest.Latest.Version)
-	shouldForce := manifest.Latest.ForceUpdate || hasCrossVersionForceUpdate(localVersion, manifest.History)
-	shouldDisable := manifest.Latest.DisableUpdate
+	decision := buildUpdateDecision(updateModeRuntimeInstall)
+	remoteVersion := strings.TrimSpace(decision.RemoteVersion)
+	shouldForce, _ := decision.UpdateControl["force_update"].(bool)
+	shouldDisable, _ := decision.UpdateControl["disable_update"].(bool)
 
-	if !isNewerVersion(remoteVersion, localVersion) {
-		log.Printf("本地版本 %s 已是最新，无需更新", localVersion)
+	if !decision.HasUpdate {
+		log.Printf("本地版本 %s 已是最新，跳过自动更新: reason=%s", localVersion, decision.ReasonCode)
+		return
+	}
+
+	if !decision.PlatformReady {
+		log.Printf("自动更新跳过: reason=%s source=%s", decision.ReasonCode, decision.ManifestSource)
 		return
 	}
 
@@ -310,12 +316,7 @@ func runAutoUpdate() {
 	}
 
 	if shouldDisable {
-		log.Printf("版本 %s 标记为 disable_update，跳过自动更新", remoteVersion)
-		return
-	}
-
-	if _, err := resolveManifestArtifactForCurrentPlatform(manifest); err != nil {
-		log.Printf("更新清单不完整，跳过自动更新: %v", err)
+		log.Printf("版本 %s 不可自动更新，跳过自动更新: reason=%s", remoteVersion, decision.ReasonCode)
 		return
 	}
 
@@ -425,6 +426,182 @@ func hasCrossVersionForceUpdate(localVersion string, history []VersionInfo) bool
 	return false
 }
 
+type localVersionDetails struct {
+	Version string `json:"version"`
+	Source  string `json:"source"`
+}
+
+type localVersionResponse struct {
+	Success            bool   `json:"success"`
+	LocalVersion       string `json:"local_version"`
+	LocalVersionSource string `json:"local_version_source,omitempty"`
+}
+
+type updateDecision struct {
+	Success             bool                      `json:"success"`
+	HasUpdate           bool                      `json:"has_update"`
+	LocalVersion        string                    `json:"local_version"`
+	LocalVersionSource  string                    `json:"local_version_source,omitempty"`
+	RemoteVersion       string                    `json:"remote_version"`
+	UpdateMode          string                    `json:"update_mode"`
+	ReasonCode          string                    `json:"reason_code,omitempty"`
+	ReasonMessage       string                    `json:"reason_message,omitempty"`
+	ManifestSource      string                    `json:"manifest_source,omitempty"`
+	ManifestStrategy    string                    `json:"manifest_fetch_strategy,omitempty"`
+	PlatformReady       bool                      `json:"platform_ready"`
+	PlatformReason      string                    `json:"platform_reason,omitempty"`
+	DesktopInstaller    *DesktopInstallerAsset    `json:"desktop_installer,omitempty"`
+	UpdateControl       map[string]interface{}    `json:"update_control"`
+	ManifestDiagnostics ManifestLookupDiagnostics `json:"manifest_diagnostics,omitempty"`
+}
+
+func getLocalVersionDetails() localVersionDetails {
+	if version := inferVersionFromCurrentRuntime(); version != "" {
+		return localVersionDetails{Version: version, Source: "current_runtime"}
+	}
+	for _, path := range localVersionConfigCandidates() {
+		version, err := readVersionFromConfig(path)
+		if err == nil {
+			return localVersionDetails{Version: version, Source: path}
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("读取本地版本配置失败: path=%s err=%v", path, err)
+		}
+	}
+	if version := readVersionFromPlainFile(localVersionFilePath); version != "" {
+		return localVersionDetails{Version: version, Source: localVersionFilePath}
+	}
+	if version := strings.TrimSpace(getEnv("PTNEXUS_VERSION", "")); version != "" {
+		return localVersionDetails{Version: version, Source: "env:PTNEXUS_VERSION"}
+	}
+	if version := readVersionFromPlainFile(strings.TrimSpace(getEnv("VERSION_FILE", ""))); version != "" {
+		return localVersionDetails{Version: version, Source: "env:VERSION_FILE"}
+	}
+	return localVersionDetails{Version: "unknown", Source: "unknown"}
+}
+
+func platformReadinessForMode(updateMode string, manifest *UpdateManifest) (bool, string, *DesktopInstallerAsset) {
+	if manifest == nil {
+		return false, "remote_manifest_unavailable", nil
+	}
+	switch strings.TrimSpace(updateMode) {
+	case updateModeInstallerDownload:
+		installer, err := resolveDesktopInstallerForCurrentPlatform(manifest)
+		if err != nil {
+			return false, "platform_installer_missing", nil
+		}
+		return true, "ready", &installer
+	default:
+		if _, err := resolveManifestArtifactForCurrentPlatform(manifest); err != nil {
+			return false, "platform_artifact_missing", nil
+		}
+		return true, "ready", nil
+	}
+}
+
+func buildUpdateDecision(updateMode string) updateDecision {
+	decision := updateDecision{
+		Success:    true,
+		UpdateMode: updateMode,
+		UpdateControl: map[string]interface{}{
+			"force_update":   false,
+			"disable_update": false,
+			"schedule":       loadScheduleConfig(),
+		},
+	}
+
+	localDetails := getLocalVersionDetails()
+	decision.LocalVersion = localDetails.Version
+	decision.LocalVersionSource = localDetails.Source
+
+	manifestResult, err := getRemoteManifestResultForMode(updateMode, localDetails.Version)
+	if err != nil {
+		decision.ReasonCode = "remote_manifest_unavailable"
+		decision.ReasonMessage = err.Error()
+		decision.PlatformReason = "remote_manifest_unavailable"
+		return decision
+	}
+
+	decision.ManifestSource = manifestResult.Source
+	decision.ManifestStrategy = manifestResult.Diagnostics.Strategy
+	decision.ManifestDiagnostics = manifestResult.Diagnostics
+
+	manifest := manifestResult.Manifest
+	if manifest != nil {
+		decision.RemoteVersion = strings.TrimSpace(manifest.Latest.Version)
+	}
+
+	forceUpdate := false
+	disableUpdate := false
+	if manifest != nil {
+		forceUpdate = manifest.Latest.ForceUpdate || hasCrossVersionForceUpdate(localDetails.Version, manifest.History)
+		disableUpdate = manifest.Latest.DisableUpdate
+	}
+
+	decision.PlatformReady, decision.PlatformReason, decision.DesktopInstaller = platformReadinessForMode(updateMode, manifest)
+
+	localKnown := strings.TrimSpace(localDetails.Version) != "" && !strings.EqualFold(strings.TrimSpace(localDetails.Version), "unknown")
+	remoteKnown := strings.TrimSpace(decision.RemoteVersion) != ""
+	if localKnown && remoteKnown {
+		decision.HasUpdate = isNewerVersion(decision.RemoteVersion, localDetails.Version)
+	}
+
+	if !localKnown {
+		decision.ReasonCode = "local_version_unknown"
+		decision.ReasonMessage = "当前实例本地版本未知"
+	} else if !remoteKnown {
+		decision.ReasonCode = "remote_manifest_unavailable"
+		decision.ReasonMessage = "远程更新清单不可用"
+	} else if !decision.HasUpdate {
+		decision.ReasonCode = "already_latest"
+		decision.ReasonMessage = "当前已是最新版本"
+		forceUpdate = false
+		disableUpdate = false
+	} else if strings.TrimSpace(updateMode) == updateModeInstallerDownload && !decision.PlatformReady {
+		decision.ReasonCode = "platform_installer_missing"
+		decision.ReasonMessage = "存在新版本，但当前平台缺少可用安装包"
+		disableUpdate = true
+	} else if strings.TrimSpace(updateMode) != updateModeInstallerDownload && !decision.PlatformReady {
+		decision.ReasonCode = "platform_artifact_missing"
+		decision.ReasonMessage = "存在新版本，但当前平台缺少可用更新产物"
+		disableUpdate = true
+	} else if manifest != nil && manifest.Latest.DisableUpdate {
+		decision.ReasonCode = "update_explicitly_disabled"
+		decision.ReasonMessage = "远程版本已显式禁用在线更新"
+		disableUpdate = true
+	} else {
+		decision.ReasonCode = "update_available"
+		decision.ReasonMessage = "检测到可用更新"
+	}
+
+	decision.UpdateControl["force_update"] = forceUpdate && decision.HasUpdate
+	decision.UpdateControl["disable_update"] = disableUpdate && decision.HasUpdate
+	return decision
+}
+
+// 获取本地版本
+func getLocalVersionHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	localDetails := getLocalVersionDetails()
+	json.NewEncoder(w).Encode(localVersionResponse{
+		Success:            true,
+		LocalVersion:       localDetails.Version,
+		LocalVersionSource: localDetails.Source,
+	})
+}
+
 // 检查更新
 func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -439,85 +616,17 @@ func checkUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	localVersion := getLocalVersion()
 	updateMode := updateModeRuntimeInstall
 	if isWindowsDesktopRuntime() {
 		updateMode = updateModeInstallerDownload
 	}
 
-	// UPDATE_MANIFEST.json：唯一的运行时更新元数据。
-	var manifestVersion string
-	var forceUpdateFromManifest bool
-	var disableUpdateFromManifest bool
-	manifestReady := false
-	var desktopInstaller *DesktopInstallerAsset
-	if manifest, err := getRemoteManifest(); err != nil {
-		log.Printf("检查更新时获取更新清单失败: %v", err)
-	} else {
-		manifestVersion = strings.TrimSpace(manifest.Latest.Version)
-		forceUpdateFromManifest = manifest.Latest.ForceUpdate || hasCrossVersionForceUpdate(localVersion, manifest.History)
-		disableUpdateFromManifest = manifest.Latest.DisableUpdate
-
-		if updateMode == updateModeInstallerDownload {
-			installer, err := resolveDesktopInstallerForCurrentPlatform(manifest)
-			if err != nil {
-				log.Printf("检查更新时桌面安装包信息不完整，跳过安装包下载入口: %v", err)
-			} else {
-				manifestReady = true
-				desktopInstaller = &installer
-			}
-		} else {
-			if _, err := resolveManifestArtifactForCurrentPlatform(manifest); err != nil {
-				log.Printf("检查更新时更新清单不完整，跳过产物更新入口: %v", err)
-			} else {
-				manifestReady = true
-			}
-		}
+	decision := buildUpdateDecision(updateMode)
+	if decision.HasUpdate {
+		log.Printf("检测到新版本: %s -> %s (reason=%s force=%v disable=%v)", decision.LocalVersion, decision.RemoteVersion, decision.ReasonCode, decision.UpdateControl["force_update"], decision.UpdateControl["disable_update"])
 	}
 
-	remoteVersion := manifestVersion
-	forceUpdate := forceUpdateFromManifest
-	disableUpdate := disableUpdateFromManifest
-
-	hasUpdate := false
-	if remoteVersion != "" && localVersion != "" {
-		hasUpdate = isNewerVersion(remoteVersion, localVersion)
-	}
-
-	// 没有新版本时，不应对前端暴露强制更新标志，避免“本地更高版本”场景误导 UI。
-	if !hasUpdate {
-		forceUpdate = false
-		disableUpdate = false
-	}
-
-	// 桌面模式下，“disable_update”代表是否提供可下载安装包；不沿用 runtime 的禁更标志。
-	if updateMode == updateModeInstallerDownload {
-		if hasUpdate {
-			disableUpdate = !manifestReady
-		}
-	} else if hasUpdate && !manifestReady {
-		// 无可用产物时禁用“在线更新”，避免 UI 出现“有更新但无法安装”的误导操作。
-		disableUpdate = true
-	}
-
-	if hasUpdate {
-		log.Printf("检测到新版本: %s -> %s (Force: %v, Disable: %v)", localVersion, remoteVersion, forceUpdate, disableUpdate)
-	}
-
-	// 这里不再做任何自动更新的触发逻辑，只返回数据
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":           true,
-		"has_update":        hasUpdate,
-		"local_version":     localVersion,
-		"remote_version":    remoteVersion,
-		"update_mode":       updateMode,
-		"desktop_installer": desktopInstaller,
-		"update_control": map[string]interface{}{
-			"force_update":   forceUpdate,
-			"disable_update": disableUpdate,
-			"schedule":       loadScheduleConfig(),
-		},
-	})
+	json.NewEncoder(w).Encode(decision)
 }
 
 // compareVersions 比较两个版本号
@@ -594,7 +703,7 @@ func pullUpdateHandler(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 			defer cancel()
 
-			manifest, err := getRemoteManifest()
+			manifest, err := getRemoteManifestForMode(updateModeInstallerDownload, getLocalVersion())
 			if err != nil {
 				return err
 			}
@@ -757,23 +866,23 @@ func installUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("安装更新成功: version=%s", prepared.Version)
 }
 
+var localVersionFilePath = "/app/VERSION"
+
 // 获取本地版本
 func getLocalVersion() string {
-	if version := inferVersionFromCurrentRuntime(); version != "" {
-		return version
-	}
+	return getLocalVersionDetails().Version
+}
 
-	for _, path := range localVersionConfigCandidates() {
-		version, err := readVersionFromConfig(path)
-		if err == nil {
-			return version
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			log.Printf("读取本地版本配置失败: path=%s err=%v", path, err)
-		}
+func readVersionFromPlainFile(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
 	}
-
-	return "unknown"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func localVersionConfigCandidates() []string {
@@ -877,7 +986,7 @@ func getChangelogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manifest, err := getRemoteManifest()
+	manifestResult, err := getRemoteManifestResultForMode(updateModeRuntimeInstall, getLocalVersionDetails().Version)
 	if err != nil {
 		log.Printf("获取远程更新历史失败: %v", err)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -886,6 +995,8 @@ func getChangelogHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	manifest := manifestResult.Manifest
 
 	log.Printf("解析更新清单成功，history 长度: %d", len(manifest.History))
 	if len(manifest.History) > 0 {
@@ -968,7 +1079,7 @@ func proxyToBatchEnhancer(w http.ResponseWriter, r *http.Request) {
 func main() {
 	log.Println("PT Nexus 更新器启动...")
 	log.Println("监听端口:", updaterPort)
-	log.Printf("更新源策略: 自动并行探测 GitHub/Gitee")
+	log.Printf("更新源策略: 自动并行探测 GitHub + Gitee")
 
 	// 检查定时配置
 	schedule := loadScheduleConfig()
@@ -984,6 +1095,7 @@ func main() {
 
 	// 注册路由
 	http.HandleFunc("/health", healthHandler)
+	http.HandleFunc("/update/local-version", getLocalVersionHandler)
 	http.HandleFunc("/update/check", checkUpdateHandler)
 	http.HandleFunc("/update/pull", pullUpdateHandler)
 	http.HandleFunc("/update/install", installUpdateHandler)
