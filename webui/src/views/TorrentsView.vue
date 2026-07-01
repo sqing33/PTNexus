@@ -848,7 +848,7 @@ const refreshBackendAndReload = async () => {
     // 先获取下载器列表和站点状态，再获取数据
     // 使用 forceRefresh = true 强制刷新缓存
     await Promise.all([fetchDownloadersList(true), fetchAllSitesStatus(true)])
-    await fetchDataWithoutLoadingControl()
+    await fetchDataWithoutLoadingControl({ includeMetadata: true })
   } finally {
     loading.value = false
     emitGlobalRefreshLoading(false)
@@ -856,9 +856,13 @@ const refreshBackendAndReload = async () => {
   }
 }
 
-const fetchDataWithSpinner = async () => {
+interface FetchDataOptions {
+  includeMetadata?: boolean
+}
+
+const fetchDataWithSpinner = async (options: FetchDataOptions = {}) => {
   loading.value = true
-  await fetchData()
+  await fetchData(options)
 }
 
 // --- [新增] 控制表格渲染的状态 ---
@@ -872,6 +876,7 @@ const SAVE_PATH_MIN_COLUMN_WIDTH = 90
 const SAVE_PATH_DISPLAY_MAX_LENGTH = 30
 
 const nameSearch = ref<string>('')
+const searchFetchTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 type SortOrder = 'ascending' | 'descending' | null
 type SortState = { prop: string; order: SortOrder }
 const currentSort = ref<SortState>({ prop: 'name', order: 'ascending' })
@@ -918,6 +923,7 @@ const unique_paths = ref<string[]>([])
 const unique_states = ref<string[]>([])
 const all_sites = ref<string[]>([])
 const site_link_rules = ref<Record<string, { base_url: string }>>({})
+const listMetadataLoaded = ref<boolean>(false)
 const expandedRows = ref<string[]>([])
 const downloadersList = ref<Downloader[]>([])
 const allDownloadersList = ref<Downloader[]>([])
@@ -1232,9 +1238,12 @@ const fetchCrossSeedSettings = async () => {
 }
 
 // 内部数据获取函数，不控制 loading 状态（供 refreshBackendAndReload 使用）
-const fetchDataWithoutLoadingControl = async () => {
+const hasListMetadata = () => listMetadataLoaded.value
+
+const fetchDataWithoutLoadingControl = async (options: FetchDataOptions = {}) => {
   error.value = null
   try {
+    const includeMetadata = options.includeMetadata ?? !hasListMetadata()
     const params = new URLSearchParams({
       page: currentPage.value.toString(),
       pageSize: pageSize.value.toString(),
@@ -1246,6 +1255,7 @@ const fetchDataWithoutLoadingControl = async () => {
       path_filters: JSON.stringify(activeFilters.paths || []),
       state_filters: JSON.stringify(activeFilters.states),
       downloader_filters: JSON.stringify(activeFilters.downloaderIds),
+      include_metadata: includeMetadata ? 'true' : 'false',
     })
 
     const response = await axios.get(`/api/data?${params.toString()}`)
@@ -1256,22 +1266,26 @@ const fetchDataWithoutLoadingControl = async () => {
     totalTorrents.value = result.total
     if (pageSize.value !== result.pageSize) pageSize.value = result.pageSize
 
-    unique_paths.value = result.unique_paths
-    unique_states.value = result.unique_states
-    all_sites.value = result.all_discovered_sites
-    site_link_rules.value = result.site_link_rules
-    activeFilters.paths = result.active_path_filters
-
-    pathTreeData.value = buildPathTree(result.unique_paths)
+    if (includeMetadata) {
+      unique_paths.value = Array.isArray(result.unique_paths) ? result.unique_paths : []
+      unique_states.value = Array.isArray(result.unique_states) ? result.unique_states : []
+      all_sites.value = Array.isArray(result.all_discovered_sites) ? result.all_discovered_sites : []
+      site_link_rules.value = result.site_link_rules || {}
+      activeFilters.paths = Array.isArray(result.active_path_filters)
+        ? result.active_path_filters
+        : activeFilters.paths
+      pathTreeData.value = buildPathTree(unique_paths.value)
+      listMetadataLoaded.value = true
+    }
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e)
   }
 }
 
-const fetchData = async () => {
+const fetchData = async (options: FetchDataOptions = {}) => {
   loading.value = true
   try {
-    await fetchDataWithoutLoadingControl()
+    await fetchDataWithoutLoadingControl(options)
   } finally {
     loading.value = false
   }
@@ -1905,6 +1919,7 @@ const triggerIYUUQueryForFiltered = async () => {
       path_filters: JSON.stringify(activeFilters.paths || []),
       state_filters: JSON.stringify(activeFilters.states),
       downloader_filters: JSON.stringify(activeFilters.downloaderIds),
+      include_metadata: 'false',
     })
 
     const listResp = await axios.get(`/api/data?${params.toString()}`)
@@ -1993,6 +2008,10 @@ const triggerIYUUQueryForFiltered = async () => {
 
 onUnmounted(() => {
   stopIyuuBatchPolling()
+  if (searchFetchTimer.value) {
+    clearTimeout(searchFetchTimer.value)
+    searchFetchTimer.value = null
+  }
   emitGlobalRefreshLoading(false)
 })
 
@@ -2353,8 +2372,14 @@ watch(nameSearch, () => {
   if (isInitializing.value) return
   currentPage.value = 1
   syncUiSettingsCache()
-  fetchDataWithSpinner()
-  saveUiSettings()
+  if (searchFetchTimer.value) {
+    clearTimeout(searchFetchTimer.value)
+  }
+  searchFetchTimer.value = setTimeout(() => {
+    fetchDataWithSpinner()
+    saveUiSettings()
+    searchFetchTimer.value = null
+  }, 300)
 })
 // 移除旧的监听器，现在不需要根据siteExistence值清空siteNames
 </script>

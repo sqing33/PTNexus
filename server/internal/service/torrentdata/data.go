@@ -8,6 +8,10 @@ import (
 	"github.com/pt-nexus/server/internal/repository"
 )
 
+// GetData 聚合维护种子列表数据并按查询条件分页返回。
+// 参数/返回：params 为页面、筛选、排序和 metadata 控制参数；返回前端表格数据及可选筛选元数据。
+// 失败场景：站点配置、种子列表或筛选元数据查询失败时返回错误。
+// 副作用：仅读取数据库和运行配置，不写入数据。
 func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any, error) {
 	if params.Page < 1 {
 		params.Page = 1
@@ -17,6 +21,10 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 	}
 	if params.PageSize > 200 {
 		params.PageSize = 200
+	}
+
+	if params.MetadataOnly {
+		return s.getDataMetadataResponse(params)
 	}
 
 	siteConfigs, err := s.repo.ListSiteConfigs()
@@ -37,11 +45,18 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		return nil, fmt.Errorf("load discovered sites failed: %w", err)
 	}
 
-	torrentRows, err := s.repo.ListTorrents(params.OnlyCompleted)
+	torrentRows, err := s.repo.ListTorrentsWithFilters(repository.TorrentListFilters{
+		OnlyCompleted:     params.OnlyCompleted,
+		NameSearch:        params.NameSearch,
+		PathFilters:       params.PathFilters,
+		StateFilters:      params.StateFilters,
+		DownloaderFilters: params.DownloaderFilters,
+		ExcludeExisting:   params.ExcludeExisting,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("load torrents failed: %w", err)
 	}
-	uploadTotals, err := s.repo.UploadTotalsByHash()
+	uploadTotals, err := s.repo.UploadTotalsByHashes(torrentRecordHashes(torrentRows))
 	if err != nil {
 		uploadTotals = map[string]int64{}
 	}
@@ -156,7 +171,9 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		allItems = append(allItems, item)
 	}
 
-	filtered := s.applyFilters(allItems, params, siteConfigMap)
+	postFilterParams := params
+	postFilterParams.ExcludeExisting = false
+	filtered := s.applyFilters(allItems, postFilterParams, siteConfigMap)
 	s.sortData(filtered, params.SortProp, params.SortOrder)
 
 	total := len(filtered)
@@ -170,27 +187,79 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 	}
 	paginated := filtered[start:end]
 
-	uniquePaths := collectUniqueStrings(torrentRows, func(row repository.TorrentRecord) string {
-		return row.SavePath
-	})
-	uniqueStates := collectUniqueStrings(torrentRows, func(row repository.TorrentRecord) string {
-		return row.State
-	})
+	result := map[string]any{
+		"data":     paginated,
+		"total":    total,
+		"page":     params.Page,
+		"pageSize": params.PageSize,
+	}
+	if !params.SkipMetadata {
+		metadata, err := s.dataMetadata(params, allDiscoveredSites)
+		if err != nil {
+			return nil, err
+		}
+		for key, value := range metadata {
+			result[key] = value
+		}
+	}
+	return result, nil
+}
 
+// getDataMetadataResponse 返回维护种子列表筛选器需要的轻量元数据。
+// 参数/返回：params 只使用完成状态和当前路径筛选；返回空 data 与路径、状态、站点、链接规则等选项。
+// 失败场景：站点或筛选选项查询失败时返回错误。
+// 副作用：仅读取数据库，不写入数据。
+func (s *TorrentDataService) getDataMetadataResponse(params TorrentsDataParams) (map[string]any, error) {
+	allDiscoveredSites, err := s.repo.ListAllDiscoveredSites()
+	if err != nil {
+		return nil, fmt.Errorf("load discovered sites failed: %w", err)
+	}
+	metadata, err := s.dataMetadata(params, allDiscoveredSites)
+	if err != nil {
+		return nil, err
+	}
+	metadata["data"] = []map[string]any{}
+	metadata["total"] = 0
+	metadata["page"] = params.Page
+	metadata["pageSize"] = params.PageSize
+	return metadata, nil
+}
+
+// dataMetadata 读取列表筛选和链接展示所需的元数据。
+// 参数/返回：allDiscoveredSites 可复用主列表已查询的站点集合；返回 unique_paths、unique_states、all_discovered_sites 等字段。
+// 失败场景：路径/状态候选查询失败时返回错误，站点链接规则失败时降级为空 map。
+// 副作用：仅读取数据库，不写入数据。
+func (s *TorrentDataService) dataMetadata(params TorrentsDataParams, allDiscoveredSites []string) (map[string]any, error) {
+	uniquePaths, uniqueStates, err := s.repo.ListTorrentFilterOptions(params.OnlyCompleted)
+	if err != nil {
+		return nil, fmt.Errorf("load torrent filter options failed: %w", err)
+	}
 	siteLinkRules, err := s.repo.SiteLinkRules()
 	if err != nil {
 		siteLinkRules = map[string]any{}
 	}
-
 	return map[string]any{
-		"data":                 paginated,
-		"total":                total,
-		"page":                 params.Page,
-		"pageSize":             params.PageSize,
 		"unique_paths":         uniquePaths,
 		"unique_states":        uniqueStates,
 		"all_discovered_sites": allDiscoveredSites,
 		"site_link_rules":      siteLinkRules,
 		"active_path_filters":  params.PathFilters,
 	}, nil
+}
+
+func torrentRecordHashes(rows []repository.TorrentRecord) []string {
+	hashes := make([]string, 0, len(rows))
+	seen := map[string]struct{}{}
+	for _, row := range rows {
+		hash := strings.TrimSpace(row.Hash)
+		if hash == "" {
+			continue
+		}
+		if _, exists := seen[hash]; exists {
+			continue
+		}
+		seen[hash] = struct{}{}
+		hashes = append(hashes, hash)
+	}
+	return hashes
 }

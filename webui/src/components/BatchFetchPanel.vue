@@ -527,6 +527,7 @@ const pageSize = ref<number>(20)
 const total = ref<number>(0)
 
 const nameSearch = ref<string>('')
+const searchFetchTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
 const filterDialogVisible = ref<boolean>(false)
 const activeFilters = ref({
@@ -700,6 +701,7 @@ const fetchData = async () => {
       source_availability_filters: JSON.stringify(activeFilters.value.sourceSiteAvailability),
       exclude_existing: 'true', // 排除已存在于 seed_parameters 表的种子
       only_completed: 'true', // 只返回下载进度达到100%的种子
+      include_metadata: 'false',
     })
 
     const response = await axios.get(`/api/data?${params.toString()}`)
@@ -728,8 +730,8 @@ const fetchData = async () => {
       }))
       total.value = result.total
 
-      // 提取唯一状态（路径现在通过专门的API获取）
-      if (uniqueStates.value.length === 0 || !activeFilters.value.states.length) {
+      // 兼容旧接口：metadata-only 请求失败或旧版本后端未返回状态时，从当前页兜底提取。
+      if (uniqueStates.value.length === 0 && !activeFilters.value.states.length) {
         uniqueStates.value = [...new Set(tableData.value.map((t: Torrent) => t.state))] as string[]
       }
     } else {
@@ -759,7 +761,9 @@ const fetchAllPaths = async () => {
   try {
     const params = new URLSearchParams({
       page: '1',
-      page_size: '1', // 只需要获取路径信息，不需要实际数据
+      pageSize: '1',
+      metadata_only: 'true',
+      only_completed: 'true',
       path_filters: JSON.stringify([]), // 清空路径筛选以获取所有路径
       state_filters: JSON.stringify([]), // 清空状态筛选
       downloader_filters: JSON.stringify([]), // 清空下载器筛选
@@ -772,6 +776,9 @@ const fetchAllPaths = async () => {
     if (result.unique_paths) {
       uniquePaths.value = result.unique_paths
       pathTreeData.value = buildPathTree(uniquePaths.value)
+    }
+    if (result.unique_states) {
+      uniqueStates.value = result.unique_states
     }
   } catch (caught: unknown) {
     console.error('获取路径列表失败:', caught)
@@ -1231,6 +1238,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopAutoRefresh()
+  if (searchFetchTimer.value) {
+    clearTimeout(searchFetchTimer.value)
+    searchFetchTimer.value = null
+  }
 })
 
 defineExpose({
@@ -1239,8 +1250,14 @@ defineExpose({
 
 watch(nameSearch, () => {
   currentPage.value = 1
-  fetchData()
-  saveFiltersToConfig()
+  if (searchFetchTimer.value) {
+    clearTimeout(searchFetchTimer.value)
+  }
+  searchFetchTimer.value = setTimeout(() => {
+    fetchData()
+    saveFiltersToConfig()
+    searchFetchTimer.value = null
+  }, 300)
 })
 </script>
 

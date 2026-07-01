@@ -97,6 +97,64 @@ func TestListTorrentsOnlyCompletedKeepsWholeCompletedGroup(t *testing.T) {
 	}
 }
 
+func TestListTorrentsWithFiltersKeepsWholeMatchedGroup(t *testing.T) {
+	store := newTorrentDataRepositoryTestStore(t)
+	repo := NewTorrentDataRepository(store)
+
+	mustExecTorrentDataRepoTest(t, store.DB, `INSERT INTO torrents (hash, name, save_path, size, progress, state, sites, downloader_id, last_seen, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		"hash-qb", "Release", "/movie", 1000, 100.0, "做种中", "憨憨", "qb", "2026-07-01 00:00:00")
+	mustExecTorrentDataRepoTest(t, store.DB, `INSERT INTO torrents (hash, name, save_path, size, progress, state, sites, downloader_id, last_seen, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		"hash-tr", "Release", "/movie", 1000, 100.0, "暂停", "猫站", "tr", "2026-07-01 00:00:00")
+	mustExecTorrentDataRepoTest(t, store.DB, `INSERT INTO torrents (hash, name, save_path, size, progress, state, sites, downloader_id, last_seen, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		"hash-other", "Other", "/movie", 2000, 100.0, "暂停", "憨憨", "tr", "2026-07-01 00:00:00")
+
+	rows, err := repo.ListTorrentsWithFilters(TorrentListFilters{DownloaderFilters: []string{"qb"}})
+	if err != nil {
+		t.Fatalf("ListTorrentsWithFilters returned error: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[row.Hash] = true
+	}
+
+	if !seen["hash-qb"] || !seen["hash-tr"] {
+		t.Fatalf("expected all rows in matched Release group, got %#v", rows)
+	}
+	if seen["hash-other"] {
+		t.Fatalf("expected unmatched group to be filtered out, got %#v", rows)
+	}
+}
+
+func TestListTorrentsWithFiltersExcludeExisting(t *testing.T) {
+	store := newTorrentDataRepositoryTestStore(t)
+	repo := NewTorrentDataRepository(store)
+
+	mustExecTorrentDataRepoTest(t, store.DB, `INSERT INTO torrents (hash, name, save_path, size, progress, state, sites, downloader_id, last_seen, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		"hash-existing", "Existing", "/movie", 1000, 100.0, "做种中", "憨憨", "qb", "2026-07-01 00:00:00")
+	mustExecTorrentDataRepoTest(t, store.DB, `INSERT INTO torrents (hash, name, save_path, size, progress, state, sites, downloader_id, last_seen, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		"hash-new", "New", "/movie", 2000, 100.0, "做种中", "猫站", "qb", "2026-07-01 00:00:00")
+	mustExecTorrentDataRepoTest(t, store.DB, `INSERT INTO seed_parameters (hash, name, type) VALUES (?, ?, ?)`,
+		"hash-existing", "Existing", "category.movie")
+
+	rows, err := repo.ListTorrentsWithFilters(TorrentListFilters{ExcludeExisting: true})
+	if err != nil {
+		t.Fatalf("ListTorrentsWithFilters returned error: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[row.Hash] = true
+	}
+
+	if seen["hash-existing"] {
+		t.Fatalf("expected existing seed parameter group to be excluded, got %#v", rows)
+	}
+	if !seen["hash-new"] {
+		t.Fatalf("expected new group to remain, got %#v", rows)
+	}
+}
+
 func TestExistingSeedParameterGroupsUsesNameAndSize(t *testing.T) {
 	store := newTorrentDataRepositoryTestStore(t)
 	repo := NewTorrentDataRepository(store)

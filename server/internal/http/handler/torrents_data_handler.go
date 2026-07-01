@@ -14,10 +14,18 @@ type TorrentDataHandler struct {
 	service *service.TorrentDataService
 }
 
+// NewTorrentDataHandler 创建种子数据 HTTP Handler。
+// 参数/返回：svc 为种子数据服务；返回可注册到路由的 Handler。
+// 失败场景：无。
+// 副作用：无。
 func NewTorrentDataHandler(svc *service.TorrentDataService) *TorrentDataHandler {
 	return &TorrentDataHandler{service: svc}
 }
 
+// Data 处理维护种子列表查询请求。
+// 参数/返回：从 query 解析分页、筛选、排序和 metadata 控制参数；返回表格数据或筛选元数据。
+// 失败场景：Service 查询失败时返回 500。
+// 副作用：仅读取数据库，不写入数据。
 func (h *TorrentDataHandler) Data(c *gin.Context) {
 	params := service.TorrentsDataParams{
 		Page:                      intQuery(c, "page", 1),
@@ -33,6 +41,8 @@ func (h *TorrentDataHandler) Data(c *gin.Context) {
 		SortOrder:                 c.Query("sortOrder"),
 		ExcludeExisting:           boolQuery(c, "exclude_existing"),
 		OnlyCompleted:             boolQuery(c, "only_completed"),
+		SkipMetadata:              boolQuery(c, "skip_metadata") || strings.EqualFold(strings.TrimSpace(c.Query("include_metadata")), "false"),
+		MetadataOnly:              boolQuery(c, "metadata_only"),
 	}
 	result, err := h.service.GetData(params)
 	if err != nil {

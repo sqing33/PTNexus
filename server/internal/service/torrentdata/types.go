@@ -22,6 +22,8 @@ type TorrentsDataParams struct {
 	SortOrder                 string
 	ExcludeExisting           bool
 	OnlyCompleted             bool
+	SkipMetadata              bool
+	MetadataOnly              bool
 }
 
 type siteSummary struct {
