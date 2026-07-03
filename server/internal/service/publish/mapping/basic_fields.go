@@ -45,6 +45,7 @@ func ResolveBasicPublishMappings(siteCode string, uploadData map[string]any) map
 	apply("resolution", "resolution", strings.TrimSpace(toStringAnyBasic(standardized["resolution"], "")), "standard", false)
 	applySourceOrProcessing(siteCfg, mapped, strings.TrimSpace(toStringAnyBasic(standardized["source"], "")))
 	apply("team", "team", strings.TrimSpace(toStringAnyBasic(standardized["team"], "")), "team", false)
+	apply("region", "region", strings.TrimSpace(toStringAnyBasic(standardized["source"], "")), "region_sel", true)
 
 	applyTags("tag", siteCfg, mapped, uploadData, standardized)
 	return mapped
