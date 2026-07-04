@@ -16,11 +16,11 @@ export default defineConfig({
     allowedHosts: ['dev.916337.xyz'],
     proxy: {
       '/api': {
-        target: 'http://localhost:5274',
+        target: 'http://localhost:5275',
         changeOrigin: true,
       },
       '/update': {
-        target: 'http://localhost:5274',
+        target: 'http://localhost:5275',
         changeOrigin: true,
       },
     },
