@@ -123,6 +123,32 @@ func (s *BatchState) Status(batchID string) (BatchTask, bool) {
 	return copied, true
 }
 
+// Snapshot 返回全部批量发布任务快照。
+// 参数/返回：无参数；返回按 batch_id 复制后的任务切片。
+// 失败场景：状态管理器为空时返回空切片。
+// 副作用：无。
+func (s *BatchState) Snapshot() []BatchTask {
+	if s == nil {
+		return []BatchTask{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]BatchTask, 0, len(s.tasks))
+	for _, task := range s.tasks {
+		if task == nil {
+			continue
+		}
+		copied := *task
+		copied.Results = map[string]map[string]any{}
+		for site, item := range task.Results {
+			copied.Results[site] = cloneMap(item)
+		}
+		result = append(result, copied)
+	}
+	return result
+}
+
 // Cancel 标记任务取消。
 func (s *BatchState) Cancel(batchID string) bool {
 	if s == nil {

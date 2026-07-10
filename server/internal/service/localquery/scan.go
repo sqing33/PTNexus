@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-func (s *Service) Scan(targetPath string) (map[string]any, error) {
-	torrents, err := s.repo.ListTorrents(targetPath)
+func (s *Service) Scan(targetPath string, videoOnly bool) (map[string]any, error) {
+	torrents, err := s.repo.ListTorrents(targetPath, videoOnly)
 	if err != nil {
 		return nil, err
 	}

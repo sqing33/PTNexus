@@ -275,6 +275,7 @@ func registerRoutes(
 		api.POST("/migrate_torrent", migrateHandler.MigrateTorrent)
 
 		api.GET("/publish_logs", migrateHandler.PublishLogs)
+		api.DELETE("/publish_logs/:id", migrateHandler.DeletePublishLog)
 	}
 
 	migrateAPI := engine.Group("/api/migrate")
@@ -298,6 +299,8 @@ func registerRoutes(
 		migrateAPI.POST("/get_aggregated_torrents", migrateHandler.GetAggregatedTorrents)
 		migrateAPI.GET("/batch_fetch_progress", migrateHandler.BatchFetchProgress)
 		migrateAPI.GET("/logs/stream/:task_id", migrateHandler.LogsStream)
+		migrateAPI.GET("/task_monitor", migrateHandler.TaskMonitor)
+		migrateAPI.POST("/task_monitor/action", migrateHandler.TaskMonitorAction)
 
 		migrateAPI.POST("/get_downloader_info", migrateHandler.GetDownloaderInfo)
 		migrateAPI.POST("/add_to_downloader", migrateHandler.AddToDownloader)

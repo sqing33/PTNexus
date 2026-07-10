@@ -22,32 +22,22 @@
       </div>
     </div>
 
-    <!-- 转种规则说明（下载器卡片上方） -->
+    <!-- 转种提醒（下载器卡片上方） -->
     <el-card class="rules-card glass-card glass-rounded">
       <div class="rules-header">
         <div class="rules-title">
-          <span>转种限制说明</span>
-          <el-tag type="warning" effect="dark" size="small">必读</el-tag>
+          <span>转种使用提醒</span>
+          <el-tag type="info" effect="dark" size="small">建议</el-tag>
         </div>
-        <el-tag type="info" effect="plain" size="small">请自行确认后重试</el-tag>
+        <el-tag type="info" effect="plain" size="small">发布前请再次核对</el-tag>
       </div>
       <ul class="rules-list">
         <li>
-          <el-tag type="danger" size="small" effect="dark">禁转</el-tag>
-          <el-tag type="danger" size="small" effect="dark">限转</el-tag>
-          <el-tag type="danger" size="small" effect="dark">分集</el-tag>
-          一律不可转。
-          <div class="rules-sub">限转：不自动检测源站是否取消限转，需自行确认后重新获取种子信息。</div>
-          <div class="rules-sub">分集：部分站点不允许转分集，且断种率较高。</div>
+          转种流程已不再额外拦截禁转、限转、分集、批量体积和同网段下载器数量等规则。
+          <div class="rules-sub">系统仍会保留原始标签与媒体信息，便于你自行判断是否继续发布。</div>
         </li>
         <li>
-          <el-tag type="warning" size="small" effect="dark">IP 网段限制</el-tag>
-          同网段下载器同时最多 <b>15</b> 个在上传种子可转；超过不可转。
-          <div class="rules-sub">不计入：添加超 <b>24h</b>、做种人数 <b>&gt; 5</b>；盒子不受限。</div>
-          <div class="rules-sub">
-            <el-tag type="warning" size="small" effect="dark">大小限制</el-tag>
-            一站多种<strong>批量</strong>转种不允许 &lt; <b>1GB</b>；一种多站<strong>单个</strong>转种不受限。
-          </div>
+          发布前建议重点检查标题组件、简介、截图、MediaInfo/BDInfo、目标站点参数映射以及站点现存种子状态。
         </li>
       </ul>
     </el-card>

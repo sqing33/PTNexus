@@ -2,11 +2,16 @@ package torrentdata
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/pt-nexus/server/internal/repository"
 )
 
+// applyFilters 按维护种子列表的查询参数过滤聚合后的种子数据。
+// 参数/返回：data 为已聚合的种子列表，params 为筛选条件，siteConfigMap 为站点配置索引；返回过滤后的列表。
+// 失败场景：不返回错误，seed_parameters 查询失败时跳过“已存在数据”排除。
+// 副作用：开启 ExcludeExisting 时会读取 seed_parameters 中已存在的 name+size 分组。
 func (s *TorrentDataService) applyFilters(data []map[string]any, params TorrentsDataParams, siteConfigMap map[string]repository.SiteConfig) []map[string]any {
 	filtered := data
 	nameSearch := strings.ToLower(strings.TrimSpace(params.NameSearch))
@@ -62,7 +67,7 @@ func (s *TorrentDataService) applyFilters(data []map[string]any, params Torrents
 					if !ok {
 						continue
 					}
-					if (cfg.Migration == 1 || cfg.Migration == 3) && strings.TrimSpace(cfg.Cookie) != "" {
+					if isAvailableBatchFetchSourceSite(siteName, cfg) {
 						hasSource = true
 						break
 					}
@@ -102,17 +107,41 @@ func (s *TorrentDataService) applyFilters(data []map[string]any, params Torrents
 	}
 
 	if params.ExcludeExisting {
-		names, err := s.repo.DistinctSeedParameterNames()
+		groups, err := s.repo.ExistingSeedParameterGroups()
 		if err == nil {
-			existing := toStringSet(names)
+			existing := map[string]struct{}{}
+			for _, group := range groups {
+				key := torrentNameSizeKey(group.Name, group.Size)
+				if key == "" {
+					continue
+				}
+				existing[key] = struct{}{}
+			}
 			filtered = filterData(filtered, func(item map[string]any) bool {
-				_, found := existing[stringValue(item["name"], "")]
+				key := torrentNameSizeKey(stringValue(item["name"], ""), int64Value(item["size"], 0))
+				_, found := existing[key]
 				return !found
 			})
 		}
 	}
 
 	return filtered
+}
+
+func torrentNameSizeKey(name string, size int64) string {
+	name = strings.TrimSpace(name)
+	if name == "" || size <= 0 {
+		return ""
+	}
+	return name + "\x00" + strconv.FormatInt(size, 10)
+}
+
+// isAvailableBatchFetchSourceSite 判断站点是否可作为维护种子批量获取的源站点。
+// 参数/返回：siteName 为站点昵称，cfg 为 sites 表配置；返回 true 表示列表会展示为可用源站点。
+// 失败场景：无。
+// 副作用：无。
+func isAvailableBatchFetchSourceSite(siteName string, cfg repository.SiteConfig) bool {
+	return (cfg.Migration == 1 || cfg.Migration == 3) && strings.TrimSpace(cfg.Cookie) != ""
 }
 
 func (s *TorrentDataService) sortData(data []map[string]any, sortProp, sortOrder string) {

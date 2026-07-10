@@ -127,10 +127,6 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 			return publishURL, isExisting, buildDetail(), nil
 		}
 	}
-	if publishURL := ExtractPublishURLFromText(baseURL, bodyText); publishURL != "" && isValidPublishedDetailURL(publishURL) {
-		detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
-		return publishURL, isExisting, buildDetail(), nil
-	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		if looksLikeUploadLoginResult(location, respBody) {
@@ -147,11 +143,21 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 			detailLines = append(detailLines, "尝试结论: 目标站点提示种子已存在，但未返回详情链接，按已存在处理")
 			return "", true, buildDetail(), nil
 		}
+		if looksLikeUploadFailurePage(bodyText) {
+			err = fmt.Errorf("站点返回上传失败页面")
+			appendUploadRawResponse(&detailLines, bodyText)
+			detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
+			return "", isExisting, buildDetail(), err
+		}
 		if looksLikeUploadFormPage(bodyText) {
 			err = fmt.Errorf("站点返回上传表单页面，可能是字段缺失、校验未通过或会话状态异常")
 			appendUploadRawResponse(&detailLines, bodyText)
 			detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
 			return "", isExisting, buildDetail(), err
+		}
+		if publishURL := ExtractPublishURLFromText(baseURL, bodyText); publishURL != "" && isValidPublishedDetailURL(publishURL) {
+			detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
+			return publishURL, isExisting, buildDetail(), nil
 		}
 	}
 
@@ -276,6 +282,19 @@ func looksLikeUploadFormPage(text string) bool {
 		return true
 	}
 	return strings.Contains(lower, "name=\"upload\"") || strings.Contains(lower, "发布 - powered by nexusphp")
+}
+
+func looksLikeUploadFailurePage(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || !looksLikeHTMLResponse(trimmed) {
+		return false
+	}
+	title := strings.ToLower(extractUploadHTMLTitle(trimmed))
+	if strings.Contains(title, "上传失败") || strings.Contains(title, "upload failed") || strings.Contains(title, "upload failure") {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+	return strings.Contains(lower, ">上传失败") || strings.Contains(lower, "上传失败！") || strings.Contains(lower, "upload failed") || strings.Contains(lower, "upload failure")
 }
 
 func looksLikeHTMLResponse(text string) bool {

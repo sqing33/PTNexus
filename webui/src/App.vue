@@ -41,6 +41,7 @@
         <el-menu-item index="/info">流量统计</el-menu-item>
         <el-menu-item index="/torrents">一种多站</el-menu-item>
         <el-menu-item index="/data">一站多种</el-menu-item>
+        <el-menu-item index="/seed-maintenance">维护种子</el-menu-item>
         <el-menu-item index="/publish-logs">发种日志</el-menu-item>
         <el-menu-item index="/sites">做种检索</el-menu-item>
         <el-menu-item index="/settings">设置</el-menu-item>
@@ -49,6 +50,88 @@
         class="right-buttons-container desktop-no-drag"
         :class="{ 'right-buttons-container--with-window-controls': showDesktopWindowControlsInNav }"
       >
+        <el-popover
+          placement="bottom-end"
+          :width="360"
+          trigger="click"
+          popper-class="task-monitor-popover"
+        >
+          <template #reference>
+            <el-badge :value="taskMonitorBadge" :hidden="taskMonitorBadge <= 0" :max="99">
+              <el-button plain class="task-monitor-button">
+                任务
+                <span class="task-monitor-button__summary">
+                  {{ runningCount }} 运行中 / {{ failedCount }} 失败
+                </span>
+              </el-button>
+            </el-badge>
+          </template>
+          <div class="task-monitor-panel">
+            <div class="task-monitor-panel__header">
+              <span>全局任务监控</span>
+              <el-button link @click="clearFinishedTasks">清理已结束</el-button>
+            </div>
+            <div v-if="taskList.length === 0" class="task-monitor-panel__empty">暂无后台任务</div>
+            <div v-else class="task-monitor-list">
+              <div v-for="task in taskList" :key="task.key" class="task-monitor-item">
+                <div class="task-monitor-item__top">
+                  <span class="task-monitor-item__title">{{ task.title }}</span>
+                  <el-tag :type="taskStatusTagType(task.status)" size="small">{{
+                    taskStatusText(task.status)
+                  }}</el-tag>
+                </div>
+                <div v-if="task.progressText" class="task-monitor-item__progress">
+                  {{ task.progressText }}
+                </div>
+                <div v-if="task.message" class="task-monitor-item__message">{{ task.message }}</div>
+                <div v-if="task.error" class="task-monitor-item__error">{{ task.error }}</div>
+                <div class="task-monitor-item__footer">
+                  <span>{{ formatTaskTime(task.updatedAt) }}</span>
+                  <div class="task-monitor-item__actions">
+                    <el-button
+                      v-if="task.actions?.includes('finish')"
+                      link
+                      type="success"
+                      @click="handleTaskMonitorAction(task, 'finish')"
+                    >
+                      完成
+                    </el-button>
+                    <el-button
+                      v-if="task.actions?.includes('terminate')"
+                      link
+                      type="danger"
+                      @click="handleTaskMonitorAction(task, 'terminate')"
+                    >
+                      终止
+                    </el-button>
+                    <el-button
+                      v-if="task.status === 'running'"
+                      link
+                      @click="clearTaskMonitorItem(task)"
+                    >
+                      隐藏
+                    </el-button>
+                    <el-button
+                      v-else
+                      link
+                      @click="clearTaskMonitorItem(task)"
+                    >
+                      清理
+                    </el-button>
+                    <el-button
+                      v-if="task.routeTarget"
+                      link
+                      type="primary"
+                      @click="openTaskRoute(task.routeTarget)"
+                    >
+                      查看详情
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-popover>
         <el-link
           href="https://ptn-wiki.sqing33.dpdns.org"
           target="_blank"
@@ -79,11 +162,7 @@
         >
           导出后端日志
         </el-button>
-        <el-link
-          href="https://github.com/sqing33/PTNexus/issues"
-          target="_blank"
-          :underline="false"
-        >
+        <el-link href="https://github.com/sqing33/PTNexus/issues" target="_blank" :underline="false">
           <el-button type="primary" plain>反馈</el-button>
         </el-link>
         <el-button
@@ -115,6 +194,9 @@
         </div>
       </div>
       <div class="mobile-top-actions">
+        <el-badge :value="taskMonitorBadge" :hidden="taskMonitorBadge <= 0" :max="99">
+          <el-button plain size="small" @click="mobileTaskMonitorVisible = true">任务</el-button>
+        </el-badge>
         <el-button
           type="success"
           plain
@@ -156,6 +238,7 @@
         <el-menu-item index="/info">流量统计</el-menu-item>
         <el-menu-item index="/torrents">一种多站</el-menu-item>
         <el-menu-item index="/data">一站多种</el-menu-item>
+        <el-menu-item index="/seed-maintenance">维护种子</el-menu-item>
         <el-menu-item index="/publish-logs">发种日志</el-menu-item>
         <el-menu-item index="/sites">做种检索</el-menu-item>
         <el-menu-item index="/settings">设置</el-menu-item>
@@ -197,13 +280,62 @@
           <el-icon><Link /></el-icon>
           GitHub
         </el-link>
-        <el-link
-          href="https://github.com/sqing33/PTNexus/issues"
-          target="_blank"
-          :underline="false"
-        >
+        <el-link href="https://github.com/sqing33/PTNexus/issues" target="_blank" :underline="false">
           <el-button type="primary" plain>反馈</el-button>
         </el-link>
+      </div>
+    </el-drawer>
+    <el-drawer v-model="mobileTaskMonitorVisible" title="全局任务监控" size="88%" append-to-body>
+      <div class="task-monitor-panel task-monitor-panel--mobile">
+        <div class="task-monitor-panel__header">
+          <span>后台任务</span>
+          <el-button link @click="clearFinishedTasks">清理已结束</el-button>
+        </div>
+        <div v-if="taskList.length === 0" class="task-monitor-panel__empty">暂无后台任务</div>
+        <div v-else class="task-monitor-list">
+          <div v-for="task in taskList" :key="task.key" class="task-monitor-item">
+            <div class="task-monitor-item__top">
+              <span class="task-monitor-item__title">{{ task.title }}</span>
+              <el-tag :type="taskStatusTagType(task.status)" size="small">{{
+                taskStatusText(task.status)
+              }}</el-tag>
+            </div>
+            <div v-if="task.progressText" class="task-monitor-item__progress">
+              {{ task.progressText }}
+            </div>
+            <div v-if="task.message" class="task-monitor-item__message">{{ task.message }}</div>
+            <div v-if="task.error" class="task-monitor-item__error">{{ task.error }}</div>
+            <div class="task-monitor-item__footer">
+              <span>{{ formatTaskTime(task.updatedAt) }}</span>
+              <div class="task-monitor-item__actions">
+                <el-button
+                  v-if="task.actions?.includes('finish')"
+                  link
+                  type="success"
+                  @click="handleTaskMonitorAction(task, 'finish')"
+                >
+                  完成
+                </el-button>
+                <el-button
+                  v-if="task.actions?.includes('terminate')"
+                  link
+                  type="danger"
+                  @click="handleTaskMonitorAction(task, 'terminate')"
+                >
+                  终止
+                </el-button>
+                <el-button
+                  v-if="task.routeTarget"
+                  link
+                  type="primary"
+                  @click="openTaskRoute(task.routeTarget)"
+                >
+                  查看详情
+                </el-button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </el-drawer>
   </div>
@@ -226,15 +358,24 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Download, Link, Menu } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import DesktopWindowControls from '@/components/desktop/DesktopWindowControls.vue'
 import { useDesktopWindowControls } from '@/desktop/windowControls'
 import VersionUpdate from '@/components/VersionUpdate.vue'
+import {
+  useTaskMonitorStore,
+  type TaskMonitorAction,
+  type TaskMonitorItem,
+  type TaskMonitorStatus,
+} from '@/stores/taskMonitor'
 import { ElMessage } from '@/utils/uiNotify'
 
 const route = useRoute()
+const router = useRouter()
+const taskMonitorStore = useTaskMonitorStore()
 const {
   hideWindowToTray,
   isDesktopShell,
@@ -251,6 +392,7 @@ const backgroundUrl = ref('https://pic.pting.club/i/2025/10/07/68e4fbfe9be93.jpg
 const currentVersion = ref('加载中...')
 
 const mobileMenuVisible = ref(false)
+const mobileTaskMonitorVisible = ref(false)
 const isMobile = ref(false)
 const MOBILE_BREAKPOINT = 768
 
@@ -262,6 +404,7 @@ const routeTitleMap: Record<string, string> = {
   '/publish-logs': '发种日志',
   '/sites': '做种检索',
   '/settings': '设置',
+  '/seed-maintenance': '维护种子信息',
 }
 
 const isLoginPage = computed(() => route.path === '/login')
@@ -281,6 +424,162 @@ const showMobileNav = computed(() => isMobile.value && !isDesktopShell.value)
 const showDesktopCompactTitleBar = computed(() => isWindowsDesktop.value && isLoginPage.value)
 const showDesktopWindowControlsInNav = computed(() => isWindowsDesktop.value && !isLoginPage.value)
 
+const taskList = computed(() => taskMonitorStore.taskList)
+const runningCount = computed(() => taskMonitorStore.runningCount)
+const failedCount = computed(() => taskMonitorStore.failedCount)
+const taskMonitorBadge = computed(() => runningCount.value + failedCount.value)
+let taskMonitorRefreshTimer: ReturnType<typeof window.setInterval> | null = null
+
+type ServerTaskRouteTarget = {
+  path?: string
+  query?: Record<string, unknown>
+}
+
+type ServerTaskItem = {
+  key?: string
+  kind?: string
+  raw_id?: string | null
+  title?: string
+  status?: TaskMonitorStatus
+  message?: string
+  error?: string
+  progress_text?: string
+  started_at?: string | number | null
+  updated_at?: string | number | null
+  actions?: unknown[]
+  action_hint?: string
+  route_target?: ServerTaskRouteTarget
+}
+
+const parseServerTaskTime = (value: string | number | null | undefined) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  const timestamp = Date.parse(value.trim())
+  return Number.isNaN(timestamp) ? undefined : timestamp
+}
+
+const taskStatusText = (status: TaskMonitorStatus) => {
+  if (status === 'running') return '运行中'
+  if (status === 'failed') return '失败'
+  return '已完成'
+}
+
+const taskStatusTagType = (status: TaskMonitorStatus): 'primary' | 'success' | 'danger' => {
+  if (status === 'running') return 'primary'
+  if (status === 'failed') return 'danger'
+  return 'success'
+}
+
+const formatTaskTime = (timestamp: number) => {
+  if (!timestamp) return '--'
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+const clearFinishedTasks = () => {
+  taskMonitorStore.clearFinished()
+}
+
+const clearTaskMonitorItem = (task: TaskMonitorItem) => {
+  taskMonitorStore.clearTask(task.key)
+}
+
+const normalizeTaskMonitorActions = (actions?: unknown[]) => {
+  if (!Array.isArray(actions)) return undefined
+  const normalized = actions.filter(
+    (action): action is TaskMonitorAction => action === 'finish' || action === 'terminate',
+  )
+  return normalized.length > 0 ? normalized : undefined
+}
+
+const handleTaskMonitorAction = async (task: TaskMonitorItem, action: TaskMonitorAction) => {
+  const actionText = action === 'finish' ? '完成' : '终止'
+  try {
+    await ElMessageBox.confirm(
+      task.actionHint || '此操作会请求取消或将监控状态标记为结束，不保证强制终止底层进程。',
+      `${actionText}后台任务`,
+      { confirmButtonText: actionText, cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const response = await axios.post('/api/migrate/task_monitor/action', {
+      kind: task.kind,
+      raw_id: task.rawId,
+      action,
+    })
+    const payload = response.data
+    if (payload?.success === false) {
+      ElMessage.error(String(payload?.message || '任务操作失败'))
+      return
+    }
+    ElMessage.success(String(payload?.message || '任务操作已提交'))
+    await syncTaskMonitor()
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.message || error.message || '任务操作失败')
+      : '任务操作失败'
+    ElMessage.error(message)
+  }
+}
+
+const syncTaskMonitor = async () => {
+  try {
+    const response = await axios.get('/api/migrate/task_monitor')
+    const payload = response.data
+    const tasks = Array.isArray(payload?.tasks) ? (payload.tasks as ServerTaskItem[]) : []
+    const normalizeRouteQuery = (query?: Record<string, unknown>) => {
+      if (!query) return undefined
+      return Object.fromEntries(
+        Object.entries(query)
+          .filter(([, value]) => value !== undefined && value !== null && String(value).trim())
+          .map(([key, value]) => [key, String(value).trim()]),
+      ) as Record<string, string>
+    }
+
+    taskMonitorStore.replaceServerTasks(
+      tasks.map((task) => ({
+        key: String(task.key || '').trim(),
+        kind: String(task.kind || 'generic').trim(),
+        rawId: typeof task.raw_id === 'string' ? task.raw_id : null,
+        source: 'server',
+        title: String(task.title || '后台任务').trim(),
+        status:
+          task.status === 'running' || task.status === 'success' || task.status === 'failed'
+            ? task.status
+            : 'running',
+        message: String(task.message || '').trim(),
+        error: String(task.error || '').trim(),
+        progressText: String(task.progress_text || '').trim(),
+        startedAt: parseServerTaskTime(task.started_at),
+        updatedAt: parseServerTaskTime(task.updated_at),
+        actions: normalizeTaskMonitorActions(task.actions),
+        actionHint: String(task.action_hint || '').trim(),
+        routeTarget:
+          task.route_target?.path && typeof task.route_target.path === 'string'
+            ? {
+                path: task.route_target.path,
+                query: normalizeRouteQuery(task.route_target.query),
+              }
+            : undefined,
+      })),
+    )
+  } catch (error) {
+    console.warn('同步任务监控失败:', error)
+  }
+}
+
+const openTaskRoute = (routeTarget?: { path: string; query?: Record<string, string> }) => {
+  if (!routeTarget?.path) return
+  mobileTaskMonitorVisible.value = false
+  void router.push({ path: routeTarget.path, query: routeTarget.query })
+}
+
 const isRefreshing = ref(false)
 const exportingLogs = ref(false)
 
@@ -289,6 +588,7 @@ const isRefreshSupportedRoute = (path: string) => {
     path.startsWith('/torrents') ||
     path.startsWith('/sites') ||
     path.startsWith('/data') ||
+    path.startsWith('/seed-maintenance') ||
     path.startsWith('/publish-logs') ||
     path.startsWith('/batch-fetch')
   )
@@ -304,7 +604,7 @@ const handleComponentReady = (refreshMethod: () => Promise<void>) => {
 }
 
 const shouldDelegateRefreshToComponent = (path: string) => {
-  return path.startsWith('/torrents')
+  return path.startsWith('/torrents') || path.startsWith('/publish-logs')
 }
 
 const handleGlobalRefresh = async () => {
@@ -315,7 +615,25 @@ const handleGlobalRefresh = async () => {
     return
   }
 
+  const refreshTaskKey = `global_refresh:${route.path}`
+  const refreshRouteTarget = {
+    path: route.path,
+    query: Object.fromEntries(
+      Object.entries(route.query)
+        .filter(([, value]) => value !== undefined && value !== null && String(value).trim())
+        .map(([key, value]) => [key, String(value).trim()]),
+    ),
+  }
+
   isRefreshing.value = true
+  taskMonitorStore.markRunning({
+    key: refreshTaskKey,
+    kind: 'refresh',
+    title: '刷新缓存',
+    message: `正在刷新${currentRouteTitle.value}`,
+    progressText: '已提交刷新请求',
+    routeTarget: refreshRouteTarget,
+  })
   ElMessage.info('后台正在刷新缓存...')
 
   try {
@@ -328,6 +646,13 @@ const handleGlobalRefresh = async () => {
       }
     }
 
+    taskMonitorStore.markSuccess(refreshTaskKey, {
+      kind: 'refresh',
+      title: '刷新缓存',
+      message: `${currentRouteTitle.value}已刷新`,
+      progressText: '刷新完成',
+      routeTarget: refreshRouteTarget,
+    })
     ElMessage.success('数据已刷新！')
   } catch (error: unknown) {
     const message = axios.isAxiosError(error)
@@ -335,6 +660,14 @@ const handleGlobalRefresh = async () => {
       : error instanceof Error
         ? error.message
         : '数据更新失败'
+    taskMonitorStore.markFailed(refreshTaskKey, {
+      kind: 'refresh',
+      title: '刷新缓存',
+      message: `刷新${currentRouteTitle.value}失败`,
+      error: message || '数据更新失败',
+      progressText: '刷新失败',
+      routeTarget: refreshRouteTarget,
+    })
     ElMessage.error(message || '数据更新失败')
   } finally {
     isRefreshing.value = false
@@ -517,18 +850,27 @@ watch(
   () => route.path,
   () => {
     mobileMenuVisible.value = false
+    mobileTaskMonitorVisible.value = false
   },
 )
 
 onMounted(() => {
   updateIsMobile()
   loadBackgroundSettings()
+  syncTaskMonitor()
+  taskMonitorRefreshTimer = window.setInterval(() => {
+    void syncTaskMonitor()
+  }, 15000)
   window.addEventListener('background-updated', handleBackgroundUpdate)
   window.addEventListener('app-global-refresh-loading', handleRefreshLoadingChange as EventListener)
   window.addEventListener('resize', updateIsMobile)
 })
 
 onUnmounted(() => {
+  if (taskMonitorRefreshTimer) {
+    window.clearInterval(taskMonitorRefreshTimer)
+    taskMonitorRefreshTimer = null
+  }
   window.removeEventListener('background-updated', handleBackgroundUpdate)
   window.removeEventListener('resize', updateIsMobile)
   window.removeEventListener(
@@ -799,6 +1141,110 @@ body {
 
 .drawer-actions .el-link {
   width: fit-content;
+}
+
+.task-monitor-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-monitor-button__summary {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.task-monitor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-monitor-panel--mobile {
+  min-height: 100%;
+}
+
+.task-monitor-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.task-monitor-panel__empty {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.task-monitor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.task-monitor-panel--mobile .task-monitor-list {
+  max-height: none;
+}
+
+.task-monitor-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.task-monitor-item__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-monitor-item__title {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.task-monitor-item__progress,
+.task-monitor-item__message,
+.task-monitor-item__footer {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.task-monitor-item__error {
+  color: var(--el-color-danger);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.task-monitor-item__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-monitor-item__footer span {
+  min-width: 0;
+}
+
+.task-monitor-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .main-content {

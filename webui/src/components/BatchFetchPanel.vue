@@ -24,6 +24,16 @@
       <el-button type="primary" @click="openFilterDialog" plain style="margin-right: 15px">
         筛选
       </el-button>
+      <el-button
+        type="primary"
+        :icon="Refresh"
+        :loading="loading"
+        @click="handleRefreshListClick"
+        plain
+        style="margin-right: 15px"
+      >
+        刷新列表
+      </el-button>
       <div
         v-if="hasActiveFilters"
         class="current-filters"
@@ -407,9 +417,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
-import { Setting } from '@element-plus/icons-vue'
+import { Refresh, Setting } from '@element-plus/icons-vue'
 import axios from 'axios'
 import type { ElTree } from 'element-plus'
+import { useTaskMonitorStore } from '@/stores/taskMonitor'
+import { useContentFiltersStore } from '@/stores/contentFilters'
 import { ElMessage } from '@/utils/uiNotify'
 
 const emit = defineEmits<{
@@ -486,6 +498,10 @@ interface BatchProgress {
   bdinfo_stats?: BdinfoStats
 }
 
+interface RefreshListOptions {
+  refreshBackend?: boolean
+}
+
 const tableData = ref<Torrent[]>([])
 const loading = ref<boolean>(true)
 const error = ref<string | null>(null)
@@ -524,6 +540,8 @@ const tempFilters = ref({ ...activeFilters.value })
 
 // 任务进度相关
 const currentTaskId = ref<string | null>(null)
+const taskMonitorStore = useTaskMonitorStore()
+const contentFiltersStore = useContentFiltersStore()
 const progress = ref<BatchProgress>({
   total: 0,
   processed: 0,
@@ -535,6 +553,55 @@ const progress = ref<BatchProgress>({
 })
 const refreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const REFRESH_INTERVAL = 3000 // 3秒刷新一次
+const batchFetchMonitorKey = computed(() =>
+  currentTaskId.value ? `batch_fetch:${currentTaskId.value}` : '',
+)
+
+const updateBatchFetchMonitor = () => {
+  if (!currentTaskId.value || !batchFetchMonitorKey.value) return
+
+  const completed = progress.value.processed || 0
+  const totalCount = progress.value.total || selectedRows.value.length || 0
+  const summaryText = totalCount > 0 ? `${completed}/${totalCount}` : '准备中'
+  const bdinfoStats = progress.value.bdinfo_stats
+  const bdinfoText = bdinfoStats
+    ? `，BDInfo ${bdinfoStats.completed}/${bdinfoStats.processing + bdinfoStats.completed + bdinfoStats.failed}`
+    : ''
+
+  if (progress.value.isRunning) {
+    taskMonitorStore.markRunning({
+      key: batchFetchMonitorKey.value,
+      kind: 'batch_fetch',
+      rawId: currentTaskId.value,
+      title: '批量获取种子数据',
+      message: `已处理 ${summaryText}${bdinfoText}`,
+      progressText: totalCount > 0 ? `处理中 ${summaryText}` : '任务运行中',
+    })
+    return
+  }
+
+  const failedResults = progress.value.results.filter((item) => item.status === 'failed')
+  const failedReason = failedResults[0]?.reason || ''
+  if (progress.value.failed > 0) {
+    taskMonitorStore.markFailed(batchFetchMonitorKey.value, {
+      kind: 'batch_fetch',
+      rawId: currentTaskId.value,
+      title: '批量获取种子数据',
+      message: `完成 ${summaryText}，失败 ${progress.value.failed} 个`,
+      progressText: `已完成 ${summaryText}`,
+      error: failedReason || `共有 ${progress.value.failed} 个种子处理失败`,
+    })
+    return
+  }
+
+  taskMonitorStore.markSuccess(batchFetchMonitorKey.value, {
+    kind: 'batch_fetch',
+    rawId: currentTaskId.value,
+    title: '批量获取种子数据',
+    message: `完成 ${summaryText}，成功 ${progress.value.success} 个`,
+    progressText: `已完成 ${summaryText}`,
+  })
+}
 
 const currentFilterText = computed(() => {
   const filters = activeFilters.value
@@ -625,6 +692,7 @@ const fetchData = async () => {
   loading.value = true
   error.value = null
   try {
+    await contentFiltersStore.load()
     const params = new URLSearchParams({
       page: currentPage.value.toString(),
       pageSize: pageSize.value.toString(),
@@ -636,6 +704,7 @@ const fetchData = async () => {
       exclude_existing: 'true', // 排除已存在于 seed_parameters 表的种子
       only_completed: 'true', // 只返回下载进度达到100%的种子
     })
+    contentFiltersStore.appendQuery(params)
 
     const response = await axios.get(`/api/data?${params.toString()}`)
     const result = response.data
@@ -692,6 +761,7 @@ const fetchDownloadersList = async () => {
 
 const fetchAllPaths = async () => {
   try {
+    await contentFiltersStore.load()
     const params = new URLSearchParams({
       page: '1',
       page_size: '1', // 只需要获取路径信息，不需要实际数据
@@ -700,6 +770,7 @@ const fetchAllPaths = async () => {
       downloader_filters: JSON.stringify([]), // 清空下载器筛选
       source_availability_filters: JSON.stringify([]), // 清空源站点筛选
     })
+    contentFiltersStore.appendQuery(params)
 
     const response = await axios.get(`/api/data?${params.toString()}`)
     const result = response.data
@@ -710,6 +781,25 @@ const fetchAllPaths = async () => {
     }
   } catch (caught: unknown) {
     console.error('获取路径列表失败:', caught)
+  }
+}
+
+const refreshList = async (options: RefreshListOptions = {}) => {
+  if (options.refreshBackend) {
+    await axios.post('/api/refresh_data')
+  }
+  await Promise.all([fetchDownloadersList(), loadSiteStatuses(), fetchAllPaths()])
+  await fetchData()
+}
+
+const handleRefreshListClick = async () => {
+  try {
+    await refreshList({ refreshBackend: true })
+    if (!error.value) {
+      ElMessage.success('种子列表已刷新')
+    }
+  } catch (caught: unknown) {
+    ElMessage.error(getErrorMessage(caught) || '刷新列表失败')
   }
 }
 
@@ -805,11 +895,7 @@ const handleSelectionChange = (selection: Torrent[]) => {
 
 const getSourceSites = (sites: Record<string, SiteData>) => {
   const sourceSites: Record<string, SiteData> = {}
-  const excludedSites = new Set(["我堡", "OurBits"])
   for (const [siteName, siteData] of Object.entries(sites || {})) {
-    // 过滤掉被排除的站点
-    if (excludedSites.has(siteName)) continue
-
     if (
       (siteData.migration === 1 || siteData.migration === 3) &&
       siteStatuses.value.find((s) => s.name === siteName)?.has_cookie
@@ -848,11 +934,8 @@ const loadPrioritySettings = async () => {
     const sitesResponse = await axios.get('/api/sites/status')
     const allSites = sitesResponse.data
 
-    // 过滤出有cookie的源站点，并排除"我堡"和"OurBits"站点
-    const excludedSites = new Set(["我堡", "OurBits"])
-    const availableSites = allSites.filter((s: SiteStatus) =>
-      s.is_source && s.has_cookie && !excludedSites.has(s.name)
-    )
+    // 过滤出有 cookie 的源站点
+    const availableSites = allSites.filter((s: SiteStatus) => s.is_source && s.has_cookie)
 
     // 加载已保存的优先级配置
     const configResponse = await axios.get('/api/config/source_priority')
@@ -865,9 +948,6 @@ const loadPrioritySettings = async () => {
 
     // 先添加按优先级排序的站点
     savedPriority.forEach((siteName: string) => {
-      // 过滤掉被排除的站点
-      if (excludedSites.has(siteName)) return
-
       const site = availableSites.find((s: SiteStatus) => s.name === siteName)
       if (site && !usedSites.has(site.name)) {
         orderedSites.push(site)
@@ -893,11 +973,7 @@ const loadPrioritySettings = async () => {
 const savePrioritySettings = async () => {
   prioritySaving.value = true
   try {
-    // 过滤掉被排除的站点后再保存
-    const excludedSites = new Set(["我堡", "OurBits"])
-    const sourcePriority = sourceSitesOrder.value
-      .map((site) => site.name)
-      .filter((siteName) => !excludedSites.has(siteName))
+    const sourcePriority = sourceSitesOrder.value.map((site) => site.name)
 
     const response = await axios.post('/api/config/source_priority', {
       source_priority: sourcePriority,
@@ -958,6 +1034,23 @@ const startBatchFetch = async () => {
 
     if (result.success) {
       currentTaskId.value = result.task_id
+      progress.value = {
+        total: selectedRows.value.length,
+        processed: 0,
+        success: 0,
+        failed: 0,
+        skipped: 0,
+        isRunning: true,
+        results: [],
+      }
+      taskMonitorStore.markRunning({
+        key: `batch_fetch:${result.task_id}`,
+        kind: 'batch_fetch',
+        rawId: result.task_id,
+        title: '批量获取种子数据',
+        message: `已选择 ${selectedRows.value.length} 个种子`,
+        progressText: '等待进度上报',
+      })
       ElMessage.success('批量获取任务已启动')
       closeBatchFetchDialog()
       openProgressDialog()
@@ -1023,32 +1116,51 @@ const refreshProgress = async () => {
       // 添加 BDInfo 处理统计
       if (progress.value.results && progress.value.results.length > 0) {
         const bdinfoStats = {
-          processing: progress.value.results.filter(r => 
-            r.bdinfo_status === 'processing_bdinfo' || 
+          processing: progress.value.results.filter(r =>
+            r.bdinfo_status === 'processing_bdinfo' ||
             (r.mediainfo && r.mediainfo.includes('正在处理 BDInfo'))
           ).length,
-          completed: progress.value.results.filter(r => 
-            r.bdinfo_status === 'completed' || 
+          completed: progress.value.results.filter(r =>
+            r.bdinfo_status === 'completed' ||
             (r.mediainfo && r.mediainfo.includes('DISC INFO'))
           ).length,
-          failed: progress.value.results.filter(r => 
-            r.bdinfo_status === 'failed' || 
+          failed: progress.value.results.filter(r =>
+            r.bdinfo_status === 'failed' ||
             (r.mediainfo && r.mediainfo.includes('bdinfo提取失败'))
           ).length
         }
-        
+
         // 更新进度对象中的 BDInfo 统计
         progress.value.bdinfo_stats = bdinfoStats
       }
+
+      updateBatchFetchMonitor()
 
       // 如果任务从运行中变为已完成，触发完成事件
       if (wasRunning && !progress.value.isRunning) {
         emit('fetch-completed')
       }
     } else {
+      taskMonitorStore.markFailed(batchFetchMonitorKey.value, {
+        kind: 'batch_fetch',
+        rawId: currentTaskId.value,
+        title: '批量获取种子数据',
+        message: result.message || '获取进度失败',
+        progressText: '状态查询失败',
+        error: result.message || '获取进度失败',
+      })
       ElMessage.error(result.message || '获取进度失败')
     }
   } catch (error: unknown) {
+    const message = getErrorMessage(error) || '获取进度时发生错误'
+    taskMonitorStore.markFailed(batchFetchMonitorKey.value, {
+      kind: 'batch_fetch',
+      rawId: currentTaskId.value,
+      title: '批量获取种子数据',
+      message,
+      progressText: '状态查询失败',
+      error: message,
+    })
     console.error('获取进度时出错:', error)
   }
 }
@@ -1125,6 +1237,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopAutoRefresh()
+})
+
+defineExpose({
+  refreshList,
 })
 
 watch(nameSearch, () => {

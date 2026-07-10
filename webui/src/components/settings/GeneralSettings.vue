@@ -118,6 +118,14 @@
               </el-input>
             </el-form-item>
 
+            <el-form-item label="内容过滤" class="form-item">
+              <el-switch
+                v-model="contentFiltersStore.videoOnly"
+                active-text="仅展示视频类种子"
+                inactive-text="展示全部种子"
+              />
+            </el-form-item>
+
             <el-form-item v-if="isDesktopRuntime" label="数据库配置文件" class="form-item">
               <div style="display: flex; flex-direction: column; gap: 8px">
                 <el-button type="primary" plain @click="openDatabaseConfigFile">
@@ -923,7 +931,9 @@ import {
   Collection,
 } from '@element-plus/icons-vue'
 import { ElMessage } from '@/utils/uiNotify'
+import { useContentFiltersStore } from '@/stores/contentFilters'
 const router = useRouter()
+const contentFiltersStore = useContentFiltersStore()
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
   if (axios.isAxiosError(error)) {
@@ -1306,6 +1316,7 @@ const fetchSettings = async () => {
     if (config.ui_settings && config.ui_settings.background_url) {
       backgroundForm.background_url = config.ui_settings.background_url
     }
+    contentFiltersStore.setVideoOnly(config.ui_settings?.content_filters?.video_only === true)
 
     // 获取网络代理设置
     if (config.network_proxy) {
@@ -1550,6 +1561,9 @@ const saveBackgroundSettings = async () => {
     const uiSettings = {
       ui_settings: {
         background_url: backgroundForm.background_url,
+        content_filters: {
+          video_only: contentFiltersStore.videoOnly,
+        },
       },
     }
     await axios.post('/api/settings', uiSettings)

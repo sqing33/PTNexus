@@ -15,6 +15,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var checkDownloaderGate = publishguard.CheckDownloaderGate
+
 // AddToDownloaderRepo 定义“按详情页反查站点并下载种子”所需依赖。
 type AddToDownloaderRepo interface {
 	DB() *gorm.DB
@@ -34,7 +36,7 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 	}
 
 	// 🚫 自动添加前预检查（对齐 Python）：避免触发做种/队列限制。
-	canContinue, limitMessage := publishguard.CheckDownloaderGate(downloaderID)
+	canContinue, limitMessage := checkDownloaderGate(downloaderID)
 	if !canContinue {
 		if strings.TrimSpace(limitMessage) == "" {
 			limitMessage = "已触发限制"

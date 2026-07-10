@@ -125,6 +125,15 @@ func (s *SettingsService) UpdateSettings(newConfig map[string]any) error {
 	}
 
 	for key, value := range newConfig {
+		if key == "ui_settings" {
+			incomingUI, incomingOK := value.(map[string]any)
+			currentUI, currentOK := current[key].(map[string]any)
+			if incomingOK && currentOK {
+				mergeSettingsMap(currentUI, incomingUI)
+				current[key] = currentUI
+				continue
+			}
+		}
 		current[key] = value
 	}
 
@@ -136,6 +145,19 @@ func (s *SettingsService) UpdateSettings(newConfig map[string]any) error {
 		return err
 	}
 	return nil
+}
+
+func mergeSettingsMap(destination map[string]any, source map[string]any) {
+	for key, value := range source {
+		sourceMap, sourceIsMap := value.(map[string]any)
+		destinationMap, destinationIsMap := destination[key].(map[string]any)
+		if sourceIsMap && destinationIsMap {
+			mergeSettingsMap(destinationMap, sourceMap)
+			destination[key] = destinationMap
+			continue
+		}
+		destination[key] = value
+	}
 }
 
 func (s *SettingsService) DownloadersList(enabledOnly bool) []map[string]any {

@@ -223,7 +223,7 @@ set_permissions() {
     chmod +x "pt-nexus-box-proxy"
     chmod +x "start.sh"
     chmod +x "stop.sh"
-    
+
     # 设置BDInfo工具权限
     if [ -d "bdinfo" ]; then
         chmod 755 "bdinfo"

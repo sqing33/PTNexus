@@ -32,8 +32,8 @@ func (s *MigrateService) BDInfoStatus(seedID string) (map[string]any, int) {
 	return response, 200
 }
 
-func (s *MigrateService) BDInfoRecords(statusFilter string, page int, pageSize int) (map[string]any, int) {
-	queryResult, err := processingbdflow.QueryBDInfoRecords(s.repo.DB(), statusFilter, page, pageSize)
+func (s *MigrateService) BDInfoRecords(statusFilter string, page int, pageSize int, videoOnly bool) (map[string]any, int) {
+	queryResult, err := processingbdflow.QueryBDInfoRecords(s.repo.DB(), statusFilter, page, pageSize, videoOnly)
 	if err != nil {
 		return map[string]any{"success": false, "message": err.Error()}, 500
 	}

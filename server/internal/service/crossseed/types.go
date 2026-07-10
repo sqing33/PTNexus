@@ -10,6 +10,8 @@ type CrossSeedQueryParams struct {
 	IsDeleted          string
 	ExcludeTargetSites string
 	ReviewStatus       string
+	IncludeUniquePaths bool
+	VideoOnly          bool
 }
 
 type CrossSeedService struct {

@@ -186,7 +186,7 @@ func parseJSONStringArray(value any) []string {
 }
 
 // QueryBDInfoRecords 查询 BDInfo 记录列表基础信息（不含内存任务进度）。
-func QueryBDInfoRecords(db *gorm.DB, statusFilter string, page int, pageSize int) (BDInfoRecordsQueryResult, error) {
+func QueryBDInfoRecords(db *gorm.DB, statusFilter string, page int, pageSize int, videoOnly bool) (BDInfoRecordsQueryResult, error) {
 	normalizedPage := page
 	if normalizedPage <= 0 {
 		normalizedPage = 1
@@ -207,6 +207,9 @@ func QueryBDInfoRecords(db *gorm.DB, statusFilter string, page int, pageSize int
 			sp.mediainfo_status, sp.bdinfo_task_id, sp.bdinfo_started_at, sp.bdinfo_completed_at, sp.bdinfo_error, sp.mediainfo`).
 		Joins("LEFT JOIN sites s ON sp.site_name = s.site").
 		Where("sp.bdinfo_task_id IS NOT NULL")
+	if videoOnly {
+		query = query.Where("sp.type IN ?", []string{"category.movie", "category.tv_series", "category.animation", "category.documentaries", "category.tv_shows"})
+	}
 
 	if filter != "" {
 		switch filter {

@@ -33,7 +33,9 @@ func (h *Handler) BDInfoRecords(c *gin.Context) {
 	}
 	requestID := c.GetString("request_id")
 	logx.Infof(bdinfoStatusHandlerLogModule, "收到记录查询 请求ID=%s status_filter=%s page=%d page_size=%d", requestID, statusFilter, page, pageSize)
-	result, status := h.service.BDInfoRecords(statusFilter, page, pageSize)
+	videoOnlyValue := strings.ToLower(strings.TrimSpace(c.Query("video_only")))
+	videoOnly := videoOnlyValue == "1" || videoOnlyValue == "true" || videoOnlyValue == "yes"
+	result, status := h.service.BDInfoRecords(statusFilter, page, pageSize, videoOnly)
 	if status >= http.StatusBadRequest {
 		logx.Warnf(bdinfoStatusHandlerLogModule, "记录查询结束 请求ID=%s status_filter=%s 状态码=%d", requestID, statusFilter, status)
 	} else {

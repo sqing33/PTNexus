@@ -12,6 +12,8 @@ import (
 	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
 
+var checkPublishDownloaderGate = publishguard.CheckDownloaderGate
+
 // PublishExecutionInput 定义单站发布执行输入。
 type PublishExecutionInput struct {
 	TargetSite string
@@ -88,7 +90,7 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 		return buildPreCheckFailure("缺少有效 downloaderId，已停止发布")
 	}
 
-	canContinue, limitMessage := publishguard.CheckDownloaderGate(resolvedDownloaderID)
+	canContinue, limitMessage := checkPublishDownloaderGate(resolvedDownloaderID)
 	if !canContinue {
 		if strings.TrimSpace(limitMessage) == "" {
 			limitMessage = "已触发限制"

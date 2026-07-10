@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pt-nexus/server/internal/repository"
 	"github.com/pt-nexus/server/internal/service/reversemapping"
 )
 
@@ -22,90 +23,32 @@ func stateRankExpr(alias string) string {
 	return fmt.Sprintf("CASE WHEN %s.state NOT IN (%s) THEN 0 ELSE 1 END", alias, statesSQL)
 }
 
-func buildReviewStatusCondition(dbType string, reviewStatus string) (string, []any) {
+func normalizeReviewStatus(reviewStatus string) string {
 	normalized := strings.ToLower(strings.TrimSpace(reviewStatus))
-	if normalized == "" {
-		return "", nil
-	}
-
-	isDeletedCondition := "ct.hash IS NULL"
-	isNotDeletedCondition := "ct.hash IS NOT NULL"
-	tagArgs := []any{"%禁转%", "%限转%", "%分集%"}
-
 	switch normalized {
-	case "reviewed", "unreviewed":
-		if strings.EqualFold(dbType, "postgresql") {
-			isReviewedValue := "false"
-			if normalized == "reviewed" {
-				isReviewedValue = "true"
-			}
-			condition := fmt.Sprintf(
-				`sp.is_reviewed = %s AND %s AND (sp.tags IS NULL OR (sp.tags::text NOT LIKE ? AND sp.tags::text NOT LIKE ? AND sp.tags::text NOT LIKE ?)) AND (sp.title_components IS NULL OR sp.title_components::text !~ ?)`,
-				isReviewedValue,
-				isNotDeletedCondition,
-			)
-			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
-		}
-
-		isReviewedValue := "0"
-		if normalized == "reviewed" {
-			isReviewedValue = "1"
-		}
-
-		if strings.EqualFold(dbType, "mysql") {
-			condition := fmt.Sprintf(
-				`sp.is_reviewed = %s AND %s AND (sp.tags IS NULL OR (sp.tags NOT LIKE ? AND sp.tags NOT LIKE ? AND sp.tags NOT LIKE ?)) AND (sp.title_components IS NULL OR sp.title_components NOT REGEXP ?)`,
-				isReviewedValue,
-				isNotDeletedCondition,
-			)
-			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
-		}
-
-		condition := fmt.Sprintf(
-			`sp.is_reviewed = %s AND %s AND (sp.tags IS NULL OR (sp.tags NOT LIKE ? AND sp.tags NOT LIKE ? AND sp.tags NOT LIKE ?)) AND (sp.title_components IS NULL OR NOT (sp.title_components LIKE ? AND sp.title_components NOT LIKE ?))`,
-			isReviewedValue,
-			isNotDeletedCondition,
-		)
-		return condition, append(tagArgs, `%"无法识别"%`, `%"value": ""%`)
-	case "error":
-		if strings.EqualFold(dbType, "postgresql") {
-			condition := fmt.Sprintf(
-				`(%s OR sp.tags::text LIKE ? OR sp.tags::text LIKE ? OR sp.tags::text LIKE ? OR sp.title_components::text ~ ?)`,
-				isDeletedCondition,
-			)
-			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
-		}
-
-		if strings.EqualFold(dbType, "mysql") {
-			condition := fmt.Sprintf(
-				`(%s OR sp.tags LIKE ? OR sp.tags LIKE ? OR sp.tags LIKE ? OR sp.title_components REGEXP ?)`,
-				isDeletedCondition,
-			)
-			return condition, append(tagArgs, `"无法识别"[^}]*"value":\s*".+"`)
-		}
-
-		condition := fmt.Sprintf(
-			`(%s OR sp.tags LIKE ? OR sp.tags LIKE ? OR sp.tags LIKE ? OR (sp.title_components LIKE ? AND sp.title_components NOT LIKE ?))`,
-			isDeletedCondition,
-		)
-		return condition, append(tagArgs, `%"无法识别"%`, `%"value": ""%`)
+	case "reviewed", "unreviewed", "error":
+		return normalized
 	default:
-		return "", nil
+		return ""
 	}
+}
+
+func buildReviewStatusCondition(dbType string, reviewStatus string) (string, []any) {
+	return "", nil
 }
 
 func buildCurrentTorrentsSubquery(dbType string) string {
 	// Match Python build_current_torrents_subquery().
 	if strings.EqualFold(dbType, "postgresql") {
 		return fmt.Sprintf(`
-			SELECT DISTINCT ON (t.hash) t.hash, t.save_path, t.downloader_id, t.state, t.last_seen
+			SELECT DISTINCT ON (t.hash) t.hash, t.name, t.size, t.save_path, t.downloader_id, t.state, t.last_seen
 			FROM torrents t
 			WHERE (t.is_hidden = 0 OR t.is_hidden IS NULL)
 			ORDER BY t.hash, %s, t.last_seen DESC
 		`, stateRankExpr("t"))
 	}
 	return fmt.Sprintf(`
-		SELECT t.hash, t.save_path, t.downloader_id, t.state, t.last_seen
+		SELECT t.hash, t.name, t.size, t.save_path, t.downloader_id, t.state, t.last_seen
 		FROM torrents t
 		JOIN (
 			SELECT hash,
@@ -121,15 +64,17 @@ func buildCurrentTorrentsSubquery(dbType string) string {
 	`, stateRankExpr("t2"), stateRankExpr("t"))
 }
 
-func (s *CrossSeedService) UniquePaths() (map[string]any, error) {
-	currentTorrentsSubquery := buildCurrentTorrentsSubquery(s.repo.DBType())
-	query := fmt.Sprintf(`
-		SELECT DISTINCT ct.save_path
-		FROM seed_parameters sp
-		JOIN (%s) ct ON sp.hash = ct.hash
-		WHERE ct.save_path IS NOT NULL AND ct.save_path != ''
-		ORDER BY ct.save_path
-	`, currentTorrentsSubquery)
+func (s *CrossSeedService) UniquePaths(videoOnly bool) (map[string]any, error) {
+	query := `
+		SELECT DISTINCT t.save_path
+		FROM torrents t
+		WHERE (t.is_hidden = 0 OR t.is_hidden IS NULL)
+		  AND t.save_path IS NOT NULL AND t.save_path != ''
+	`
+	if videoOnly {
+		query += " AND EXISTS (SELECT 1 FROM seed_parameters sp WHERE sp.hash = t.hash AND " + buildVideoTypeCondition("sp.type") + ")"
+	}
+	query += " ORDER BY t.save_path"
 	paths, err := s.repo.RawStrings(query, "save_path")
 	if err != nil {
 		return nil, err
@@ -151,6 +96,8 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 	offset := (params.Page - 1) * params.PageSize
 	dbType := s.repo.DBType()
 	currentTorrentsSubquery := buildCurrentTorrentsSubquery(dbType)
+	hasPublishQueueTable := s.repo.DB() != nil && s.repo.DB().Migrator().HasTable("publish_queue_tasks")
+	hasPublishLogTable := s.repo.DB() != nil && s.repo.DB().Migrator().HasTable("publish_logs")
 
 	fromClause := fmt.Sprintf(`
 		FROM seed_parameters sp
@@ -159,6 +106,10 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 
 	whereConditions := make([]string, 0)
 	args := make([]any, 0)
+
+	if params.VideoOnly {
+		whereConditions = append(whereConditions, buildVideoTypeCondition("sp.type"))
+	}
 
 	search := strings.TrimSpace(params.Search)
 	if search != "" {
@@ -192,9 +143,69 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		whereConditions = append(whereConditions, "ct.hash IS NOT NULL")
 	}
 
-	if reviewCondition, reviewArgs := buildReviewStatusCondition(dbType, params.ReviewStatus); reviewCondition != "" {
-		whereConditions = append(whereConditions, reviewCondition)
-		args = append(args, reviewArgs...)
+	normalizedReviewStatus := normalizeReviewStatus(params.ReviewStatus)
+	if normalizedReviewStatus == "" {
+		if reviewCondition, reviewArgs := buildReviewStatusCondition(dbType, params.ReviewStatus); reviewCondition != "" {
+			whereConditions = append(whereConditions, reviewCondition)
+			args = append(args, reviewArgs...)
+		}
+	}
+	if excludedTarget := strings.TrimSpace(params.ExcludeTargetSites); excludedTarget != "" {
+		targetAliases, err := s.repo.ResolveSiteAliases(excludedTarget)
+		if err != nil {
+			return nil, fmt.Errorf("resolve target site aliases failed: %w", err)
+		}
+		if len(targetAliases) == 0 {
+			targetAliases = []string{excludedTarget}
+		}
+
+		spNicknameCondition := buildAliasMatchCondition(dbType, "sp.nickname", targetAliases)
+		spSiteCondition := buildAliasMatchCondition(dbType, "sp.site_name", targetAliases)
+		txSiteCondition := buildAliasMatchCondition(dbType, "tx.sites", targetAliases)
+		aliasArgs := aliasMatchArgs(dbType, targetAliases)
+
+		conditionParts := []string{
+			fmt.Sprintf(`ct.hash IS NOT NULL AND NOT EXISTS (
+					SELECT 1
+					FROM torrents tx
+					WHERE (tx.is_hidden = 0 OR tx.is_hidden IS NULL)
+					  AND %s
+					  AND (tx.hash = ct.hash OR (tx.name = ct.name AND tx.size = ct.size))
+				)`, txSiteCondition),
+		}
+		args = append(args, aliasArgs...)
+
+		if hasPublishQueueTable {
+			queueSiteCondition := buildAliasMatchCondition(dbType, "pqt.target_site", targetAliases)
+			conditionParts = append(conditionParts, fmt.Sprintf(`NOT EXISTS (
+				SELECT 1
+				FROM publish_queue_tasks pqt
+				WHERE pqt.torrent_id = sp.torrent_id
+				  AND %s
+				  AND pqt.status IN (?, ?, ?)
+			)`, queueSiteCondition))
+			args = append(args, aliasArgs...)
+			args = append(args, repository.PublishQueueStatusQueued, repository.PublishQueueStatusRunning, repository.PublishQueueStatusSuccess)
+		}
+
+		if hasPublishLogTable {
+			logSiteCondition := buildAliasMatchCondition(dbType, "pl.target_site", targetAliases)
+			conditionParts = append(conditionParts, fmt.Sprintf(`NOT EXISTS (
+				SELECT 1
+				FROM publish_logs pl
+				WHERE pl.torrent_id = sp.torrent_id
+				  AND %s
+				  AND pl.status = ?
+			)`, logSiteCondition))
+			args = append(args, aliasArgs...)
+			args = append(args, "success")
+		}
+
+		conditionParts = append(conditionParts, fmt.Sprintf("NOT (%s OR %s)", spNicknameCondition, spSiteCondition))
+		args = append(args, aliasArgs...)
+		args = append(args, aliasArgs...)
+
+		whereConditions = append(whereConditions, strings.Join(conditionParts, " AND "))
 	}
 
 	whereClause := ""
@@ -211,70 +222,83 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		return nil, err
 	}
 
+	if normalizedReviewStatus != "" {
+		count.Total = 0
+	}
+
 	isDeletedExpr := "CASE WHEN ct.hash IS NULL THEN 1 ELSE 0 END AS is_deleted"
 	if strings.EqualFold(dbType, "postgresql") {
 		isDeletedExpr = "CASE WHEN ct.hash IS NULL THEN true ELSE false END AS is_deleted"
 	}
 
 	dataQuery := fmt.Sprintf(`
-		SELECT sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
-		       COALESCE(ct.save_path, '') AS save_path,
-		       ct.downloader_id AS downloader_id,
-		       sp.title, sp.subtitle, sp.type, sp.medium, sp.video_codec,
-		       sp.audio_codec, sp.resolution, sp.team, sp.source, sp.tags,
-		       sp.title_components, sp.screenshot_review_status,
-		       %s,
-		       sp.is_reviewed, sp.updated_at
-		%s
-		%s
-		ORDER BY sp.created_at DESC
-		LIMIT ? OFFSET ?
-	`, isDeletedExpr, fromClause, whereClause)
+			SELECT sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
+			       COALESCE(ct.save_path, '') AS save_path,
+			       ct.downloader_id AS downloader_id,
+			       sp.title, sp.subtitle, sp.type, sp.medium, sp.video_codec,
+			       sp.audio_codec, sp.resolution, sp.team, sp.source, sp.tags,
+			       sp.title_components, sp.screenshot_review_status,
+			       %s,
+			       sp.is_reviewed, sp.updated_at
+			%s
+			%s
+			ORDER BY sp.created_at DESC
+		`, isDeletedExpr, fromClause, whereClause)
 
-	dataArgs := make([]any, 0, len(args)+2)
-	dataArgs = append(dataArgs, args...)
-	dataArgs = append(dataArgs, params.PageSize, offset)
+	dataArgs := args
+	if normalizedReviewStatus == "" {
+		dataQuery += "\n\t\t\tLIMIT ? OFFSET ?"
+		dataArgs = make([]any, 0, len(args)+2)
+		dataArgs = append(dataArgs, args...)
+		dataArgs = append(dataArgs, params.PageSize, offset)
+	}
 
 	pageData, err := s.repo.RawMaps(dataQuery, dataArgs...)
 	if err != nil {
 		return nil, err
 	}
 
+	reverseMappings := reversemapping.Build(nil)
 	for _, item := range pageData {
-		item["tags"] = parseStringArray(item["tags"])
-		item["is_deleted"] = boolFromAny(item["is_deleted"])
-		item["is_reviewed"] = boolFromAny(item["is_reviewed"])
+		normalizeQueryRow(item, reverseMappings)
+	}
 
-		titleComponents := parseAnyArray(item["title_components"])
-		item["unrecognized"] = extractUnrecognized(titleComponents)
+	if normalizedReviewStatus != "" {
+		filteredData := make([]map[string]any, 0, len(pageData))
+		for _, item := range pageData {
+			if matchesReviewStatus(item, normalizedReviewStatus) {
+				filteredData = append(filteredData, item)
+			}
+		}
+		count.Total = int64(len(filteredData))
+		pageData = paginateMaps(filteredData, offset, params.PageSize)
 	}
 
 	targetSites, err := s.repo.RawStrings("SELECT nickname FROM sites WHERE migration IN (2, 3) ORDER BY nickname", "nickname")
 	if err != nil {
 		targetSites = []string{}
 	}
-	uniquePaths, err := s.repo.RawStrings(`
-		SELECT DISTINCT ct.save_path
-		FROM seed_parameters sp
-		JOIN (`+currentTorrentsSubquery+`) ct ON sp.hash = ct.hash
-		WHERE ct.save_path IS NOT NULL AND ct.save_path != ''
-		ORDER BY ct.save_path
-	`, "save_path")
-	if err != nil {
-		uniquePaths = []string{}
-	}
-
-	return map[string]any{
+	result := map[string]any{
 		"success":          true,
 		"data":             pageData,
 		"count":            len(pageData),
 		"total":            int(count.Total),
 		"page":             params.Page,
 		"page_size":        params.PageSize,
-		"reverse_mappings": reversemapping.Build(nil),
-		"unique_paths":     uniquePaths,
+		"reverse_mappings": reverseMappings,
 		"target_sites":     targetSites,
-	}, nil
+	}
+
+	if params.IncludeUniquePaths {
+		uniquePaths, err := s.UniquePaths(params.VideoOnly)
+		if err == nil {
+			if values, ok := uniquePaths["unique_paths"]; ok {
+				result["unique_paths"] = values
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[string]any, int) {
@@ -314,4 +338,37 @@ func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[stri
 		return map[string]any{"success": false, "error": err.Error()}, 500
 	}
 	return map[string]any{"success": true, "message": fmt.Sprintf("种子数据 %s from %s 已删除", torrentID, siteName)}, 200
+}
+
+func buildVideoTypeCondition(field string) string {
+	return fmt.Sprintf("%s IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')", field)
+}
+
+func buildAliasMatchCondition(dbType string, field string, aliases []string) string {
+	if len(aliases) == 0 {
+		return "1 = 0"
+	}
+
+	placeholders := make([]string, 0, len(aliases))
+	for range aliases {
+		placeholders = append(placeholders, "?")
+	}
+
+	if strings.EqualFold(dbType, "mysql") {
+		return fmt.Sprintf("%s IN (%s)", field, strings.Join(placeholders, ", "))
+	}
+	return fmt.Sprintf("LOWER(COALESCE(%s, '')) IN (%s)", field, strings.Join(placeholders, ", "))
+}
+
+func aliasMatchArgs(dbType string, aliases []string) []any {
+	result := make([]any, 0, len(aliases))
+	for _, alias := range aliases {
+		value := strings.TrimSpace(alias)
+		if strings.EqualFold(dbType, "mysql") {
+			result = append(result, value)
+			continue
+		}
+		result = append(result, strings.ToLower(value))
+	}
+	return result
 }

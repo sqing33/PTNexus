@@ -1,6 +1,6 @@
 <template>
   <div class="cross-seed-panel">
-    <CrossSeedStepsHeader :steps="steps" :active-step="activeStep" />
+    <CrossSeedStepsHeader v-if="!maintenanceOnly" :steps="steps" :active-step="activeStep" />
 
     <!-- 2. 中间内容区 -->
     <main class="panel-content">
@@ -8,13 +8,13 @@
       <CrossSeedStepDetails v-if="activeStep === 0" />
 
       <!-- 步骤 1: 发布参数预览 -->
-      <CrossSeedStepPublishPreview v-if="activeStep === 1" />
+      <CrossSeedStepPublishPreview v-if="!maintenanceOnly && activeStep === 1" />
 
       <!-- 步骤 2: 选择发布站点 -->
-      <CrossSeedStepSiteSelection v-if="activeStep === 2" />
+      <CrossSeedStepSiteSelection v-if="!maintenanceOnly && activeStep === 2" />
 
       <!-- 步骤 3: 完成发布 -->
-      <CrossSeedStepPublishResults v-if="activeStep === 3" />
+      <CrossSeedStepPublishResults v-if="!maintenanceOnly && activeStep === 3" />
     </main>
 
     <!-- 3. 底部按钮栏 (固定) -->
@@ -176,6 +176,7 @@
 import { ref, onMounted, onUnmounted, computed, nextTick, watch, provide } from 'vue'
 import axios from 'axios'
 import { useCrossSeedStore } from '@/stores/crossSeed'
+import { useTaskMonitorStore } from '@/stores/taskMonitor'
 import { ElNotification } from '@/utils/uiNotify'
 import { openSSE, type EventSourceLike } from '@/desktop/sse'
 import LogProgress from './LogProgress.vue'
@@ -388,10 +389,12 @@ const props = defineProps({
 const emit = defineEmits(['complete', 'cancel', 'close-with-refresh'])
 
 const crossSeedStore = useCrossSeedStore()
+const taskMonitorStore = useTaskMonitorStore()
 
 const torrent = computed(() => crossSeedStore.workingParams as WorkingTorrent)
 const sourceSite = computed(() => crossSeedStore.sourceInfo?.name || '')
 const sourceTorrentId = computed(() => crossSeedStore.sourceInfo?.torrentId || '')
+const maintenanceOnly = computed(() => props.publishScene === 'maintenance')
 
 const normalizeScreenshotReviewStatus = (value: unknown): ScreenshotReviewStatus => {
   if (typeof value !== 'string') return 'none'
@@ -680,11 +683,8 @@ const rebindDetailsTabsDrag = debounce(() => {
 // 在组件挂载时添加监听器
 onMounted(() => {
   void fetchCrossSeedSettings()
-  void (async () => {
-    // 先获取站点状态，避免 fetchTorrentInfo 内部再次触发 /api/sites/status
-    await fetchSitesStatus()
-    await fetchTorrentInfo(props.prefetchedDbSeedInfo || undefined)
-  })()
+  void fetchSitesStatus()
+  void fetchTorrentInfo(props.prefetchedDbSeedInfo || undefined)
 
   // 在下一个tick添加滚动监听器，确保DOM已经渲染
   nextTick(() => {
@@ -746,6 +746,7 @@ const publishBatchEventSource = ref<EventSource | null>(null)
 const isReparsing = ref(false)
 const isRefreshingScreenshots = ref(false)
 const isConfirmingScreenshotReview = ref(false)
+const isRefetchingFromSource = ref(false)
 const isFinalizingScreenshotPreview = ref(false)
 const showScreenshotPreviewDialog = ref(false)
 const screenshotPreviewCandidates = ref<ScreenshotPreviewCandidateItem[]>([])
@@ -781,6 +782,8 @@ const bdinfoProgress = ref<BdinfoProgress>({
 
 // BDInfo 状态变量
 const bdinfoStatus = ref('')
+const bdinfoTaskId = ref('')
+const bdinfoMonitorKey = ref('')
 
 // BDInfo 碟片大小
 const discSize = ref(0)
@@ -799,6 +802,91 @@ const formatFileSize = (bytes: number) => {
   }
 
   return `${size.toFixed(2)} ${units[unitIndex]}`
+}
+
+const buildBdinfoRouteTarget = (patch?: { taskId?: string; status?: string }) => {
+  void patch
+  return undefined
+}
+
+const hasUsableMediainfo = () => String(torrentData.value.mediainfo || '').trim().length > 0
+
+const createBdinfoMonitorKey = (seedId: string, rawId?: string | null) =>
+  `bdinfo:${seedId}:${rawId || 'pending'}`
+
+const getBdinfoTitle = () => '重新获取 MediaInfo'
+
+const getBdinfoProgressText = (fallback = '等待进度更新') => {
+  const percent = Math.round(Number(bdinfoProgress.value.percent || 0))
+  const fileText = String(bdinfoProgress.value.currentFile || '').trim()
+  const sizeText = discSize.value ? `，原盘 ${formatFileSize(discSize.value)}` : ''
+  if (fileText) {
+    return `${percent}% · ${fileText}${sizeText}`
+  }
+  return percent > 0 ? `${percent}%${sizeText}` : fallback
+}
+
+const syncBdinfoMonitorIdentity = (seedId: string, rawId?: string | null) => {
+  const nextRawId = String(rawId || bdinfoTaskId.value || '').trim()
+  const nextKey = createBdinfoMonitorKey(seedId, nextRawId || null)
+  if (bdinfoMonitorKey.value && bdinfoMonitorKey.value !== nextKey) {
+    taskMonitorStore.removeTask(bdinfoMonitorKey.value)
+  }
+  bdinfoTaskId.value = nextRawId
+  bdinfoMonitorKey.value = nextKey
+  return { key: nextKey, rawId: nextRawId || seedId }
+}
+
+const markBdinfoRunning = (
+  seedId: string,
+  patch: { rawId?: string | null; message: string; progressText?: string },
+) => {
+  const identity = syncBdinfoMonitorIdentity(seedId, patch.rawId)
+  taskMonitorStore.markRunning({
+    key: identity.key,
+    kind: 'bdinfo',
+    rawId: identity.rawId,
+    title: getBdinfoTitle(),
+    message: patch.message,
+    progressText: patch.progressText || getBdinfoProgressText(),
+    routeTarget: buildBdinfoRouteTarget({ taskId: identity.rawId, status: 'running' }),
+  })
+}
+
+const markBdinfoSuccess = (
+  seedId: string,
+  patch: { rawId?: string | null; message: string; progressText?: string },
+) => {
+  const identity = syncBdinfoMonitorIdentity(seedId, patch.rawId)
+  taskMonitorStore.markSuccess(identity.key, {
+    kind: 'bdinfo',
+    rawId: identity.rawId,
+    title: getBdinfoTitle(),
+    message: patch.message,
+    progressText: patch.progressText || getBdinfoProgressText('可继续核对并发布'),
+    routeTarget: buildBdinfoRouteTarget({ taskId: identity.rawId, status: 'success' }),
+  })
+}
+
+const markBdinfoFailed = (
+  seedId: string,
+  patch: { rawId?: string | null; message: string; error: string; progressText?: string },
+) => {
+  const identity = syncBdinfoMonitorIdentity(seedId, patch.rawId)
+  taskMonitorStore.markFailed(identity.key, {
+    kind: 'bdinfo',
+    rawId: identity.rawId,
+    title: getBdinfoTitle(),
+    message: patch.message,
+    error: patch.error,
+    progressText: patch.progressText || getBdinfoProgressText('请稍后重试'),
+    routeTarget: buildBdinfoRouteTarget({ taskId: identity.rawId, status: 'failed' }),
+  })
+}
+
+const clearBdinfoMonitorRuntime = () => {
+  bdinfoTaskId.value = ''
+  bdinfoMonitorKey.value = ''
 }
 
 // 日志进度组件相关
@@ -823,18 +911,6 @@ const screenshotImages = computed(() => parseImageUrls(torrentData.value.intro.s
 const isScreenshotReviewPending = computed(
   () => torrentData.value.screenshot_review_status === 'pending',
 )
-const hasRestrictedAutoRepairTags = computed(() => {
-  const tags = torrentData.value.standardized_params.tags || []
-  return tags.some(
-    (tag) =>
-      tag === '禁转' ||
-      tag === 'tag.禁转' ||
-      tag === '限转' ||
-      tag === 'tag.限转' ||
-      tag === '分集' ||
-      tag === 'tag.分集',
-  )
-})
 
 const buildScreenshotPayload = (type: string, extra: Record<string, unknown> = {}) => ({
   type,
@@ -1152,10 +1228,7 @@ const openFetchedScreenshotPreview = async () => {
     })
   } catch (error: unknown) {
     ElNotification.closeAll()
-    const errorMsg = getScreenshotValidateErrorMessage(
-      error,
-      '未能生成候选截图，请查看后台日志。',
-    )
+    const errorMsg = getScreenshotValidateErrorMessage(error, '未能生成候选截图，请查看后台日志。')
     ElNotification.error({
       title: '候选生成失败',
       message: errorMsg,
@@ -1318,10 +1391,7 @@ const confirmScreenshotPreviewSelection = async () => {
     })
   } catch (error: unknown) {
     ElNotification.closeAll()
-    const errorMsg = getScreenshotValidateErrorMessage(
-      error,
-      '未能生成正式截图，请查看后台日志。',
-    )
+    const errorMsg = getScreenshotValidateErrorMessage(error, '未能生成正式截图，请查看后台日志。')
     ElNotification.error({
       title: '正式截图生成失败',
       message: errorMsg,
@@ -1421,82 +1491,11 @@ const isTargetSiteSelectable = (siteName: string): boolean => {
     return false
   }
 
-  // 条件 4: 检查是否为ubits站点并应用特殊禁转规则
-  if (siteName.toLowerCase() === 'ubits') {
-    const team = torrentData.value.standardized_params.team
-    const titleComponents = torrentData.value.title_components
-
-    // 检查标准化参数中的制作组
-    if (
-      team &&
-      ['cmct', 'cmctv', 'hdsky', 'hdsweb', 'hds', 'hdstv', 'hdspad'].includes(team.toLowerCase())
-    ) {
-      return false
-    }
-
-    // 检查标题组件中的制作组
-    const teamComponent = titleComponents.find((param) => param.key === '制作组')
-    if (teamComponent && teamComponent.value) {
-      const teamValue = teamComponent.value.toLowerCase()
-      const forbiddenTeams = [
-        'cmct',
-        'cmctv',
-        'telesto',
-        'shadow610',
-        'hdsky',
-        'hdsweb',
-        'hds',
-        'hdstv',
-        'hdspad',
-      ]
-
-      for (const forbiddenTeam of forbiddenTeams) {
-        if (teamValue.includes(forbiddenTeam)) {
-          return false
-        }
-      }
-    }
-  }
-
   // 如果所有检查都通过，则站点可选
   return true
 }
 
-const isUbitsDisabled = computed(() => {
-  const team = torrentData.value.standardized_params.team
-  const titleComponents = torrentData.value.title_components
-
-  if (
-    team &&
-    ['cmct', 'cmctv', 'hdsky', 'hdsweb', 'hds', 'hdstv', 'hdspad'].includes(team.toLowerCase())
-  ) {
-    return true
-  }
-
-  const teamComponent = titleComponents.find((param) => param.key === '制作组')
-  if (teamComponent && teamComponent.value) {
-    const teamValue = teamComponent.value.toLowerCase()
-    const forbiddenTeams = [
-      'cmct',
-      'cmctv',
-      'telesto',
-      'shadow610',
-      'hdsky',
-      'hdsweb',
-      'hds',
-      'hdstv',
-      'hdspad',
-    ]
-
-    for (const forbiddenTeam of forbiddenTeams) {
-      if (teamValue.includes(forbiddenTeam)) {
-        return true
-      }
-    }
-  }
-
-  return false
-})
+const isUbitsDisabled = computed(() => false)
 
 // 新增函数：根据站点状态获取按钮类型
 const getButtonType = (site: SiteStatus) => {
@@ -1767,10 +1766,7 @@ const refreshScreenshots = async () => {
     }
   } catch (error: unknown) {
     ElNotification.closeAll()
-    const errorMsg = getScreenshotValidateErrorMessage(
-      error,
-      '未能生成候选截图，请查看后台日志。',
-    )
+    const errorMsg = getScreenshotValidateErrorMessage(error, '未能生成候选截图，请查看后台日志。')
     ElNotification.error({
       title: '候选生成失败',
       message: errorMsg,
@@ -1827,12 +1823,18 @@ const refreshMediainfo = async () => {
 
       // 如果 BDInfo 在后台处理中，开始SSE连接
       if (response.data.bdinfo_async && response.data.bdinfo_async.bdinfo_status === 'processing') {
+        const asyncTaskId = String(response.data.bdinfo_async.bdinfo_task_id || '').trim()
+        markBdinfoRunning(String(torrentData.value.seed_id || ''), {
+          rawId: asyncTaskId || String(torrentData.value.seed_id || ''),
+          message: 'BDInfo 正在后台处理中',
+          progressText: '正在建立进度连接',
+        })
         ElNotification.info({
           title: 'BDInfo 处理中',
           message: 'BDInfo 正在后台处理中，完成后将自动更新...',
           duration: 5000,
         })
-        startBDInfoSSE()
+        startBDInfoSSE(asyncTaskId || undefined)
       } else if (response.data.mediainfo) {
         ElNotification.success({
           title: '重新获取成功',
@@ -1863,6 +1865,14 @@ const refreshMediainfo = async () => {
       : error instanceof Error
         ? error.message || '未能重新获取媒体信息，请查看后台日志。'
         : '未能重新获取媒体信息，请查看后台日志。'
+    if (torrentData.value.seed_id) {
+      markBdinfoFailed(String(torrentData.value.seed_id), {
+        rawId: bdinfoTaskId.value || String(torrentData.value.seed_id),
+        message: '重新获取 MediaInfo 失败',
+        error: errorMsg,
+        progressText: '任务启动失败',
+      })
+    }
     ElNotification.error({
       title: '操作失败',
       message: errorMsg,
@@ -1877,6 +1887,12 @@ const checkAndStartBDInfoProgress = async (seedId: string, isFromFetch: boolean 
   const maxRetries = isFromFetch ? 5 : 3 // 从抓取流程调用时增加重试次数
   const retryDelay = isFromFetch ? 2000 : 1000 // 从抓取流程调用时增加延迟
 
+  markBdinfoRunning(seedId, {
+    rawId: bdinfoTaskId.value || seedId,
+    message: '正在检查 BDInfo 任务状态',
+    progressText: '等待后端返回任务进度',
+  })
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const response = await axios.get(`/api/migrate/bdinfo_status/${seedId}`)
@@ -1889,26 +1905,70 @@ const checkAndStartBDInfoProgress = async (seedId: string, isFromFetch: boolean 
       if (data && !data.error) {
         // 修复：从正确的字段获取状态
         const status = data.mediainfo_status || data.task_status?.status
+        const hasCompletedMedia =
+          hasUsableMediainfo() ||
+          String(data.mediainfo || '').trim().length > 0 ||
+          String(data.task_status?.mediainfo || '').trim().length > 0
 
         if (status === 'processing_bdinfo') {
-          const taskId = data.bdinfo_task_id
+          const taskId = String(data.bdinfo_task_id || '').trim()
           if (taskId) {
             // 启动 BDInfo 进度显示
             console.log(`检测到 BDInfo 任务正在进行中: ${status}`)
             console.log('任务 ID:', taskId)
             console.log('进度信息:', data.progress_info)
 
-            startBDInfoSSE()
+            markBdinfoRunning(seedId, {
+              rawId: taskId,
+              message: 'BDInfo 正在后台处理中',
+              progressText: '正在建立进度连接',
+            })
+            startBDInfoSSE(taskId)
             bdinfoStatus.value = status
             return // 成功检测到任务，退出重试循环
           }
           console.log(`状态为 processing_bdinfo 但缺少任务ID，继续等待: ${seedId}`)
+          markBdinfoRunning(seedId, {
+            rawId: seedId,
+            message: 'BDInfo 已启动，等待任务编号',
+            progressText: `第 ${attempt}/${maxRetries} 次检查`,
+          })
         } else if (status === 'queued') {
           // queued 表示待处理，不等于 BDInfo 已启动
           console.log(`任务处于 queued，等待后端修复流程继续推进: ${seedId}`)
-        } else if (status === 'completed' || status === 'failed') {
+          markBdinfoRunning(seedId, {
+            rawId: seedId,
+            message: 'BDInfo 任务排队中',
+            progressText: `第 ${attempt}/${maxRetries} 次检查`,
+          })
+        } else if (status === 'completed') {
           console.log(`BDInfo 任务已结束: ${status}，无需启动进度显示`)
+          markBdinfoSuccess(seedId, {
+            rawId: bdinfoTaskId.value || seedId,
+            message: 'BDInfo 已处理完成',
+            progressText: '媒体信息已更新',
+          })
+          clearBdinfoMonitorRuntime()
           return // 任务已结束，退出重试循环
+        } else if (status === 'failed') {
+          console.log(`BDInfo 任务已结束: ${status}，无需启动进度显示`)
+          markBdinfoFailed(seedId, {
+            rawId: bdinfoTaskId.value || seedId,
+            message: 'BDInfo 获取失败',
+            error: String(data.error || data.task_status?.error || 'BDInfo 获取失败，可手动重试'),
+            progressText: '后台任务已结束',
+          })
+          clearBdinfoMonitorRuntime()
+          return
+        } else if (hasCompletedMedia) {
+          console.log('已检测到可用 MediaInfo，跳过 BDInfo 状态失败提示')
+          markBdinfoSuccess(seedId, {
+            rawId: bdinfoTaskId.value || seedId,
+            message: 'MediaInfo 已可用',
+            progressText: '无需继续等待后台状态',
+          })
+          clearBdinfoMonitorRuntime()
+          return
         } else {
           console.log(`BDInfo 任务状态: ${status}，尝试 ${attempt}/${maxRetries}`)
         }
@@ -1944,11 +2004,29 @@ const checkAndStartBDInfoProgress = async (seedId: string, isFromFetch: boolean 
   }
 
   // 所有重试都失败了
+  if (hasUsableMediainfo()) {
+    console.log('轮询结束时已存在可用 MediaInfo，跳过 BDInfo 失败标记')
+    markBdinfoSuccess(seedId, {
+      rawId: bdinfoTaskId.value || seedId,
+      message: 'MediaInfo 已可用',
+      progressText: '无需继续等待后台状态',
+    })
+    clearBdinfoMonitorRuntime()
+    return
+  }
+
   console.warn(`经过 ${maxRetries} 次尝试，未能检测到 BDInfo 任务`)
+  markBdinfoFailed(seedId, {
+    rawId: bdinfoTaskId.value || seedId,
+    message: '未能确认 BDInfo 后台任务状态',
+    error: '多次检查后仍未获取到有效的 BDInfo 任务状态，请稍后重试。',
+    progressText: `共检查 ${maxRetries} 次`,
+  })
+  clearBdinfoMonitorRuntime()
 }
 
 // BDInfo SSE相关函数
-const startBDInfoSSE = () => {
+const startBDInfoSSE = (rawTaskId?: string) => {
   console.log('启动 BDInfo SSE 连接...')
 
   // 验证 seed_id
@@ -1960,6 +2038,14 @@ const startBDInfoSSE = () => {
     })
     return
   }
+
+  const seedId = String(torrentData.value.seed_id)
+  const currentTaskId = String(rawTaskId || bdinfoTaskId.value || seedId).trim()
+  markBdinfoRunning(seedId, {
+    rawId: currentTaskId,
+    message: 'BDInfo 正在建立进度连接',
+    progressText: '正在连接 SSE',
+  })
 
   console.log(`使用 seed_id 建立 SSE 连接: ${torrentData.value.seed_id}`)
 
@@ -1987,12 +2073,17 @@ const startBDInfoSSE = () => {
   let connectionTimeout: ReturnType<typeof setTimeout> | null = setTimeout(() => {
     if (bdinfoEventSource.value?.readyState === EventSource.CONNECTING) {
       console.warn('SSE 连接超时，尝试重新连接')
+      markBdinfoRunning(seedId, {
+        rawId: currentTaskId,
+        message: 'BDInfo 连接超时，正在重试',
+        progressText: '正在重新建立 SSE 连接',
+      })
       bdinfoEventSource.value?.close()
       // 尝试重新连接一次
       if (bdinfoProgress.value.visible) {
         setTimeout(() => {
           console.log('尝试重新建立 SSE 连接...')
-          startBDInfoSSE()
+          startBDInfoSSE(currentTaskId)
         }, 2000)
       }
     }
@@ -2005,6 +2096,11 @@ const startBDInfoSSE = () => {
       clearTimeout(connectionTimeout)
       connectionTimeout = null
     }
+    markBdinfoRunning(seedId, {
+      rawId: currentTaskId,
+      message: 'BDInfo 正在处理',
+      progressText: getBdinfoProgressText('已连接，等待进度更新'),
+    })
     // 请求当前进度状态
     requestCurrentProgress()
   }
@@ -2034,6 +2130,11 @@ const startBDInfoSSE = () => {
           if (disc_size) {
             discSize.value = disc_size
           }
+          markBdinfoRunning(seedId, {
+            rawId: currentTaskId,
+            message: 'BDInfo 正在处理中',
+            progressText: getBdinfoProgressText('正在更新进度'),
+          })
           console.log(`BDInfo 进度: ${progress_percent}%`)
           break
 
@@ -2043,6 +2144,12 @@ const startBDInfoSSE = () => {
           if (data.data.seed_updates) {
             applySeedUpdates(data.data.seed_updates)
           }
+          markBdinfoSuccess(seedId, {
+            rawId: currentTaskId,
+            message: 'BDInfo 已成功获取并更新',
+            progressText: getBdinfoProgressText('媒体信息已更新'),
+          })
+          clearBdinfoMonitorRuntime()
           ElNotification.success({
             title: 'BDInfo 获取完成',
             message: 'BDInfo 已成功获取并更新',
@@ -2053,6 +2160,13 @@ const startBDInfoSSE = () => {
 
         case 'error':
           // BDInfo 失败
+          markBdinfoFailed(seedId, {
+            rawId: currentTaskId,
+            message: 'BDInfo 获取失败',
+            error: data.data.error || 'BDInfo 获取失败，可手动重试',
+            progressText: getBdinfoProgressText('后台任务失败'),
+          })
+          clearBdinfoMonitorRuntime()
           ElNotification.warning({
             title: 'BDInfo 获取失败',
             message: data.data.error || 'BDInfo 获取失败，可手动重试',
@@ -2090,19 +2204,32 @@ const startBDInfoSSE = () => {
       if (bdinfoProgress.value.visible) {
         console.log('尝试重新建立 SSE 连接...')
         bdinfoProgress.value.currentFile = '连接中断，正在重连...'
+        markBdinfoRunning(seedId, {
+          rawId: currentTaskId,
+          message: 'BDInfo 连接中断，正在重连',
+          progressText: getBdinfoProgressText('正在重新建立 SSE 连接'),
+        })
 
         // 延迟2秒后重连
         setTimeout(() => {
           if (bdinfoProgress.value.visible) {
-            startBDInfoSSE()
+            startBDInfoSSE(currentTaskId)
           }
         }, 2000)
       }
     } else {
       // 其他错误，显示错误通知
+      const errorMessage = 'BDInfo 进度更新连接中断，请刷新页面重试'
+      markBdinfoFailed(seedId, {
+        rawId: currentTaskId,
+        message: 'BDInfo 进度连接中断',
+        error: errorMessage,
+        progressText: getBdinfoProgressText('连接异常结束'),
+      })
+      clearBdinfoMonitorRuntime()
       ElNotification.error({
         title: '连接错误',
-        message: 'BDInfo 进度更新连接中断，请刷新页面重试',
+        message: errorMessage,
       })
       bdinfoProgress.value.visible = false
       stopBDInfoSSE(false)
@@ -2119,6 +2246,15 @@ const stopBDInfoSSE = (showNotification: boolean | Event = true) => {
   // 隐藏进度条
   bdinfoProgress.value.visible = false
   if (showNotification === true || (typeof showNotification === 'object' && showNotification)) {
+    if (torrentData.value.seed_id) {
+      markBdinfoFailed(String(torrentData.value.seed_id), {
+        rawId: bdinfoTaskId.value || String(torrentData.value.seed_id),
+        message: 'BDInfo 获取已取消',
+        error: '任务已由用户取消',
+        progressText: '已停止进度连接',
+      })
+      clearBdinfoMonitorRuntime()
+    }
     ElNotification.info({
       title: '已取消',
       message: 'BDInfo 获取已取消',
@@ -2155,6 +2291,11 @@ const requestCurrentProgress = async () => {
           elapsedTime: taskStatus.elapsed_time || '',
           remainingTime: taskStatus.remaining_time || '',
         }
+        markBdinfoRunning(String(torrentData.value.seed_id), {
+          rawId: bdinfoTaskId.value || String(torrentData.value.seed_id),
+          message: 'BDInfo 正在处理中',
+          progressText: getBdinfoProgressText('正在同步当前进度'),
+        })
         console.log(`更新进度显示: ${taskStatus.progress_percent || 0}%`)
       }
     }
@@ -2170,6 +2311,13 @@ const runInBackground = () => {
   if (bdinfoEventSource.value) {
     bdinfoEventSource.value.close()
     bdinfoEventSource.value = null
+  }
+  if (torrentData.value.seed_id) {
+    markBdinfoRunning(String(torrentData.value.seed_id), {
+      rawId: bdinfoTaskId.value || String(torrentData.value.seed_id),
+      message: 'BDInfo 继续在后台处理中',
+      progressText: getBdinfoProgressText('可稍后在任务面板查看'),
+    })
   }
   handleCancelClick()
 }
@@ -2303,14 +2451,6 @@ const reparseTitle = async () => {
 }
 
 const handleImageError = async (url: string, type: 'poster' | 'screenshot', index: number) => {
-  if (hasRestrictedAutoRepairTags.value) {
-    console.log(`受限标签已命中，跳过失效${type === 'poster' ? '海报' : '截图'}自动修复: ${url}`)
-    if (type === 'screenshot') {
-      screenshotValid.value = true
-    }
-    return
-  }
-
   // 如果是 pixhost.to 的图片，跳过检测
   if (url && url.includes('pixhost.to')) {
     console.log(`检测到 pixhost.to 图片，跳过有效性检测: ${url}`)
@@ -2441,13 +2581,13 @@ const seedFlow = createSeedFlow({
   isLoading,
   isDataFromDatabase,
   taskId,
+  isRefetchingFromSource,
 
   torrentData,
   reverseMappings,
 
   logProgressTaskId,
   showLogProgress,
-
   fetchFlowErrorMessage,
 
   filterExtraEmptyLines,
@@ -2469,7 +2609,9 @@ const {
   saveAutoAddExistingSetting,
   saveAutoUpdateExistingTorrentSetting,
   fetchTorrentInfo,
+  refetchFromSource,
   handleTeamInput,
+  saveCurrentSeedEdits,
   goToPublishPreviewStep,
   goToSelectSiteStep,
   toggleSiteSelection,
@@ -2548,6 +2690,7 @@ const confirmScreenshotReview = async () => {
       torrentData.value.screenshot_review_status = normalizeScreenshotReviewStatus(
         response.data.screenshot_review_status,
       )
+      screenshotValid.value = true
       ElNotification.success({
         title: '截图已确认',
         message: '已确认当前截图时间点，可继续下一步。',
@@ -2640,6 +2783,7 @@ const publishFlow = createPublishFlow({
   showLogProgress,
 
   goToSelectSiteStep,
+  saveCurrentSeedEdits,
 
   invalidStandardParams,
   screenshotValid,
@@ -2666,7 +2810,9 @@ const {
   getTagType,
   handleTagClose,
   isNextButtonDisabled,
+  isCompleteButtonDisabled,
   nextButtonTooltipContent,
+  completeButtonTooltipContent,
   groupedResults,
   showSiteLog,
   filterUploadedParam,
@@ -2686,6 +2832,7 @@ provide(crossSeedPanelContextKey, {
   steps,
   activeStep,
   activeTab,
+  maintenanceOnly,
   torrentData,
   reverseMappings,
   filteredTitleComponents,
@@ -2715,6 +2862,8 @@ provide(crossSeedPanelContextKey, {
   isRefreshingIntro,
   refreshMediainfo,
   isRefreshingMediainfo,
+  refetchFromSource,
+  isRefetchingFromSource,
   bdinfoProgress,
   discSize,
   formatFileSize,
@@ -2754,7 +2903,9 @@ provide(crossSeedPanelContextKey, {
   isLoading,
   isEnqueueing,
   isNextButtonDisabled,
+  isCompleteButtonDisabled,
   nextButtonTooltipContent,
+  completeButtonTooltipContent,
   isScrolledToBottom,
   handleCancelClick,
   goToPublishPreviewStep,

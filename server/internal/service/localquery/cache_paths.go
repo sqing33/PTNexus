@@ -23,25 +23,22 @@ func (s *Service) GetScanCache() (map[string]any, bool, error) {
 	return parsed, true, nil
 }
 
-func (s *Service) GetPaths() (map[string]any, error) {
-	paths, err := s.repo.DistinctPaths()
+func (s *Service) GetPaths(videoOnly bool) (map[string]any, error) {
+	paths, err := s.repo.DistinctPaths(videoOnly)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"paths": paths, "total": len(paths)}, nil
 }
 
-func (s *Service) GetDownloadersWithPaths() (map[string]any, error) {
+func (s *Service) GetDownloadersWithPaths(videoOnly bool) (map[string]any, error) {
 	downloaders := s.downloadersInConfigOrder()
 	result := make([]map[string]any, 0)
 
 	for _, meta := range downloaders {
-		pathRows, err := s.repo.DownloaderPathCounts(meta.ID)
+		pathRows, err := s.repo.DownloaderPathCounts(meta.ID, videoOnly)
 		if err != nil {
 			return nil, err
-		}
-		if len(pathRows) == 0 {
-			continue
 		}
 
 		merged := map[string]int64{}
@@ -71,9 +68,6 @@ func (s *Service) GetDownloadersWithPaths() (map[string]any, error) {
 				}
 			}
 			paths = append(paths, map[string]any{"path": path, "count": count})
-		}
-		if len(paths) == 0 {
-			continue
 		}
 		sort.Slice(paths, func(i, j int) bool {
 			return stringFromAny(paths[i]["path"]) < stringFromAny(paths[j]["path"])

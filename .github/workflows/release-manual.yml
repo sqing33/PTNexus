@@ -23,6 +23,11 @@ on:
         required: false
         default: true
         type: boolean
+      sync_to_gitee:
+        description: 是否同步代码与 Release 到 Gitee
+        required: false
+        default: true
+        type: boolean
   schedule:
     - cron: "0 22 * * *" # Asia/Shanghai 06:00
 
@@ -32,11 +37,31 @@ permissions:
 
 env:
   IMAGE_NAME: pt-nexus
-  GITEE_OWNER: sqing33
-  GITEE_REPO: PTNexus
   BROWSER_EXTENSION_ASSET_NAME: pt-nexus-browser-extension.zip
 
 jobs:
+  sync_to_gitee:
+    needs: meta
+    runs-on: ubuntu-latest
+    if: ${{ needs.meta.outputs.sync_to_gitee == 'true' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 推送到 Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "GITEE_TOKEN 未配置，跳过同步"
+            exit 0
+          fi
+          git remote add gitee https://oauth2:${GITEE_TOKEN}@gitee.com/sqing33/PTNexus.git 2>/dev/null || true
+          git push gitee HEAD:go --force
+          git push gitee --tags --force
+
   meta:
     runs-on: ubuntu-latest
     outputs:
@@ -48,6 +73,7 @@ jobs:
       run_proxy: ${{ steps.meta.outputs.run_proxy }}
       run_docker_image: ${{ steps.meta.outputs.run_docker_image }}
       run_release_assets: ${{ steps.meta.outputs.run_release_assets }}
+      sync_to_gitee: ${{ steps.meta.outputs.sync_to_gitee }}
       should_run: ${{ steps.meta.outputs.should_run }}
       skip_reason: ${{ steps.meta.outputs.skip_reason }}
 
@@ -178,6 +204,10 @@ jobs:
           write_output("run_proxy", str(run_proxy).lower())
           write_output("run_docker_image", str(run_docker_image).lower())
           write_output("run_release_assets", str(run_release_assets).lower())
+          sync_to_gitee = True
+          if event_name == "workflow_dispatch":
+              sync_to_gitee = to_bool(inputs.get("sync_to_gitee"), True)
+          write_output("sync_to_gitee", str(sync_to_gitee).lower())
           write_output("should_run", str(should_run).lower())
           write_multiline_output("skip_reason", skip_reason)
           PY
@@ -615,18 +645,37 @@ jobs:
 
       - name: 6. 准备 Docker 标签
         id: prepare-tags
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
           GHCR_REPO="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          FULL_TAGS="${GHCR_REPO}:${{ needs.meta.outputs.version }},${GHCR_REPO}:latest"
+          TAGS=()
+
+          add_tag() {
+            local image_repo="$1"
+            local image_tag="$2"
+            if [[ -n "$image_repo" && -n "$image_tag" ]]; then
+              TAGS+=("${image_repo}:${image_tag}")
+            fi
+          }
+
+          if [[ "${VERSION}" != "" ]]; then
+            add_tag "$GHCR_REPO" "$VERSION"
+          fi
+          add_tag "$GHCR_REPO" "latest"
 
           if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
             DOCKERHUB_REPO="${DOCKERHUB_USERNAME}/${{ env.IMAGE_NAME }}"
-            FULL_TAGS="${FULL_TAGS},${DOCKERHUB_REPO}:${{ needs.meta.outputs.version }},${DOCKERHUB_REPO}:latest"
+            if [[ "${VERSION}" != "" ]]; then
+              add_tag "$DOCKERHUB_REPO" "$VERSION"
+            fi
+            add_tag "$DOCKERHUB_REPO" "latest"
           else
             echo "::warning::DOCKERHUB_USERNAME 或 DOCKERHUB_TOKEN 未配置，本次只推送 GHCR。"
           fi
 
-          echo "tags=$FULL_TAGS" >> "$GITHUB_OUTPUT"
+          UNIQUE_TAGS="$(printf '%s\n' "${TAGS[@]}" | awk 'NF && !seen[$0]++' | paste -sd, -)"
+          echo "tags=$UNIQUE_TAGS" >> "$GITHUB_OUTPUT"
 
       - name: 7. 构建并推送 AMD64/ARM64 Docker 镜像
         uses: docker/build-push-action@v6
@@ -642,6 +691,7 @@ jobs:
   release_assets:
     needs:
       - meta
+      - sync_to_gitee
       - runtime
       - desktop_windows
       - proxy
@@ -650,12 +700,12 @@ jobs:
         always() &&
         needs.meta.outputs.run_release_assets == 'true' &&
         needs.meta.result == 'success' &&
+        (needs.sync_to_gitee.result == 'success' || needs.sync_to_gitee.result == 'skipped') &&
         (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') &&
         (needs.desktop_windows.result == 'success' || needs.desktop_windows.result == 'skipped') &&
         (needs.proxy.result == 'success' || needs.proxy.result == 'skipped')
       }}
     runs-on: ubuntu-latest
-
     steps:
       - name: 1. 检出代码
         uses: actions/checkout@v4
@@ -775,28 +825,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 11. 发布版本 Gitee Release
-        continue-on-error: true
+      - name: 11. 发布版本到 Gitee Release
+        if: ${{ needs.meta.outputs.sync_to_gitee == 'true' }}
         env:
-          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
-          RELEASE_BODY: ${{ needs.meta.outputs.body }}
-          TARGET_COMMITISH: ${{ github.ref_name }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           VERSION: ${{ needs.meta.outputs.version }}
+          BODY: ${{ needs.meta.outputs.body }}
         run: |
-          if [[ -z "${GITEE_ACCESS_TOKEN}" ]]; then
-            echo "::warning::GITEE_ACCESS_TOKEN 未配置，跳过 Gitee Release 发布。"
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "GITEE_TOKEN 未配置，跳过 Gitee Release 发布"
             exit 0
           fi
 
-          BODY_FILE="${RUNNER_TEMP}/gitee-release-body.md"
-          printf '%s\n' "${RELEASE_BODY}" > "${BODY_FILE}"
+          body_file="$(mktemp)"
+          trap 'rm -f "$body_file"' EXIT
+          printf '%s\n' "$BODY" > "$body_file"
 
           python3 scripts/publish-gitee-release.py \
-            --owner "${GITEE_OWNER}" \
-            --repo "${GITEE_REPO}" \
-            --tag "${VERSION}" \
-            --target-commitish "${TARGET_COMMITISH}" \
-            --name "${VERSION}" \
-            --body-file "${BODY_FILE}" \
-            --assets-dir "dist/release-assets/${VERSION}" \
-            --token "${GITEE_ACCESS_TOKEN}"
+            --owner sqing33 \
+            --repo PTNexus \
+            --tag "$VERSION" \
+            --target-commitish go \
+            --name "$VERSION" \
+            --body-file "$body_file" \
+            --assets-dir "dist/release-assets/$VERSION" \
+            --token "$GITEE_TOKEN"

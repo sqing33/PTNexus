@@ -33,6 +33,7 @@ func (h *TorrentDataHandler) Data(c *gin.Context) {
 		SortOrder:                 c.Query("sortOrder"),
 		ExcludeExisting:           boolQuery(c, "exclude_existing"),
 		OnlyCompleted:             boolQuery(c, "only_completed"),
+		VideoOnly:                 boolQuery(c, "video_only"),
 	}
 	result, err := h.service.GetData(params)
 	if err != nil {
