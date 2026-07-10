@@ -3,6 +3,7 @@ package extract
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +15,10 @@ import (
 )
 
 const teamNormalizeLogModule = "制作组标准化"
+
+// frdsAtPattern matches patterns like "xxx@FRDS" or "Yumi@FRDS"
+// This is a special format used by FRDS release group in titles.
+var frdsAtPattern = regexp.MustCompile(`[A-Za-z0-9]+@FRDS`)
 
 type teamMappingEntry struct {
 	SourceLower string
@@ -92,6 +97,23 @@ func buildTeamCandidates(raw string) []string {
 	if trimmed == "" {
 		return []string{}
 	}
+
+	// Special handling for FRDS @FRDS pattern like "xxx@FRDS" or "Yumi@FRDS"
+	// Extract both the full match (e.g., "xxx@FRDS") and the pure FRDS part
+	if strings.Contains(trimmed, "@FRDS") {
+		matches := frdsAtPattern.FindAllString(trimmed, -1)
+		if len(matches) > 0 {
+			out := make([]string, 0, len(matches)+1)
+			// Add each match as a candidate (e.g., "xxx@FRDS", "Yumi@FRDS")
+			for _, match := range matches {
+				out = append(out, match)
+			}
+			// Also add the pure "@FRDS" as a candidate for mapping
+			out = append(out, "@FRDS")
+			return out
+		}
+	}
+
 	if !strings.Contains(trimmed, "@") {
 		return []string{trimmed}
 	}
