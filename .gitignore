@@ -33,6 +33,7 @@
 
 # Local IDE/agent private settings
 /.claude/settings.local.json
+/.claude/worktrees/
 /.vscode/*
 !/.vscode/extensions.json
 */__pycache__
