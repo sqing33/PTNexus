@@ -1,10 +1,5 @@
 import { inject } from 'vue'
-import type {
-  ComputedRef,
-  InjectionKey,
-  Ref,
-  WritableComputedRef,
-} from 'vue'
+import type { ComputedRef, InjectionKey, Ref, WritableComputedRef } from 'vue'
 
 export interface TitleComponent {
   key: string
@@ -145,6 +140,7 @@ export interface CrossSeedPanelContext {
   steps: Array<{ title: string }>
   activeStep: Ref<number>
   activeTab: Ref<string>
+  maintenanceOnly: ComputedRef<boolean>
 
   // Core data
   torrentData: Ref<TorrentData>
@@ -178,6 +174,8 @@ export interface CrossSeedPanelContext {
   isRefreshingIntro: Ref<boolean>
   refreshMediainfo: () => Promise<void>
   isRefreshingMediainfo: Ref<boolean>
+  refetchFromSource: () => Promise<void>
+  isRefetchingFromSource: Ref<boolean>
   bdinfoProgress: Ref<BdinfoProgress>
   discSize: Ref<number>
   formatFileSize: (size: number) => string
@@ -222,23 +220,24 @@ export interface CrossSeedPanelContext {
 
   // Footer
   showCompleteButton: ComputedRef<boolean>
+  isCompleteButtonDisabled: ComputedRef<boolean>
   isLoading: Ref<boolean>
   isEnqueueing: Ref<boolean>
   isNextButtonDisabled: ComputedRef<boolean>
   nextButtonTooltipContent: ComputedRef<string>
+  completeButtonTooltipContent: ComputedRef<string>
   isScrolledToBottom: Ref<boolean>
   handleCancelClick: () => void
-  goToPublishPreviewStep: () => void
+  goToPublishPreviewStep: () => Promise<void>
   handlePreviousStep: () => void
-  handleCompleteClick: () => void
+  handleCompleteClick: () => Promise<void>
   handleScrollOrNextStep: () => void
   handleEnqueue: () => Promise<void>
   handlePublish: () => Promise<void>
 }
 
-export const crossSeedPanelContextKey: InjectionKey<CrossSeedPanelContext> = Symbol(
-  'crossSeedPanelContext',
-)
+export const crossSeedPanelContextKey: InjectionKey<CrossSeedPanelContext> =
+  Symbol('crossSeedPanelContext')
 
 export function useCrossSeedPanelContext(): CrossSeedPanelContext {
   const ctx = inject(crossSeedPanelContextKey)

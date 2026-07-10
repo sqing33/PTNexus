@@ -27,6 +27,11 @@ const router = createRouter({
       component: () => import('../views/CrossSeedDataView.vue'),
     },
     {
+      path: '/seed-maintenance',
+      name: 'seed-maintenance',
+      component: () => import('../views/SeedMaintenanceView.vue'),
+    },
+    {
       path: '/publish-logs',
       name: 'publish-logs',
       component: () => import('../views/PublishLogsView.vue'),
