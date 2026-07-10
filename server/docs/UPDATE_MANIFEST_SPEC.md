@@ -99,6 +99,11 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
 
 ## 5. 常用环境变量
 
+- `UPDATE_CHANNEL`：更新通道，`stable`（默认）或 `beta`。
+  - `stable`：只探测正式 Release（`/releases/latest` 与正式 version tag），**不会**读取 tag `beta`。
+  - `beta`：只读取滚动 prerelease 固定入口 `.../releases/download/beta/UPDATE_MANIFEST.json`（Gitee/GitHub），**不会**读取 `/releases/latest`。
+  - 别名：`preview` / `test` 映射为 `beta`；其它未知值回退 `stable`。
+  - 逃逸舱：`UPDATE_MANIFEST_URL` 在任一通道下仍可强制覆盖 manifest 地址。
 - `UPDATE_USE_PROXY`：是否使用系统代理访问更新源。
 - `UPDATE_SKIP_VERIFY`：是否允许跳过 SHA256 校验（默认 `false`）。
 - `UPDATE_DOWNLOAD_TIMEOUT`：下载超时，默认 `20m`。
@@ -115,3 +120,49 @@ updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变
 4. 执行 `scripts/build-update-artifacts.sh` 自动生成产物与包含完整 `history` 的 `UPDATE_MANIFEST.json`。
 5. 上传 `dist/updates/<version>/` 下产物到 Release/对象存储。
 6. 将最终 `UPDATE_MANIFEST.json` 发布到 GitHub/Gitee 对应路径。
+
+## 7. Beta 通道（与主线隔离）
+
+目标：测试人员可走完整在线更新链路，而**主线用户永远看不到 beta**。
+
+### 7.1 真相源边界
+
+| 对象 | 主线 | Beta |
+|------|------|------|
+| 仓库 `CHANGELOG.json` `history[0]` | 正式版本真相 | **只读**作 base，不因 beta 改写 |
+| 仓库根 `UPDATE_MANIFEST.json` | 占位/同步历史 | **不写回** |
+| Release 资产 `UPDATE_MANIFEST.json` | 正式 tag / `latest` | **仅**挂在固定 prerelease tag `beta` |
+| Docker 标签 | `latest` + `vX.Y.Z` | `beta` / `vX.Y.Z.<run>` / `beta-<sha>`，**禁止** `latest` |
+
+### 7.2 版本号（第 4 段）
+
+- 逻辑版本：`{CHANGELOG.history[0].version}.{github.run_number}`，例：`v4.0.2.120`。
+- 仅写入镜像内 `/app/VERSION` 与 **Release 资产** 里的 manifest `latest.version`。
+- beta→beta 比较依赖现有数字分段比较（`v4.0.2.120` < `v4.0.2.121`）。
+- **禁止**为 beta 单独抬高仓库主线 `history[0].version`。
+
+### 7.3 下载地址
+
+- Manifest 入口（beta）：  
+  `https://github.com/.../releases/download/beta/UPDATE_MANIFEST.json`  
+  （Gitee 同理）
+- Artifact URL 中的 tag 段是 **`beta`**，不是 `v4.0.2.120`：  
+  `.../releases/download/beta/ptnexus-runtime-linux-amd64.tar.gz`
+- 构建脚本支持覆盖（**不改**仓库文件）：
+  - `VERSION`：逻辑版本
+  - `RELEASE_TAG`：下载 URL 的 tag 段（beta 构建设为 `beta`）
+  - `BASE_URL`：可选完整覆盖
+
+### 7.4 标签与流程禁忌
+
+- Beta 发布 workflow：`.github/workflows/release-beta.yml`（手动/定时）。
+- 主线发布 workflow：`.github/workflows/release-manual.yml`；二者产物面不得混用。
+- Beta Release **必须** `prerelease: true` + tag `beta`（GitHub `latest` 忽略 prerelease）。
+- 不要创建正式 tag `vX.Y.Z` 作为 beta 出口。
+- 不要把 beta 产物推到 Docker `latest`。
+
+### 7.5 测试人员用法（简述）
+
+- 镜像：拉取带 `beta` / `vX.Y.Z.<n>` 标签的镜像（镜像默认 `UPDATE_CHANNEL=beta`）。
+- 已有 stable 实例切测：环境变量 `UPDATE_CHANNEL=beta` 后重启 updater（不推荐与生产数据混用）。
+- 检查更新应只命中 tag `beta` 的 manifest；若误设为 stable，即使本地版本带第 4 段，也**不会**去拉 beta 资产。

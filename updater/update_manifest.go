@@ -172,6 +172,32 @@ func getRemoteManifestResultForMode(updateMode string, versionHints ...string) (
 		return validateUpdateManifest(manifest)
 	}
 
+	// beta：只拉 tag=beta 固定入口，跳过 latest/version-hint/forward-probe（那些会落到正式 release）
+	if isBetaUpdateChannel() {
+		candidates := betaManifestCandidates()
+		result := &RemoteManifestResult{
+			Diagnostics: ManifestLookupDiagnostics{
+				Strategy:          "beta_release_tag",
+				InitialCandidates: append([]string(nil), candidates...),
+			},
+		}
+		manifest, source, initialDiag, err := fetchJSONFromCandidatesWithDiagnostics[UpdateManifest](
+			context.Background(),
+			candidates,
+			15*time.Second,
+			validator,
+		)
+		result.Diagnostics.InitialFetch = initialDiag
+		if err != nil {
+			return nil, fmt.Errorf("获取 UPDATE_MANIFEST.json 失败: %w", err)
+		}
+		result.Manifest = manifest
+		result.Source = source
+		result.Diagnostics.ManifestSource = source
+		log.Printf("获取更新清单成功，使用源: %s (mode=%s channel=beta strategy=%s)", source, strings.TrimSpace(updateMode), result.Diagnostics.Strategy)
+		return result, nil
+	}
+
 	candidates := manifestCandidates()
 	result := &RemoteManifestResult{
 		Diagnostics: ManifestLookupDiagnostics{

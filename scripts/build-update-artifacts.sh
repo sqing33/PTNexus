@@ -63,9 +63,23 @@ for item in urls:
 PY
 }
 
-VERSION="$(json_get "${REPO_ROOT}/CHANGELOG.json" | tr -d '\r\n')"
-if [ -z "$VERSION" ] || [ "$VERSION" = "unknown" ]; then
+# VERSION: 写入 manifest 的逻辑版本号（可覆盖，供 beta 使用 vX.Y.Z.<run>）
+# RELEASE_TAG: 下载 URL 中的 Release tag 段（可覆盖为 beta；默认等于 VERSION）
+CHANGELOG_VERSION="$(json_get "${REPO_ROOT}/CHANGELOG.json" | tr -d '\r\n')"
+if [ -z "$CHANGELOG_VERSION" ] || [ "$CHANGELOG_VERSION" = "unknown" ]; then
   echo "Failed to parse version from CHANGELOG.json" >&2
+  exit 1
+fi
+
+VERSION="$(printf '%s' "${VERSION:-$CHANGELOG_VERSION}" | tr -d '\r\n')"
+if [ -z "$VERSION" ]; then
+  echo "VERSION is empty" >&2
+  exit 1
+fi
+
+RELEASE_TAG="$(printf '%s' "${RELEASE_TAG:-$VERSION}" | tr -d '\r\n')"
+if [ -z "$RELEASE_TAG" ]; then
+  echo "RELEASE_TAG is empty" >&2
   exit 1
 fi
 
@@ -73,7 +87,10 @@ ARCHES="${ARCHES:-amd64 arm64}"
 OS_NAME="${OS_NAME:-linux}"
 
 OUT_DIR="${OUT_DIR:-${REPO_ROOT}/dist/updates/${VERSION}}"
-BASE_URL="${BASE_URL:-https://github.com/sqing33/PTNexus/releases/download/${VERSION}}"
+# artifact 下载路径使用 RELEASE_TAG（beta 滚动发布时 tag=beta，版本号仍是 VERSION）
+BASE_URL="${BASE_URL:-https://github.com/sqing33/PTNexus/releases/download/${RELEASE_TAG}}"
+
+echo "[update/build] version=${VERSION} release_tag=${RELEASE_TAG} changelog_base=${CHANGELOG_VERSION}"
 
 mkdir -p "$OUT_DIR"
 
@@ -185,7 +202,8 @@ for arch in $ARCHES; do
 
   sha="$(sha256_of "$bundle_path")"
   size="$(file_size "$bundle_path")"
-  mapfile -t urls < <(artifact_urls "${REPO_ROOT}/CHANGELOG.json" "${VERSION}" "${bundle_name}" "${BASE_URL}")
+  # 模板 {version} 展开为 RELEASE_TAG，使产物挂到固定 tag（如 beta）时 URL 正确
+  mapfile -t urls < <(artifact_urls "${REPO_ROOT}/CHANGELOG.json" "${RELEASE_TAG}" "${bundle_name}" "${BASE_URL}")
   if [ ${#urls[@]} -eq 0 ]; then
     echo "[update/build] No artifact source available for ${bundle_name}" >&2
     exit 1
@@ -229,15 +247,16 @@ fi
 # Generate UPDATE_MANIFEST.json (for publishing).
 manifest_path="${OUT_DIR}/UPDATE_MANIFEST.json"
 
-python3 - "${REPO_ROOT}/CHANGELOG.json" "${VERSION}" "$ARTIFACTS_JSONL" "$manifest_path" <<'PY'
+python3 - "${REPO_ROOT}/CHANGELOG.json" "${VERSION}" "${CHANGELOG_VERSION}" "$ARTIFACTS_JSONL" "$manifest_path" <<'PY'
 import json
 import sys
+from datetime import datetime, timezone
 
-changelog_path, version, artifacts_jsonl, manifest_path = sys.argv[1:]
+changelog_path, version, changelog_version, artifacts_jsonl, manifest_path = sys.argv[1:]
 with open(changelog_path, "r", encoding="utf-8") as f:
     changelog = json.load(f)
 
-history = changelog.get("history") or []
+history = list(changelog.get("history") or [])
 latest_log = history[0] if history else {}
 
 artifacts = []
@@ -259,6 +278,28 @@ if "disable_update" in latest_log:
     latest["disable_update"] = bool(latest_log.get("disable_update"))
 if latest_log.get("note"):
     latest["note"] = latest_log["note"]
+
+# 覆盖 VERSION 时保证 history[0].version 与 latest.version 一致（beta 不改仓库 CHANGELOG）
+if version != changelog_version:
+    today = datetime.now(timezone.utc).strftime("%Y.%m.%d")
+    beta_entry = {
+        "version": version,
+        "date": latest.get("date") or today,
+        "changes": [
+            f"Beta build based on {changelog_version}",
+        ],
+    }
+    if "force_update" in latest:
+        beta_entry["force_update"] = latest["force_update"]
+    if "disable_update" in latest:
+        beta_entry["disable_update"] = latest["disable_update"]
+    if latest.get("note"):
+        beta_entry["note"] = latest["note"]
+    history = [beta_entry] + history
+elif history:
+    history = list(history)
+    history[0] = dict(history[0])
+    history[0]["version"] = version
 
 manifest = {
     "schema": 2,

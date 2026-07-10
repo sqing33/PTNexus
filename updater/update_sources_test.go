@@ -17,6 +17,7 @@ import (
 func TestManifestCandidatesIncludeGitee(t *testing.T) {
 	t.Setenv("UPDATE_MANIFEST_URL", "")
 	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv(updateChannelEnv, updateChannelStable)
 
 	version := "v4.0.2"
 	candidates := manifestCandidates(version)
@@ -48,6 +49,7 @@ func TestManifestCandidatesIncludeGitee(t *testing.T) {
 func TestManifestCandidatesWithoutHintsUseLatestOnly(t *testing.T) {
 	t.Setenv("UPDATE_MANIFEST_URL", "")
 	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv(updateChannelEnv, updateChannelStable)
 
 	candidates := manifestCandidates()
 	if len(candidates) != 2 {
@@ -78,6 +80,7 @@ func TestManifestVersionHintCandidatesExcludeLatestFallback(t *testing.T) {
 func TestManifestCandidatesDefaultToReleaseAssetsOnly(t *testing.T) {
 	t.Setenv("UPDATE_MANIFEST_URL", "")
 	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv(updateChannelEnv, updateChannelStable)
 
 	candidates := manifestCandidates("v4.0.16")
 	for _, candidate := range candidates {
@@ -87,9 +90,108 @@ func TestManifestCandidatesDefaultToReleaseAssetsOnly(t *testing.T) {
 	}
 }
 
+func TestManifestCandidatesBetaChannelOnlyUsesBetaTag(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv(updateChannelEnv, updateChannelBeta)
+
+	candidates := manifestCandidates("v4.0.2.120")
+	if len(candidates) != 2 {
+		t.Fatalf("expected exactly 2 beta candidates, got %d: %#v", len(candidates), candidates)
+	}
+	if candidates[0] != giteeManifestBetaReleaseURL {
+		t.Fatalf("expected first candidate %q, got %q", giteeManifestBetaReleaseURL, candidates[0])
+	}
+	if candidates[1] != githubManifestBetaReleaseURL {
+		t.Fatalf("expected second candidate %q, got %q", githubManifestBetaReleaseURL, candidates[1])
+	}
+	for _, candidate := range candidates {
+		if strings.Contains(candidate, "/releases/latest") {
+			t.Fatalf("beta channel must not include stable latest, got %q", candidate)
+		}
+		if strings.Contains(candidate, "v4.0.2.120") {
+			t.Fatalf("beta channel must not use version as release tag, got %q", candidate)
+		}
+		if !strings.Contains(candidate, "/download/beta/") {
+			t.Fatalf("beta candidate must use tag beta, got %q", candidate)
+		}
+	}
+}
+
+func TestManifestCandidatesStableChannelExcludesBetaTagURL(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv(updateChannelEnv, updateChannelStable)
+
+	candidates := manifestCandidates("v4.0.2", "beta")
+	for _, candidate := range candidates {
+		if strings.Contains(candidate, "/download/beta/") {
+			t.Fatalf("stable channel must not include beta release URL, got %q", candidate)
+		}
+	}
+}
+
+func TestUpdateChannelNormalizesAliases(t *testing.T) {
+	t.Setenv(updateChannelEnv, "preview")
+	if updateChannel() != updateChannelBeta {
+		t.Fatalf("expected preview alias to map to beta, got %q", updateChannel())
+	}
+	t.Setenv(updateChannelEnv, "whatever")
+	if updateChannel() != updateChannelStable {
+		t.Fatalf("expected unknown channel to fall back to stable, got %q", updateChannel())
+	}
+}
+
+func TestGetRemoteManifestForModeBetaChannelUsesBetaTagStrategy(t *testing.T) {
+	t.Setenv("UPDATE_MANIFEST_URL", "")
+	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv(updateChannelEnv, updateChannelBeta)
+	t.Setenv("UPDATE_OS", "linux")
+	t.Setenv("UPDATE_ARCH", "amd64")
+
+	oldGiteeBeta := giteeManifestBetaReleaseURL
+	oldGithubBeta := githubManifestBetaReleaseURL
+	oldGiteeLatest := giteeManifestReleaseLatestURL
+	oldGithubLatest := githubManifestReleaseLatestURL
+	t.Cleanup(func() {
+		giteeManifestBetaReleaseURL = oldGiteeBeta
+		githubManifestBetaReleaseURL = oldGithubBeta
+		giteeManifestReleaseLatestURL = oldGiteeLatest
+		githubManifestReleaseLatestURL = oldGithubLatest
+	})
+
+	betaBody := `{"schema":2,"latest":{"version":"v4.0.2.120","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"betasha"}]},"history":[{"version":"v4.0.2.120","changes":["beta"]}]}`
+	stableLatest := `{"schema":2,"latest":{"version":"v4.0.2","artifacts":[{"os":"linux","arch":"amd64","url":"https://example.com/runtime.tar.gz","sha256":"stablesha"}]},"history":[{"version":"v4.0.2","changes":["stable"]}]}`
+
+	server := newManifestTestServer(t, map[string]manifestTestResponse{
+		"/beta.json":   {body: betaBody},
+		"/latest.json": {body: stableLatest},
+	})
+
+	giteeManifestBetaReleaseURL = server.URL + "/beta.json"
+	githubManifestBetaReleaseURL = server.URL + "/beta.json"
+	giteeManifestReleaseLatestURL = server.URL + "/latest.json"
+	githubManifestReleaseLatestURL = server.URL + "/latest.json"
+
+	result, err := getRemoteManifestResultForMode(updateModeRuntimeInstall, "v4.0.2.119")
+	if err != nil {
+		t.Fatalf("expected beta manifest fetch success, got error: %v", err)
+	}
+	if result == nil || result.Manifest == nil || result.Manifest.Latest.Version != "v4.0.2.120" {
+		t.Fatalf("expected beta version v4.0.2.120, got %#v", result)
+	}
+	if result.Diagnostics.Strategy != "beta_release_tag" {
+		t.Fatalf("expected beta_release_tag strategy, got %#v", result.Diagnostics)
+	}
+	if result.Source != server.URL+"/beta.json" {
+		t.Fatalf("expected beta source, got %#v", result)
+	}
+}
+
 func TestManifestCandidatesCanOptIntoRawFallback(t *testing.T) {
 	t.Setenv("UPDATE_MANIFEST_URL", "")
 	t.Setenv(updateManifestRawFallbackEnv, "true")
+	t.Setenv(updateChannelEnv, updateChannelStable)
 
 	candidates := manifestCandidates("v4.0.16")
 	joined := strings.Join(candidates, "\n")
@@ -136,8 +238,23 @@ func TestManifestCandidatesKeepsOverrideFirst(t *testing.T) {
 	override := "https://override.example.com/manifest.json"
 	t.Setenv("UPDATE_MANIFEST_URL", override)
 	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv(updateChannelEnv, updateChannelStable)
 
 	candidates := manifestCandidates("v4.0.16")
+	if len(candidates) == 0 {
+		t.Fatal("expected non-empty candidates")
+	}
+	if candidates[0] != override {
+		t.Fatalf("expected override candidate first, got %q", candidates[0])
+	}
+}
+
+func TestManifestCandidatesBetaKeepsOverrideFirst(t *testing.T) {
+	override := "https://override.example.com/beta-manifest.json"
+	t.Setenv("UPDATE_MANIFEST_URL", override)
+	t.Setenv(updateChannelEnv, updateChannelBeta)
+
+	candidates := manifestCandidates("v4.0.2.1")
 	if len(candidates) == 0 {
 		t.Fatal("expected non-empty candidates")
 	}
@@ -149,6 +266,7 @@ func TestManifestCandidatesKeepsOverrideFirst(t *testing.T) {
 func TestGetRemoteManifestForModePrefersLatestBeforeVersionHints(t *testing.T) {
 	t.Setenv("UPDATE_MANIFEST_URL", "")
 	t.Setenv(updateManifestRawFallbackEnv, "false")
+	t.Setenv(updateChannelEnv, updateChannelStable)
 	t.Setenv("UPDATE_OS", "linux")
 	t.Setenv("UPDATE_ARCH", "amd64")
 

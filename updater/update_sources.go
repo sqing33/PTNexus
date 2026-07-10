@@ -19,13 +19,47 @@ var (
 	giteeManifestReleaseLatestURL   = "https://gitee.com/sqing33/PTNexus/releases/latest/download/UPDATE_MANIFEST.json"
 	giteeManifestRawGoURL           = "https://gitee.com/sqing33/PTNexus/raw/go/UPDATE_MANIFEST.json"
 	giteeManifestRawMainURL         = "https://gitee.com/sqing33/PTNexus/raw/main/UPDATE_MANIFEST.json"
+
+	// 滚动 prerelease tag=beta 下的固定 manifest 入口（与正式 latest 隔离）
+	githubManifestBetaReleaseURL = "https://github.com/sqing33/PTNexus/releases/download/beta/UPDATE_MANIFEST.json"
+	giteeManifestBetaReleaseURL  = "https://gitee.com/sqing33/PTNexus/releases/download/beta/UPDATE_MANIFEST.json"
 )
 
 const (
 	// Manifest is expected to be published as a Release asset.
 	// Runtime metadata is served only from Release assets.
 	updateManifestRawFallbackEnv = "UPDATE_MANIFEST_RAW_FALLBACK"
+	updateChannelEnv             = "UPDATE_CHANNEL"
+
+	updateChannelStable = "stable"
+	updateChannelBeta   = "beta"
+	betaReleaseTag      = "beta"
 )
+
+// updateChannel 返回 stable|beta；未知值回退 stable，避免误入测试通道。
+func updateChannel() string {
+	raw := strings.ToLower(strings.TrimSpace(getEnv(updateChannelEnv, updateChannelStable)))
+	switch raw {
+	case updateChannelBeta, "preview", "test":
+		return updateChannelBeta
+	default:
+		return updateChannelStable
+	}
+}
+
+func isBetaUpdateChannel() bool {
+	return updateChannel() == updateChannelBeta
+}
+
+// betaManifestCandidates 仅指向 tag=beta 的固定入口，不含 /releases/latest。
+func betaManifestCandidates() []string {
+	override := strings.TrimSpace(getEnv("UPDATE_MANIFEST_URL", ""))
+	return normalizeURLCandidates(
+		override,
+		giteeManifestBetaReleaseURL,
+		githubManifestBetaReleaseURL,
+	)
+}
 
 func normalizeURLCandidates(urls ...string) []string {
 	seen := make(map[string]struct{}, len(urls))
@@ -122,11 +156,20 @@ func manifestForwardProbeCandidates(versionHints ...string) ([]string, []string)
 }
 
 func manifestCandidates(versionHints ...string) []string {
+	if isBetaUpdateChannel() {
+		// beta 通道：只读滚动 prerelease tag=beta，绝不拼正式 latest / 正式 version tag
+		return betaManifestCandidates()
+	}
+
 	// Allow explicit override for deployments that publish manifest in another location.
 	override := strings.TrimSpace(getEnv("UPDATE_MANIFEST_URL", ""))
 	candidates := make([]string, 0, 1+len(versionHints)*2+2)
 	candidates = append(candidates, override)
 	for _, hint := range versionHints {
+		// 稳定通道不把 beta 版本号当作 release tag 去探测
+		if strings.EqualFold(strings.TrimSpace(hint), betaReleaseTag) {
+			continue
+		}
 		candidates = append(candidates, manifestReleaseCandidatesForVersion(hint)...)
 	}
 	candidates = append(candidates,

@@ -2,7 +2,7 @@
   "schema": 2,
   "note": "repo-root metadata only; production updater must use release UPDATE_MANIFEST.json",
   "latest": {
-    "version": "v4.1.0",
+    "version": "v4.0.2",
     "artifacts": [
       {
         "os": "linux",

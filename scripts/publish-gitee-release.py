@@ -114,6 +114,8 @@ def create_release(
     name: str,
     body: str,
     token: str,
+    *,
+    prerelease: bool = False,
 ) -> dict[str, Any]:
     url = f"{API_BASE}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/releases"
     payload = {
@@ -121,7 +123,7 @@ def create_release(
         "target_commitish": target_commitish,
         "name": name,
         "body": body,
-        "prerelease": False,
+        "prerelease": prerelease,
     }
     result = api_request("POST", url, token, payload=payload, form_encoded=True)
     if not isinstance(result, dict) or not result.get("id"):
@@ -138,6 +140,8 @@ def update_release(
     name: str,
     body: str,
     token: str,
+    *,
+    prerelease: bool = False,
 ) -> dict[str, Any]:
     url = f"{API_BASE}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/releases/{release_id}"
     payload = {
@@ -145,7 +149,7 @@ def update_release(
         "target_commitish": target_commitish,
         "name": name,
         "body": body,
-        "prerelease": False,
+        "prerelease": prerelease,
     }
     result = api_request("PATCH", url, token, payload=payload, form_encoded=True)
     if not isinstance(result, dict):
@@ -243,6 +247,11 @@ def main() -> int:
     parser.add_argument("--assets-dir", required=True, help="Directory containing release assets")
     parser.add_argument("--token", required=True, help="Gitee access token")
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES, help="Max upload size per asset")
+    parser.add_argument(
+        "--prerelease",
+        action="store_true",
+        help="Mark the Gitee release as prerelease (for beta rolling tag)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print selected files without calling Gitee API")
     args = parser.parse_args()
 
@@ -256,7 +265,8 @@ def main() -> int:
         raise RuntimeError(f"no assets selected from {assets_dir}")
 
     print(
-        f"[gitee-release] repo={args.owner}/{args.repo} tag={args.tag} target_commitish={args.target_commitish}"
+        f"[gitee-release] repo={args.owner}/{args.repo} tag={args.tag} "
+        f"target_commitish={args.target_commitish} prerelease={args.prerelease}"
     )
     for message in skipped:
         print(f"[gitee-release] {message}")
@@ -278,6 +288,7 @@ def main() -> int:
             args.name,
             body,
             args.token,
+            prerelease=args.prerelease,
         )
     else:
         print(f"[gitee-release] updating release {args.tag} (id={release.get('id')})")
@@ -290,6 +301,7 @@ def main() -> int:
             args.name,
             body,
             args.token,
+            prerelease=args.prerelease,
         )
 
     release_id = int(release["id"])

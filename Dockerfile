@@ -49,6 +49,8 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 ARG PTNEXUS_VERSION=""
+# stable|beta；镜像构建时可注入，运行时仍可被 compose 环境变量覆盖
+ARG UPDATE_CHANNEL="stable"
 
 # 确保容器内对 localhost 和 127.0.0.1 的请求直接连接，不通过代理
 ENV no_proxy="localhost,127.0.0.1,::1"
@@ -56,6 +58,9 @@ ENV NO_PROXY="localhost,127.0.0.1,::1"
 
 # 禁用 updater 的定时自动更新
 ENV SCHEDULE_ENABLED="false"
+
+# 在线更新通道：stable 读正式 latest；beta 读 Release tag=beta
+ENV UPDATE_CHANNEL="${UPDATE_CHANNEL}"
 
 # server 运行目录与数据目录（对齐 updater/batch 使用的 /app/data）
 ENV PTNEXUS_BASE_DIR="/app/server"

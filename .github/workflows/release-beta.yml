@@ -1,0 +1,403 @@
+name: Beta 构建（runtime / Docker / 滚动 prerelease）
+
+# 与 release-manual（主线）隔离：
+# - 不推 Docker :latest
+# - 不发正式 tag vX.Y.Z
+# - 产物挂到固定 prerelease tag=beta
+# - 不改仓库 CHANGELOG.json / 根 UPDATE_MANIFEST.json
+on:
+  workflow_dispatch:
+    inputs:
+      build_runtime:
+        description: 是否构建在线更新 runtime 产物
+        required: false
+        default: true
+        type: boolean
+      build_docker_image:
+        description: 是否构建 Docker beta 镜像
+        required: false
+        default: true
+        type: boolean
+      sync_to_gitee:
+        description: 是否同步 Release 到 Gitee（tag=beta prerelease）
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    # Asia/Shanghai 每天 12:00；可按需改
+    - cron: "0 4 * * *"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE_NAME: pt-nexus
+  BETA_RELEASE_TAG: beta
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      base_version: ${{ steps.meta.outputs.base_version }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      body: ${{ steps.meta.outputs.body }}
+      run_runtime: ${{ steps.meta.outputs.run_runtime }}
+      run_docker_image: ${{ steps.meta.outputs.run_docker_image }}
+      run_release_assets: ${{ steps.meta.outputs.run_release_assets }}
+      sync_to_gitee: ${{ steps.meta.outputs.sync_to_gitee }}
+      should_run: ${{ steps.meta.outputs.should_run }}
+
+    steps:
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 2. 解析 beta 版本与执行计划
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+          BETA_RELEASE_TAG: ${{ env.BETA_RELEASE_TAG }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+
+
+          def write_output(name: str, value: str) -> None:
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                  fh.write(f"{name}={value}\n")
+
+
+          def write_multiline_output(name: str, value: str) -> None:
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                  fh.write(f"{name}<<EOF\n{value}\nEOF\n")
+
+
+          def to_bool(value, default: bool) -> bool:
+              if value is None:
+                  return default
+              if isinstance(value, bool):
+                  return value
+              return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+          with open("CHANGELOG.json", "r", encoding="utf-8") as fh:
+              data = json.load(fh)
+
+          history = data.get("history") or []
+          if not history:
+              raise SystemExit("CHANGELOG.json 缺少 history 数据")
+
+          latest = history[0]
+          base_version = str(latest.get("version", "")).strip()
+          if not base_version:
+              raise SystemExit("CHANGELOG.json 缺少 history[0].version")
+
+          # 逻辑版本：base + "." + run_number（不写回仓库）
+          # 例 v4.0.2 + run 120 -> v4.0.2.120
+          run_number = str(os.environ.get("RUN_NUMBER", "")).strip() or "0"
+          version = f"{base_version}.{run_number}"
+          release_tag = str(os.environ.get("BETA_RELEASE_TAG", "beta")).strip() or "beta"
+
+          date = str(latest.get("date", "")).strip()
+          note = str(latest.get("note", "")).strip()
+          changes = latest.get("changes") or []
+          utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+          lines = [
+              f"## Beta build {version}",
+              "",
+              f"- base: `{base_version}`（来自仓库 CHANGELOG，未修改）",
+              f"- release tag: `{release_tag}`（prerelease，滚动覆盖）",
+              f"- built at: {utc_now}",
+              f"- commit: `{os.environ.get('GITHUB_SHA', '')[:12]}`",
+          ]
+          if date:
+              lines.extend(["", f"主线 changelog 日期：{date}"])
+          if note:
+              normalized_note = note if note.startswith("注：") else f"注：{note}"
+              lines.extend(["", normalized_note])
+          if changes:
+              lines.append("")
+              lines.append("### 主线变更摘录")
+              for item in changes[:12]:
+                  lines.append(f"- {item}")
+
+          body = "\n".join(lines).strip()
+
+          event_name = os.environ["EVENT_NAME"]
+          if event_name == "schedule":
+              run_runtime = True
+              run_docker_image = True
+              sync_to_gitee = True
+          else:
+              with open(os.environ["GITHUB_EVENT_PATH"], "r", encoding="utf-8") as fh:
+                  event_payload = json.load(fh)
+              inputs = event_payload.get("inputs") or {}
+              run_runtime = to_bool(inputs.get("build_runtime"), True)
+              run_docker_image = to_bool(inputs.get("build_docker_image"), True)
+              sync_to_gitee = to_bool(inputs.get("sync_to_gitee"), True)
+
+          should_run = any((run_runtime, run_docker_image))
+          run_release_assets = run_runtime
+
+          write_output("version", version)
+          write_output("base_version", base_version)
+          write_output("release_tag", release_tag)
+          write_multiline_output("body", body)
+          write_output("run_runtime", str(run_runtime).lower())
+          write_output("run_docker_image", str(run_docker_image).lower())
+          write_output("run_release_assets", str(run_release_assets).lower())
+          write_output("sync_to_gitee", str(sync_to_gitee).lower())
+          write_output("should_run", str(should_run).lower())
+          PY
+
+      - name: 3. 输出执行计划
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          BASE_VERSION: ${{ steps.meta.outputs.base_version }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+          RUN_RUNTIME: ${{ steps.meta.outputs.run_runtime }}
+          RUN_DOCKER_IMAGE: ${{ steps.meta.outputs.run_docker_image }}
+          SYNC_TO_GITEE: ${{ steps.meta.outputs.sync_to_gitee }}
+          SHOULD_RUN: ${{ steps.meta.outputs.should_run }}
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "base_version=${BASE_VERSION}"
+          echo "version=${VERSION}"
+          echo "release_tag=${RELEASE_TAG}"
+          echo "run_runtime=${RUN_RUNTIME}"
+          echo "run_docker_image=${RUN_DOCKER_IMAGE}"
+          echo "sync_to_gitee=${SYNC_TO_GITEE}"
+          echo "should_run=${SHOULD_RUN}"
+          if [[ "${SHOULD_RUN}" != "true" ]]; then
+            echo "未选择任何构建项，后续 job 将跳过。"
+          fi
+
+  runtime:
+    needs: meta
+    if: ${{ needs.meta.outputs.run_runtime == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 2. 设置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: server/go.sum
+
+      - name: 3. 设置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 4. 设置 Node（启用 pnpm 缓存）
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: 5. 安装交叉编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - name: 6. 构建 Runtime 产物与 beta UPDATE_MANIFEST.json
+        env:
+          ARCHES: "amd64 arm64"
+          VERSION: ${{ needs.meta.outputs.version }}
+          RELEASE_TAG: ${{ needs.meta.outputs.release_tag }}
+        run: |
+          bash scripts/build-update-artifacts.sh
+          test -f "dist/updates/${VERSION}/UPDATE_MANIFEST.json"
+          # 确认产物 URL 落在 tag=beta，而非 vX.Y.Z.<run>
+          python3 - <<'PY'
+          import json, os, sys
+          version = os.environ["VERSION"]
+          release_tag = os.environ["RELEASE_TAG"]
+          path = f"dist/updates/{version}/UPDATE_MANIFEST.json"
+          with open(path, encoding="utf-8") as fh:
+              manifest = json.load(fh)
+          if manifest.get("latest", {}).get("version") != version:
+              raise SystemExit(f"manifest latest.version mismatch: {manifest.get('latest')}")
+          for art in manifest.get("latest", {}).get("artifacts") or []:
+              url = str(art.get("url") or "")
+              if f"/download/{release_tag}/" not in url:
+                  raise SystemExit(f"artifact url must use release tag {release_tag}: {url}")
+              if f"/download/{version}/" in url:
+                  raise SystemExit(f"artifact url must not use version as tag: {url}")
+          print("beta manifest OK:", path)
+          PY
+          ls -lh "dist/updates/${VERSION}"
+
+      - name: 7. 上传 Runtime 发布产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-beta-${{ needs.meta.outputs.version }}
+          path: |
+            dist/updates/${{ needs.meta.outputs.version }}/ptnexus-runtime-*.tar.gz
+            dist/updates/${{ needs.meta.outputs.version }}/UPDATE_MANIFEST.json
+          if-no-files-found: error
+
+  docker_image:
+    needs: meta
+    if: ${{ needs.meta.outputs.run_docker_image == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    steps:
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
+
+      - name: 2. 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 3. 登录到 GitHub Container Registry (ghcr.io)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 4. 登录到 Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 5. 准备 Docker 标签（禁止 latest）
+        id: prepare-tags
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          RELEASE_TAG: ${{ needs.meta.outputs.release_tag }}
+        run: |
+          GHCR_REPO="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+          TAGS=()
+
+          add_tag() {
+            local image_repo="$1"
+            local image_tag="$2"
+            if [[ -n "$image_repo" && -n "$image_tag" ]]; then
+              TAGS+=("${image_repo}:${image_tag}")
+            fi
+          }
+
+          # 滚动 beta + 精确版本 + short sha，绝不打 latest
+          add_tag "$GHCR_REPO" "${RELEASE_TAG}"
+          add_tag "$GHCR_REPO" "${VERSION}"
+          add_tag "$GHCR_REPO" "beta-${GITHUB_SHA::12}"
+
+          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
+            DOCKERHUB_REPO="${DOCKERHUB_USERNAME}/${{ env.IMAGE_NAME }}"
+            add_tag "$DOCKERHUB_REPO" "${RELEASE_TAG}"
+            add_tag "$DOCKERHUB_REPO" "${VERSION}"
+            add_tag "$DOCKERHUB_REPO" "beta-${GITHUB_SHA::12}"
+          else
+            echo "::warning::DOCKERHUB_USERNAME 或 DOCKERHUB_TOKEN 未配置，本次只推送 GHCR。"
+          fi
+
+          UNIQUE_TAGS="$(printf '%s\n' "${TAGS[@]}" | awk 'NF && !seen[$0]++' | paste -sd, -)"
+          echo "tags=$UNIQUE_TAGS" >> "$GITHUB_OUTPUT"
+          echo "tags=$UNIQUE_TAGS"
+
+      # beta 镜像仅 amd64，加快测试发布；主线 release-manual 仍为 multi-arch
+      - name: 6. 构建并推送 AMD64 Docker 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.prepare-tags.outputs.tags }}
+          build-args: |
+            PTNEXUS_VERSION=${{ needs.meta.outputs.version }}
+            UPDATE_CHANNEL=beta
+          cache-from: type=gha,scope=go-beta-amd64
+          cache-to: type=gha,mode=max,scope=go-beta-amd64
+
+  release_assets:
+    needs:
+      - meta
+      - runtime
+    if: >-
+      ${{
+        always() &&
+        needs.meta.outputs.run_release_assets == 'true' &&
+        needs.meta.result == 'success' &&
+        needs.runtime.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
+
+      - name: 2. 创建 Release 产物目录
+        run: |
+          mkdir -p "dist/release-assets/${{ needs.meta.outputs.version }}"
+
+      - name: 3. 下载 Runtime 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-beta-${{ needs.meta.outputs.version }}
+          path: dist/release-assets/${{ needs.meta.outputs.version }}
+
+      - name: 4. 校验待发布文件
+        run: |
+          find "dist/release-assets/${{ needs.meta.outputs.version }}" -maxdepth 1 -type f -printf '%f\n' | sort
+          test -f "dist/release-assets/${{ needs.meta.outputs.version }}/UPDATE_MANIFEST.json"
+          test -n "$(find "dist/release-assets/${{ needs.meta.outputs.version }}" -maxdepth 1 -type f -name 'ptnexus-runtime-*.tar.gz' | head -n 1)"
+
+      - name: 5. 发布/更新 GitHub prerelease（tag=beta）
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.release_tag }}
+          name: Beta ${{ needs.meta.outputs.version }}
+          body: ${{ needs.meta.outputs.body }}
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: dist/release-assets/${{ needs.meta.outputs.version }}/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 6. 同步 Gitee prerelease（tag=beta）
+        if: ${{ needs.meta.outputs.sync_to_gitee == 'true' }}
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          RELEASE_TAG: ${{ needs.meta.outputs.release_tag }}
+          BODY: ${{ needs.meta.outputs.body }}
+        run: |
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "GITEE_TOKEN 未配置，跳过 Gitee beta Release"
+            exit 0
+          fi
+
+          body_file="$(mktemp)"
+          trap 'rm -f "$body_file"' EXIT
+          printf '%s\n' "$BODY" > "$body_file"
+
+          python3 scripts/publish-gitee-release.py \
+            --owner sqing33 \
+            --repo PTNexus \
+            --tag "$RELEASE_TAG" \
+            --target-commitish go \
+            --name "Beta $VERSION" \
+            --body-file "$body_file" \
+            --assets-dir "dist/release-assets/$VERSION" \
+            --token "$GITEE_TOKEN" \
+            --prerelease
