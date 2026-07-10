@@ -153,6 +153,24 @@ func (s *BDInfoState) ApplyCallbackCompletion(taskID string, success bool, media
 	return task.SeedID, true
 }
 
+// CleanupByTaskID 清理仍在处理中的指定任务。
+func (s *BDInfoState) CleanupByTaskID(taskID string, now time.Time, reason string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	task := s.tasks[taskID]
+	if task == nil || task.Status != "processing_bdinfo" {
+		return false
+	}
+	task.Status = "failed"
+	task.Error = reason
+	task.UpdatedAt = now
+	task.CompletedAt = &now
+	return true
+}
+
 // CleanupBySeedID 清理仍在处理中的任务。
 func (s *BDInfoState) CleanupBySeedID(seedID string, now time.Time) bool {
 	if s == nil {
