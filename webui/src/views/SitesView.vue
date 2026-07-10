@@ -230,6 +230,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 import axios from 'axios'
+import { useContentFiltersStore } from '@/stores/contentFilters'
 import { ElMessage } from '@/utils/uiNotify'
 
 interface SiteStat {
@@ -296,6 +297,7 @@ interface ScanResult {
 const emits = defineEmits<{
   ready: [refreshFn: () => Promise<void>]
 }>()
+const contentFiltersStore = useContentFiltersStore()
 
 const siteStatsLoading = ref(true)
 const groupStatsLoading = ref(true)
@@ -403,7 +405,12 @@ const handleSiteChange = () => {
 // 获取下载器路径列表
 const fetchDownloadersWithPaths = async () => {
   try {
-    const res = await axios.get<{ downloaders: Downloader[] }>('/api/local_query/downloaders_with_paths')
+    await contentFiltersStore.load()
+    const params = new URLSearchParams()
+    contentFiltersStore.appendQuery(params)
+    const res = await axios.get<{ downloaders: Downloader[] }>(
+      `/api/local_query/downloaders_with_paths?${params.toString()}`,
+    )
     downloadersWithPaths.value = res.data.downloaders || []
   } catch (error) {
     console.error('获取路径列表失败:', error)
@@ -429,9 +436,11 @@ const startScan = async () => {
   scanning.value = true
   scanResult.value = null
   try {
-    const url = selectedPath.value
-      ? `/api/local_query/scan?path=${encodeURIComponent(selectedPath.value)}`
-      : '/api/local_query/scan'
+    await contentFiltersStore.load()
+    const params = new URLSearchParams()
+    if (selectedPath.value) params.set('path', selectedPath.value)
+    contentFiltersStore.appendQuery(params)
+    const url = `/api/local_query/scan?${params.toString()}`
     const res = await axios.post<ScanResult>(url)
     scanResult.value = res.data
     ElMessage.success('扫描完成！')

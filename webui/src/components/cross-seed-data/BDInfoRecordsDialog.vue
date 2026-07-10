@@ -272,9 +272,11 @@
 import { onUnmounted, ref, watch } from 'vue'
 import { CopyDocument } from '@element-plus/icons-vue'
 import axios from 'axios'
+import { useContentFiltersStore } from '@/stores/contentFilters'
 import { ElMessage } from '@/utils/uiNotify'
 
 const visible = defineModel<boolean>({ default: false })
+const contentFiltersStore = useContentFiltersStore()
 const emit = defineEmits<{
   (e: 'closed'): void
 }>()
@@ -336,9 +338,11 @@ const handleBDInfoStatusChange = async (value: string) => {
 const refreshBDInfoRecords = async () => {
   bdinfoRecordsLoading.value = true
   try {
+    await contentFiltersStore.load()
     const params = new URLSearchParams({
       status_filter: bdinfoStatusFilter.value,
     })
+    contentFiltersStore.appendQuery(params)
 
     const existingProgressInfo = new Map<string, NonNullable<BDInfoRecord['progress_info']>>()
     for (const record of bdinfoRecords.value) {

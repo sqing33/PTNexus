@@ -13,12 +13,21 @@ func NewTorrentRepository(store *Store) *TorrentRepository {
 	return &TorrentRepository{store: store}
 }
 
-func (r *TorrentRepository) DistinctPaths() ([]string, error) {
+func (r *TorrentRepository) DistinctPaths(videoOnly bool) ([]string, error) {
 	sqlDB, err := r.store.DB.DB()
 	if err != nil {
 		return nil, err
 	}
-	rows, err := sqlDB.Query("SELECT DISTINCT save_path FROM torrents WHERE save_path IS NOT NULL AND save_path != '' AND (is_hidden = 0 OR is_hidden IS NULL) ORDER BY save_path")
+	query := `
+		SELECT DISTINCT t.save_path
+		FROM torrents t
+		WHERE t.save_path IS NOT NULL AND t.save_path != '' AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
+	`
+	if videoOnly {
+		query += " AND " + videoTorrentExistsCondition("t")
+	}
+	query += " ORDER BY t.save_path"
+	rows, err := sqlDB.Query(query)
 	if err != nil {
 		return nil, err
 	}

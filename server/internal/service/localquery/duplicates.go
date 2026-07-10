@@ -1,7 +1,7 @@
 package localquery
 
-func (s *Service) AnalyzeDuplicates() (map[string]any, error) {
-	names, err := s.repo.ListDuplicateNames()
+func (s *Service) AnalyzeDuplicates(videoOnly bool) (map[string]any, error) {
+	names, err := s.repo.ListDuplicateNames(videoOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -10,7 +10,7 @@ func (s *Service) AnalyzeDuplicates() (map[string]any, error) {
 	totalWasted := int64(0)
 
 	for _, row := range names {
-		instances, err := s.repo.ListTorrentsByName(row.Name)
+		instances, err := s.repo.ListTorrentsByName(row.Name, videoOnly)
 		if err != nil {
 			continue
 		}

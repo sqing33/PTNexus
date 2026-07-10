@@ -16,7 +16,7 @@ func NewTorrentsHandler(repo *repository.TorrentRepository) *TorrentsHandler {
 }
 
 func (h *TorrentsHandler) Paths(c *gin.Context) {
-	paths, err := h.repo.DistinctPaths()
+	paths, err := h.repo.DistinctPaths(boolQuery(c, "video_only"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取路径列表失败", "success": false})
 		return

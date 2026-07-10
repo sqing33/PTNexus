@@ -173,6 +173,9 @@ func defaultConfig() map[string]any {
 			"ratio_limiter_interval_seconds": 1800,
 		},
 		"ui_settings": map[string]any{
+			"content_filters": map[string]any{
+				"video_only": false,
+			},
 			"torrents_view": map[string]any{
 				"page_size":   50,
 				"sort_prop":   "name",
