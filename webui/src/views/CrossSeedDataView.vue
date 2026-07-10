@@ -372,6 +372,62 @@
 
     <BDInfoRecordsDialog v-if="isMaintenanceMode" v-model="recordDialogVisible" @closed="fetchData" />
 
+    <!-- 维护：列表内弹窗编辑（非全页切换） -->
+    <div v-if="isMaintenanceMode && maintenanceDialogVisible" class="modal-overlay">
+      <el-card class="cross-seed-card" shadow="always" v-loading="maintenanceLoading">
+        <template #header>
+          <div class="modal-header maintenance-modal-header">
+            <div class="maintenance-modal-title">
+              <span class="maintenance-modal-title-text">维护 - {{ selectedTorrentName || '加载中…' }}</span>
+            </div>
+            <div class="maintenance-modal-actions">
+              <el-select
+                v-model="selectedSourceSite"
+                class="maintenance-source-select"
+                placeholder="选择源站"
+                filterable
+                :disabled="maintenanceLoading || refetching"
+              >
+                <el-option
+                  v-for="site in sourceSiteOptions"
+                  :key="site.site"
+                  :label="site.name"
+                  :value="site.name"
+                />
+              </el-select>
+              <el-input
+                v-model="sourceTorrentId"
+                class="maintenance-source-id"
+                placeholder="源站种子 ID"
+                clearable
+                :disabled="maintenanceLoading || refetching"
+              />
+              <el-button
+                type="warning"
+                plain
+                :loading="refetching"
+                :disabled="maintenanceLoading || !canRefetch"
+                @click="refetchSeedInfo"
+              >
+                重新拉取数据
+              </el-button>
+              <el-button type="danger" circle plain @click="closeMaintenanceDialog">X</el-button>
+            </div>
+          </div>
+        </template>
+        <div class="cross-seed-content">
+          <CrossSeedPanel
+            v-if="prefetchedDbSeedInfo && crossSeedStore.taskId"
+            :show-complete-button="true"
+            publish-scene="maintenance"
+            :prefetched-db-seed-info="prefetchedDbSeedInfo"
+            @complete="handleMaintenanceComplete"
+            @cancel="closeMaintenanceDialog"
+          />
+        </div>
+      </el-card>
+    </div>
+
     <div v-if="isMaintenanceMode && batchFetchDialogVisible" class="modal-overlay">
       <el-card class="batch-fetch-main-card" shadow="always">
         <template #header>
@@ -394,14 +450,18 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { WarningFilled } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
 import BatchFetchPanel from '@/components/BatchFetchPanel.vue'
+import CrossSeedPanel from '@/components/CrossSeedPanel.vue'
 import BDInfoRecordsDialog from '@/components/cross-seed-data/BDInfoRecordsDialog.vue'
 import { useContentFiltersStore } from '@/stores/contentFilters'
+import { useCrossSeedStore } from '@/stores/crossSeed'
+import { useTorrentsViewState } from '@/stores/torrentsViewState'
+import type { ISourceInfo } from '@/types'
 import '@/assets/styles/glass-morphism.scss'
 import { ElMessage } from '@/utils/uiNotify'
 
@@ -467,13 +527,36 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'ready', refreshMethod: () => Promise<void>): void
-  (e: 'maintain', row: SeedParameter): void
 }>()
 
 const router = useRouter()
+const route = useRoute()
 const contentFiltersStore = useContentFiltersStore()
+const crossSeedStore = useCrossSeedStore()
+const torrentsViewState = useTorrentsViewState()
 const isMaintenanceMode = computed(() => props.mode === 'maintenance')
 const isCrossSeedMode = computed(() => !isMaintenanceMode.value)
+
+interface SourceSiteOption {
+  name: string
+  site: string
+}
+
+interface SeedInfoData extends Record<string, unknown> {
+  name?: string
+  title?: string
+  save_path?: string
+  downloader_id?: string
+  site_name: string
+  torrent_id: string
+}
+
+interface SeedInfoResponse extends Record<string, unknown> {
+  success?: boolean
+  message?: string
+  error?: string
+  data: SeedInfoData
+}
 
 const isAnimationRelatedType = (typeValue: string | undefined | null) => {
   const text = (typeValue || '').trim().toLowerCase()
@@ -510,6 +593,18 @@ const batchFetchDialogVisible = ref(false)
 const batchFetchPanelRef = ref<InstanceType<typeof BatchFetchPanel> | null>(null)
 const isDeleteMode = ref(false)
 const recordDialogVisible = ref(false)
+
+// 维护弹窗状态（仅 mode=maintenance）
+const maintenanceDialogVisible = ref(false)
+const maintenanceLoading = ref(false)
+const refetching = ref(false)
+const prefetchedDbSeedInfo = ref<SeedInfoResponse | undefined>(undefined)
+const sourceSiteOptions = ref<SourceSiteOption[]>([])
+const selectedSourceSite = ref('')
+const sourceTorrentId = ref('')
+const maintenanceTargetTorrentId = ref('')
+const maintenanceTargetSiteName = ref('')
+const maintenanceRowId = ref('')
 const pathTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
 const pathTreeData = ref<PathNode[]>([])
 const uniquePaths = ref<string[]>([])
@@ -1117,8 +1212,197 @@ const tableRowClassName = ({ row }: { row: SeedParameter }) => {
   return ''
 }
 
+const selectedTorrentName = computed(() => {
+  const params = crossSeedStore.workingParams as { title?: string; name?: string } | null
+  return params?.title ?? params?.name ?? ''
+})
+
+const canRefetch = computed(
+  () =>
+    !!selectedSourceSite.value.trim() &&
+    !!sourceTorrentId.value.trim() &&
+    !!prefetchedDbSeedInfo.value &&
+    !!maintenanceTargetTorrentId.value &&
+    !!maintenanceTargetSiteName.value,
+)
+
+const resolveSiteCode = (siteLabel: string) => {
+  const trimmed = siteLabel.trim()
+  if (!trimmed) return ''
+  const matched = sourceSiteOptions.value.find((item) => item.name === trimmed)
+  return matched?.site || trimmed.toLowerCase()
+}
+
+const loadSourceSites = async () => {
+  const sites = await torrentsViewState.fetchSitesStatus()
+  sourceSiteOptions.value = sites.map((site) => ({
+    name: String(site.name || '').trim(),
+    site: String(site.site || '').trim(),
+  }))
+}
+
+const buildWorkingTorrent = (seedInfo: SeedInfoData) => ({
+  ...seedInfo,
+  name: seedInfo.name || seedInfo.title,
+  save_path: seedInfo.save_path || '',
+  size: 0,
+  size_formatted: '0 B',
+  progress: 100,
+  state: 'completed',
+  total_uploaded: 0,
+  total_uploaded_formatted: '0 B',
+  downloaderId: seedInfo.downloader_id || null,
+  sites: {
+    [seedInfo.site_name]: {
+      torrentId: seedInfo.torrent_id,
+      site: seedInfo.site_name,
+      site_name: seedInfo.site_name,
+      comment: `id=${seedInfo.torrent_id}`,
+    },
+  },
+})
+
+const applySeedInfo = (seedInfoResult: SeedInfoResponse, rowKey?: string) => {
+  prefetchedDbSeedInfo.value = seedInfoResult
+  crossSeedStore.reset()
+  crossSeedStore.setParams(buildWorkingTorrent(seedInfoResult.data))
+
+  const fallbackSourceName = selectedSourceSite.value || seedInfoResult.data.site_name
+  const sourceInfo: ISourceInfo = {
+    name: fallbackSourceName,
+    site: resolveSiteCode(fallbackSourceName),
+    torrentId: sourceTorrentId.value || seedInfoResult.data.torrent_id,
+  }
+  crossSeedStore.setSourceInfo(sourceInfo)
+
+  const idSuffix =
+    maintenanceRowId.value ||
+    rowKey ||
+    `${seedInfoResult.data.site_name}_${seedInfoResult.data.torrent_id}`
+  crossSeedStore.setTaskId(`seed_maintenance_${idSuffix}_${Date.now()}`)
+}
+
+const openMaintenance = async (opts: {
+  torrentId: string
+  siteName: string
+  rowId?: string
+}) => {
+  const torrentId = opts.torrentId.trim()
+  const siteName = opts.siteName.trim()
+  if (!torrentId || !siteName) {
+    ElMessage.warning('缺少种子 ID 或站点名称，无法打开维护')
+    return
+  }
+
+  maintenanceDialogVisible.value = true
+  maintenanceLoading.value = true
+  maintenanceTargetTorrentId.value = torrentId
+  maintenanceTargetSiteName.value = siteName
+  maintenanceRowId.value = String(opts.rowId || '').trim()
+  selectedSourceSite.value = siteName
+  sourceTorrentId.value = torrentId
+  prefetchedDbSeedInfo.value = undefined
+  crossSeedStore.reset()
+
+  try {
+    if (sourceSiteOptions.value.length === 0) {
+      await loadSourceSites()
+    }
+
+    const response = await axios.get(
+      `/api/migrate/get_db_seed_info?torrent_id=${encodeURIComponent(torrentId)}&site_name=${encodeURIComponent(siteName)}`,
+    )
+    const result = response.data as SeedInfoResponse
+    if (!result.success) {
+      throw new Error(result.error || '获取种子参数失败')
+    }
+
+    applySeedInfo(result, maintenanceRowId.value || `${siteName}_${torrentId}`)
+  } catch (err: unknown) {
+    const message = axios.isAxiosError(err)
+      ? (err.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (err.response?.data as { error?: string } | undefined)?.error ||
+        err.message
+      : err instanceof Error
+        ? err.message
+        : '网络错误'
+    ElMessage.error(message)
+    maintenanceDialogVisible.value = false
+    prefetchedDbSeedInfo.value = undefined
+    crossSeedStore.reset()
+  } finally {
+    maintenanceLoading.value = false
+  }
+}
+
 const handleMaintain = (row: SeedParameter) => {
-  emit('maintain', row)
+  void openMaintenance({
+    torrentId: row.torrent_id,
+    siteName: row.site_name,
+    rowId: row.nickname || String(row.id),
+  })
+}
+
+const refetchSeedInfo = async () => {
+  if (!canRefetch.value || !prefetchedDbSeedInfo.value) {
+    return
+  }
+
+  refetching.value = true
+  try {
+    const prefetchedSeedData = prefetchedDbSeedInfo.value.data
+    const payload = {
+      sourceSite: selectedSourceSite.value.trim(),
+      searchTerm: sourceTorrentId.value.trim(),
+      savePath: String(prefetchedSeedData.save_path || ''),
+      torrentName: String(prefetchedSeedData.name || prefetchedSeedData.title || ''),
+      downloaderId: String(prefetchedSeedData.downloader_id || ''),
+      target_torrent_id: maintenanceTargetTorrentId.value,
+      target_site_name: maintenanceTargetSiteName.value,
+      screenshotReviewMode: 'interactive',
+      task_id: crossSeedStore.taskId || undefined,
+    }
+    const response = await axios.post('/api/migrate/refetch_maintenance_seed', payload)
+    const result = response.data as SeedInfoResponse
+    if (!result.success) {
+      throw new Error(result.message || result.error || '重新拉取失败')
+    }
+
+    applySeedInfo(result)
+    ElMessage.success('重新拉取完成')
+  } catch (err: unknown) {
+    const message = axios.isAxiosError(err)
+      ? (err.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (err.response?.data as { error?: string } | undefined)?.error ||
+        err.message
+      : err instanceof Error
+        ? err.message
+        : '网络错误'
+    ElMessage.error(message)
+  } finally {
+    refetching.value = false
+  }
+}
+
+const closeMaintenanceDialog = () => {
+  maintenanceDialogVisible.value = false
+  maintenanceLoading.value = false
+  refetching.value = false
+  prefetchedDbSeedInfo.value = undefined
+  maintenanceTargetTorrentId.value = ''
+  maintenanceTargetSiteName.value = ''
+  maintenanceRowId.value = ''
+  crossSeedStore.reset()
+  // 深链 query 清掉，避免再次挂载时重复弹窗
+  if (route.query.torrent_id || route.query.site_name || route.query.row_id) {
+    void router.replace({ path: '/seed-maintenance', query: {} })
+  }
+}
+
+const handleMaintenanceComplete = async () => {
+  ElMessage.success('种子信息维护已完成！')
+  closeMaintenanceDialog()
+  await fetchData()
 }
 
 const handleSelectionChange = (selection: SeedParameter[]) => {
@@ -1323,11 +1607,31 @@ const openRecordViewDialog = () => {
 }
 
 const refreshCurrentView = async () => {
+  if (isMaintenanceMode.value && maintenanceDialogVisible.value && prefetchedDbSeedInfo.value) {
+    await openMaintenance({
+      torrentId: maintenanceTargetTorrentId.value || sourceTorrentId.value,
+      siteName: maintenanceTargetSiteName.value || selectedSourceSite.value,
+      rowId: maintenanceRowId.value,
+    })
+    return
+  }
   if (isMaintenanceMode.value && batchFetchDialogVisible.value && batchFetchPanelRef.value) {
     await batchFetchPanelRef.value.refreshList()
     return
   }
   await fetchData()
+}
+
+const tryOpenMaintenanceFromRoute = async () => {
+  if (!isMaintenanceMode.value) return
+  const torrentId = String(route.query.torrent_id || '').trim()
+  const siteName = String(route.query.site_name || '').trim()
+  if (!torrentId || !siteName) return
+  await openMaintenance({
+    torrentId,
+    siteName,
+    rowId: String(route.query.row_id || '').trim(),
+  })
 }
 
 onMounted(() => {
@@ -1338,9 +1642,12 @@ onMounted(async () => {
   await loadUiSettings()
   if (isMaintenanceMode.value) {
     await loadReviewStatusFilter()
+    void loadSourceSites()
   }
   uiInitializing.value = false
-  void fetchData()
+  void fetchData().then(() => {
+    void tryOpenMaintenanceFromRoute()
+  })
   window.addEventListener('resize', handleResize)
 })
 
@@ -1349,6 +1656,12 @@ onUnmounted(() => {
     window.clearTimeout(searchDebounceTimer)
   }
   window.removeEventListener('resize', handleResize)
+  // 离开维护页时清掉弹窗 store，避免污染其它场景
+  if (isMaintenanceMode.value && (maintenanceDialogVisible.value || crossSeedStore.taskId)) {
+    prefetchedDbSeedInfo.value = undefined
+    maintenanceDialogVisible.value = false
+    crossSeedStore.reset()
+  }
 })
 </script>
 
@@ -1489,6 +1802,72 @@ onUnmounted(() => {
   overflow: auto;
 }
 
+/* 维护弹窗：旧版 90vh 卡片骨架 */
+.cross-seed-card {
+  width: 90vw;
+  max-width: 1200px;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.cross-seed-card .el-card__body) {
+  padding: 10px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cross-seed-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cross-seed-content :deep(.cross-seed-panel) {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.maintenance-modal-header {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.maintenance-modal-title {
+  flex: 1;
+  min-width: 160px;
+}
+
+.maintenance-modal-title-text {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  max-width: 100%;
+}
+
+.maintenance-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.maintenance-source-select {
+  width: 160px;
+}
+
+.maintenance-source-id {
+  width: 160px;
+}
+
 .cross-seed-data-view {
   height: 100%;
   display: flex;
@@ -1499,7 +1878,9 @@ onUnmounted(() => {
 
 .search-and-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 10px;
   padding: 10px 15px;
   background-color: #ffffff;
   border-bottom: 1px solid #ebeef5;
