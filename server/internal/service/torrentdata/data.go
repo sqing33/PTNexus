@@ -37,7 +37,7 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		return nil, fmt.Errorf("load discovered sites failed: %w", err)
 	}
 
-	torrentRows, err := s.repo.ListTorrents(params.OnlyCompleted)
+	torrentRows, err := s.repo.ListTorrents(params.OnlyCompleted, params.VideoOnly)
 	if err != nil {
 		return nil, fmt.Errorf("load torrents failed: %w", err)
 	}

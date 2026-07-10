@@ -148,7 +148,7 @@ func (s *TorrentDataService) GetIYUUQueryBatchTask(taskID string) (*IYUUBatchTas
 }
 
 func (s *TorrentDataService) groupsByPath(savePath string, limit int, anchorName string) ([]iyuuQueryGroup, int) {
-	torrents, err := s.repo.ListTorrents(false)
+	torrents, err := s.repo.ListTorrents(false, false)
 	if err != nil {
 		return []iyuuQueryGroup{}, 0
 	}
