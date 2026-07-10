@@ -101,8 +101,8 @@ type transmissionResponse struct {
 }
 
 // CheckDownloaderGate 检查下载器是否触发发布前限制。
-// 参数/返回：downloaderID 为下载器 ID；返回 canContinue 与 message；检查异常时默认放行（返回 true, ""）。
-// 失败场景：远端预检查不可用或本地检查异常时记录日志并默认放行。
+// 参数/返回：downloaderID 为下载器 ID；返回 canContinue 与 message；检查异常时安全阻止发布。
+// 失败场景：远端预检查不可用时回退本地检查；本地配置或下载器查询失败时返回 false。
 // 副作用：可能访问远端预检查接口（当 GO_SERVICE_URL 配置存在），并可能直接连接下载器执行本地检查。
 func CheckDownloaderGate(downloaderID string) (bool, string) {
 	trimmedID := strings.TrimSpace(downloaderID)
@@ -175,7 +175,10 @@ func CheckDownloaderGateStats(downloaderID string) (SeedingLimitStats, error) {
 		return stats, nil
 	}
 
-	groupStats := collectSeedingLimitGroupStats(subnetID, group)
+	groupStats, err := collectSeedingLimitGroupStats(subnetID, group)
+	if err != nil {
+		return SeedingLimitStats{}, err
+	}
 	canContinue, message := evaluateSeedingLimit(groupStats)
 	stats.CanContinue = canContinue
 	stats.Message = strings.TrimSpace(message)
@@ -231,14 +234,16 @@ func checkByRemoteGuard(downloaderID string) (bool, string, bool) {
 func checkByLocalGuard(downloaderID string) (bool, string) {
 	downloaders, err := loadDownloadersConfig()
 	if err != nil {
-		logx.Warnf(seedingLimitGuardLogModule, "加载下载器配置失败 downloader_id=%s err=%v", downloaderID, err)
-		return true, ""
+		message := "加载下载器配置失败，已停止发布: " + err.Error()
+		logx.Warnf(seedingLimitGuardLogModule, "%s downloader_id=%s", message, downloaderID)
+		return false, message
 	}
 
 	target := findDownloaderByID(downloaders, downloaderID)
 	if target == nil {
-		logx.Warnf(seedingLimitGuardLogModule, "未找到下载器配置，跳过预检查 downloader_id=%s", downloaderID)
-		return true, ""
+		message := "未找到下载器配置，已停止发布"
+		logx.Warnf(seedingLimitGuardLogModule, "%s downloader_id=%s", message, downloaderID)
+		return false, message
 	}
 	if target.UseProxy {
 		return true, ""
@@ -246,8 +251,9 @@ func checkByLocalGuard(downloaderID string) (bool, string) {
 
 	targetSubnet, err := resolveDownloaderSubnet(*target)
 	if err != nil {
-		logx.Warnf(seedingLimitGuardLogModule, "解析下载器地址失败，跳过预检查 downloader_id=%s host=%s err=%v", downloaderID, target.Host, err)
-		return true, ""
+		message := "解析下载器地址失败，已停止发布: " + err.Error()
+		logx.Warnf(seedingLimitGuardLogModule, "%s downloader_id=%s host=%s", message, downloaderID, target.Host)
+		return false, message
 	}
 
 	group := make([]seedingLimitDownloader, 0, len(downloaders))
@@ -336,7 +342,12 @@ func resolveDownloaderSubnet(downloader seedingLimitDownloader) (string, error) 
 }
 
 func checkSeedingLimitForGroup(subnetID string, downloaders []seedingLimitDownloader) (bool, string) {
-	stats := collectSeedingLimitGroupStats(subnetID, downloaders)
+	stats, err := collectSeedingLimitGroupStats(subnetID, downloaders)
+	if err != nil {
+		message := "下载器统计失败，已停止发布: " + err.Error()
+		logx.Warnf(seedingLimitGuardLogModule, "%s subnet=%s.x", message, subnetID)
+		return false, message
+	}
 	canContinue, message := evaluateSeedingLimit(stats)
 	if canContinue {
 		logx.Infof(seedingLimitGuardLogModule, "本地预检查通过 subnet=%s.x monitored=%d recent=%d", subnetID, stats.MonitoredCount, stats.RecentCount)
@@ -344,13 +355,16 @@ func checkSeedingLimitForGroup(subnetID string, downloaders []seedingLimitDownlo
 	return canContinue, message
 }
 
-func collectSeedingLimitGroupStats(subnetID string, downloaders []seedingLimitDownloader) seedingLimitGroupStats {
+func collectSeedingLimitGroupStats(subnetID string, downloaders []seedingLimitDownloader) (seedingLimitGroupStats, error) {
 	monitored := 0
 	recent := 0
 	names := make([]string, 0, len(downloaders))
 
 	for _, downloader := range downloaders {
-		uploadingCount, recentCount := checkDownloaderStatus(downloader)
+		uploadingCount, recentCount, err := checkDownloaderStatus(downloader)
+		if err != nil {
+			return seedingLimitGroupStats{}, fmt.Errorf("下载器 %s 查询失败: %w", downloader.ID, err)
+		}
 		monitored += uploadingCount
 		recent += recentCount
 		name := strings.TrimSpace(downloader.Name)
@@ -365,7 +379,7 @@ func collectSeedingLimitGroupStats(subnetID string, downloaders []seedingLimitDo
 		DownloaderNames: names,
 		MonitoredCount:  monitored,
 		RecentCount:     recent,
-	}
+	}, nil
 }
 
 func evaluateSeedingLimit(stats seedingLimitGroupStats) (bool, string) {
@@ -384,36 +398,36 @@ func evaluateSeedingLimit(stats seedingLimitGroupStats) (bool, string) {
 	return true, ""
 }
 
-func checkDownloaderStatus(downloader seedingLimitDownloader) (int, int) {
+func checkDownloaderStatus(downloader seedingLimitDownloader) (int, int, error) {
 	switch strings.ToLower(strings.TrimSpace(downloader.Type)) {
 	case "qbittorrent":
 		return checkQBittorrentStatus(downloader)
 	case "transmission":
 		return checkTransmissionStatus(downloader)
 	default:
-		return 0, 0
+		return 0, 0, fmt.Errorf("不支持的下载器类型: %s", downloader.Type)
 	}
 }
 
-func checkQBittorrentStatus(downloader seedingLimitDownloader) (int, int) {
+func checkQBittorrentStatus(downloader seedingLimitDownloader) (int, int, error) {
 	baseURL := normalizeHostURL(downloader.Host)
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Timeout: 10 * time.Second, Jar: jar}
 
 	if err := qbLogin(client, baseURL, downloader.Username, downloader.Password); err != nil {
 		logx.Warnf(seedingLimitGuardLogModule, "qB 登录失败 downloader_id=%s host=%s err=%v", downloader.ID, downloader.Host, err)
-		return 0, 0
+		return 0, 0, err
 	}
 
 	seedingTorrents, err := qbFetchTorrents(client, baseURL, "seeding")
 	if err != nil {
 		logx.Warnf(seedingLimitGuardLogModule, "qB 获取做种列表失败 downloader_id=%s host=%s err=%v", downloader.ID, downloader.Host, err)
-		return 0, 0
+		return 0, 0, err
 	}
 	pausedTorrents, err := qbFetchTorrents(client, baseURL, "paused")
 	if err != nil {
 		logx.Warnf(seedingLimitGuardLogModule, "qB 获取暂停列表失败 downloader_id=%s host=%s err=%v", downloader.ID, downloader.Host, err)
-		return 0, 0
+		return 0, 0, err
 	}
 
 	activeCount := 0
@@ -461,7 +475,7 @@ func checkQBittorrentStatus(downloader seedingLimitDownloader) (int, int) {
 		}
 	}
 
-	return activeCount + pausedCount, recentCount
+	return activeCount + pausedCount, recentCount, nil
 }
 
 func qbLogin(client *http.Client, baseURL, username, password string) error {
@@ -515,7 +529,7 @@ func qbFetchTorrents(client *http.Client, baseURL, filter string) ([]qbTorrent, 
 	return rows, nil
 }
 
-func checkTransmissionStatus(downloader seedingLimitDownloader) (int, int) {
+func checkTransmissionStatus(downloader seedingLimitDownloader) (int, int, error) {
 	rpcURL := strings.TrimRight(normalizeHostURL(downloader.Host), "/") + "/transmission/rpc"
 	payload := map[string]any{
 		"method": "torrent-get",
@@ -525,22 +539,22 @@ func checkTransmissionStatus(downloader seedingLimitDownloader) (int, int) {
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return 0, 0
+		return 0, 0, err
 	}
 
 	body, err := transmissionRPC(rpcURL, downloader.Username, downloader.Password, payloadBytes)
 	if err != nil {
 		logx.Warnf(seedingLimitGuardLogModule, "Transmission 调用失败 downloader_id=%s host=%s err=%v", downloader.ID, downloader.Host, err)
-		return 0, 0
+		return 0, 0, err
 	}
 
 	resp := transmissionResponse{}
 	if err := json.Unmarshal(body, &resp); err != nil {
 		logx.Warnf(seedingLimitGuardLogModule, "Transmission 响应解析失败 downloader_id=%s host=%s err=%v", downloader.ID, downloader.Host, err)
-		return 0, 0
+		return 0, 0, err
 	}
 	if resp.Result != "success" {
-		return 0, 0
+		return 0, 0, fmt.Errorf("Transmission 响应失败: %s", resp.Result)
 	}
 
 	activeCount := 0
@@ -568,7 +582,7 @@ func checkTransmissionStatus(downloader seedingLimitDownloader) (int, int) {
 		}
 	}
 
-	return activeCount + pausedCount, recentCount
+	return activeCount + pausedCount, recentCount, nil
 }
 
 func transmissionRPC(rpcURL, username, password string, payload []byte) ([]byte, error) {
