@@ -6,14 +6,15 @@
 
 updater 保持 `/update/check`、`/update/pull`、`/update/install` 协议不变，在线更新主链路为：
 
-- `/update/check`：基于 `UPDATE_MANIFEST.json` 计算版本、强更与禁更状态。
+- `/update/check`：基于 Release 资产中的 `UPDATE_MANIFEST.json` 计算版本、强更与禁更状态。
 - `/update/pull`：按平台下载构建产物（artifact），校验 SHA256，解压到 staging。
 - `/update/install`：切换到新版本目录并重启服务，健康检查失败时自动回滚。
 
 说明：
 
+- 线上 updater 默认只信任 GitHub/Gitee Release 里的 `UPDATE_MANIFEST.json`；仓库根目录同名文件仅用于仓库内同步版本历史与下载地址占位。
 - 在线更新链路不依赖 git clone/pull。
-- updater 会并行探测 GitHub/Gitee 的元数据地址，自动选择可用源。
+- updater 会并行探测 GitHub/Gitee 的 Release 元数据地址，自动选择当前更新模式可用的源。
 
 ## 2. UPDATE_MANIFEST.json 格式
 

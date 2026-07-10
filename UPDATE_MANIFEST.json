@@ -1,38 +1,57 @@
 {
   "schema": 2,
+  "note": "repo-root metadata only; production updater must use release UPDATE_MANIFEST.json",
   "latest": {
-    "version": "v4.0.2",
+    "version": "v4.1.0",
     "artifacts": [
       {
         "os": "linux",
         "arch": "amd64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.1.0/ptnexus-runtime-linux-amd64.tar.gz",
         "sha256": "",
         "size": 11163781,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz",
-          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-amd64.tar.gz"
+          "https://gitee.com/sqing33/PTNexus/releases/download/v4.1.0/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.1.0/ptnexus-runtime-linux-amd64.tar.gz",
+          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.1.0/ptnexus-runtime-linux-amd64.tar.gz"
         ]
       },
       {
         "os": "linux",
         "arch": "arm64",
-        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
+        "url": "https://github.com/sqing33/PTNexus/releases/download/v4.1.0/ptnexus-runtime-linux-arm64.tar.gz",
         "sha256": "",
         "size": 10104449,
         "format": "tar.gz",
         "mirror_urls": [
-          "https://gitee.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz",
-          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.0.2/ptnexus-runtime-linux-arm64.tar.gz"
+          "https://gitee.com/sqing33/PTNexus/releases/download/v4.1.0/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://gh.ddlc.top/https://github.com/sqing33/PTNexus/releases/download/v4.1.0/ptnexus-runtime-linux-arm64.tar.gz",
+          "https://ghproxy.net/https://github.com/sqing33/PTNexus/releases/download/v4.1.0/ptnexus-runtime-linux-arm64.tar.gz"
         ]
       }
     ],
-    "date": "2026.03.21"
+    "date": "2026.07.10",
+    "note": "本版本整合长期未维护期间积累的功能与修复，升级过程兼容现有配置和数据库。"
   },
   "history": [
+    {
+      "version": "v4.1.0",
+      "date": "2026.07.10",
+      "note": "本版本整合长期未维护期间积累的功能与修复，升级过程兼容现有配置和数据库。",
+      "changes": [
+        "新增：独立种子维护页面与全局任务监控，支持查看、标记完成、请求终止和清理已结束任务",
+        "新增：可配置的仅视频类种子过滤，默认关闭，并统一应用于一站多种、种子列表、维护页和做种检索",
+        "优化：增加 torrents 与 seed_parameters 查询索引，改进站点分组统计、发布日志查询导出和路径懒加载",
+        "优化：列表搜索防抖、请求去重和批量刷新，减少重复请求并提升大数据量页面响应速度",
+        "修复：新种按名称与大小联合判断，下载器种子优先按 hash 匹配，避免同名或不同体积种子误判",
+        "修复：FRDS 标题与官组映射、源站匹配、保存路径、媒体文件解析和上传失败页面误判成功",
+        "修复：Windows 下带多个点号且无扩展名的媒体基础名称识别失败",
+        "修复：完整保留直接发布、队列发布、自动加种、禁转限转分集与小于 1GB 预检查限制，下载器统计失败时安全阻止发布",
+        "优化：更新器支持 manifest 选择、本地版本识别、状态缓存、跨设备目录迁移、失败回退和本地版本查询接口",
+        "优化：改进 Gitee Release 同步、上传重试与超时处理，以及 Docker 多架构版本标签发布流程"
+      ]
+    },
     {
       "version": "v4.0.2",
       "date": "2026.03.21",
