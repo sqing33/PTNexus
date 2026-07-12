@@ -1066,28 +1066,52 @@ const handleEdit = async (row: SeedParameter) => {
 
     if (result.success) {
       prefetchedDbSeedInfo.value = result
-      // 将获取到的数据设置到 store 中
       // 构造一个基本的 Torrent 对象结构
+      const torrentName = result.data.name || result.data.title
+
+      // 从 /api/data 获取完整的种子数据（包含所有做种站点信息）
+      let fullTorrentData: Record<string, any> | null = null
+      try {
+        const dataResponse = await axios.get('/api/data', {
+          params: {
+            page: 1,
+            pageSize: 1,
+            nameSearch: torrentName,
+          },
+        })
+        if (dataResponse.data?.data?.length > 0) {
+          fullTorrentData = dataResponse.data.data[0]
+        }
+      } catch (e) {
+        console.warn('从 /api/data 获取完整种子数据失败，将仅使用源站点信息', e)
+      }
+
       const torrentData = {
         ...result.data,
         // 优先使用数据库中的name列，如果不存在则使用title列
-        name: result.data.name || result.data.title,
-        // 使用从数据库获取的实际保存路径，如果没有则为空字符串
-        save_path: result.data.save_path || '',
-        size: 0,
-        size_formatted: '0 B',
+        name: torrentName,
+        // 优先使用完整数据中的保存路径，回退到数据库中的路径
+        save_path: fullTorrentData?.save_path || result.data.save_path || '',
+        size: fullTorrentData?.size || 0,
+        size_formatted: fullTorrentData?.size_formatted || '0 B',
         progress: 100,
         state: 'completed',
-        total_uploaded: 0,
-        total_uploaded_formatted: '0 B',
-        // 添加下载器ID（如果从数据库返回了）
-        downloaderId: result.data.downloader_id || null,
-        sites: {
+        total_uploaded: fullTorrentData?.total_uploaded || 0,
+        total_uploaded_formatted: fullTorrentData?.total_uploaded_formatted || '0 B',
+        // 优先使用完整数据中的下载器信息
+        downloaderId: fullTorrentData?.downloaderId || result.data.downloader_id || null,
+        downloaderIds: fullTorrentData?.downloaderIds || (result.data.downloader_id ? [result.data.downloader_id] : []),
+        // 使用完整数据中的所有站点信息（做种数/当前做种站点）
+        sites: fullTorrentData?.sites || {
           [result.data.site_name]: {
             torrentId: result.data.torrent_id,
-            comment: `id=${result.data.torrent_id}`, // 为了向后兼容，也提供comment格式
+            comment: `id=${result.data.torrent_id}`,
           },
         },
+        site_count: fullTorrentData?.site_count || 1,
+        total_site_count: fullTorrentData?.total_site_count || 0,
+        target_sites_count: fullTorrentData?.target_sites_count || 0,
+        seeders: fullTorrentData?.seeders || 0,
       }
 
       crossSeedStore.setParams(torrentData)
