@@ -1280,7 +1280,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
   const selectAllTargetSites = () => {
     const selectableSites = allSitesStatus.value
-      .filter((s) => s.is_target && isTargetSiteSelectable(s.name))
+      .filter((s) => s.is_target && s.can_publish !== false && isTargetSiteSelectable(s.name))
       .map((s) => s.name)
     selectedTargetSites.value = selectableSites
   }

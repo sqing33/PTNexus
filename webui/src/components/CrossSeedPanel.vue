@@ -2642,7 +2642,6 @@ const publishFlow = createPublishFlow({
   goToSelectSiteStep,
 
   invalidStandardParams,
-  screenshotValid,
 })
 
 const {

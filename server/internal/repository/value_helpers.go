@@ -46,6 +46,11 @@ func toInt64(value any) (int64, error) {
 		return int64(typed), nil
 	case float32:
 		return int64(typed), nil
+	case bool:
+		if typed {
+			return 1, nil
+		}
+		return 0, nil
 	case string:
 		text := strings.TrimSpace(typed)
 		if text == "" {

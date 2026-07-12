@@ -50,14 +50,24 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 		payload = map[string]any{}
 	}
 
-	if restricted := publishuploader.DetectRestrictedTags(uploadData); len(restricted) > 0 {
-		return map[string]any{
-			"success":       false,
-			"logs":          fmt.Sprintf("🚫 发布前标签限制: 检测到禁转/限转/分集标签 %v", restricted),
-			"limit_reached": true,
-			"pre_check":     true,
-			"url":           nil,
-		}, 200
+	// 检查前端是否已确认跳过受限标签检查
+	skipRestrictedCheck := false
+	if v, ok := uploadData["skip_restricted_check"]; ok {
+		if b, isBool := v.(bool); isBool {
+			skipRestrictedCheck = b
+		}
+	}
+
+	if !skipRestrictedCheck {
+		if restricted := publishuploader.DetectRestrictedTags(uploadData); len(restricted) > 0 {
+			return map[string]any{
+				"success":       false,
+				"logs":          fmt.Sprintf("🚫 发布前标签限制: 检测到禁转/限转/分集标签 %v", restricted),
+				"limit_reached": true,
+				"pre_check":     true,
+				"url":           nil,
+			}, 200
+		}
 	}
 
 	resolvedSavePath, resolvedDownloaderID := publishdownloader.ResolveEffectiveTarget(

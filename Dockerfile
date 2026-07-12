@@ -17,6 +17,8 @@ FROM golang:1.23-bookworm AS updater-builder
 
 WORKDIR /src/updater
 
+ENV GOPROXY=https://goproxy.cn,direct
+
 COPY ./updater/go.mod ./updater/go.sum ./
 RUN go mod download
 
@@ -29,6 +31,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/updater .
 FROM golang:1.23-bookworm AS server-builder
 
 WORKDIR /src/server
+
+ENV GOPROXY=https://goproxy.cn,direct
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc g++ libc6-dev && \

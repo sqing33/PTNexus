@@ -332,12 +332,16 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 		}
 	}
 
-	publishTrigger, _, triggerErr := s.NextBatchCrossSeedTrigger()
-	if strings.TrimSpace(publishTrigger) == "" {
-		publishTrigger = batchCrossSeedTriggerPrefix + "1"
-	}
-	if triggerErr != nil {
-		logx.Warnf(publishQueueLogModule, "计算批量触发标识失败，已回退 trigger=%s err=%v", publishTrigger, triggerErr)
+	publishTrigger := strings.TrimSpace(processingshared.ToString(payload["publish_trigger"], ""))
+	if publishTrigger == "" {
+		var triggerErr error
+		publishTrigger, _, triggerErr = s.NextBatchCrossSeedTrigger()
+		if strings.TrimSpace(publishTrigger) == "" {
+			publishTrigger = batchCrossSeedTriggerPrefix + "1"
+		}
+		if triggerErr != nil {
+			logx.Warnf(publishQueueLogModule, "计算批量触发标识失败，已回退 trigger=%s err=%v", publishTrigger, triggerErr)
+		}
 	}
 
 	scene := strings.TrimSpace(processingshared.ToString(payload["publish_scene"], "multi_torrent"))

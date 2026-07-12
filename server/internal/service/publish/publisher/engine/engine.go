@@ -41,8 +41,6 @@ func Publish(input publisher.PublishInput) (publisher.PublishResult, error) {
 		return publishsites.PublishHdfans(input)
 	case "crabpt":
 		return publishsites.PublishCrabPT(input)
-	case "hdvideo":
-		return publishsites.PublishHDVideo(input)
 	default:
 		return publisher.PublishPublic(input)
 	}

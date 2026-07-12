@@ -73,7 +73,9 @@
         height="100%"
         :row-class-name="getRowClassName"
         @sort-change="handleSortChange"
+        @row-click="handleRowClick"
         :default-sort="defaultSort"
+        :row-style="{ cursor: 'pointer' }"
       >
         <el-table-column
           prop="nickname"
@@ -100,6 +102,19 @@
             <span v-else-if="getSiteRole(scope.row) === 'target'" class="role-tag role-target">
               目标站
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="can_publish"
+          label="可发种"
+          width="80"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #default="scope">
+            <el-tag v-if="scope.row.can_publish" type="success" size="small">是</el-tag>
+            <el-tag v-else type="info" size="small">否</el-tag>
           </template>
         </el-table-column>
         <el-table-column
@@ -225,7 +240,7 @@
             <el-button type="primary" :icon="Edit" link @click="handleOpenDialog(scope.row)">
               编辑
             </el-button>
-            <el-button type="danger" :icon="Delete" link @click="handleDelete(scope.row)">
+            <el-button type="danger" :icon="Delete" link @click.stop="handleDelete(scope.row)">
               删除
             </el-button>
           </template>
@@ -284,6 +299,10 @@
         <el-form-item label="关联官组" prop="group">
           <el-input v-model="siteForm.group" placeholder="例如：PT, PTWEB"></el-input>
           <div class="form-tip">用于识别种子所属发布组，多个组用英文逗号(,)分隔。</div>
+        </el-form-item>
+        <el-form-item label="可发种站" prop="can_publish">
+          <el-switch v-model="siteForm.can_publish" />
+          <div class="form-tip">关闭后，该站点在发种选择时将置灰不可选择。</div>
         </el-form-item>
         <el-form-item label="Cookie" prop="cookie">
           <el-input
@@ -384,6 +403,7 @@ type SiteConfig = {
   seed_speed_limit?: number | null
   has_cookie?: boolean
   has_passkey?: boolean
+  can_publish?: boolean | number
   [key: string]: unknown
 }
 
@@ -425,6 +445,7 @@ type SiteForm = {
   speed_limit: number
   ratio_threshold: number
   seed_speed_limit: number
+  can_publish: boolean
 }
 
 // --- 状态管理 ---
@@ -473,6 +494,7 @@ const siteForm = ref<SiteForm>({
   speed_limit: 0, // 前端显示和输入使用 MB/s 单位
   ratio_threshold: 3.0,
   seed_speed_limit: 5,
+  can_publish: true,
 })
 
 const API_BASE_URL = '/api'
@@ -585,6 +607,8 @@ const compareByProp = (a: SiteConfig, b: SiteConfig, prop: string) => {
       return getCookieSortKey(a) - getCookieSortKey(b)
     case 'has_passkey':
       return getPasskeySortKey(a) - getPasskeySortKey(b)
+    case 'can_publish':
+      return (a?.can_publish ? 1 : 0) - (b?.can_publish ? 1 : 0)
     default:
       return 0
   }
@@ -753,6 +777,7 @@ const normalizeSiteForm = (site: SiteConfig): SiteForm => ({
     typeof site.ratio_threshold === 'number' ? site.ratio_threshold : Number(site.ratio_threshold) || 3.0,
   seed_speed_limit:
     typeof site.seed_speed_limit === 'number' ? site.seed_speed_limit : Number(site.seed_speed_limit) || 5,
+  can_publish: site.can_publish == null ? true : Boolean(site.can_publish),
 })
 
 // [新增] 合并后的保存与同步功能
@@ -818,6 +843,11 @@ const handleSaveAndSync = async () => {
 const handleOpenDialog = (site: SiteConfig) => {
   siteForm.value = normalizeSiteForm(site)
   dialogVisible.value = true
+}
+
+// 点击表格行打开编辑对话框
+const handleRowClick = (row: SiteConfig) => {
+  handleOpenDialog(row)
 }
 
 const handleSave = async () => {

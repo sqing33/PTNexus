@@ -202,6 +202,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				speed_limit INT NOT NULL DEFAULT 0,
 				ratio_threshold DOUBLE NOT NULL DEFAULT 3.0,
 				seed_speed_limit INT NOT NULL DEFAULT 5,
+				can_publish TINYINT(1) NOT NULL DEFAULT 1,
 				PRIMARY KEY (id)
 			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
 			`CREATE TABLE IF NOT EXISTS seed_parameters (
@@ -288,6 +289,24 @@ func (m *SchemaManager) createTableSQLs() []string {
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL
 			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
+			`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
+				id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+				name VARCHAR(128) NOT NULL,
+				status VARCHAR(16) NOT NULL DEFAULT 'active',
+				seeds_json LONGTEXT NOT NULL,
+				target_sites_json LONGTEXT NOT NULL,
+				interval_minutes INT NOT NULL,
+				current_seed_index INT NOT NULL DEFAULT 0,
+				current_site_index INT NOT NULL DEFAULT 0,
+				total_published INT NOT NULL DEFAULT 0,
+				total_skipped INT NOT NULL DEFAULT 0,
+				loop_enabled TINYINT(1) NOT NULL DEFAULT 0,
+				trigger_tag VARCHAR(64) NOT NULL,
+				last_run_at DATETIME NULL,
+				next_run_at DATETIME NOT NULL,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL
+			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
 		}
 	case "postgresql":
 		return []string{
@@ -355,7 +374,8 @@ func (m *SchemaManager) createTableSQLs() []string {
 				migration INTEGER NOT NULL DEFAULT 1,
 				speed_limit INTEGER NOT NULL DEFAULT 0,
 				ratio_threshold DOUBLE PRECISION NOT NULL DEFAULT 3.0,
-				seed_speed_limit INTEGER NOT NULL DEFAULT 5
+				seed_speed_limit INTEGER NOT NULL DEFAULT 5,
+				can_publish INTEGER NOT NULL DEFAULT 1
 			)`,
 			`CREATE TABLE IF NOT EXISTS seed_parameters (
 				hash VARCHAR(64) NOT NULL,
@@ -441,6 +461,24 @@ func (m *SchemaManager) createTableSQLs() []string {
 				created_at TIMESTAMP NOT NULL,
 				updated_at TIMESTAMP NOT NULL
 			)`,
+			`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
+				id BIGSERIAL PRIMARY KEY,
+				name VARCHAR(128) NOT NULL,
+				status VARCHAR(16) NOT NULL DEFAULT 'active',
+				seeds_json TEXT NOT NULL,
+				target_sites_json TEXT NOT NULL,
+				interval_minutes INTEGER NOT NULL,
+				current_seed_index INTEGER NOT NULL DEFAULT 0,
+				current_site_index INTEGER NOT NULL DEFAULT 0,
+				total_published INTEGER NOT NULL DEFAULT 0,
+				total_skipped INTEGER NOT NULL DEFAULT 0,
+				loop_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+				trigger_tag VARCHAR(64) NOT NULL,
+				last_run_at TIMESTAMP NULL,
+				next_run_at TIMESTAMP NOT NULL,
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL
+			)`,
 		}
 	default:
 		return []string{
@@ -508,7 +546,8 @@ func (m *SchemaManager) createTableSQLs() []string {
 				migration INTEGER NOT NULL DEFAULT 1,
 				speed_limit INTEGER NOT NULL DEFAULT 0,
 				ratio_threshold REAL NOT NULL DEFAULT 3.0,
-				seed_speed_limit INTEGER NOT NULL DEFAULT 5
+				seed_speed_limit INTEGER NOT NULL DEFAULT 5,
+				can_publish INTEGER NOT NULL DEFAULT 1
 			)`,
 			`CREATE TABLE IF NOT EXISTS seed_parameters (
 				hash TEXT NOT NULL,
@@ -594,6 +633,24 @@ func (m *SchemaManager) createTableSQLs() []string {
 				created_at TEXT NOT NULL,
 				updated_at TEXT NOT NULL
 			)`,
+			`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL,
+				status TEXT NOT NULL DEFAULT 'active',
+				seeds_json TEXT NOT NULL,
+				target_sites_json TEXT NOT NULL,
+				interval_minutes INTEGER NOT NULL,
+				current_seed_index INTEGER NOT NULL DEFAULT 0,
+				current_site_index INTEGER NOT NULL DEFAULT 0,
+				total_published INTEGER NOT NULL DEFAULT 0,
+				total_skipped INTEGER NOT NULL DEFAULT 0,
+				loop_enabled INTEGER NOT NULL DEFAULT 0,
+				trigger_tag TEXT NOT NULL,
+				last_run_at TEXT NULL,
+				next_run_at TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
 		}
 	}
 }
@@ -660,6 +717,7 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "speed_limit", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
 			{name: "ratio_threshold", definition: map[string]string{"sqlite": "REAL NOT NULL DEFAULT 3.0", "mysql": "DOUBLE NOT NULL DEFAULT 3.0", "postgresql": "DOUBLE PRECISION NOT NULL DEFAULT 3.0"}},
 			{name: "seed_speed_limit", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 5", "mysql": "INT NOT NULL DEFAULT 5", "postgresql": "INTEGER NOT NULL DEFAULT 5"}},
+			{name: "can_publish", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 1", "mysql": "TINYINT(1) NOT NULL DEFAULT 1", "postgresql": "INTEGER NOT NULL DEFAULT 1"}},
 		},
 		"seed_parameters": {
 			{name: "hash", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(64) NOT NULL", "postgresql": "VARCHAR(64) NOT NULL"}},
@@ -722,6 +780,23 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 		},
+		"scheduled_seed_tasks": {
+			{name: "name", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(128) NOT NULL", "postgresql": "VARCHAR(128) NOT NULL"}},
+			{name: "status", definition: map[string]string{"sqlite": "TEXT NOT NULL DEFAULT 'active'", "mysql": "VARCHAR(16) NOT NULL DEFAULT 'active'", "postgresql": "VARCHAR(16) NOT NULL DEFAULT 'active'"}},
+			{name: "seeds_json", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "LONGTEXT NOT NULL", "postgresql": "TEXT NOT NULL"}},
+			{name: "target_sites_json", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "LONGTEXT NOT NULL", "postgresql": "TEXT NOT NULL"}},
+			{name: "interval_minutes", definition: map[string]string{"sqlite": "INTEGER NOT NULL", "mysql": "INT NOT NULL", "postgresql": "INTEGER NOT NULL"}},
+			{name: "current_seed_index", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
+			{name: "current_site_index", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
+			{name: "total_published", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
+			{name: "total_skipped", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
+			{name: "loop_enabled", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "TINYINT(1) NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT FALSE"}},
+			{name: "trigger_tag", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(64) NOT NULL", "postgresql": "VARCHAR(64) NOT NULL"}},
+			{name: "last_run_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
+			{name: "next_run_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+		},
 		"publish_logs": {
 			{name: "publish_trigger", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(32) NOT NULL", "postgresql": "VARCHAR(32) NOT NULL"}},
 			{name: "scene", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(32)", "postgresql": "VARCHAR(32)"}},
@@ -762,6 +837,9 @@ func (m *SchemaManager) indexSpecs() []schemaIndexSpec {
 		{table: "publish_logs", name: "idx_publish_logs_scene", columns: []string{"scene"}},
 		{table: "publish_logs", name: "idx_publish_logs_queue_task_id", columns: []string{"queue_task_id"}},
 		{table: "publish_logs", name: "idx_publish_logs_queue_group_id", columns: []string{"queue_group_id"}},
+
+		{table: "scheduled_seed_tasks", name: "idx_sched_seed_status_next_run", columns: []string{"status", "next_run_at"}},
+		{table: "scheduled_seed_tasks", name: "idx_sched_seed_trigger_tag", columns: []string{"trigger_tag"}},
 	}
 }
 

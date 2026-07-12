@@ -61,6 +61,7 @@ export interface TorrentData {
   final_publish_parameters: Record<string, string>
   complete_publish_params: Record<string, unknown>
   raw_params_for_preview: Record<string, unknown>
+  skip_restricted_check?: boolean
 }
 
 export interface BdinfoProgress {
@@ -78,6 +79,7 @@ export interface SiteStatus {
   has_passkey: boolean
   is_source: boolean
   is_target: boolean
+  can_publish: boolean
   uses_public_publisher?: boolean
   uses_public_extractor?: boolean
 }

@@ -57,7 +57,7 @@
         class="site-button"
         :type="getButtonType(site)"
         :plain="!site.has_cookie && site.name !== '肉丝'"
-        :disabled="!isTargetSiteSelectable(site.name)"
+        :disabled="site.can_publish === false || !isTargetSiteSelectable(site.name)"
         @click="toggleSiteSelection(site.name)"
       >
         <span
@@ -69,7 +69,16 @@
           >{{ site.name }}</span
         >
         <el-tooltip
-          v-if="site.name === 'ubits' && !isTargetSiteSelectable(site.name)"
+          v-if="site.can_publish === false"
+          content="该站点已设置为不可发种，请在站点管理中修改"
+          placement="top"
+        >
+          <el-icon style="margin-left: 4px; color: #909399">
+            <InfoFilled />
+          </el-icon>
+        </el-tooltip>
+        <el-tooltip
+          v-else-if="site.name === 'ubits' && !isTargetSiteSelectable(site.name)"
           content="该制作组禁止转载到 uBits 站点"
           placement="top"
         >

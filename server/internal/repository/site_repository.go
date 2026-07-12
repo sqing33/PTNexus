@@ -66,7 +66,7 @@ func (r *SiteRepository) ListSites(filterByTorrents string) ([]map[string]any, e
 	groupColumn := r.store.GroupColumn()
 	selectFields := fmt.Sprintf(`
 		s.id, s.nickname, s.site, s.base_url, s.special_tracker_domain, s.%s, s.speed_limit,
-		s.ratio_threshold, s.seed_speed_limit,
+		s.ratio_threshold, s.seed_speed_limit, s.can_publish,
 		CASE WHEN s.cookie IS NOT NULL AND s.cookie != '' THEN 1 ELSE 0 END as has_cookie,
 		CASE WHEN s.passkey IS NOT NULL AND s.passkey != '' THEN 1 ELSE 0 END as has_passkey,
 		s.cookie, s.passkey
@@ -129,6 +129,7 @@ func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
 		ratioThreshold = 3.0
 	}
 	seedSpeedLimit := toIntWithDefault(data["seed_speed_limit"], 5)
+	canPublish := toIntWithDefault(data["can_publish"], 1)
 
 	groupColumn := r.store.GroupColumn()
 	sql := fmt.Sprintf(`
@@ -142,7 +143,8 @@ func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
 			passkey = ?,
 			speed_limit = ?,
 			ratio_threshold = ?,
-			seed_speed_limit = ?
+			seed_speed_limit = ?,
+			can_publish = ?
 		WHERE id = ?
 	`, groupColumn)
 
@@ -158,6 +160,7 @@ func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
 		toIntWithDefault(data["speed_limit"], 0),
 		ratioThreshold,
 		seedSpeedLimit,
+		canPublish,
 		siteID,
 	)
 	if result.Error != nil {
@@ -199,7 +202,7 @@ func (r *SiteRepository) SitesStatus() ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := sqlDB.Query("SELECT nickname, site, cookie, passkey, migration FROM sites")
+	rows, err := sqlDB.Query("SELECT nickname, site, cookie, passkey, migration, can_publish FROM sites")
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +223,7 @@ func (r *SiteRepository) SitesStatus() ([]map[string]any, error) {
 			"has_passkey": toString(row["passkey"], "") != "",
 			"is_source":   migration == 1 || migration == 3,
 			"is_target":   migration == 2 || migration == 3,
+			"can_publish": toIntWithDefault(row["can_publish"], 1) != 0,
 		})
 	}
 	return result, nil

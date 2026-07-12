@@ -1,5 +1,6 @@
 import { computed, ref, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
 import axios from 'axios'
+import { ElMessageBox } from 'element-plus'
 import { ElNotification } from '@/utils/uiNotify'
 import { openSSE, type EventSourceLike } from '@/desktop/sse'
 
@@ -63,7 +64,6 @@ export type PublishFlowDeps = {
   goToSelectSiteStep: () => Promise<void>
 
   invalidStandardParams: ComputedRef<Array<StandardParamKey | 'tags'>>
-  screenshotValid: Ref<boolean>
 }
 
 export type PublishFlowApi = {
@@ -127,7 +127,6 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     showLogProgress,
     goToSelectSiteStep,
     invalidStandardParams,
-    screenshotValid,
   } = deps
 
   const stopPublishBatchSSE = () => {
@@ -701,7 +700,61 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     isLoading.value = false
   }
 
+  // 受限标签确认：若原始数据包含受限标签，弹出确认对话框
+  const confirmRestrictedTags = async (): Promise<boolean> => {
+    const originalRestricted = initialRestrictedTags.value
+    const currentTags = torrentData.value.standardized_params.tags || []
+    const stillHasRestricted = currentTags.some((tag) => isRestrictedTag(tag))
+
+    if (originalRestricted.length === 0) {
+      return true // 原本就没有受限标签，无需确认
+    }
+
+    // 构建确认消息
+    const removedTags = originalRestricted.filter(
+      (tag) => !currentTags.includes(tag),
+    )
+    if (removedTags.length > 0) {
+      const tagLabels = [...new Set(
+        removedTags.map((t) =>
+          t.includes('禁转') ? '禁转' : t.includes('限转') ? '限转' : '分集',
+        ),
+      )].join('/')
+      try {
+        await ElMessageBox.confirm(
+          `该种子原本包含「${tagLabels}」标签，你已将其移除。请确认源站已允许转种后再发布，违规转种可能导致封号。`,
+          '受限标签确认',
+          {
+            confirmButtonText: '确认发布',
+            cancelButtonText: '取消',
+            type: 'warning',
+          },
+        )
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    if (stillHasRestricted) {
+      // 受限标签仍然存在，后端会拦截
+      return true
+    }
+
+    return true
+  }
+
   const handlePublish = async () => {
+    // 受限标签确认
+    const confirmed = await confirmRestrictedTags()
+    if (!confirmed) return
+
+    // 若原始数据包含受限标签，添加跳过标记让后端放行
+    const hadRestricted = initialRestrictedTags.value.length > 0
+    if (hadRestricted) {
+      torrentData.value.skip_restricted_check = true
+    }
+
     const started = await handlePublishBatch()
     if (!started) {
       await handlePublishSerial()
@@ -715,6 +768,10 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       return
     }
 
+    // 受限标签确认
+    const confirmed = await confirmRestrictedTags()
+    if (!confirmed) return
+
     const currentTorrent = torrent.value
     if (!currentTorrent) {
       ElNotification.error({
@@ -724,6 +781,12 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
         showClose: true,
       })
       return
+    }
+
+    // 若原始数据包含受限标签，添加跳过标记让后端放行
+    const hadRestricted = initialRestrictedTags.value.length > 0
+    if (hadRestricted) {
+      torrentData.value.skip_restricted_check = true
     }
 
     isEnqueueing.value = true
@@ -937,22 +1000,18 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     )
   }
 
-  // 检查是否包含受限标签
+  // 记录初始受限标签（用于发布时确认提示，在流程创建时快照）
+  const initialRestrictedTags = ref<string[]>(
+    (torrentData.value.standardized_params.tags || []).filter((tag) => isRestrictedTag(tag)),
+  )
+
+  // 检查是否包含受限标签（基于当前标签）
   const hasRestrictedTag = computed(() => {
     const tags = torrentData.value.standardized_params.tags || []
     return tags.some((tag) => isRestrictedTag(tag))
   })
 
   const handleTagClose = (tagToRemove: string) => {
-    if (isRestrictedTag(tagToRemove)) {
-      ElNotification.warning({
-        title: '无法删除',
-        message: '禁转/限转/分集标签不允许删除',
-        duration: 2000,
-      })
-      return
-    }
-
     const index = torrentData.value.standardized_params.tags.indexOf(tagToRemove)
     if (index > -1) {
       torrentData.value.standardized_params.tags.splice(index, 1)
@@ -1001,10 +1060,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     )
     const hasUnrecognized = unrecognized && unrecognized.value !== ''
 
-    // 2. 检查禁转标签
-    if (hasRestrictedTag.value) {
-      return true
-    }
+    // 2. 检查禁转标签（仅警告，不阻止继续）
 
     // 3. 【新增】检查简介、海报、截图是否为空
     const intro = torrentData.value.intro
@@ -1071,15 +1127,11 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
       return true
     }
 
-    // 7. 检查截图链接是否有效 (加载失败的情况)
-    // 注意：这里依靠 screenshotValid 状态，但如果截图文本本身为空，在第3步就已经拦截了
-    const hasInvalidScreenshots = !screenshotValid.value
-
     if (torrentData.value.screenshot_review_status === 'pending') {
       return true
     }
 
-    if (hasUnrecognized || hasInvalidScreenshots) {
+    if (hasUnrecognized) {
       return true
     }
 
@@ -1088,12 +1140,7 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
 
   // 计算属性：获取下一步按钮的提示文本
   const nextButtonTooltipContent = computed(() => {
-    // 1. 优先级最高：检查禁转标签
-    if (hasRestrictedTag.value) {
-      return '检测到禁转/限转/分集标签，不允许继续发布'
-    }
-
-    // 2. 检查是否存在"无法识别"的内容
+    // 1. 检查是否存在"无法识别"的内容
     const unrecognized = torrentData.value.title_components.find(
       (param) => param.key === '无法识别',
     )
@@ -1171,11 +1218,6 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     const mediaInfoText = torrentData.value.mediainfo || ''
     if (!_isValidMediainfo(mediaInfoText) && !_isValidBDInfo(mediaInfoText)) {
       return 'MediaInfo 或 BDInfo 格式无效'
-    }
-
-    // 6. 检查截图链接有效性
-    if (!screenshotValid.value) {
-      return '截图链接失效，请等待重新获取或手动修复'
     }
 
     if (torrentData.value.screenshot_review_status === 'pending') {

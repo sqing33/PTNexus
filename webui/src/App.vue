@@ -41,6 +41,7 @@
         <el-menu-item index="/info">流量统计</el-menu-item>
         <el-menu-item index="/torrents">一种多站</el-menu-item>
         <el-menu-item index="/data">一站多种</el-menu-item>
+        <el-menu-item index="/scheduled-seeding">定时发种</el-menu-item>
         <el-menu-item index="/publish-logs">发种日志</el-menu-item>
         <el-menu-item index="/sites">做种检索</el-menu-item>
         <el-menu-item index="/settings">设置</el-menu-item>
@@ -156,6 +157,7 @@
         <el-menu-item index="/info">流量统计</el-menu-item>
         <el-menu-item index="/torrents">一种多站</el-menu-item>
         <el-menu-item index="/data">一站多种</el-menu-item>
+        <el-menu-item index="/scheduled-seeding">定时发种</el-menu-item>
         <el-menu-item index="/publish-logs">发种日志</el-menu-item>
         <el-menu-item index="/sites">做种检索</el-menu-item>
         <el-menu-item index="/settings">设置</el-menu-item>
@@ -259,6 +261,7 @@ const routeTitleMap: Record<string, string> = {
   '/info': '流量统计',
   '/torrents': '一种多站',
   '/data': '一站多种',
+  '/scheduled-seeding': '定时发种',
   '/publish-logs': '发种日志',
   '/sites': '做种检索',
   '/settings': '设置',

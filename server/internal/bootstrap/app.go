@@ -20,6 +20,7 @@ import (
 	"github.com/pt-nexus/server/internal/repository"
 	"github.com/pt-nexus/server/internal/service"
 	migrationflow "github.com/pt-nexus/server/internal/service/migrationflow"
+	"github.com/pt-nexus/server/internal/service/scheduledseed"
 )
 
 // App 封装 Gin 引擎实例，供主程序启动 HTTP 服务。
@@ -76,6 +77,13 @@ func NewApp() (*App, error) {
 	migrateService.InitPublishLogs(publishLogRepo)
 	migrateService.StartPublishQueueWorker()
 	torrentTransferService := service.NewTorrentTransferService(migrateRepo, cfgManager)
+
+	scheduledSeedRepo := repository.NewScheduledSeedRepository(store)
+	scheduledSeedScheduler := scheduledseed.NewScheduler(scheduledSeedRepo)
+	scheduledSeedScheduler.SetEnqueueFn(migrateService.EnqueuePublishQueueBatch)
+	scheduledSeedScheduler.SetPublishLogRepo(publishLogRepo)
+	scheduledSeedScheduler.Start()
+	scheduledSeedHandler := handler.NewScheduledSeedHandler(scheduledSeedRepo, scheduledSeedScheduler)
 
 	settingsService.SetIYUUTrigger(func() map[string]any {
 		settings := cfgManager.Get()
@@ -179,6 +187,7 @@ func NewApp() (*App, error) {
 		migrateHandler,
 		torrentTransferHandler,
 		logsHandler,
+		scheduledSeedHandler,
 	)
 
 	return &App{Engine: engine, trackerWorker: trackerService}, nil
@@ -200,6 +209,7 @@ func registerRoutes(
 	migrateHandler *migratehandler.Handler,
 	torrentTransferHandler *handler.TorrentTransferHandler,
 	logsHandler *handler.LogsHandler,
+	scheduledSeedHandler *handler.ScheduledSeedHandler,
 ) {
 	engine.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "服务正常", "service": "pt-nexus-go"})
@@ -350,6 +360,18 @@ func registerRoutes(
 		configAPI.POST("/cross_seed_review_filter", configHandler.SaveCrossSeedReviewFilter)
 		configAPI.GET("/tags", configHandler.GetTags)
 		configAPI.POST("/tags", configHandler.SaveTags)
+	}
+
+	scheduledSeedAPI := engine.Group("/api/scheduled-seed")
+	{
+		scheduledSeedAPI.GET("/tasks", scheduledSeedHandler.ListTasks)
+		scheduledSeedAPI.POST("/tasks", scheduledSeedHandler.CreateTask)
+		scheduledSeedAPI.GET("/tasks/:id", scheduledSeedHandler.GetTask)
+		scheduledSeedAPI.PUT("/tasks/:id", scheduledSeedHandler.UpdateTask)
+		scheduledSeedAPI.DELETE("/tasks/:id", scheduledSeedHandler.DeleteTask)
+		scheduledSeedAPI.POST("/tasks/:id/toggle", scheduledSeedHandler.ToggleTask)
+		scheduledSeedAPI.GET("/seeds", scheduledSeedHandler.ListAvailableSeeds)
+		scheduledSeedAPI.GET("/seed-sites", scheduledSeedHandler.GetSeedSites)
 	}
 
 	logsAPI := engine.Group("/api/logs")
