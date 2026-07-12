@@ -19,6 +19,11 @@ func NewSettingsService(cfg *config.Manager) *SettingsService {
 	return settingspkg.NewSettingsService(cfg)
 }
 
+// NewSettingsServiceWithDataDir 创建带数据目录的设置服务（支持本地背景图）。
+func NewSettingsServiceWithDataDir(cfg *config.Manager, dataDir string) *SettingsService {
+	return settingspkg.NewSettingsServiceWithDataDir(cfg, dataDir)
+}
+
 // IsInvalidSettingsError 判断错误是否属于前端提交内容不合法。
 func IsInvalidSettingsError(err error) bool {
 	return settingspkg.IsInvalidSettingsError(err)

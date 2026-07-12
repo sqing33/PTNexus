@@ -385,8 +385,9 @@ const {
   toggleWindowMaximise,
 } = useDesktopWindowControls()
 
-// 背景图片
-const backgroundUrl = ref('https://pic.pting.club/i/2025/10/07/68e4fbfe9be93.jpg')
+// 背景图片：空时用内置远程默认；配置可为本地 /backgrounds/xxx 或远程 URL
+const DEFAULT_BACKGROUND_URL = 'https://pic.pting.club/i/2025/10/07/68e4fbfe9be93.jpg'
+const backgroundUrl = ref(DEFAULT_BACKGROUND_URL)
 
 // 版本信息
 const currentVersion = ref('加载中...')
@@ -788,8 +789,9 @@ const handleRefreshLoadingChange = (event: Event) => {
 const loadBackgroundSettings = async () => {
   try {
     const response = await axios.get('/api/settings')
-    if (response.data?.ui_settings?.background_url) {
-      backgroundUrl.value = response.data.ui_settings.background_url
+    const configured = response.data?.ui_settings?.background_url
+    if (typeof configured === 'string' && configured.trim()) {
+      backgroundUrl.value = configured.trim()
       updateBackground(backgroundUrl.value)
     }
   } catch (error) {
@@ -801,11 +803,8 @@ const loadBackgroundSettings = async () => {
 const updateBackground = (url: string) => {
   const appElement = document.getElementById('app')
   if (appElement) {
-    if (url) {
-      appElement.style.backgroundImage = `url('${url}')`
-    } else {
-      appElement.style.backgroundImage = `url('${backgroundUrl.value}')`
-    }
+    const finalUrl = (url || backgroundUrl.value || DEFAULT_BACKGROUND_URL).trim()
+    appElement.style.backgroundImage = `url('${finalUrl}')`
   }
 }
 

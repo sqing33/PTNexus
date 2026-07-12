@@ -52,7 +52,10 @@ func NewApp() (*App, error) {
 	}
 
 	authService := service.NewAuthService(cfgManager)
-	settingsService := service.NewSettingsService(cfgManager)
+	settingsService := service.NewSettingsServiceWithDataDir(cfgManager, paths.DataDir)
+	if err := settingsService.EnsureDefaultBackgrounds(); err != nil {
+		logx.Warnf("背景图", "初始化默认背景失败 err=%v", err)
+	}
 	statsRepo := repository.NewStatsRepository(store)
 	statsService := service.NewStatsService(statsRepo, cfgManager)
 	trackerService := service.NewTrackerService(statsRepo, cfgManager)
@@ -204,6 +207,8 @@ func registerRoutes(
 	engine.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "服务正常", "service": "pt-nexus-go"})
 	})
+	// 背景图静态访问放在 /api 外，避免 CSS background-image 请求缺少 JWT
+	engine.GET("/backgrounds/:name", settingsHandler.ServeBackgroundImage)
 
 	authAPI := engine.Group("/api/auth")
 	{
@@ -224,6 +229,10 @@ func registerRoutes(
 		api.POST("/cookiecloud/sync", settingsHandler.CookieCloudSync)
 		api.POST("/test_connection", settingsHandler.TestConnection)
 		api.POST("/upload_image", settingsHandler.UploadImage)
+		api.GET("/backgrounds", settingsHandler.ListBackgroundImages)
+		api.POST("/backgrounds/upload", settingsHandler.UploadBackgroundImage)
+		api.POST("/backgrounds/download", settingsHandler.DownloadBackgroundImage)
+		api.DELETE("/backgrounds/:name", settingsHandler.DeleteBackgroundImage)
 		api.GET("/settings", settingsHandler.GetSettings)
 		api.POST("/settings", settingsHandler.UpdateSettings)
 		api.GET("/downloader_info", settingsHandler.DownloaderInfo)

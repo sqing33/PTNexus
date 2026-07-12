@@ -19,6 +19,11 @@ export default defineConfig({
         target: 'http://localhost:5274',
         changeOrigin: true,
       },
+      // 本地背景图文件访问（CSS background-image，不带 JWT）
+      '/backgrounds': {
+        target: 'http://localhost:5274',
+        changeOrigin: true,
+      },
       '/update': {
         target: 'http://localhost:5274',
         changeOrigin: true,

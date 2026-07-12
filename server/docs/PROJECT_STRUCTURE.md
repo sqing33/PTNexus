@@ -131,6 +131,7 @@
 | `internal/http/handler/settings/downloader_connection.go` | 下载器连通性、版本、流量信息 |
 | `internal/http/handler/settings/cross_seed_migration.go` | Cross-seed 设置与迁移历史 |
 | `internal/http/handler/settings/ui_upload_iyuu.go` | UI 设置、上传、IYUU 设置 |
+| `internal/http/handler/settings/background_images.go` | 本地背景图列表/上传/下载 URL/删除/静态访问 |
 
 ---
 
@@ -456,7 +457,9 @@
 |---|---|
 | `internal/service/crossseed` | Cross-seed 查询与删除等 |
 | `internal/service/localquery` | 本地路径扫描、缓存、重复分析 |
-| `internal/service/settings` | 设置读写、UI 设置、迁移配置、下载器信息 |
+| `internal/service/settings` | 设置读写、UI 设置、本地背景图、迁移配置、下载器信息 |
+
+本地背景图落盘目录：`{DataDir}/backgrounds/`；内置默认图：`internal/service/settings/default_backgrounds/`（embed，空目录时种子写入）。
 | `internal/service/stats` | 图表、速度、站点/分组统计 |
 | `internal/service/torrentdata` | 种子数据检索、刷新、IYUU 查询任务 |
 | `internal/service/torrenttransfer` | 转移准备、执行、暂停、导出、补种 |

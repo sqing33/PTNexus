@@ -14,6 +14,7 @@ const (
 
 type SettingsService struct {
 	cfg      *config.Manager
+	dataDir  string
 	logMu    sync.RWMutex
 	iyuuLogs []string
 
@@ -22,6 +23,16 @@ type SettingsService struct {
 
 func NewSettingsService(cfg *config.Manager) *SettingsService {
 	return &SettingsService{cfg: cfg, iyuuLogs: make([]string, 0)}
+}
+
+// NewSettingsServiceWithDataDir 创建设置服务并绑定数据目录（本地背景图等落盘依赖）。
+// 参数/返回：cfg 配置管理器；dataDir 运行时数据目录；返回服务实例。
+// 失败场景：无。
+// 副作用：确保 backgrounds 目录存在。
+func NewSettingsServiceWithDataDir(cfg *config.Manager, dataDir string) *SettingsService {
+	service := NewSettingsService(cfg)
+	service.SetDataDir(dataDir)
+	return service
 }
 
 func (s *SettingsService) SetIYUUTrigger(trigger func() map[string]any) {

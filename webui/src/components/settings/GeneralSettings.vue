@@ -104,18 +104,23 @@
 
         <div class="card-content">
           <el-form :model="backgroundForm" label-position="top" class="settings-form">
-            <el-form-item label="背景图片URL" class="form-item">
-              <el-input
-                v-model="backgroundForm.background_url"
-                placeholder="请输入背景图片的URL地址"
-                clearable
-              >
-                <template #prefix>
-                  <el-icon>
-                    <Picture />
-                  </el-icon>
-                </template>
-              </el-input>
+            <el-form-item label="当前背景" class="form-item">
+              <div class="background-current-row">
+                <el-input
+                  v-model="backgroundForm.background_url"
+                  placeholder="本地路径如 /backgrounds/xxx.jpg，也可填在线 URL"
+                  clearable
+                >
+                  <template #prefix>
+                    <el-icon>
+                      <Picture />
+                    </el-icon>
+                  </template>
+                </el-input>
+                <el-button type="primary" plain @click="openBackgroundPicker">
+                  选择本地图片
+                </el-button>
+              </div>
             </el-form-item>
 
             <el-form-item label="内容过滤" class="form-item">
@@ -147,11 +152,72 @@
               <el-icon size="12">
                 <InfoFilled />
               </el-icon>
-              设置应用程序的背景图片，支持在线图片URL
+              优先使用本地背景图；可上传图片，或把当前 URL 下载到本地后选择
             </el-text>
           </el-form>
         </div>
       </div>
+
+      <el-dialog
+        v-model="backgroundPickerVisible"
+        title="本地背景图"
+        width="720px"
+        destroy-on-close
+        class="background-picker-dialog"
+      >
+        <div class="background-picker-toolbar">
+          <el-button type="primary" :loading="uploadingBackground" @click="triggerBackgroundUpload">
+            上传图片
+          </el-button>
+          <el-button
+            type="success"
+            plain
+            :loading="downloadingBackground"
+            :disabled="!backgroundForm.background_url.trim()"
+            @click="downloadBackgroundFromUrl"
+          >
+            下载当前 URL 到本地
+          </el-button>
+          <el-button :loading="loadingBackgrounds" @click="loadBackgroundImages">刷新</el-button>
+          <input
+            ref="backgroundFileInputRef"
+            type="file"
+            accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+            style="display: none"
+            @change="onBackgroundFileSelected"
+          />
+        </div>
+
+        <div v-loading="loadingBackgrounds" class="background-picker-grid">
+          <div
+            v-for="item in backgroundImages"
+            :key="item.name"
+            class="background-picker-item"
+            :class="{ active: backgroundForm.background_url === item.url }"
+            @click="selectBackgroundImage(item)"
+          >
+            <div
+              class="background-picker-thumb"
+              :style="{ backgroundImage: `url('${item.url}')` }"
+            ></div>
+            <div class="background-picker-meta">
+              <span class="background-picker-name" :title="item.name">{{ item.name }}</span>
+              <el-button
+                link
+                type="danger"
+                size="small"
+                @click.stop="deleteBackgroundImage(item.name)"
+              >
+                删除
+              </el-button>
+            </div>
+          </div>
+          <el-empty
+            v-if="!loadingBackgrounds && backgroundImages.length === 0"
+            description="还没有本地背景图，请先上传或下载"
+          />
+        </div>
+      </el-dialog>
 
       <div
         class="settings-card glass-card glass-rounded glass-transparent-header glass-transparent-body"
@@ -1071,6 +1137,18 @@ const savingBackground = ref(false)
 const backgroundForm = reactive({
   background_url: '',
 })
+const backgroundPickerVisible = ref(false)
+const loadingBackgrounds = ref(false)
+const uploadingBackground = ref(false)
+const downloadingBackground = ref(false)
+const backgroundFileInputRef = ref<HTMLInputElement | null>(null)
+type BackgroundImageItem = {
+  name: string
+  url: string
+  size: number
+  updated_at: number
+}
+const backgroundImages = ref<BackgroundImageItem[]>([])
 const savingNetworkProxy = ref(false)
 const networkProxyForm = reactive<{
   proxy_url: string
@@ -1583,6 +1661,103 @@ const saveBackgroundSettings = async () => {
   }
 }
 
+const openBackgroundPicker = async () => {
+  backgroundPickerVisible.value = true
+  await loadBackgroundImages()
+}
+
+const loadBackgroundImages = async () => {
+  loadingBackgrounds.value = true
+  try {
+    const res = await axios.get('/api/backgrounds')
+    backgroundImages.value = Array.isArray(res.data?.items) ? res.data.items : []
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error, '加载本地背景图失败'))
+  } finally {
+    loadingBackgrounds.value = false
+  }
+}
+
+const triggerBackgroundUpload = () => {
+  backgroundFileInputRef.value?.click()
+}
+
+const onBackgroundFileSelected = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  uploadingBackground.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await axios.post('/api/backgrounds/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    if (!res.data?.success || !res.data?.item?.url) {
+      ElMessage.error(res.data?.message || '上传失败')
+      return
+    }
+    ElMessage.success('上传成功')
+    await loadBackgroundImages()
+    selectBackgroundImage(res.data.item as BackgroundImageItem)
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error, '上传失败'))
+  } finally {
+    uploadingBackground.value = false
+  }
+}
+
+const downloadBackgroundFromUrl = async () => {
+  const url = backgroundForm.background_url.trim()
+  if (!url) {
+    ElMessage.warning('请先填写图片 URL')
+    return
+  }
+  if (url.startsWith('/backgrounds/') || url.startsWith('/api/backgrounds/')) {
+    ElMessage.info('当前已是本地背景图')
+    return
+  }
+  downloadingBackground.value = true
+  try {
+    const res = await axios.post('/api/backgrounds/download', { url })
+    if (!res.data?.success || !res.data?.item?.url) {
+      ElMessage.error(res.data?.message || '下载失败')
+      return
+    }
+    ElMessage.success('已下载到本地')
+    await loadBackgroundImages()
+    selectBackgroundImage(res.data.item as BackgroundImageItem)
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error, '下载失败'))
+  } finally {
+    downloadingBackground.value = false
+  }
+}
+
+const selectBackgroundImage = (item: BackgroundImageItem) => {
+  backgroundForm.background_url = item.url
+  window.dispatchEvent(
+    new CustomEvent('background-updated', {
+      detail: { backgroundUrl: item.url },
+    }),
+  )
+}
+
+const deleteBackgroundImage = async (name: string) => {
+  try {
+    await axios.delete(`/api/backgrounds/${encodeURIComponent(name)}`)
+    if (backgroundForm.background_url === `/backgrounds/${name}`) {
+      backgroundForm.background_url = ''
+    }
+    ElMessage.success('已删除')
+    await loadBackgroundImages()
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error, '删除失败'))
+  }
+}
+
 const saveNetworkProxySettings = async () => {
   if (savingNetworkProxy.value) return
 
@@ -1876,6 +2051,75 @@ onMounted(() => {
   gap: 4px;
   line-height: 1.4;
   margin-top: auto;
+}
+
+.background-current-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.background-current-row .el-input {
+  flex: 1;
+}
+
+.background-picker-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.background-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  min-height: 180px;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.background-picker-item {
+  border: 1px solid var(--el-border-color);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.background-picker-item:hover,
+.background-picker-item.active {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 1px var(--el-color-primary);
+}
+
+.background-picker-thumb {
+  width: 100%;
+  height: 96px;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.background-picker-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.background-picker-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .placeholder-content {
