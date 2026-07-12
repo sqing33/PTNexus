@@ -1,10 +1,11 @@
 root = "."
-tmp_dir = "/tmp/ptnexus-air"
+# 跨平台：使用 server 目录下的 tmp/，避免 Linux /tmp 在 Windows 不存在
+tmp_dir = "tmp/ptnexus-air"
 
 [build]
-cmd = "go build -o /tmp/ptnexus-server.air ./cmd/server"
-bin = "/tmp/ptnexus-server.air"
-full_bin = "/tmp/ptnexus-server.air"
+cmd = "go build -o tmp/ptnexus-server.air.exe ./cmd/server"
+bin = "tmp/ptnexus-server.air.exe"
+full_bin = "tmp/ptnexus-server.air.exe"
 include_ext = ["go", "yaml", "yml", "json"]
 exclude_dir = ["data", "docs", "tmp", ".git", "bdinfo"]
 exclude_regex = ["_test\\.go"]
