@@ -430,11 +430,16 @@ const emit = defineEmits<{
 
 const getErrorMessage = (error: unknown): string => {
   if (axios.isAxiosError(error)) {
-    const data = error.response?.data as { message?: string } | undefined
-    return data?.message || error.message
+    const data = error.response?.data as { message?: string; error?: string } | undefined
+    if (error.code === 'ECONNABORTED') return '请求超时，请稍后重试'
+    return data?.message || data?.error || error.message
   }
   return error instanceof Error ? error.message : String(error)
 }
+
+const INITIAL_CONFIG_TIMEOUT_MS = 10_000
+const AUXILIARY_DATA_TIMEOUT_MS = 30_000
+const LIST_DATA_TIMEOUT_MS = 60_000
 
 interface PathNode {
   path: string
@@ -528,6 +533,7 @@ const total = ref<number>(0)
 
 const nameSearch = ref<string>('')
 const searchFetchTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const filtersLoaded = ref(false)
 
 const filterDialogVisible = ref<boolean>(false)
 const activeFilters = ref({
@@ -639,7 +645,7 @@ const siteStatuses = ref<SiteStatus[]>([])
 
 const loadSiteStatuses = async () => {
   try {
-    const response = await axios.get('/api/sites/status')
+    const response = await axios.get('/api/sites/status', { timeout: AUXILIARY_DATA_TIMEOUT_MS })
     siteStatuses.value = response.data
   } catch (error: unknown) {
     console.error('加载站点状态失败:', error)
@@ -704,7 +710,9 @@ const fetchData = async () => {
       include_metadata: 'false',
     })
 
-    const response = await axios.get(`/api/data?${params.toString()}`)
+    const response = await axios.get(`/api/data?${params.toString()}`, {
+      timeout: LIST_DATA_TIMEOUT_MS,
+    })
     const result = response.data
 
     if (!result.error) {
@@ -749,11 +757,13 @@ const fetchData = async () => {
 
 const fetchDownloadersList = async () => {
   try {
-    const response = await axios.get('/api/all_downloaders')
+    const response = await axios.get('/api/all_downloaders', {
+      timeout: AUXILIARY_DATA_TIMEOUT_MS,
+    })
     const allDownloaders: Downloader[] = Array.isArray(response.data) ? (response.data as Downloader[]) : []
     downloadersList.value = allDownloaders.filter((d) => d.enabled)
   } catch (caught: unknown) {
-    error.value = getErrorMessage(caught)
+    console.error('加载下载器列表失败:', caught)
   }
 }
 
@@ -770,7 +780,9 @@ const fetchAllPaths = async () => {
       source_availability_filters: JSON.stringify([]), // 清空源站点筛选
     })
 
-    const response = await axios.get(`/api/data?${params.toString()}`)
+    const response = await axios.get(`/api/data?${params.toString()}`, {
+      timeout: AUXILIARY_DATA_TIMEOUT_MS,
+    })
     const result = response.data
 
     if (result.unique_paths) {
@@ -785,12 +797,16 @@ const fetchAllPaths = async () => {
   }
 }
 
+const loadPanelData = async () => {
+  // 筛选元数据可能较慢，必须与主列表并发加载，避免表格一直停留在 loading 状态。
+  await Promise.all([fetchDownloadersList(), loadSiteStatuses(), fetchAllPaths(), fetchData()])
+}
+
 const refreshList = async (options: RefreshListOptions = {}) => {
   if (options.refreshBackend) {
     await axios.post('/api/refresh_data')
   }
-  await Promise.all([fetchDownloadersList(), loadSiteStatuses(), fetchAllPaths()])
-  await fetchData()
+  await loadPanelData()
 }
 
 const handleRefreshListClick = async () => {
@@ -870,7 +886,9 @@ const saveFiltersToConfig = async () => {
 
 const loadFiltersFromConfig = async () => {
   try {
-    const response = await axios.get('/api/config/batch_fetch_filters')
+    const response = await axios.get('/api/config/batch_fetch_filters', {
+      timeout: INITIAL_CONFIG_TIMEOUT_MS,
+    })
     const result = response.data
     if (result.success && result.data) {
       const defaultFilters = {
@@ -887,6 +905,9 @@ const loadFiltersFromConfig = async () => {
     }
   } catch (error: unknown) {
     console.error('加载筛选条件失败:', error)
+  } finally {
+    await nextTick()
+    filtersLoaded.value = true
   }
 }
 
@@ -1229,11 +1250,8 @@ const shortenPath = (path: string, maxLength: number = 50) => {
 }
 
 onMounted(async () => {
-  await fetchDownloadersList()
   await loadFiltersFromConfig()
-  await loadSiteStatuses() // 加载站点状态
-  await fetchAllPaths() // 获取所有路径
-  fetchData()
+  await loadPanelData()
 })
 
 onUnmounted(() => {
@@ -1249,6 +1267,7 @@ defineExpose({
 })
 
 watch(nameSearch, () => {
+  if (!filtersLoaded.value) return
   currentPage.value = 1
   if (searchFetchTimer.value) {
     clearTimeout(searchFetchTimer.value)
