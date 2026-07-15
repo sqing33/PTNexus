@@ -1557,6 +1557,14 @@
     margin: 3px 0;
   }
 
+  .required-field-empty .el-form-item__label {
+    color: var(--el-color-danger);
+    font-weight: 600;
+  }
+  .required-field-empty .el-input__wrapper {
+    box-shadow: 0 0 0 1px var(--el-color-danger) inset !important;
+  }
+
   /* --- 类型和媒介未选择时的红色提示样式 --- */
   .el-select.is-empty .el-select__wrapper {
     box-shadow: 0 0 0 1px var(--el-color-danger) inset !important;

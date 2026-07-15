@@ -7,6 +7,7 @@ type CrossSeedQueryParams struct {
 	PageSize           int
 	Search             string
 	PathFilters        []string
+	DownloaderFilters  []string
 	IsDeleted          string
 	ExcludeTargetSites string
 	ReviewStatus       string

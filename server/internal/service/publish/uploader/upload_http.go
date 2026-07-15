@@ -139,7 +139,7 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 			detailLines = append(detailLines, fmt.Sprintf("尝试结论: %v", err))
 			return "", isExisting, buildDetail(), err
 		}
-		if strings.Contains(bodyText, "已存在") || strings.Contains(strings.ToLower(bodyText), "already exists") {
+		if strings.Contains(bodyText, "已存在") || strings.Contains(bodyText, "已经上传") || strings.Contains(strings.ToLower(bodyText), "already exists") {
 			if publishURL := ExtractPublishURLFromText(baseURL, bodyText); publishURL != "" && isValidPublishedDetailURL(publishURL) {
 				detailLines = append(detailLines, fmt.Sprintf("解析详情页: %s", publishURL))
 				return publishURL, true, buildDetail(), nil
@@ -211,6 +211,7 @@ func looksLikeExistingTorrent(text string) bool {
 	return strings.Contains(trimmed, "种子已存在") ||
 		strings.Contains(trimmed, "该种子已存在") ||
 		strings.Contains(trimmed, "已存在") ||
+		strings.Contains(trimmed, "已经上传") ||
 		strings.Contains(lower, "already exists")
 }
 
@@ -341,7 +342,8 @@ func isValidPublishedDetailURL(raw string) bool {
 	return strings.Contains(trimmed, "details.php?") ||
 		strings.Contains(trimmed, "offers.php?") ||
 		strings.Contains(trimmed, "/torrent/") ||
-		strings.Contains(trimmed, "/torrent/info/")
+		strings.Contains(trimmed, "/torrent/info/") ||
+		isTTGDownloadURL(trimmed)
 }
 
 func extractUploadHTMLTitle(text string) string {

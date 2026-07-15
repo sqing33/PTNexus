@@ -55,6 +55,14 @@
         筛选
       </el-button>
 
+      <!-- 列显示/隐藏 -->
+      <ColumnToggle
+        v-model="visibleColumns"
+        :columns="crossSeedColumns"
+        :defaults="defaultVisibleColumns"
+        style="margin-right: 15px"
+      />
+
       <!-- 检查状态筛选单选组 -->
       <el-radio-group
         v-model="reviewStatusFilter"
@@ -82,7 +90,7 @@
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[20, 50, 100]"
+          :page-sizes="[5, 10, 20, 50, 100]"
           :total="total"
           layout="total, sizes, prev, pager, next"
           @size-change="handleSizeChange"
@@ -128,6 +136,19 @@
             <el-radio :label="'0'">未删除</el-radio>
             <el-radio :label="'1'">已删除</el-radio>
           </el-radio-group>
+
+          <el-divider content-position="left">下载器</el-divider>
+          <div style="margin-bottom: 10px">
+            <div v-if="tempFilters.downloaderIds.length > 0" style="display: flex; align-items: center">
+              <el-tag type="info" size="default" effect="plain">下载器: {{ tempFilters.downloaderIds.length }}</el-tag>
+              <el-button type="danger" link style="padding: 0; margin-left: 5px" @click="clearDownloaderFilter">清除</el-button>
+            </div>
+          </div>
+          <el-checkbox-group v-model="tempFilters.downloaderIds">
+            <el-checkbox v-for="downloader in downloadersList" :key="downloader.id" :label="downloader.id">
+              {{ downloader.name }}
+            </el-checkbox>
+          </el-checkbox-group>
 
           <el-divider content-position="left">
             <span class="target-site-filter-title">
@@ -194,6 +215,7 @@
           :selectable="checkSelectable"
         ></el-table-column>
         <el-table-column
+          v-if="isColumnVisible('torrent_id')"
           prop="torrent_id"
           label="种子ID"
           align="center"
@@ -201,24 +223,52 @@
           show-overflow-tooltip
         ></el-table-column>
 
-        <el-table-column prop="nickname" label="站点名称" width="100" align="center">
+        <el-table-column v-if="isColumnVisible('nickname')" prop="nickname" label="站点名称" width="100" align="center">
           <template #default="scope">
             <div class="mapped-cell">{{ scope.row.nickname }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="title" label="标题" align="center">
+        <el-table-column v-if="isColumnVisible('downloader_id')" prop="downloader_id" label="下载器" width="100" align="center">
+          <template #default="scope">
+            <div class="mapped-cell">{{ getDownloaderName(scope.row.downloader_id) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="isColumnVisible('size')" prop="size" label="大小" width="100" align="center" sortable>
+          <template #default="scope">
+            <div class="mapped-cell">{{ formatBytes(scope.row.size) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="isColumnVisible('seeders')" prop="seed_site_count" label="做种站点数" width="100" align="center" sortable>
+          <template #default="scope">
+            <div class="mapped-cell">
+              <el-tag
+                :type="(scope.row.seed_site_count || 0) > 0 ? 'warning' : 'info'"
+                size="small"
+                class="clickable-tag"
+                @click.stop="openSeedSitesDialog(scope.row)"
+              >
+                {{ scope.row.seed_site_count || 0 }}
+              </el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="isColumnVisible('title')" prop="title" label="标题" align="center">
           <template #default="scope">
             <div class="title-cell">
               <div class="subtitle-line" :title="scope.row.subtitle">
                 {{ scope.row.subtitle || '' }}
               </div>
-              <div class="main-title-line" :title="scope.row.title">
+              <div
+                class="main-title-line clickable-title"
+                :title="scope.row.title"
+                @click.stop="openSeedSitesDialog(scope.row)"
+              >
                 {{ scope.row.title || '' }}
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="type" label="类型" width="100" align="center">
+        <el-table-column v-if="isColumnVisible('type')" prop="type" label="类型" width="100" align="center">
           <template #default="scope">
             <div
               class="mapped-cell"
@@ -231,7 +281,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="medium" label="媒介" width="100" align="center">
+        <el-table-column v-if="isColumnVisible('medium')" prop="medium" label="媒介" width="100" align="center">
           <template #default="scope">
             <div
               class="mapped-cell"
@@ -244,7 +294,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="video_codec" label="视频编码" width="120" align="center">
+        <el-table-column v-if="isColumnVisible('video_codec')" prop="video_codec" label="视频编码" width="120" align="center">
           <template #default="scope">
             <div
               class="mapped-cell"
@@ -258,7 +308,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="audio_codec" label="音频编码" width="90" align="center">
+        <el-table-column v-if="isColumnVisible('audio_codec')" prop="audio_codec" label="音频编码" width="90" align="center">
           <template #default="scope">
             <div
               class="mapped-cell"
@@ -272,7 +322,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="resolution" label="分辨率" width="90" align="center">
+        <el-table-column v-if="isColumnVisible('resolution')" prop="resolution" label="分辨率" width="90" align="center">
           <template #default="scope">
             <div
               class="mapped-cell"
@@ -286,7 +336,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="team" label="制作组" width="120" align="center">
+        <el-table-column v-if="isColumnVisible('team')" prop="team" label="制作组" width="120" align="center">
           <template #default="scope">
             <div
               class="mapped-cell"
@@ -299,7 +349,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="source" label="产地" width="100" align="center">
+        <el-table-column v-if="isColumnVisible('source')" prop="source" label="产地" width="100" align="center">
           <template #default="scope">
             <div
               class="mapped-cell"
@@ -313,6 +363,7 @@
           </template>
         </el-table-column>
         <el-table-column
+          v-if="isColumnVisible('tags')"
           prop="tags"
           label="标签"
           align="center"
@@ -335,14 +386,50 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="unrecognized" label="无法识别" width="120" align="center">
+        <el-table-column v-if="isColumnVisible('unrecognized')" prop="unrecognized" label="无法识别" width="120" align="center">
           <template #default="scope">
             <div class="mapped-cell" :class="{ 'invalid-value': scope.row.unrecognized }">
               {{ scope.row.unrecognized || '' }}
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="updated_at" label="更新时间" width="140" align="center" sortable>
+        <el-table-column v-if="isColumnVisible('publish_at')" prop="publish_at" label="可发种时间" width="170" align="center" sortable>
+          <template #default="scope">
+            <div v-if="editingPublishAtId === scope.row.id" class="publish-at-edit" @click.stop>
+              <el-input-number
+                v-model="editingPublishAtHours"
+                :min="1"
+                :step="1"
+                size="small"
+                style="width: 90px"
+                controls-position="right"
+                placeholder="小时"
+                @keyup.enter="confirmPublishAt(scope.row)"
+                ref="publishAtInputRef"
+              />
+              <span style="font-size: 12px; white-space: nowrap; margin-left: 2px; color: #909399">小时</span>
+              <el-button
+                type="danger"
+                size="small"
+                link
+                style="margin-left: 4px"
+                @click.stop="clearPublishAt(scope.row)"
+                title="清除"
+              >
+                ✕
+              </el-button>
+            </div>
+            <div
+              v-else
+              class="mapped-cell datetime-cell clickable-cell"
+              @click.stop="startPublishAtEdit(scope.row)"
+              :title="'点击设置可发种时间(小时)'"
+            >
+              {{ scope.row.publish_at ? formatDateTimeFull(scope.row.publish_at) : '未设置' }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="isColumnVisible('updated_at')" prop="updated_at" label="更新时间" width="140" align="center" sortable>
           <template #default="scope">
             <div class="mapped-cell datetime-cell">
               {{
@@ -409,6 +496,32 @@
         </div>
       </el-card>
     </div>
+
+    <!-- 做种站点弹窗 -->
+    <div v-if="seedSitesDialogVisible" class="modal-overlay" @click.self="closeSeedSitesDialog">
+      <el-card class="seed-sites-card" shadow="always">
+        <template #header>
+          <div class="modal-header">
+            <span class="seed-sites-title">{{ seedSitesTorrentName }}</span>
+            <el-button type="danger" circle @click="closeSeedSitesDialog" plain>X</el-button>
+          </div>
+        </template>
+        <div v-loading="seedSitesLoading" class="seed-sites-body">
+          <div v-if="seedSitesData.length === 0 && !seedSitesLoading" class="seed-sites-empty">
+            暂无做种站点信息
+          </div>
+          <div v-else class="seed-sites-grid">
+            <div
+              v-for="site in seedSitesData"
+              :key="site.site_name"
+              class="seed-site-card"
+            >
+              <div class="seed-site-name">{{ site.nickname || site.site_name }}</div>
+            </div>
+          </div>
+        </div>
+      </el-card>
+    </div>
   </div>
 </template>
 
@@ -421,8 +534,12 @@ import type { ElTree } from 'element-plus'
 import axios from 'axios'
 import CrossSeedPanel from '../components/CrossSeedPanel.vue'
 import BatchFetchPanel from '../components/BatchFetchPanel.vue'
+import ColumnToggle from '../components/ColumnToggle.vue'
+import type { ColumnDef } from '../components/ColumnToggle.vue'
 import BDInfoRecordsDialog from '../components/cross-seed-data/BDInfoRecordsDialog.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
+import { useTorrentsViewState } from '@/stores/torrentsViewState'
+import type { Downloader } from '@/types'
 import '@/assets/styles/glass-morphism.scss'
 import { ElMessage } from '@/utils/uiNotify'
 
@@ -466,7 +583,10 @@ interface SeedParameter {
   torrent_id: string
   site_name: string
   nickname: string
+  name: string
   downloader_id?: string
+  size: number
+  seeders: number
   title: string
   subtitle: string
   imdb_link: string
@@ -490,6 +610,7 @@ interface SeedParameter {
   updated_at: string
   is_deleted: boolean
   is_reviewed: boolean // 新增：是否已检查
+  publish_at: string | null // 可发种时间
 }
 
 const isAnimationRelatedType = (typeValue: string | undefined | null) => {
@@ -609,6 +730,11 @@ const currentFilterText = computed(() => {
     filterTexts.push(`不存在于: ${filters.excludeTargetSites}`)
   }
 
+  // 处理下载器筛选
+  if (filters.downloaderIds && filters.downloaderIds.length > 0) {
+    filterTexts.push(`下载器: ${filters.downloaderIds.length}`)
+  }
+
   return filterTexts.join(', ')
 })
 
@@ -618,7 +744,8 @@ const hasActiveFilters = computed(() => {
   return (
     (filters.paths && filters.paths.length > 0) ||
     filters.isDeleted !== '' ||
-    (filters.excludeTargetSites && filters.excludeTargetSites.trim() !== '')
+    (filters.excludeTargetSites && filters.excludeTargetSites.trim() !== '') ||
+    (filters.downloaderIds && filters.downloaderIds.length > 0)
   )
 })
 
@@ -628,9 +755,53 @@ const activeFilters = ref({
   paths: [] as string[], // 修改：改为数组类型
   isDeleted: '',
   excludeTargetSites: '', // 新增：排除目标站点筛选
+  downloaderIds: [] as string[], // 下载器筛选
 })
-const tempFilters = ref({ ...activeFilters.value })
+const tempFilters = ref({ ...activeFilters.value, downloaderIds: [...(activeFilters.value.downloaderIds || [])] })
 const targetSitesList = ref<string[]>([]) // 新增：目标站点列表
+
+// 下载器列表
+const torrentsViewState = useTorrentsViewState()
+const downloadersList = ref<Downloader[]>([])
+const allDownloadersList = ref<Downloader[]>([])
+
+const fetchDownloadersList = async (forceRefresh = false) => {
+  const result = await torrentsViewState.fetchDownloadersList(forceRefresh)
+  downloadersList.value = result.downloadersList
+  allDownloadersList.value = result.allDownloadersList
+}
+
+// 根据下载器ID获取下载器名称
+const getDownloaderName = (downloaderId: string | undefined) => {
+  if (!downloaderId) return ''
+  const downloader = allDownloadersList.value.find((d) => d.id === downloaderId)
+  return downloader?.name || downloaderId
+}
+
+// 列定义与可见性
+const crossSeedColumns: ColumnDef[] = [
+  { prop: 'torrent_id', label: '种子ID' },
+  { prop: 'nickname', label: '站点名称' },
+  { prop: 'downloader_id', label: '下载器' },
+  { prop: 'size', label: '大小' },
+  { prop: 'seeders', label: '做种数' },
+  { prop: 'title', label: '标题' },
+  { prop: 'type', label: '类型' },
+  { prop: 'medium', label: '媒介' },
+  { prop: 'video_codec', label: '视频编码' },
+  { prop: 'audio_codec', label: '音频编码' },
+  { prop: 'resolution', label: '分辨率' },
+  { prop: 'team', label: '制作组' },
+  { prop: 'source', label: '产地' },
+  { prop: 'tags', label: '标签' },
+  { prop: 'unrecognized', label: '无法识别' },
+  { prop: 'publish_at', label: '可发种时间' },
+  { prop: 'updated_at', label: '更新时间' },
+]
+
+const defaultVisibleColumns = crossSeedColumns.map((c) => c.prop)
+const visibleColumns = ref<string[]>([...defaultVisibleColumns])
+const isColumnVisible = (prop: string) => visibleColumns.value.includes(prop)
 
 // 计算属性：选中的目标站点（单选）
 const selectedTargetSite = computed({
@@ -645,6 +816,11 @@ const selectedTargetSite = computed({
 // 清除选中的目标站点
 const clearSelectedTargetSite = () => {
   tempFilters.value.excludeTargetSites = ''
+}
+
+// 清除下载器筛选
+const clearDownloaderFilter = () => {
+  tempFilters.value.downloaderIds = []
 }
 
 // 辅助函数：获取映射后的中文值
@@ -790,6 +966,167 @@ const formatDateTime = (dateString: string) => {
   }
 }
 
+// 格式化日期时间为单行完整格式（用于可发种时间列）
+const formatDateTimeFull = (dateString: string) => {
+  if (!dateString) return ''
+  try {
+    const date = new Date(dateString)
+    if (isNaN(date.getTime())) return dateString
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  } catch {
+    return dateString
+  }
+}
+
+// 可发种时间编辑状态（小时数输入）
+const editingPublishAtId = ref<number | null>(null)
+const editingPublishAtHours = ref<number>(24)
+const publishAtInputRef = ref<InstanceType<any> | null>(null)
+
+const startPublishAtEdit = (row: SeedParameter) => {
+  editingPublishAtId.value = row.id
+  editingPublishAtHours.value = 24
+  nextTick(() => {
+    if (publishAtInputRef.value) {
+      const inner = publishAtInputRef.value.$el?.querySelector('input')
+      inner?.focus()
+      inner?.select()
+    }
+  })
+}
+
+const cancelPublishAtEdit = () => {
+  editingPublishAtId.value = null
+  editingPublishAtHours.value = 24
+}
+
+const computePublishAtFromHours = (hours: number): string => {
+  const targetDate = new Date(Date.now() + hours * 60 * 60 * 1000)
+  const year = targetDate.getFullYear()
+  const month = String(targetDate.getMonth() + 1).padStart(2, '0')
+  const day = String(targetDate.getDate()).padStart(2, '0')
+  const h = String(targetDate.getHours()).padStart(2, '0')
+  const m = String(targetDate.getMinutes()).padStart(2, '0')
+  const s = String(targetDate.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day}T${h}:${m}:${s}`
+}
+
+const confirmPublishAt = async (row: SeedParameter) => {
+  const hours = editingPublishAtHours.value
+  if (!hours || hours <= 0) {
+    ElMessage.warning('请输入有效的小时数')
+    return
+  }
+  const publishAt = computePublishAtFromHours(hours)
+  try {
+    const response = await axios.post('/api/cross-seed-data/update_publish_at', {
+      torrent_id: row.torrent_id,
+      site_name: row.site_name,
+      publish_at: publishAt,
+    })
+    const result = response.data
+    if (result.success) {
+      row.publish_at = publishAt
+      ElMessage.success(`可发种时间已设置为 ${hours} 小时后`)
+    } else {
+      ElMessage.error(result.error || '更新失败')
+    }
+  } catch (e: unknown) {
+    const message = axios.isAxiosError(e)
+      ? ((e.response?.data as { error?: string } | undefined)?.error || e.message)
+      : e instanceof Error
+        ? e.message
+        : '网络错误'
+    ElMessage.error(message)
+  } finally {
+    editingPublishAtId.value = null
+    editingPublishAtHours.value = 24
+  }
+}
+
+const handlePublishAtChange = confirmPublishAt
+
+const clearPublishAt = async (row: SeedParameter) => {
+  try {
+    const response = await axios.post('/api/cross-seed-data/update_publish_at', {
+      torrent_id: row.torrent_id,
+      site_name: row.site_name,
+      publish_at: null,
+    })
+    const result = response.data
+    if (result.success) {
+      row.publish_at = null
+      ElMessage.success('已清除可发种时间')
+    } else {
+      ElMessage.error(result.error || '清除失败')
+    }
+  } catch (e: unknown) {
+    const message = axios.isAxiosError(e)
+      ? ((e.response?.data as { error?: string } | undefined)?.error || e.message)
+      : e instanceof Error
+        ? e.message
+        : '网络错误'
+    ElMessage.error(message)
+  } finally {
+    editingPublishAtId.value = null
+    editingPublishAtHours.value = 24
+  }
+}
+
+// 格式化文件大小
+const formatBytes = (bytes: number | null | undefined): string => {
+  if (bytes == null || bytes <= 0) return ''
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i]}`
+}
+
+// 做种站点弹窗相关
+interface SeedSiteInfo {
+  site_name: string
+  nickname: string
+}
+
+const seedSitesDialogVisible = ref(false)
+const seedSitesData = ref<SeedSiteInfo[]>([])
+const seedSitesLoading = ref(false)
+const seedSitesTorrentName = ref('')
+
+const openSeedSitesDialog = async (row: SeedParameter) => {
+  if (!row.name) return
+  seedSitesTorrentName.value = row.title || row.name
+  seedSitesDialogVisible.value = true
+  seedSitesLoading.value = true
+  seedSitesData.value = []
+  try {
+    const response = await axios.get('/api/cross-seed-data/seed-sites', {
+      params: { name: row.name },
+    })
+    const result = response.data
+    if (result.success && Array.isArray(result.sites)) {
+      seedSitesData.value = result.sites.map((s: Record<string, unknown>) => ({
+        site_name: String(s.site_name || ''),
+        nickname: String(s.nickname || ''),
+      }))
+    }
+  } catch (e) {
+    console.error('获取做种站点信息失败:', e)
+  } finally {
+    seedSitesLoading.value = false
+  }
+}
+
+const closeSeedSitesDialog = () => {
+  seedSitesDialogVisible.value = false
+  seedSitesData.value = []
+}
+
 // 检查行是否有无效参数
 const hasInvalidParams = (row: SeedParameter): boolean => {
   const categories: (keyof Omit<ReverseMappings, 'tags' | 'site_name'>)[] = [
@@ -875,6 +1212,7 @@ const fetchData = async () => {
       page_size: pageSize.value.toString(),
       search: searchQuery.value,
       path_filters: JSON.stringify(activeFilters.value.paths || []),
+      downloader_filters: JSON.stringify(activeFilters.value.downloaderIds || []),
       is_deleted: activeFilters.value.isDeleted,
       exclude_target_sites: activeFilters.value.excludeTargetSites,
       review_status: reviewStatusFilter.value, // 新增：检查状态筛选参数
@@ -951,6 +1289,7 @@ const saveUiSettings = async () => {
       page_size: pageSize.value,
       search_query: searchQuery.value,
       active_filters: activeFilters.value,
+      visible_columns: visibleColumns.value,
     }
     await axios.post('/api/ui_settings/cross_seed', settingsToSave)
   } catch (e: unknown) {
@@ -971,6 +1310,9 @@ const loadUiSettings = async () => {
     searchQuery.value = settings.search_query ?? ''
     if (settings.active_filters) {
       Object.assign(activeFilters.value, settings.active_filters)
+    }
+    if (Array.isArray(settings.visible_columns)) {
+      visibleColumns.value = settings.visible_columns
     }
   } catch (e) {
     console.error('加载UI设置时出错:', e)
@@ -995,6 +1337,7 @@ const clearFilters = () => {
     paths: [],
     isDeleted: '',
     excludeTargetSites: '', // 新增：清除目标站点排除筛选
+    downloaderIds: [],
   }
   currentPage.value = 1
   fetchData()
@@ -1004,7 +1347,10 @@ const clearFilters = () => {
 // 打开筛选对话框
 const openFilterDialog = () => {
   // 将当前活动的筛选条件复制到临时筛选条件
-  tempFilters.value = { ...activeFilters.value }
+  tempFilters.value = {
+    ...activeFilters.value,
+    downloaderIds: [...(activeFilters.value.downloaderIds || [])],
+  }
   filterDialogVisible.value = true
   nextTick(() => {
     // 如果已有选中的路径，设置树的选中状态
@@ -1024,7 +1370,10 @@ const applyFilters = () => {
   }
 
   // 将临时筛选条件应用为活动筛选条件
-  activeFilters.value = { ...tempFilters.value }
+  activeFilters.value = {
+    ...tempFilters.value,
+    downloaderIds: [...(tempFilters.value.downloaderIds || [])],
+  }
   filterDialogVisible.value = false
   // 重置到第一页并获取数据
   currentPage.value = 1
@@ -1041,6 +1390,11 @@ watch(searchQuery, () => {
   if (uiInitializing.value) return
   currentPage.value = 1
   fetchData()
+  saveUiSettings()
+})
+
+watch(visibleColumns, () => {
+  if (uiInitializing.value) return
   saveUiSettings()
 })
 
@@ -1066,52 +1420,28 @@ const handleEdit = async (row: SeedParameter) => {
 
     if (result.success) {
       prefetchedDbSeedInfo.value = result
+      // 将获取到的数据设置到 store 中
       // 构造一个基本的 Torrent 对象结构
-      const torrentName = result.data.name || result.data.title
-
-      // 从 /api/data 获取完整的种子数据（包含所有做种站点信息）
-      let fullTorrentData: Record<string, any> | null = null
-      try {
-        const dataResponse = await axios.get('/api/data', {
-          params: {
-            page: 1,
-            pageSize: 1,
-            nameSearch: torrentName,
-          },
-        })
-        if (dataResponse.data?.data?.length > 0) {
-          fullTorrentData = dataResponse.data.data[0]
-        }
-      } catch (e) {
-        console.warn('从 /api/data 获取完整种子数据失败，将仅使用源站点信息', e)
-      }
-
       const torrentData = {
         ...result.data,
         // 优先使用数据库中的name列，如果不存在则使用title列
-        name: torrentName,
-        // 优先使用完整数据中的保存路径，回退到数据库中的路径
-        save_path: fullTorrentData?.save_path || result.data.save_path || '',
-        size: fullTorrentData?.size || 0,
-        size_formatted: fullTorrentData?.size_formatted || '0 B',
+        name: result.data.name || result.data.title,
+        // 使用从数据库获取的实际保存路径，如果没有则为空字符串
+        save_path: result.data.save_path || '',
+        size: 0,
+        size_formatted: '0 B',
         progress: 100,
         state: 'completed',
-        total_uploaded: fullTorrentData?.total_uploaded || 0,
-        total_uploaded_formatted: fullTorrentData?.total_uploaded_formatted || '0 B',
-        // 优先使用完整数据中的下载器信息
-        downloaderId: fullTorrentData?.downloaderId || result.data.downloader_id || null,
-        downloaderIds: fullTorrentData?.downloaderIds || (result.data.downloader_id ? [result.data.downloader_id] : []),
-        // 使用完整数据中的所有站点信息（做种数/当前做种站点）
-        sites: fullTorrentData?.sites || {
+        total_uploaded: 0,
+        total_uploaded_formatted: '0 B',
+        // 添加下载器ID（如果从数据库返回了）
+        downloaderId: result.data.downloader_id || null,
+        sites: {
           [result.data.site_name]: {
             torrentId: result.data.torrent_id,
-            comment: `id=${result.data.torrent_id}`,
+            comment: `id=${result.data.torrent_id}`, // 为了向后兼容，也提供comment格式
           },
         },
-        site_count: fullTorrentData?.site_count || 1,
-        total_site_count: fullTorrentData?.total_site_count || 0,
-        target_sites_count: fullTorrentData?.target_sites_count || 0,
-        seeders: fullTorrentData?.seeders || 0,
       }
 
       crossSeedStore.setParams(torrentData)
@@ -1209,6 +1539,8 @@ onMounted(async () => {
   await loadUiSettings()
   // 加载检查状态筛选配置
   await loadReviewStatusFilter()
+  // 加载下载器列表
+  await fetchDownloadersList()
   uiInitializing.value = false
   // 获取数据
   fetchData()
@@ -1759,6 +2091,23 @@ onUnmounted(() => {
   line-height: 1.2;
 }
 
+.clickable-cell {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.clickable-cell:hover {
+  background-color: #f0f7ff;
+  color: #409eff;
+}
+
+.publish-at-edit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
 :deep(.el-table_1_column_13) {
   padding: 0;
 }
@@ -1919,5 +2268,90 @@ onUnmounted(() => {
   .target-sites-radio-group {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+.clickable-title {
+  cursor: pointer;
+  color: #409eff;
+}
+
+.clickable-title:hover {
+  text-decoration: underline;
+  color: #337ecc;
+}
+
+.clickable-tag {
+  cursor: pointer;
+}
+
+.clickable-tag:hover {
+  opacity: 0.8;
+}
+
+/* 做种站点弹窗 */
+.seed-sites-card {
+  width: 600px;
+  max-width: 90vw;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.seed-sites-title {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: calc(100% - 40px);
+}
+
+.seed-sites-body {
+  min-height: 80px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.seed-sites-empty {
+  text-align: center;
+  color: #909399;
+  padding: 30px 0;
+  font-size: 14px;
+}
+
+.seed-sites-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.seed-site-card {
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 10px;
+  background: #fafbfc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.seed-site-card:hover {
+  border-color: #b3d8ff;
+  box-shadow: 0 2px 8px rgba(179, 216, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.seed-site-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: #303133;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 </style>

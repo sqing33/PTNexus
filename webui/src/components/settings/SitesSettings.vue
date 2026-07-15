@@ -55,28 +55,60 @@
       </el-form>
 
       <div class="right-action-group">
-        <el-input
-          v-model="searchQuery"
-          placeholder="搜索站点昵称/标识/官组"
-          clearable
-          :prefix-icon="Search"
-          class="search-input"
-        />
+        <template v-if="isSortMode">
+          <el-button type="success" @click="handleSaveSortOrder" :loading="isSortSaving">
+            保存排序
+          </el-button>
+          <el-button @click="cancelSortMode">取消</el-button>
+        </template>
+        <template v-else>
+          <el-button
+            :type="isSortMode ? 'primary' : 'default'"
+            @click="enterSortMode"
+            :icon="Rank"
+          >
+            排序
+          </el-button>
+          <el-input
+            v-model="searchQuery"
+            placeholder="搜索站点昵称/标识/官组"
+            clearable
+            :prefix-icon="Search"
+            class="search-input"
+          />
+        </template>
       </div>
     </div>
 
     <!-- 2. 中间可滚动内容区域 -->
     <div class="settings-view" v-loading="isSitesLoading">
       <el-table
-        :data="paginatedSites"
+        :data="isSortMode ? dragSortedSites : paginatedSites"
         class="settings-table glass-table"
+        :class="{ 'sort-mode-table': isSortMode }"
         height="100%"
         :row-class-name="getRowClassName"
         @sort-change="handleSortChange"
         @row-click="handleRowClick"
         :default-sort="defaultSort"
         :row-style="{ cursor: 'pointer' }"
+        row-key="id"
       >
+        <el-table-column v-if="isSortMode" label="" width="50" align="center" class-name="drag-handle-col">
+          <template #default="scope">
+            <span
+              class="drag-handle"
+              draggable="true"
+              @dragstart="onDragStart($event, scope.$index)"
+              @dragover.prevent="onDragOver($event, scope.$index)"
+              @drop="onDrop($event, scope.$index)"
+              @dragend="onDragEnd"
+              :data-index="scope.$index"
+            >
+              <el-icon :size="16"><Rank /></el-icon>
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column
           prop="nickname"
           label="站点昵称"
@@ -84,6 +116,19 @@
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         />
+        <el-table-column
+          prop="sort_order"
+          label="排序"
+          width="70"
+          align="center"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #default="scope">
+            <span v-if="Number(scope.row.sort_order) > 0">{{ scope.row.sort_order }}</span>
+            <span v-else style="color: var(--el-text-color-placeholder)">-</span>
+          </template>
+        </el-table-column>
         <el-table-column
           prop="support_role"
           label="支持"
@@ -249,7 +294,7 @@
     </div>
 
     <!-- 3. 底部固定区域 -->
-    <div class="settings-footer glass-pagination">
+    <div class="settings-footer glass-pagination" v-show="!isSortMode">
       <el-radio-group v-model="siteFilter" @change="handleFilterChange">
         <el-radio-button label="existing_supported">已有支持站点</el-radio-button>
         <el-radio-button label="supported">所有支持站点</el-radio-button>
@@ -303,6 +348,15 @@
         <el-form-item label="可发种站" prop="can_publish">
           <el-switch v-model="siteForm.can_publish" />
           <div class="form-tip">关闭后，该站点在发种选择时将置灰不可选择。</div>
+        </el-form-item>
+        <el-form-item label="排序序号" prop="sort_order">
+          <el-input-number
+            v-model="siteForm.sort_order"
+            :min="0"
+            :max="9999"
+            style="width: 100%"
+          />
+          <div class="form-tip">数值越小越靠前，0 表示不参与自定义排序（按默认规则排列）。</div>
         </el-form-item>
         <el-form-item label="Cookie" prop="cookie">
           <el-input
@@ -386,7 +440,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import axios from 'axios'
 import { ElMessageBox } from 'element-plus'
-import { Delete, Edit, Refresh, Search } from '@element-plus/icons-vue'
+import { Delete, Edit, Rank, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage } from '@/utils/uiNotify'
 
 type SiteConfig = {
@@ -446,6 +500,7 @@ type SiteForm = {
   ratio_threshold: number
   seed_speed_limit: number
   can_publish: boolean
+  sort_order: number
 }
 
 // --- 状态管理 ---
@@ -463,7 +518,7 @@ const siteFilter = ref('existing_supported')
 
 // --- 排序状态 ---
 const sortState = ref<SortState>({
-  prop: 'support_role',
+  prop: 'sort_order',
   order: 'ascending',
 })
 
@@ -495,6 +550,7 @@ const siteForm = ref<SiteForm>({
   ratio_threshold: 3.0,
   seed_speed_limit: 5,
   can_publish: true,
+  sort_order: 0,
 })
 
 const API_BASE_URL = '/api'
@@ -591,6 +647,14 @@ const compareByProp = (a: SiteConfig, b: SiteConfig, prop: string) => {
       return compareStrings(a?.nickname, b?.nickname)
     case 'support_role':
       return getSupportRank(a) - getSupportRank(b)
+    case 'sort_order': {
+      const oa = Number(a?.sort_order ?? 0)
+      const ob = Number(b?.sort_order ?? 0)
+      if (oa === 0 && ob === 0) return 0
+      if (oa === 0) return 1
+      if (ob === 0) return -1
+      return oa - ob
+    }
     case 'site':
       return compareStrings(a?.site, b?.site)
     case 'base_url':
@@ -668,7 +732,7 @@ const sortedSites = computed(() => {
       const ordered = applySortOrder(result, order)
       if (ordered !== 0) return ordered
     } else {
-      const result = compareByProp(a, b, 'support_role')
+      const result = compareByProp(a, b, 'sort_order')
       if (result !== 0) return result
     }
 
@@ -701,10 +765,87 @@ watch(searchQuery, () => {
 
 const handleSortChange = ({ prop, order }: { prop?: string; order?: SortOrder }) => {
   sortState.value = {
-    prop: prop || 'support_role',
+    prop: prop || 'sort_order',
     order: order || 'ascending',
   }
   pagination.value.currentPage = 1
+}
+
+// --- 拖拽排序状态 ---
+const isSortMode = ref(false)
+const isSortSaving = ref(false)
+const dragSortedList = ref<SiteConfig[]>([])
+const dragIndex = ref(-1)
+const dragOverIndex = ref(-1)
+
+const dragSortedSites = computed(() => dragSortedList.value)
+
+const enterSortMode = () => {
+  // 从 sitesList 构建排序列表，按 sort_order 排序（0 排末尾），tiebreaker 为 nickname
+  const all = (sitesList.value || []).slice()
+  all.sort((a, b) => {
+    const oa = Number(a.sort_order ?? 0)
+    const ob = Number(b.sort_order ?? 0)
+    if (oa === 0 && ob === 0) return compareStrings(a.nickname, b.nickname)
+    if (oa === 0) return 1
+    if (ob === 0) return -1
+    if (oa !== ob) return oa - ob
+    return compareStrings(a.nickname, b.nickname)
+  })
+  dragSortedList.value = all
+  isSortMode.value = true
+}
+
+const cancelSortMode = () => {
+  isSortMode.value = false
+  dragSortedList.value = []
+  dragIndex.value = -1
+  dragOverIndex.value = -1
+}
+
+const onDragStart = (event: DragEvent, index: number) => {
+  dragIndex.value = index
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', String(index))
+  }
+}
+
+const onDragOver = (_event: DragEvent, index: number) => {
+  dragOverIndex.value = index
+}
+
+const onDrop = (_event: DragEvent, toIndex: number) => {
+  const fromIndex = dragIndex.value
+  if (fromIndex < 0 || fromIndex === toIndex) return
+  const list = dragSortedList.value.slice()
+  const [item] = list.splice(fromIndex, 1)
+  list.splice(toIndex, 0, item)
+  dragSortedList.value = list
+  dragIndex.value = -1
+  dragOverIndex.value = -1
+}
+
+const onDragEnd = () => {
+  dragIndex.value = -1
+  dragOverIndex.value = -1
+}
+
+const handleSaveSortOrder = async () => {
+  if (dragSortedList.value.length === 0) return
+  isSortSaving.value = true
+  try {
+    const ids = dragSortedList.value.map((s) => Number(s.id)).filter((id) => id > 0)
+    await axios.post(`${API_BASE_URL}/sites/update_order`, { ids })
+    ElMessage.success('站点排序已保存')
+    isSortMode.value = false
+    dragSortedList.value = []
+    await fetchSites()
+  } catch {
+    ElMessage.error('保存排序失败')
+  } finally {
+    isSortSaving.value = false
+  }
 }
 
 onMounted(() => {
@@ -778,6 +919,7 @@ const normalizeSiteForm = (site: SiteConfig): SiteForm => ({
   seed_speed_limit:
     typeof site.seed_speed_limit === 'number' ? site.seed_speed_limit : Number(site.seed_speed_limit) || 5,
   can_publish: site.can_publish == null ? true : Boolean(site.can_publish),
+  sort_order: typeof site.sort_order === 'number' ? site.sort_order : Number(site.sort_order) || 0,
 })
 
 // [新增] 合并后的保存与同步功能
@@ -847,6 +989,7 @@ const handleOpenDialog = (site: SiteConfig) => {
 
 // 点击表格行打开编辑对话框
 const handleRowClick = (row: SiteConfig) => {
+  if (isSortMode.value) return
   handleOpenDialog(row)
 }
 
@@ -1044,6 +1187,45 @@ const handleDelete = (site: SiteConfig) => {
 
 .site-edit-dialog :deep(.el-dialog) {
   margin: 0;
+}
+
+/* 拖拽排序样式 */
+.drag-handle {
+  cursor: grab;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--el-text-color-secondary);
+  transition: all 0.2s;
+}
+
+.drag-handle:hover {
+  color: var(--el-color-primary);
+  background-color: var(--el-color-primary-light-9);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.sort-mode-table :deep(.el-table__body tr) {
+  transition: background-color 0.15s;
+}
+
+.sort-mode-table :deep(.el-table__body tr:hover) {
+  background-color: var(--el-color-primary-light-9) !important;
+}
+
+.sort-mode-table :deep(.drag-handle-col) {
+  cursor: grab;
+}
+
+.right-action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 @media (max-width: 768px) {

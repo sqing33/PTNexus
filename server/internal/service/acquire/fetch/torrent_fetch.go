@@ -20,11 +20,12 @@ import (
 )
 
 var (
-	reDownloadLink = regexp.MustCompile(`(?is)href\s*=\s*["']([^"']*(?:download\.php[^"']*|/api/torrent/[^"']*/download/[^"']+|[^"']*\.torrent[^"']*))["']`)
+	reDownloadLink = regexp.MustCompile(`(?is)href\s*=\s*["']([^"']*(?:download\.php[^"']*|/api/torrent/[^"']*/download/[^"']+|[^"']*\.torrent[^"']*|/dl/\d+/[a-zA-Z0-9]+[^"']*))["']`)
 	reIDInURL      = regexp.MustCompile(`id=(\d+)`)
 	reTorrentIDURL = regexp.MustCompile(`torrent_id=(\d+)`)
 	reUUIDInURL    = regexp.MustCompile(`([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`)
 	rePathUnsafe   = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+	reTTGDetailURL = regexp.MustCompile(`(?is)/dl/(\d+)(?:/([a-zA-Z0-9]+))?`)
 )
 
 const sourceDownloadLogModule = "迁移-种子下载"
@@ -105,6 +106,10 @@ func DownloadTorrentForSource(sourceInfo map[string]any, torrentID string) (stri
 			logx.Warnf(sourceDownloadLogModule, "构造详情页失败 source_site=%s torrent_id=%s 缺少base_url", siteName, trimmedID)
 			return "", "", nil, fmt.Errorf("站点 '%s' 缺少 base_url，无法构造详情页", toStringAny(sourceInfo["nickname"], siteCode))
 		}
+		detailURL = buildDetailURL(baseURL, siteCode, trimmedID)
+	}
+	// TTG: 若已存储的 torrentID 为 /dl/ 下载 URL，转换为详情页 URL
+	if match := reTTGDetailURL.FindStringSubmatch(detailURL); len(match) >= 2 && baseURL != "" {
 		detailURL = buildDetailURL(baseURL, siteCode, trimmedID)
 	}
 	logx.Infof(sourceDownloadLogModule, "详情页地址已确定 source_site=%s torrent_id=%s detail_url=%s", siteName, trimmedID, detailURL)
@@ -503,6 +508,10 @@ func buildDetailURL(baseURL, siteCode, torrentID string) string {
 	if strings.Contains(strings.ToLower(siteCode), "rousi") && reUUIDInURL.MatchString(trimmed) {
 		return fmt.Sprintf("%s/torrent/%s", strings.TrimRight(baseURL, "/"), reUUIDInURL.FindString(trimmed))
 	}
+	// TTG: 将 /dl/{id}/{passkey} 下载 URL 转换为详情页 URL
+	if match := reTTGDetailURL.FindStringSubmatch(trimmed); len(match) >= 2 {
+		return fmt.Sprintf("%s/details.php?id=%s", strings.TrimRight(baseURL, "/"), match[1])
+	}
 	if reIDInURL.MatchString(trimmed) {
 		id := reIDInURL.FindStringSubmatch(trimmed)[1]
 		return fmt.Sprintf("%s/details.php?id=%s", strings.TrimRight(baseURL, "/"), id)
@@ -522,6 +531,12 @@ func buildDirectDownloadURL(baseURL, siteCode, detailURL, torrentID, passkey str
 		uuid := reUUIDInURL.FindString(detailURL)
 		if uuid != "" {
 			return fmt.Sprintf("%s/api/torrent/%s/download/%s", strings.TrimRight(baseURL, "/"), uuid, neturl.PathEscape(trimmedPasskey))
+		}
+	}
+	// TTG: 使用 /dl/{id}/{passkey} 格式而非标准 download.php
+	if strings.Contains(strings.ToLower(siteCode), "ttg") && trimmedPasskey != "" {
+		if id := extractDownloadID(siteCode, detailURL, torrentID); id != "" {
+			return fmt.Sprintf("%s/dl/%s/%s", strings.TrimRight(baseURL, "/"), id, trimmedPasskey)
 		}
 	}
 	id := extractDownloadID(siteCode, detailURL, torrentID)

@@ -76,12 +76,21 @@
 
       <el-button type="primary" plain @click="applyFilters">查询</el-button>
       <el-button type="danger" plain style="margin-left: 8px" @click="clearFilters">清空</el-button>
+      <el-button
+        type="danger"
+        plain
+        style="margin-left: 8px"
+        :disabled="selectedRows.length === 0"
+        @click="batchDeleteSelected"
+      >
+        批量删除{{ selectedRows.length > 0 ? ` (${selectedRows.length})` : '' }}
+      </el-button>
 
       <div class="pagination-controls" v-if="total > 0">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[20, 50, 100]"
+          :page-sizes="[5, 10, 20, 50, 100]"
           :total="total"
           layout="total, sizes, prev, pager, next"
           @size-change="handleSizeChange"
@@ -93,6 +102,7 @@
 
     <div class="table-container">
       <el-table
+        ref="tableRef"
         :data="rows"
         row-key="id"
         v-loading="loading"
@@ -101,7 +111,9 @@
         height="100%"
         empty-text="暂无发种日志"
         class="glass-table"
+        @selection-change="handleSelectionChange"
       >
+        <el-table-column type="selection" width="45" />
         <el-table-column label="加入时间" width="150" align="center">
           <template #default="scope">
             <div class="datetime-cell">{{ formatDateTimeTwoLines(scope.row.created_at) }}</div>
@@ -177,8 +189,7 @@
                 size="small"
                 type="danger"
                 style="margin-left: 5px"
-                :disabled="!canDeleteQueued(scope.row)"
-                @click="deleteQueuedTask(scope.row)"
+                @click="deleteSingleLog(scope.row)"
               >
                 删除
               </el-button>
@@ -242,6 +253,8 @@ const route = useRoute()
 const router = useRouter()
 
 const rows = ref<PublishLogRow[]>([])
+const selectedRows = ref<PublishLogRow[]>([])
+const tableRef = ref()
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -496,6 +509,8 @@ const fetchLogs = async (options: { silent?: boolean } = {}) => {
     if (currentFetchSeq !== fetchSeq) return
     rows.value = Array.isArray(response.data.data) ? (response.data.data as PublishLogRow[]) : []
     total.value = Number(response.data.total || 0)
+    selectedRows.value = []
+    tableRef.value?.clearSelection?.()
     if (error.value) {
       error.value = ''
     }
@@ -577,28 +592,75 @@ const openResultURL = (row: PublishLogRow) => {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-const canDeleteQueued = (row: PublishLogRow) => {
-  const status = String(row?.status || '').trim()
-  const queueTaskID = Number(row?.queue_task_id || 0)
-  return status === 'queued' && queueTaskID > 0
-}
+const canDeleteRow = () => true
 
-const deleteQueuedTask = async (row: PublishLogRow) => {
-  if (!canDeleteQueued(row)) return
-  const queueTaskID = Number(row.queue_task_id)
+const deleteSingleLog = async (row: PublishLogRow) => {
+  const id = Number(row.id)
+  if (id <= 0) return
+  const isQueued = String(row.status).trim() === 'queued' && Number(row.queue_task_id || 0) > 0
+  const confirmMsg = isQueued
+    ? '确认删除该日志？关联的队列任务也会被取消。'
+    : '确认删除该日志？'
   try {
-    await ElMessageBox.confirm('确认从队列移除该待发布任务？', '删除待发布任务', {
+    await ElMessageBox.confirm(confirmMsg, '删除日志', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'warning',
     })
 
-    const response = await axios.delete(`/api/migrate/publish_queue/tasks/${queueTaskID}`)
+    const response = await axios.post('/api/publish_logs/delete', { ids: [id] })
     if (!response.data?.success) {
       throw new Error(response.data?.message || '删除失败')
     }
 
-    ElMessage.success(response.data?.message || '队列任务已移除')
+    ElMessage.success(response.data?.message || '删除成功')
+    await fetchLogs()
+  } catch (error: unknown) {
+    if (error === 'cancel' || error === 'close') return
+    const message = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (error.response?.data as { error?: string } | undefined)?.error ||
+        error.message)
+      : error instanceof Error
+        ? error.message
+        : '删除失败'
+    ElMessage.error(message)
+  }
+}
+
+const handleSelectionChange = (rows: PublishLogRow[]) => {
+  selectedRows.value = rows
+}
+
+const batchDeleteSelected = async () => {
+  if (selectedRows.value.length === 0) return
+
+  const ids = selectedRows.value.map((r) => Number(r.id)).filter((id) => id > 0)
+  if (ids.length === 0) return
+
+  const queuedCount = selectedRows.value.filter(
+    (r) => String(r.status).trim() === 'queued' && Number(r.queue_task_id || 0) > 0,
+  ).length
+  const confirmMsg =
+    queuedCount > 0
+      ? `确认删除选中的 ${ids.length} 条日志？其中 ${queuedCount} 条关联的队列任务也会被取消。`
+      : `确认删除选中的 ${ids.length} 条日志？`
+
+  try {
+    await ElMessageBox.confirm(confirmMsg, '批量删除日志', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+
+    const response = await axios.post('/api/publish_logs/delete', { ids })
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || '删除失败')
+    }
+
+    ElMessage.success(response.data?.message || '删除成功')
+    selectedRows.value = []
+    tableRef.value?.clearSelection()
     await fetchLogs()
   } catch (error: unknown) {
     if (error === 'cancel' || error === 'close') return

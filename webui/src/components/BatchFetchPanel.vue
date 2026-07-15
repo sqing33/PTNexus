@@ -74,7 +74,7 @@
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[20, 50, 100]"
+          :page-sizes="[5, 10, 20, 50, 100]"
           :total="total"
           layout="total, sizes, prev, pager, next, jumper"
           @size-change="handleSizeChange"
@@ -1023,20 +1023,20 @@ const refreshProgress = async () => {
       // 添加 BDInfo 处理统计
       if (progress.value.results && progress.value.results.length > 0) {
         const bdinfoStats = {
-          processing: progress.value.results.filter(r => 
-            r.bdinfo_status === 'processing_bdinfo' || 
+          processing: progress.value.results.filter(r =>
+            r.bdinfo_status === 'processing_bdinfo' ||
             (r.mediainfo && r.mediainfo.includes('正在处理 BDInfo'))
           ).length,
-          completed: progress.value.results.filter(r => 
-            r.bdinfo_status === 'completed' || 
+          completed: progress.value.results.filter(r =>
+            r.bdinfo_status === 'completed' ||
             (r.mediainfo && r.mediainfo.includes('DISC INFO'))
           ).length,
-          failed: progress.value.results.filter(r => 
-            r.bdinfo_status === 'failed' || 
+          failed: progress.value.results.filter(r =>
+            r.bdinfo_status === 'failed' ||
             (r.mediainfo && r.mediainfo.includes('bdinfo提取失败'))
           ).length
         }
-        
+
         // 更新进度对象中的 BDInfo 统计
         progress.value.bdinfo_stats = bdinfoStats
       }

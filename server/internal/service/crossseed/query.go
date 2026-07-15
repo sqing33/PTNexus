@@ -98,14 +98,14 @@ func buildCurrentTorrentsSubquery(dbType string) string {
 	// Match Python build_current_torrents_subquery().
 	if strings.EqualFold(dbType, "postgresql") {
 		return fmt.Sprintf(`
-			SELECT DISTINCT ON (t.hash) t.hash, t.save_path, t.downloader_id, t.state, t.last_seen
+			SELECT DISTINCT ON (t.hash) t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.size, t.seeders
 			FROM torrents t
 			WHERE (t.is_hidden = 0 OR t.is_hidden IS NULL)
 			ORDER BY t.hash, %s, t.last_seen DESC
 		`, stateRankExpr("t"))
 	}
 	return fmt.Sprintf(`
-		SELECT t.hash, t.save_path, t.downloader_id, t.state, t.last_seen
+		SELECT t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.size, t.seeders
 		FROM torrents t
 		JOIN (
 			SELECT hash,
@@ -185,6 +185,21 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		}
 	}
 
+	if len(params.DownloaderFilters) > 0 {
+		placeholders := make([]string, 0, len(params.DownloaderFilters))
+		for _, value := range params.DownloaderFilters {
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" {
+				continue
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, trimmed)
+		}
+		if len(placeholders) > 0 {
+			whereConditions = append(whereConditions, "ct.downloader_id IN ("+strings.Join(placeholders, ", ")+")")
+		}
+	}
+
 	switch strings.TrimSpace(params.IsDeleted) {
 	case "1":
 		whereConditions = append(whereConditions, "ct.hash IS NULL")
@@ -220,11 +235,14 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		SELECT sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
 		       COALESCE(ct.save_path, '') AS save_path,
 		       ct.downloader_id AS downloader_id,
+		       COALESCE(ct.size, 0) AS size,
+		       COALESCE(ct.seeders, 0) AS seeders,
+		       COALESCE(sp.name, '') AS name,
 		       sp.title, sp.subtitle, sp.type, sp.medium, sp.video_codec,
 		       sp.audio_codec, sp.resolution, sp.team, sp.source, sp.tags,
 		       sp.title_components, sp.screenshot_review_status,
 		       %s,
-		       sp.is_reviewed, sp.updated_at
+		       sp.is_reviewed, sp.publish_at, sp.updated_at
 		%s
 		%s
 		ORDER BY sp.created_at DESC
@@ -249,7 +267,21 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		item["unrecognized"] = extractUnrecognized(titleComponents)
 	}
 
-	targetSites, err := s.repo.RawStrings("SELECT nickname FROM sites WHERE migration IN (2, 3) ORDER BY nickname", "nickname")
+	// Compute seed_site_count: number of distinct sites currently seeding each torrent.
+	seedSiteCountMap := map[string]int{}
+	for _, item := range pageData {
+		name, _ := item["name"].(string)
+		if name != "" {
+			if _, exists := seedSiteCountMap[name]; !exists {
+				var count int64
+				s.repo.DB().Raw("SELECT COUNT(DISTINCT sites) FROM torrents WHERE name = ? AND sites IS NOT NULL AND sites != ''", name).Scan(&count)
+				seedSiteCountMap[name] = int(count)
+			}
+			item["seed_site_count"] = seedSiteCountMap[name]
+		}
+	}
+
+	targetSites, err := s.repo.RawStrings("SELECT nickname FROM sites WHERE migration IN (2, 3) ORDER BY sort_order, nickname", "nickname")
 	if err != nil {
 		targetSites = []string{}
 	}
@@ -314,4 +346,95 @@ func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[stri
 		return map[string]any{"success": false, "error": err.Error()}, 500
 	}
 	return map[string]any{"success": true, "message": fmt.Sprintf("种子数据 %s from %s 已删除", torrentID, siteName)}, 200
+}
+
+func (s *CrossSeedService) GetSeedSites(torrentName string) (map[string]any, error) {
+	if strings.TrimSpace(torrentName) == "" {
+		return map[string]any{"success": false, "error": "缺少 torrent name 参数"}, nil
+	}
+
+	query := `
+		SELECT DISTINCT sites AS site_name
+		FROM torrents
+		WHERE name = ? AND sites IS NOT NULL AND sites != ''
+		ORDER BY sites
+	`
+
+	rows, err := s.repo.RawMaps(query, torrentName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build nickname map from sites table
+	type siteRow struct {
+		Nickname string `gorm:"column:nickname"`
+		SiteName string `gorm:"column:site_name"`
+	}
+	var siteRows []siteRow
+	s.repo.DB().Raw("SELECT nickname, site_name FROM sites WHERE site_name IS NOT NULL AND site_name != ''").Scan(&siteRows)
+	nicknameMap := map[string]string{}
+	for _, sr := range siteRows {
+		nicknameMap[sr.SiteName] = sr.Nickname
+		if sr.Nickname != "" {
+			nicknameMap[sr.Nickname] = sr.Nickname
+		}
+	}
+
+	sites := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		siteName, _ := row["site_name"].(string)
+		if siteName == "" {
+			continue
+		}
+		nickname := siteName
+		if n, ok := nicknameMap[siteName]; ok && n != "" {
+			nickname = n
+		}
+		sites = append(sites, map[string]any{
+			"site_name": siteName,
+			"nickname":  nickname,
+		})
+	}
+
+	return map[string]any{
+		"success": true,
+		"sites":   sites,
+		"count":   len(sites),
+	}, nil
+}
+
+func (s *CrossSeedService) UpdatePublishAt(payload map[string]any) (map[string]any, int) {
+	torrentID := toString(payload["torrent_id"], "")
+	siteName := toString(payload["site_name"], "")
+	if torrentID == "" || siteName == "" {
+		return map[string]any{"success": false, "error": "缺少必需参数: torrent_id 和 site_name"}, 400
+	}
+
+	publishAtRaw, exists := payload["publish_at"]
+	if !exists {
+		return map[string]any{"success": false, "error": "缺少 publish_at 参数"}, 400
+	}
+
+	var publishAt any
+	if publishAtRaw == nil || publishAtRaw == "" {
+		publishAt = nil
+	} else {
+		publishAtStr, ok := publishAtRaw.(string)
+		if !ok {
+			return map[string]any{"success": false, "error": "publish_at 格式错误"}, 400
+		}
+		publishAt = strings.TrimSpace(publishAtStr)
+	}
+
+	affected, err := s.repo.Exec(
+		"UPDATE seed_parameters SET publish_at = ? WHERE torrent_id = ? AND site_name = ?",
+		publishAt, torrentID, siteName,
+	)
+	if err != nil {
+		return map[string]any{"success": false, "error": err.Error()}, 500
+	}
+	if affected == 0 {
+		return map[string]any{"success": false, "error": "未找到匹配的种子数据"}, 404
+	}
+	return map[string]any{"success": true, "message": "可发种时间已更新"}, 200
 }

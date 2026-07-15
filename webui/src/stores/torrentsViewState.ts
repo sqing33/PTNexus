@@ -12,6 +12,7 @@ interface SiteStatus {
   has_passkey: boolean
   is_source: boolean
   is_target: boolean
+  can_publish: boolean
 }
 
 interface UiSettings {
@@ -26,6 +27,7 @@ interface UiSettings {
     notExistSiteNames: string[]
     downloaderIds: string[]
   }
+  visible_columns?: string[]
 }
 
 const cloneUiSettings = (settings: UiSettings): UiSettings => ({
@@ -40,6 +42,7 @@ const cloneUiSettings = (settings: UiSettings): UiSettings => ({
     notExistSiteNames: [...(settings.active_filters?.notExistSiteNames || [])],
     downloaderIds: [...(settings.active_filters?.downloaderIds || [])],
   },
+  visible_columns: settings.visible_columns ? [...settings.visible_columns] : undefined,
 })
 
 // 用于保存 TorrentsView 页面的初始化状态和缓存数据
@@ -128,7 +131,7 @@ export const useTorrentsViewState = defineStore('torrentsViewState', () => {
     try {
       const response = await axios.get('/api/sites/status')
       const allSites = response.data
-      cachedAllSourceSitesStatus.value = allSites.filter((s: SiteStatus) => s.is_source)
+      cachedAllSourceSitesStatus.value = allSites
       isSitesStatusLoaded.value = true
       return cachedAllSourceSitesStatus.value
     } catch (e) {

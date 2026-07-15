@@ -242,5 +242,25 @@ func looksLikeDirectDownloadURL(raw string) bool {
 	return strings.Contains(lower, "/download.php") ||
 		strings.Contains(lower, ".torrent") ||
 		strings.Contains(lower, "/api/torrent/") && strings.Contains(lower, "/download/") ||
-		strings.Contains(lower, "/api/torrent/download/")
+		strings.Contains(lower, "/api/torrent/download/") ||
+		matchesTTGDownloadPattern(lower)
+}
+
+// matchesTTGDownloadPattern 匹配 TTG 的 /dl/{id}/{passkey} 下载链接格式。
+func matchesTTGDownloadPattern(lower string) bool {
+	idx := strings.Index(lower, "/dl/")
+	if idx < 0 {
+		return false
+	}
+	rest := lower[idx+4:]
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 2 {
+		return false
+	}
+	for _, ch := range parts[0] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return len(parts[0]) > 0 && len(parts[1]) > 0
 }

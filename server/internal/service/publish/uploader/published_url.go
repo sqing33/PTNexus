@@ -13,15 +13,29 @@ var (
 	reDetailTorrentID = regexp.MustCompile(`(?is)details\.php\?[^\s"']*torrent_id=(\d+)`)
 	reRousiUUIDs      = regexp.MustCompile(`(?is)/torrent/([0-9a-fA-F\-]{36})`)
 	reZhuqueID        = regexp.MustCompile(`(?is)/torrent/info/(\d+)`)
+	reTTGDownload     = regexp.MustCompile(`(?is)/dl/(\d+)/([a-zA-Z0-9]+)`)
 )
 
-// NormalizePublishURLWithOfferSupport 标准化发布链接，并将 offer 链接转换为 details 链接。
+// isTTGDownloadURL 判断 URL 是否为 TTG 的 /dl/{id}/{passkey} 下载链接格式。
+func isTTGDownloadURL(raw string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	if trimmed == "" {
+		return false
+	}
+	return reTTGDownload.MatchString(trimmed)
+}
+
+// NormalizePublishURLWithOfferSupport 标准化发布链接，并将 offer 链接转换为 details 链接，将 TTG /dl/ 链接转换为详情页链接。
 func NormalizePublishURLWithOfferSupport(baseURL, candidate string) string {
 	normalized := NormalizePublishURL(baseURL, candidate)
 	if normalized == "" {
 		return ""
 	}
 	if match := reOfferID.FindStringSubmatch(normalized); len(match) >= 2 {
+		return strings.TrimRight(baseURL, "/") + "/details.php?id=" + match[1]
+	}
+	// TTG 上传后重定向到 /dl/{id}/{passkey} 下载 URL，转换为详情页 URL 以便后续流程统一处理
+	if match := reTTGDownload.FindStringSubmatch(normalized); len(match) >= 2 {
 		return strings.TrimRight(baseURL, "/") + "/details.php?id=" + match[1]
 	}
 	return normalized
@@ -79,6 +93,11 @@ func BuildDirectDownloadURLForPublished(baseURL string, passkey string, siteCode
 			return ""
 		}
 		return fmt.Sprintf("%s/download.php?id=%s&passkey=%s&https=1", strings.TrimRight(normalizedBase, "/"), id, trimmedPasskey)
+	case strings.Contains(trimmedSiteCode, "ttg"):
+		if trimmedPasskey == "" {
+			return ""
+		}
+		return fmt.Sprintf("%s/dl/%s/%s", strings.TrimRight(normalizedBase, "/"), id, trimmedPasskey)
 	default:
 		if trimmedPasskey == "" {
 			return ""

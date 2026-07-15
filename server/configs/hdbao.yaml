@@ -1,0 +1,195 @@
+# 红豆包(HDBao)站点配置文件
+# NexusPHP标准站点，含音频编码字段
+
+site_name: "HDBao"
+
+form_fields:
+  category: "type"
+  medium: "medium_sel[4]"
+  video_codec: "codec_sel[4]"
+  audio_codec: "audiocodec_sel[4]"
+  resolution: "standard_sel[4]"
+  team: "team_sel[4]"
+  tags[4][]: "tags[]"
+
+source_parsers:
+  source_params:
+    type:
+      source_key: "类型"
+    medium:
+      source_key: "质量媒介"
+    video_codec:
+      source_key: "编码"
+    audio_codec:
+      source_key: "音频编码"
+    resolution:
+      source_key: "分辨率"
+    team:
+      source_key: "制作组"
+    tags[]:
+      source_key: "标签"
+
+  standard_keys:
+    type:
+      "Sports/赛事": "category.sports"
+      "Movies/电影": "category.movie"
+      "TV Series/电视剧": "category.tv_series"
+      "Documentaries/纪录片": "category.documentaries"
+      "TV Shows/综艺": "category.tv_shows"
+      "Misc/音乐": "category.music"
+      "Concert/演唱会": "category.concert"
+      "Music Videos/音乐MV": "category.mv"
+      "Animations/动漫&动画": "category.animation"
+      "Tutorial/教程": "category.tutorial"
+      "Others/其他": "category.other"
+
+    medium:
+      "UHD Blu-ray 原盘": "medium.uhd_bluray"
+      "UHD Blu-ray DIY": "medium.uhd_diy"
+      "Blu-ray 原盘": "medium.bluray"
+      "Blu-ray DIY": "medium.bluray_diy"
+      "REMUX": "medium.remux"
+      "Encode": "medium.encode"
+      "WEB-DL": "medium.webdl"
+      "HDTV": "medium.hdtv"
+      "DVD/CD": "medium.dvd"
+      "Other": "medium.other"
+
+    video_codec:
+      "H.264/AVC/x264": "video.h264"
+      "H.265/HEVC/x265": "video.h265"
+      "VC-1": "video.vc1"
+      "MPEG-4": "video.mpeg4"
+      "MPEG-2": "video.mpeg2"
+      "Xvid": "video.xvid"
+      "AV1": "video.av1"
+      "Other": "video.other"
+
+    audio_codec:
+      "DTS:X": "audio.dtsx"
+      "TrueHD Atmos": "audio.truehd_atmos"
+      "DTS-HD MA": "audio.dts_hd_ma"
+      "TrueHD": "audio.truehd"
+      "LPCM": "audio.lpcm"
+      "DTS": "audio.dts"
+      "FLAC": "audio.flac"
+      "AAC": "audio.aac"
+      "DD/AC3": "audio.ac3"
+      "MP3": "audio.mp3"
+      "OGG": "audio.ogg"
+      "APE": "audio.ape"
+      "Other": "audio.other"
+
+    resolution:
+      "4K/2160p": "resolution.r2160p"
+      "1080p": "resolution.r1080p"
+      "1080i": "resolution.r1080i"
+      "720p": "resolution.r720p"
+      "SD": "resolution.sd"
+      "Other": "resolution.other"
+
+    team:
+      "HDBao": "team.hdbao"
+      "HD4FANS": "team.hd4fans"
+      "CHD": "team.chd"
+      "MySiLU": "team.mysilu"
+      "WiKi": "team.wiki"
+      "HDC": "team.hdc"
+      "CMCT": "team.cmct"
+      "HDSky": "team.hdsky"
+      "HHClub": "team.hhclub"
+      "Other": "team.other"
+
+    tag:
+      "禁转": "tag.禁转"
+      "首发": "tag.首发"
+      "DIY": "tag.DIY"
+      "国语": "tag.国语"
+      "中字": "tag.中字"
+      "HDR": "tag.HDR"
+
+mappings:
+  type:
+    "category.sports": "407"
+    "category.movie": "401"
+    "category.tv_series": "402"
+    "category.documentaries": "404"
+    "category.tv_shows": "403"
+    "category.music": "409"
+    "category.concert": "408"
+    "category.mv": "406"
+    "category.animation": "405"
+    "category.tutorial": "410"
+    "category.other": "411"
+    "default": "401"
+
+  medium:
+    "medium.uhd_bluray": "1"
+    "medium.uhd_diy": "2"
+    "medium.bluray": "3"
+    "medium.bluray_diy": "4"
+    "medium.remux": "5"
+    "medium.encode": "6"
+    "medium.webdl": "7"
+    "medium.hdtv": "8"
+    "medium.dvd": "12"
+    "medium.other": "13"
+    "default": "13"
+
+  video_codec:
+    "video.h264": "1"
+    "video.h265": "7"
+    "video.vc1": "2"
+    "video.mpeg4": "9"
+    "video.mpeg2": "4"
+    "video.xvid": "3"
+    "video.av1": "10"
+    "video.other": "5"
+    "default": "5"
+
+  audio_codec:
+    "audio.dtsx": "8"
+    "audio.truehd_atmos": "9"
+    "audio.dts_hd_ma": "11"
+    "audio.truehd": "12"
+    "audio.lpcm": "13"
+    "audio.dts": "3"
+    "audio.flac": "15"
+    "audio.aac": "1"
+    "audio.ac3": "2"
+    "audio.mp3": "4"
+    "audio.ogg": "5"
+    "audio.ape": "6"
+    "audio.other": "7"
+    "default": "7"
+
+  resolution:
+    "resolution.r2160p": "5"
+    "resolution.r1080p": "8"
+    "resolution.r1080i": "2"
+    "resolution.r720p": "7"
+    "resolution.sd": "10"
+    "resolution.other": "11"
+    "default": "11"
+
+  team:
+    "team.hdbao": "1"
+    "team.hd4fans": "10"
+    "team.chd": "2"
+    "team.mysilu": "3"
+    "team.wiki": "4"
+    "team.hdc": "6"
+    "team.cmct": "7"
+    "team.hdsky": "8"
+    "team.hhclub": "9"
+    "team.other": "5"
+    "default": "5"
+
+  tag:
+    "tag.禁转": 1
+    "tag.首发": 2
+    "tag.DIY": 4
+    "tag.国语": 5
+    "tag.中字": 6
+    "tag.HDR": 7
+    "default": null

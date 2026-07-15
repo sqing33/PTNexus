@@ -301,6 +301,47 @@ func (r *PublishLogRepository) List(query PublishLogQuery) ([]PublishLogEntry, i
 	return rows, total, nil
 }
 
+// DeleteByIDs 按主键列表批量删除发种日志记录。
+// 参数/返回：ids 为日志主键列表；返回实际删除行数与 error。
+// 失败场景：DB 未初始化或批量删除失败返回 error。
+// 副作用：DELETE publish_logs。
+func (r *PublishLogRepository) DeleteByIDs(ids []uint64) (int64, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return 0, errors.New("publish log repo is nil")
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	result := r.store.DB.Where("id IN ?", ids).Delete(&PublishLogEntry{})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+// FindByIDs 按主键列表批量查询发种日志记录（仅返回 ID/Status/QueueTaskID）。
+// 参数/返回：ids 为日志主键列表；返回匹配的日志列表与 error。
+// 失败场景：DB 未初始化或查询失败返回 error。
+// 副作用：无（只读）。
+func (r *PublishLogRepository) FindByIDs(ids []uint64) ([]PublishLogEntry, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("publish log repo is nil")
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	rows := make([]PublishLogEntry, 0)
+	if err := r.store.DB.
+		Select("id, status, queue_task_id").
+		Where("id IN ?", ids).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // MaxNumericTriggerSuffix 计算 publish_trigger 以指定前缀开头的最大数字后缀。
 // 参数/返回：prefix 为触发前缀（例如：批量转种-）；返回最大数字（不存在则为 0）与 error。
 // 失败场景：DB 未初始化或查询失败返回 error；解析失败的触发会被忽略。

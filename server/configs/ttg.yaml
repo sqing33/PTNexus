@@ -1,0 +1,46 @@
+# TTG (ToTheGlory) 站点配置文件
+# TTG 使用单一 type 下拉框（合并类型/媒介/分辨率），由 Go 发布器处理 type 映射
+
+site_name: "TTG"
+
+form_fields:
+  category: "type"
+  subtitle: "subtitle"
+  imdb_url: "imdb_c"
+  douban_url: "douban_id"
+
+source_parsers:
+  source_params:
+    type:
+      source_key: "类型"
+    tags[]:
+      source_key: "标签"
+
+  standard_keys:
+    type:
+      "电影DVDRip": "category.movie"
+      "电影720p": "category.movie"
+      "电影1080i/p": "category.movie"
+      "BluRay原盘": "category.movie"
+      "影视2160p": "category.movie"
+      "UHD原盘": "category.movie"
+      "纪录片720p": "category.documentary"
+      "纪录片1080i/p": "category.documentary"
+      "纪录片BluRay原盘": "category.documentary"
+      "欧美剧720p(单集)": "category.tv_series"
+      "欧美剧1080i/p(单集)": "category.tv_series"
+      "高清日剧": "category.tv_series"
+      "大陆港台剧720p(单集)": "category.tv_series"
+      "大陆港台剧1080i/p(单集)": "category.tv_series"
+      "高清韩剧": "category.tv_series"
+      "欧美剧包(全集)": "category.tv_shows"
+      "日剧包": "category.tv_shows"
+      "韩剧包": "category.tv_shows"
+      "华语剧包(全集)": "category.tv_shows"
+      "高清动漫": "category.animation"
+      "动漫原盘": "category.animation"
+      "MV&演唱会": "category.mv"
+
+mappings:
+  tag:
+    "default": null

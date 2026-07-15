@@ -118,7 +118,7 @@ func (s *MigrateService) runPublishQueueWorker() {
 	}
 }
 
-// EnqueuePublishQueue 将“选择站点发布”步骤生成的 payload 写入发布队列，等待后台触发。
+// EnqueuePublishQueue 将"选择站点发布"步骤生成的 payload 写入发布队列，等待后台触发。
 // 参数/返回：payload 与发布接口一致（支持 targetSites/targetSite），必须包含 task_id 与 upload_data；返回入队结果与 HTTP 状态码。
 // 失败场景：参数缺失、上下文过期、队列已满或入库失败时返回对应错误。
 // 副作用：写入 publish_queue_tasks 与 publish_logs。
@@ -296,7 +296,7 @@ func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string
 	}, 200
 }
 
-// EnqueuePublishQueueBatch 将“一站多种”批量转种请求批量写入发布队列。
+// EnqueuePublishQueueBatch 将"一站多种"批量转种请求批量写入发布队列。
 // 参数/返回：payload 需包含 target_site_name 与 seeds；返回批量入队统计（group_id/publish_trigger/requested/queued/skipped）。
 // 失败场景：参数缺失、队列未初始化/关闭、队列上限不足、入库失败时返回 4xx/5xx。
 // 副作用：写入 publish_queue_tasks 与 publish_logs。
@@ -541,7 +541,123 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 	}, 200
 }
 
-// DeleteQueuedPublishTask 将待发布的 queued 任务标记为 cancelled（供日志页“删除”操作调用）。
+// EnqueuePublishQueueBatchByNames 根据种子名称批量查找 seed_parameters 并加入发种队列。
+// 参数/返回：payload 需包含 torrent_names([]string) 和 target_site_name；返回批量入队统计与批次标识。
+// 失败场景：参数缺失、队列未初始化、seed_parameters 中未找到对应记录会跳过。
+// 副作用：写入 publish_queue_tasks 与 publish_logs。
+func (s *MigrateService) EnqueuePublishQueueBatchByNames(payload map[string]any) (map[string]any, int) {
+	if s == nil || s.queueRepo == nil || s.queueRepo.DB() == nil {
+		return map[string]any{"success": false, "message": "队列服务未初始化"}, 500
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+
+	targetSite := strings.TrimSpace(processingshared.ToString(payload["target_site_name"], ""))
+	if targetSite == "" {
+		return map[string]any{"success": false, "message": "缺少 target_site_name 参数"}, 400
+	}
+
+	rawNames, ok := payload["torrent_names"].([]any)
+	if !ok || len(rawNames) == 0 {
+		return map[string]any{"success": false, "message": "缺少 torrent_names 参数"}, 400
+	}
+
+	// Deduplicate names
+	seenNames := map[string]struct{}{}
+	uniqueNames := make([]string, 0, len(rawNames))
+	for _, raw := range rawNames {
+		name := strings.TrimSpace(processingshared.ToString(raw, ""))
+		if name == "" {
+			continue
+		}
+		if _, exists := seenNames[name]; exists {
+			continue
+		}
+		seenNames[name] = struct{}{}
+		uniqueNames = append(uniqueNames, name)
+	}
+
+	if len(uniqueNames) == 0 {
+		return map[string]any{"success": false, "message": "没有有效的种子名称"}, 400
+	}
+
+	// Resolve each name to seed_parameters entry
+	seeds := make([]any, 0, len(uniqueNames))
+	unresolvedNames := make([]string, 0)
+
+	for _, name := range uniqueNames {
+		entries, err := s.repo.GetSeedParametersByName(name)
+		if err != nil || len(entries) == 0 {
+			unresolvedNames = append(unresolvedNames, name)
+			continue
+		}
+
+		// Pick the best entry: prefer one that is not the target site
+		var best map[string]any
+		for _, entry := range entries {
+			entrySite := strings.TrimSpace(processingshared.ToString(entry["site_name"], ""))
+			if entrySite == "" || entrySite == targetSite {
+				continue
+			}
+			best = entry
+			break
+		}
+		// If no non-target entry found, try first entry
+		if best == nil && len(entries) > 0 {
+			best = entries[0]
+		}
+		if best == nil {
+			unresolvedNames = append(unresolvedNames, name)
+			continue
+		}
+
+		torrentID := strings.TrimSpace(processingshared.ToString(best["torrent_id"], ""))
+		siteName := strings.TrimSpace(processingshared.ToString(best["site_name"], ""))
+		if torrentID == "" || siteName == "" {
+			unresolvedNames = append(unresolvedNames, name)
+			continue
+		}
+
+		seeds = append(seeds, map[string]any{
+			"torrent_id":    torrentID,
+			"site_name":     siteName,
+			"nickname":      processingshared.ToString(best["nickname"], siteName),
+			"hash":          processingshared.ToString(best["hash"], ""),
+			"downloader_id": processingshared.ToString(best["downloader_id"], ""),
+		})
+	}
+
+	if len(seeds) == 0 {
+		return map[string]any{
+			"success":         false,
+			"message":         fmt.Sprintf("所有 %d 个种子均未找到 seed_parameters 记录", len(uniqueNames)),
+			"unresolved_names": unresolvedNames,
+		}, 400
+	}
+
+	// Delegate to existing batch enqueue
+	delegatePayload := map[string]any{
+		"target_site_name": targetSite,
+		"seeds":            seeds,
+		"publish_scene":    processingshared.ToString(payload["publish_scene"], "multi_site"),
+	}
+	if trigger, ok := payload["publish_trigger"]; ok {
+		delegatePayload["publish_trigger"] = trigger
+	}
+
+	result, status := s.EnqueuePublishQueueBatch(delegatePayload)
+
+	// Enrich response with unresolved info
+	if unresolvedNames != nil {
+		result["unresolved_names"] = unresolvedNames
+	}
+	result["requested_names"] = len(uniqueNames)
+
+	return result, status
+}
+
+// DeleteQueuedPublishTask 将待发布的 queued 任务标记为 cancelled（供日志页"删除"操作调用）。
 // 参数/返回：queueTaskID 为队列任务主键；返回标准响应与状态码。
 // 失败场景：任务不存在返回 404；任务非 queued 返回 409；数据库更新失败返回 500。
 // 副作用：更新 publish_queue_tasks 与 publish_logs。

@@ -32,6 +32,7 @@ func (h *CrossSeedHandler) Data(c *gin.Context) {
 		PageSize:           intQuery(c, "page_size", 20),
 		Search:             c.Query("search"),
 		PathFilters:        stringSliceQuery(c, "path_filters"),
+		DownloaderFilters:  stringSliceQuery(c, "downloader_filters"),
 		IsDeleted:          c.Query("is_deleted"),
 		ExcludeTargetSites: c.Query("exclude_target_sites"),
 		ReviewStatus:       c.Query("review_status"),
@@ -57,5 +58,25 @@ func (h *CrossSeedHandler) DeleteData(c *gin.Context) {
 		return
 	}
 	result, status := h.service.DeleteCrossSeedData(payload)
+	c.JSON(status, result)
+}
+
+func (h *CrossSeedHandler) SeedSites(c *gin.Context) {
+	name := c.Query("name")
+	result, err := h.service.GetSeedSites(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *CrossSeedHandler) UpdatePublishAt(c *gin.Context) {
+	payload := map[string]any{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "请求体格式错误"})
+		return
+	}
+	result, status := h.service.UpdatePublishAt(payload)
 	c.JSON(status, result)
 }

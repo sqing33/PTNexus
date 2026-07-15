@@ -135,7 +135,7 @@ func pickDescriptionSection(uploadData map[string]any, intro map[string]any, key
 
 func shouldInlineMediainfo(siteCode string) bool {
 	switch strings.ToLower(strings.TrimSpace(siteCode)) {
-	case "btschool", "carpt", "kufei", "muxuege", "ptskit", "sewerpt", "upxin", "zmpt":
+	case "audiences", "btschool", "carpt", "kufei", "muxuege", "ptskit", "sewerpt", "ttg", "upxin", "zmpt":
 		return true
 	default:
 		return false

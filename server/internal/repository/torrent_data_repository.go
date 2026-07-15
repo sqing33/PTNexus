@@ -90,14 +90,20 @@ func (r *TorrentDataRepository) ListAllDiscoveredSites() ([]string, error) {
 		}
 	}
 
-	var sitesWithCookie []string
-	if err := r.store.DB.Raw("SELECT nickname FROM sites WHERE cookie IS NOT NULL AND cookie != ''").Pluck("nickname", &sitesWithCookie).Error; err != nil {
+	// 从 sites 表读取排序序号
+	type siteOrder struct {
+		Nickname  string
+		SortOrder int
+	}
+	var siteOrders []siteOrder
+	if err := r.store.DB.Raw("SELECT nickname, sort_order FROM sites").Scan(&siteOrders).Error; err != nil {
 		return nil, err
 	}
-	for _, site := range sitesWithCookie {
-		site = strings.TrimSpace(site)
-		if site != "" {
-			sitesSet[site] = struct{}{}
+	orderMap := map[string]int{}
+	for _, so := range siteOrders {
+		name := strings.TrimSpace(so.Nickname)
+		if name != "" {
+			orderMap[name] = so.SortOrder
 		}
 	}
 
@@ -105,7 +111,17 @@ func (r *TorrentDataRepository) ListAllDiscoveredSites() ([]string, error) {
 	for site := range sitesSet {
 		result = append(result, site)
 	}
-	sort.Strings(result)
+	sort.Slice(result, func(i, j int) bool {
+		oi, oj := orderMap[result[i]], orderMap[result[j]]
+		// sort_order 0 的站点排在最后
+		if (oi == 0) != (oj == 0) {
+			return oi != 0
+		}
+		if oi != oj {
+			return oi < oj
+		}
+		return result[i] < result[j]
+	})
 	return result, nil
 }
 
@@ -387,4 +403,31 @@ func (r *TorrentDataRepository) CachedSitesByNameAndSize(name string, size int64
 	sort.Strings(cachedSites)
 	sort.Strings(matchedHashes)
 	return cachedSites, matchedHashes, nil
+}
+
+type namePublishAt struct {
+	Name      string  `gorm:"column:name"`
+	PublishAt *string `gorm:"column:publish_at"`
+}
+
+func (r *TorrentDataRepository) PublishAtByNames() (map[string]string, error) {
+	rows := make([]namePublishAt, 0)
+	if err := r.store.DB.Raw("SELECT name, MIN(publish_at) AS publish_at FROM seed_parameters WHERE name IS NOT NULL AND name != '' AND publish_at IS NOT NULL GROUP BY name").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	result := map[string]string{}
+	for _, row := range rows {
+		if row.PublishAt != nil && *row.PublishAt != "" {
+			result[row.Name] = *row.PublishAt
+		}
+	}
+	return result, nil
+}
+
+func (r *TorrentDataRepository) UpdatePublishAtByName(name string, publishAt any) (int64, error) {
+	result := r.store.DB.Exec("UPDATE seed_parameters SET publish_at = ? WHERE name = ?", publishAt, name)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }

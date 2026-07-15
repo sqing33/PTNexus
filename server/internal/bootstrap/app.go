@@ -229,6 +229,7 @@ func registerRoutes(
 		api.POST("/sites/update", sitesHandler.UpdateSite)
 		api.POST("/sites/delete", sitesHandler.DeleteSite)
 		api.POST("/sites/update_cookie", sitesHandler.UpdateSiteCookie)
+		api.POST("/sites/update_order", sitesHandler.UpdateSitesOrder)
 		api.GET("/sites/cookie_sync_targets", sitesHandler.CookieSyncTargets)
 		api.POST("/sites/cookie_sync_batch", sitesHandler.BatchUpdateSiteCookies)
 		api.POST("/cookiecloud/sync", settingsHandler.CookieCloudSync)
@@ -262,6 +263,7 @@ func registerRoutes(
 		api.GET("/data", torrentDataHandler.Data)
 		api.POST("/refresh_data", torrentDataHandler.RefreshData)
 		api.GET("/cached_sites", torrentDataHandler.CachedSites)
+		api.POST("/data/update_publish_at", torrentDataHandler.UpdatePublishAt)
 		api.POST("/iyuu_query", torrentDataHandler.IYUUQuery)
 		api.POST("/iyuu_query_batch", torrentDataHandler.IYUUQueryBatch)
 		api.GET("/iyuu_query_batch_progress", torrentDataHandler.IYUUQueryBatchProgress)
@@ -275,16 +277,19 @@ func registerRoutes(
 
 		api.GET("/cross-seed-data/unique-paths", crossSeedHandler.UniquePaths)
 		api.GET("/cross-seed-data", crossSeedHandler.Data)
+		api.GET("/cross-seed-data/seed-sites", crossSeedHandler.SeedSites)
 		api.POST("/cross-seed-data/test-no-auth", crossSeedHandler.TestNoAuth)
 		api.GET("/cross-seed-data/test-no-auth", crossSeedHandler.TestNoAuth)
 		api.POST("/cross-seed-data/delete", crossSeedHandler.DeleteData)
 		api.DELETE("/cross-seed-data/delete", crossSeedHandler.DeleteData)
+		api.POST("/cross-seed-data/update_publish_at", crossSeedHandler.UpdatePublishAt)
 
 		api.POST("/utils/parse_title", migrateHandler.ParseTitle)
 		api.POST("/media/validate", migrateHandler.MediaValidate)
 		api.POST("/migrate_torrent", migrateHandler.MigrateTorrent)
 
 		api.GET("/publish_logs", migrateHandler.PublishLogs)
+		api.POST("/publish_logs/delete", migrateHandler.BatchDeletePublishLogs)
 	}
 
 	migrateAPI := engine.Group("/api/migrate")
@@ -301,6 +306,7 @@ func registerRoutes(
 		migrateAPI.GET("/publish_batch/stream/:batch_id", migrateHandler.PublishBatchStream)
 		migrateAPI.POST("/publish_queue/enqueue", migrateHandler.PublishQueueEnqueue)
 		migrateAPI.POST("/publish_queue/enqueue_batch", migrateHandler.PublishQueueEnqueueBatch)
+		migrateAPI.POST("/publish_queue/enqueue_batch_by_names", migrateHandler.PublishQueueEnqueueBatchByNames)
 		migrateAPI.DELETE("/publish_queue/tasks/:queue_task_id", migrateHandler.PublishQueueDeleteTask)
 
 		migrateAPI.POST("/batch_fetch_seed_data", migrateHandler.BatchFetchSeedData)

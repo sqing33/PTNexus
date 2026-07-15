@@ -53,6 +53,16 @@ func (h *TorrentDataHandler) CachedSites(c *gin.Context) {
 	c.JSON(status, result)
 }
 
+func (h *TorrentDataHandler) UpdatePublishAt(c *gin.Context) {
+	payload := map[string]any{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "请求体格式错误"})
+		return
+	}
+	result, status := h.service.UpdatePublishAt(payload)
+	c.JSON(status, result)
+}
+
 func (h *TorrentDataHandler) IYUUQuery(c *gin.Context) {
 	payload := map[string]any{}
 	_ = c.ShouldBindJSON(&payload)

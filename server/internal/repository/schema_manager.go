@@ -203,6 +203,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				ratio_threshold DOUBLE NOT NULL DEFAULT 3.0,
 				seed_speed_limit INT NOT NULL DEFAULT 5,
 				can_publish TINYINT(1) NOT NULL DEFAULT 1,
+				sort_order INT NOT NULL DEFAULT 0,
 				PRIMARY KEY (id)
 			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
 			`CREATE TABLE IF NOT EXISTS seed_parameters (
@@ -238,6 +239,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				bdinfo_started_at DATETIME,
 				bdinfo_completed_at DATETIME,
 				bdinfo_error TEXT,
+				publish_at DATETIME NULL,
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL,
 				PRIMARY KEY (hash, torrent_id, site_name)
@@ -375,7 +377,8 @@ func (m *SchemaManager) createTableSQLs() []string {
 				speed_limit INTEGER NOT NULL DEFAULT 0,
 				ratio_threshold DOUBLE PRECISION NOT NULL DEFAULT 3.0,
 				seed_speed_limit INTEGER NOT NULL DEFAULT 5,
-				can_publish INTEGER NOT NULL DEFAULT 1
+				can_publish INTEGER NOT NULL DEFAULT 1,
+				sort_order INTEGER NOT NULL DEFAULT 0
 			)`,
 			`CREATE TABLE IF NOT EXISTS seed_parameters (
 				hash VARCHAR(64) NOT NULL,
@@ -410,6 +413,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				bdinfo_started_at TIMESTAMP,
 				bdinfo_completed_at TIMESTAMP,
 				bdinfo_error TEXT,
+				publish_at TIMESTAMP NULL,
 				created_at TIMESTAMP NOT NULL,
 				updated_at TIMESTAMP NOT NULL,
 				PRIMARY KEY (hash, torrent_id, site_name)
@@ -547,7 +551,8 @@ func (m *SchemaManager) createTableSQLs() []string {
 				speed_limit INTEGER NOT NULL DEFAULT 0,
 				ratio_threshold REAL NOT NULL DEFAULT 3.0,
 				seed_speed_limit INTEGER NOT NULL DEFAULT 5,
-				can_publish INTEGER NOT NULL DEFAULT 1
+				can_publish INTEGER NOT NULL DEFAULT 1,
+				sort_order INTEGER NOT NULL DEFAULT 0
 			)`,
 			`CREATE TABLE IF NOT EXISTS seed_parameters (
 				hash TEXT NOT NULL,
@@ -582,6 +587,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				bdinfo_started_at TEXT,
 				bdinfo_completed_at TEXT,
 				bdinfo_error TEXT,
+				publish_at TEXT NULL,
 				created_at TEXT NOT NULL,
 				updated_at TEXT NOT NULL,
 				PRIMARY KEY (hash, torrent_id, site_name)
@@ -718,6 +724,7 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "ratio_threshold", definition: map[string]string{"sqlite": "REAL NOT NULL DEFAULT 3.0", "mysql": "DOUBLE NOT NULL DEFAULT 3.0", "postgresql": "DOUBLE PRECISION NOT NULL DEFAULT 3.0"}},
 			{name: "seed_speed_limit", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 5", "mysql": "INT NOT NULL DEFAULT 5", "postgresql": "INTEGER NOT NULL DEFAULT 5"}},
 			{name: "can_publish", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 1", "mysql": "TINYINT(1) NOT NULL DEFAULT 1", "postgresql": "INTEGER NOT NULL DEFAULT 1"}},
+			{name: "sort_order", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
 		},
 		"seed_parameters": {
 			{name: "hash", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(64) NOT NULL", "postgresql": "VARCHAR(64) NOT NULL"}},
@@ -752,6 +759,7 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "bdinfo_started_at", definition: map[string]string{"sqlite": "TEXT", "mysql": "DATETIME", "postgresql": "TIMESTAMP"}},
 			{name: "bdinfo_completed_at", definition: map[string]string{"sqlite": "TEXT", "mysql": "DATETIME", "postgresql": "TIMESTAMP"}},
 			{name: "bdinfo_error", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
+			{name: "publish_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
 			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 		},

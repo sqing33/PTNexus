@@ -24,6 +24,7 @@
       @row-click="handleRowClick"
       @expand-change="handleExpandChange"
       @sort-change="handleSortChange"
+      @selection-change="handleSelectionChange"
       :default-sort="defaultSortForTable"
       empty-text="无数据或当前筛选条件下无结果"
       class="glass-table"
@@ -101,7 +102,11 @@
         </template>
       </el-table-column>
 
-      <el-table-column prop="name" min-width="450" sortable="custom">
+      <el-table-column type="selection" width="45" align="center" :selectable="checkSelectable" />
+
+      <el-table-column
+        v-if="isColumnVisible('name')"
+        prop="name" min-width="450" sortable="custom">
         <template #header>
           <div class="name-header-container">
             <div class="name-header-title">种子</div>
@@ -127,6 +132,11 @@
                   >清除</el-button
                 >
               </div>
+              <ColumnToggle
+                v-model="visibleColumns"
+                :columns="torrentsColumns"
+                :defaults="defaultTorrentsVisibleColumns"
+              />
               <el-button type="primary" @click="openFilterDialog" plain class="filter-trigger">
                 筛选
               </el-button>
@@ -139,6 +149,7 @@
       </el-table-column>
 
       <el-table-column
+        v-if="isColumnVisible('site_count')"
         prop="site_count"
         label="做种数"
         sortable="custom"
@@ -154,6 +165,7 @@
       </el-table-column>
 
       <el-table-column
+        v-if="isColumnVisible('save_path')"
         prop="save_path"
         label="保存路径"
         :width="savePathColumnWidth"
@@ -168,7 +180,7 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="下载器" width="130" align="center" header-align="center">
+      <el-table-column v-if="isColumnVisible('downloader')" label="下载器" width="130" align="center" header-align="center">
         <template #default="scope">
           <div
             style="
@@ -196,6 +208,7 @@
         </template>
       </el-table-column>
       <el-table-column
+        v-if="isColumnVisible('size_formatted')"
         label="大小"
         prop="size_formatted"
         width="100"
@@ -204,13 +217,14 @@
       />
 
       <el-table-column
+        v-if="isColumnVisible('total_uploaded_formatted')"
         label="总上传量"
         prop="total_uploaded_formatted"
         width="110"
         align="center"
         sortable="custom"
       />
-      <el-table-column label="进度" prop="progress" width="90" align="center" sortable="custom">
+      <el-table-column v-if="isColumnVisible('progress')" label="进度" prop="progress" width="90" align="center" sortable="custom">
         <template #default="scope">
           <div style="padding: 1px 0; width: 100%">
             <el-progress
@@ -226,7 +240,7 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="状态" prop="state" width="120" align="center" header-align="center">
+      <el-table-column v-if="isColumnVisible('state')" label="状态" prop="state" width="120" align="center" header-align="center">
         <template #default="scope">
           <div
             style="
@@ -245,6 +259,52 @@
       </el-table-column>
 
       <el-table-column
+        v-if="isColumnVisible('publish_at')"
+        prop="publish_at"
+        label="可发种时间"
+        width="170"
+        align="center"
+        header-align="center"
+        sortable="custom"
+      >
+        <template #default="scope">
+          <div v-if="editingPublishAtId === scope.row.unique_id" class="publish-at-edit" @click.stop>
+            <el-input-number
+              v-model="editingPublishAtHours"
+              :min="1"
+              :step="1"
+              size="small"
+              style="width: 90px"
+              controls-position="right"
+              placeholder="小时"
+              @keyup.enter="confirmPublishAt(scope.row)"
+              ref="publishAtInputRef"
+            />
+            <span style="font-size: 12px; white-space: nowrap; margin-left: 2px; color: #909399">小时</span>
+            <el-button
+              type="danger"
+              size="small"
+              link
+              style="margin-left: 4px"
+              @click.stop="clearPublishAt(scope.row)"
+              title="清除"
+            >
+              ✕
+            </el-button>
+          </div>
+          <div
+            v-else
+            class="publish-at-cell clickable-cell"
+            @click.stop="startPublishAtEdit(scope.row)"
+            title="点击设置可发种时间(小时)"
+          >
+            {{ scope.row.publish_at ? formatPublishAt(scope.row.publish_at) : '未设置' }}
+          </div>
+        </template>
+      </el-table-column>
+
+      <el-table-column
+        v-if="isColumnVisible('target_sites_count')"
         label="可转种"
         width="100"
         align="center"
@@ -294,13 +354,21 @@
       </el-table-column>
     </el-table>
 
+    <div v-if="selectedRows.length > 0" class="batch-action-bar">
+      <span>已选择 {{ selectedRows.length }} 项</span>
+      <el-button type="success" @click="openBatchPublishDialog" plain size="small">
+        批量发种
+      </el-button>
+      <el-button @click="clearSelection" plain size="small">取消选择</el-button>
+    </div>
+
     <el-pagination
       v-if="totalTorrents > 0"
       class="glass-pagination"
       style="justify-content: flex-end"
       v-model:current-page="currentPage"
       v-model:page-size="pageSize"
-      :page-sizes="[20, 50, 100]"
+      :page-sizes="[5, 10, 20, 50, 100]"
       :total="totalTorrents"
       layout="total, sizes, prev, pager, next, jumper"
       @size-change="handleSizeChange"
@@ -587,7 +655,7 @@
             <p class="cached-sites-label">已缓存的站点 ({{ cachedSites.length }})</p>
             <div class="site-list-box glass-site-box cached-sites-box">
               <el-tag
-                v-for="site in allSourceSitesStatus.filter((s) => cachedSites.includes(s.name))"
+                v-for="site in allSourceSitesStatus.filter((s) => s.is_source && cachedSites.includes(s.name))"
                 :key="site.name"
                 :type="getSiteTagType(site)"
                 :class="{
@@ -610,13 +678,13 @@
 
           <!-- 未缓存站点区域 -->
           <div
-            v-if="allSourceSitesStatus.some((s) => !cachedSites.includes(s.name))"
+            v-if="allSourceSitesStatus.some((s) => s.is_source && !cachedSites.includes(s.name))"
             class="uncached-sites-section"
           >
             <p class="uncached-sites-label">未缓存的站点</p>
             <div class="site-list-box glass-site-box">
               <el-tag
-                v-for="site in allSourceSitesStatus.filter((s) => !cachedSites.includes(s.name))"
+                v-for="site in allSourceSitesStatus.filter((s) => s.is_source && !cachedSites.includes(s.name))"
                 :key="site.name"
                 :type="getSiteTagType(site)"
                 :class="{ 'is-selectable': isSourceSiteSelectable(site.name) }"
@@ -729,17 +797,71 @@
         </div>
       </el-card>
     </div>
+
+    <!-- 批量发种弹窗 -->
+    <div v-if="batchPublishDialogVisible" class="modal-overlay" @click.self="batchPublishDialogVisible = false">
+      <el-card class="batch-publish-card" shadow="always">
+        <template #header>
+          <div class="modal-header">
+            <div class="batch-publish-header-info">
+              <span class="batch-publish-title">批量发种</span>
+              <el-tag type="success" size="small" effect="plain">{{ selectedRows.length }} 个种子</el-tag>
+            </div>
+            <el-button type="danger" circle @click="batchPublishDialogVisible = false" plain>X</el-button>
+          </div>
+        </template>
+        <div class="batch-publish-body">
+          <div class="batch-publish-hint">选择要发布到的目标站点：</div>
+          <el-input
+            v-model="batchSiteSearch"
+            placeholder="搜索站点..."
+            clearable
+            size="small"
+            class="batch-site-search"
+          />
+          <div class="batch-site-grid">
+            <div
+              v-for="site in filteredBatchTargetSites"
+              :key="site"
+              class="batch-site-card"
+              :class="{ 'batch-site-card--active': batchPublishTargetSite === site }"
+              @click="batchPublishTargetSite = site"
+            >
+              <span class="batch-site-name">{{ site }}</span>
+              <div v-if="batchPublishTargetSite === site" class="batch-site-check">✓</div>
+            </div>
+            <div v-if="filteredBatchTargetSites.length === 0" class="batch-site-empty">
+              无匹配站点
+            </div>
+          </div>
+        </div>
+        <div class="batch-publish-footer">
+          <el-button @click="batchPublishDialogVisible = false">取消</el-button>
+          <el-button
+            type="primary"
+            @click="executeBatchPublish"
+            :loading="batchPublishLoading"
+            :disabled="!batchPublishTargetSite"
+          >
+            发种到 {{ batchPublishTargetSite || '...' }}
+          </el-button>
+        </div>
+      </el-card>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, reactive, watch, nextTick, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import type { TableInstance, Sort } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
 import CrossSeedPanel from '../components/CrossSeedPanel.vue'
 import SiteDataViewer from '../components/SiteDataViewer.vue'
+import ColumnToggle from '../components/ColumnToggle.vue'
+import type { ColumnDef } from '../components/ColumnToggle.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
 import { useSiteDataStore } from '@/stores/siteData'
 import { useTorrentsViewState } from '@/stores/torrentsViewState'
@@ -762,6 +884,7 @@ interface SiteStatus {
   has_passkey: boolean
   is_source: boolean
   is_target: boolean
+  can_publish: boolean
 }
 interface ActiveFilters {
   paths: string[]
@@ -778,13 +901,19 @@ interface PathNode {
 
 type SourceSiteOption = { siteName: string } & SiteData
 
-// const router = useRouter();
+const router = useRouter()
 
 const tableRef = ref<TableInstance | null>(null)
 const loading = ref<boolean>(true)
 const refreshingBackendData = ref<boolean>(false)
 const allData = ref<Torrent[]>([])
 const error = ref<string | null>(null)
+
+// 批量发种状态
+const selectedRows = ref<Torrent[]>([])
+const batchPublishDialogVisible = ref(false)
+const batchPublishTargetSite = ref('')
+const batchPublishLoading = ref(false)
 
 const emitGlobalRefreshLoading = (refreshing: boolean) => {
   window.dispatchEvent(
@@ -890,6 +1019,20 @@ const pathTreeData = ref<PathNode[]>([])
 
 const sourceSelectionDialogVisible = ref<boolean>(false)
 const allSourceSitesStatus = ref<SiteStatus[]>([])
+
+const batchTargetSites = computed(() => {
+  return allSourceSitesStatus.value
+    .filter((s) => s.is_target && s.can_publish)
+    .map((s) => s.name)
+})
+
+const batchSiteSearch = ref('')
+const filteredBatchTargetSites = computed(() => {
+  const kw = batchSiteSearch.value.trim().toLowerCase()
+  if (!kw) return batchTargetSites.value
+  return batchTargetSites.value.filter((s) => s.toLowerCase().includes(kw))
+})
+
 const iyuuBatchQueryLoading = ref<boolean>(false)
 const iyuuBatchDialogVisible = ref<boolean>(false)
 const iyuuBatchTaskId = ref<string | null>(null)
@@ -920,6 +1063,116 @@ const IYUU_BATCH_MAX_GROUPS = 200
 const IYUU_BATCH_POLL_INTERVAL_MS = 2000
 const cachedSites = ref<string[]>([]) // 存储已缓存的站点列表
 const cachedSitesLoading = ref<boolean>(false) // 查询缓存站点的加载状态
+
+// 可发种时间编辑（小时数输入）
+const editingPublishAtId = ref<string | null>(null)
+const editingPublishAtHours = ref<number>(24)
+const publishAtInputRef = ref<InstanceType<any> | null>(null)
+
+const formatPublishAt = (dateString: string) => {
+  if (!dateString) return ''
+  try {
+    const date = new Date(dateString)
+    if (isNaN(date.getTime())) return dateString
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  } catch {
+    return dateString
+  }
+}
+
+const startPublishAtEdit = (row: Torrent) => {
+  editingPublishAtId.value = row.unique_id
+  editingPublishAtHours.value = 24
+  nextTick(() => {
+    if (publishAtInputRef.value) {
+      const inner = publishAtInputRef.value.$el?.querySelector('input')
+      inner?.focus()
+      inner?.select()
+    }
+  })
+}
+
+const cancelPublishAtEdit = () => {
+  editingPublishAtId.value = null
+  editingPublishAtHours.value = 24
+}
+
+const computePublishAtFromHours = (hours: number): string => {
+  const targetDate = new Date(Date.now() + hours * 60 * 60 * 1000)
+  const year = targetDate.getFullYear()
+  const month = String(targetDate.getMonth() + 1).padStart(2, '0')
+  const day = String(targetDate.getDate()).padStart(2, '0')
+  const h = String(targetDate.getHours()).padStart(2, '0')
+  const m = String(targetDate.getMinutes()).padStart(2, '0')
+  const s = String(targetDate.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day}T${h}:${m}:${s}`
+}
+
+const confirmPublishAt = async (row: Torrent) => {
+  const hours = editingPublishAtHours.value
+  if (!hours || hours <= 0) {
+    ElMessage.warning('请输入有效的小时数')
+    return
+  }
+  const publishAt = computePublishAtFromHours(hours)
+  try {
+    const response = await axios.post('/api/data/update_publish_at', {
+      name: row.name,
+      publish_at: publishAt,
+    })
+    const result = response.data
+    if (result.success) {
+      row.publish_at = publishAt
+      ElMessage.success(`可发种时间已设置为 ${hours} 小时后`)
+    } else {
+      ElMessage.error(result.error || '更新失败')
+    }
+  } catch (e: unknown) {
+    const message = axios.isAxiosError(e)
+      ? ((e.response?.data as { error?: string } | undefined)?.error || e.message)
+      : e instanceof Error
+        ? e.message
+        : '网络错误'
+    ElMessage.error(message)
+  } finally {
+    editingPublishAtId.value = null
+    editingPublishAtHours.value = 24
+  }
+}
+
+const handlePublishAtChange = confirmPublishAt
+
+const clearPublishAt = async (row: Torrent) => {
+  try {
+    const response = await axios.post('/api/data/update_publish_at', {
+      name: row.name,
+      publish_at: null,
+    })
+    const result = response.data
+    if (result.success) {
+      row.publish_at = null
+      ElMessage.success('已清除可发种时间')
+    } else {
+      ElMessage.error(result.error || '清除失败')
+    }
+  } catch (e: unknown) {
+    const message = axios.isAxiosError(e)
+      ? ((e.response?.data as { error?: string } | undefined)?.error || e.message)
+      : e instanceof Error
+        ? e.message
+        : '网络错误'
+    ElMessage.error(message)
+  } finally {
+    editingPublishAtId.value = null
+    editingPublishAtHours.value = 24
+  }
+}
 
 const crossSeedStore = useCrossSeedStore()
 const siteDataStore = useSiteDataStore()
@@ -1034,6 +1287,24 @@ const progressColors = [
   { color: '#67c23a', percentage: 100 },
 ]
 
+// 列定义与可见性
+const torrentsColumns: ColumnDef[] = [
+  { prop: 'name', label: '种子' },
+  { prop: 'site_count', label: '做种数' },
+  { prop: 'save_path', label: '保存路径' },
+  { prop: 'downloader', label: '下载器' },
+  { prop: 'size_formatted', label: '大小' },
+  { prop: 'total_uploaded_formatted', label: '总上传量' },
+  { prop: 'progress', label: '进度' },
+  { prop: 'state', label: '状态' },
+  { prop: 'publish_at', label: '可发种时间' },
+  { prop: 'target_sites_count', label: '可转种' },
+]
+
+const defaultTorrentsVisibleColumns = torrentsColumns.map((c) => c.prop)
+const visibleColumns = ref<string[]>([...defaultTorrentsVisibleColumns])
+const isColumnVisible = (prop: string) => visibleColumns.value.includes(prop)
+
 const buildCurrentUiSettings = () => ({
   page_size: pageSize.value,
   sort_prop: currentSort.value.prop,
@@ -1046,6 +1317,7 @@ const buildCurrentUiSettings = () => ({
     notExistSiteNames: [...activeFilters.notExistSiteNames],
     downloaderIds: [...activeFilters.downloaderIds],
   },
+  visible_columns: [...visibleColumns.value],
 })
 
 const syncUiSettingsCache = () => {
@@ -1101,6 +1373,9 @@ const loadUiSettings = async (forceRefresh = false) => {
         // 旧的siteNames字段不再使用
         delete legacyFilters.siteNames
       }
+    }
+    if (Array.isArray(settings.visible_columns)) {
+      visibleColumns.value = settings.visible_columns
     }
     syncUiSettingsCache()
   } catch (e) {
@@ -1237,6 +1512,82 @@ const startCrossSeed = async (row: Torrent) => {
 const openSiteDataViewer = (row: Torrent | null) => {
   if (!row) return
   siteDataStore.openDialog(row, allDownloadersList.value)
+}
+
+// 批量发种相关
+const handleSelectionChange = (selection: Torrent[]) => {
+  selectedRows.value = selection
+}
+
+const checkSelectable = (row: Torrent) => {
+  return row.progress >= 100
+}
+
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+  selectedRows.value = []
+}
+
+const openBatchPublishDialog = () => {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要批量发种的种子')
+    return
+  }
+  batchPublishTargetSite.value = ''
+  batchPublishDialogVisible.value = true
+}
+
+const executeBatchPublish = async () => {
+  if (!batchPublishTargetSite.value || selectedRows.value.length === 0) return
+
+  batchPublishLoading.value = true
+  try {
+    const response = await axios.post('/api/migrate/publish_queue/enqueue_batch_by_names', {
+      torrent_names: selectedRows.value.map((r) => r.name),
+      target_site_name: batchPublishTargetSite.value,
+      publish_scene: 'multi_site',
+    })
+    const result = response.data
+    if (result.success) {
+      const publishTrigger = String(result?.publish_trigger || '').trim()
+      const groupID = String(result?.group_id || '').trim()
+      const queued = Number(result?.queued || 0)
+      const requested = Number(result?.requested_names || selectedRows.value.length)
+      ElMessage.success(
+        `${result.message || `批量加入队列完成（${queued}/${requested}）`}${publishTrigger ? `（${publishTrigger}）` : ''}`,
+      )
+
+      const unresolved = result.unresolved_names as string[] | undefined
+      if (unresolved && unresolved.length > 0) {
+        ElMessage.warning(`${unresolved.length} 个种子无发种记录，已跳过`)
+      }
+
+      batchPublishDialogVisible.value = false
+      clearSelection()
+
+      if (publishTrigger) {
+        await router.push({
+          path: '/publish-logs',
+          query: {
+            trigger: publishTrigger,
+            scene: 'multi_site',
+            ...(groupID ? { queue_group_id: groupID } : {}),
+          },
+        })
+      }
+    } else {
+      ElMessage.error(result.message || '批量入队失败')
+    }
+  } catch (e: unknown) {
+    const message = axios.isAxiosError(e)
+      ? ((e.response?.data as { message?: string } | undefined)?.message || e.message)
+      : e instanceof Error
+        ? e.message
+        : String(e)
+    ElMessage.error(message)
+  } finally {
+    batchPublishLoading.value = false
+  }
 }
 
 // 处理种子数据刷新
@@ -1985,6 +2336,12 @@ watch(nameSearch, () => {
   fetchDataWithSpinner()
   saveUiSettings()
 })
+
+watch(visibleColumns, () => {
+  if (isInitializing.value) return
+  syncUiSettingsCache()
+  saveUiSettings()
+})
 // 移除旧的监听器，现在不需要根据siteExistence值清空siteNames
 </script>
 
@@ -1998,6 +2355,149 @@ watch(nameSearch, () => {
 }
 
 /* 表格和分页器样式已移至 glass-morphism.scss */
+
+.publish-at-cell {
+  cursor: pointer;
+  transition: background-color 0.2s;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+  padding: 4px;
+}
+
+.publish-at-cell:hover {
+  background-color: #f0f7ff;
+  color: #409eff;
+}
+
+.publish-at-edit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.clickable-cell {
+  cursor: pointer;
+}
+
+.batch-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 15px;
+  background-color: #f0f9eb;
+  border: 1px solid #e1f3d8;
+  border-radius: 4px;
+  margin: 8px 0;
+  font-size: 14px;
+  color: #67c23a;
+}
+
+.batch-publish-card {
+  width: 520px;
+  max-width: 90vw;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.batch-publish-header-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.batch-publish-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.batch-publish-body {
+  padding: 4px 0;
+  overflow-y: auto;
+}
+
+.batch-publish-hint {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 10px;
+}
+
+.batch-site-search {
+  margin-bottom: 12px;
+}
+
+.batch-site-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.batch-site-card {
+  position: relative;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  padding: 12px 10px;
+  background: #fafbfc;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.batch-site-card:hover {
+  border-color: #409eff;
+  background: #ecf5ff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.15);
+}
+
+.batch-site-card--active {
+  border-color: #409eff;
+  background: #ecf5ff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
+}
+
+.batch-site-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.batch-site-check {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 12px;
+  color: #409eff;
+  font-weight: 700;
+}
+
+.batch-site-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #c0c4cc;
+  padding: 24px 0;
+  font-size: 13px;
+}
+
+.batch-publish-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #ebeef5;
+  margin-top: 12px;
+}
 
 .disabled-site {
   opacity: 0.5;

@@ -19,6 +19,8 @@ func Publish(input publisher.PublishInput) (publisher.PublishResult, error) {
 		return publishsites.PublishCBG(input)
 	case "baozi":
 		return publishsites.PublishBaozi(input)
+	case "audiences":
+		return publishsites.PublishAudiences(input)
 	case "hddolby":
 		return publishsites.PublishHDDolby(input)
 	case "hdkyl":
@@ -41,6 +43,10 @@ func Publish(input publisher.PublishInput) (publisher.PublishResult, error) {
 		return publishsites.PublishHdfans(input)
 	case "crabpt":
 		return publishsites.PublishCrabPT(input)
+	case "ttg":
+		return publishsites.PublishTTG(input)
+	case "longpt":
+		return publishsites.PublishLongPT(input)
 	default:
 		return publisher.PublishPublic(input)
 	}

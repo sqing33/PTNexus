@@ -267,6 +267,18 @@ func (r *MigrateRepository) GetSeedParameterByKey(hash, torrentID, siteName stri
 	return row, nil
 }
 
+func (r *MigrateRepository) GetSeedParametersByName(name string) ([]map[string]any, error) {
+	rows := make([]map[string]any, 0)
+	err := r.store.DB.Table("seed_parameters").
+		Where("name = ?", name).
+		Order("updated_at DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 func (r *MigrateRepository) GetCurrentTorrentByName(name string) (map[string]any, error) {
 	row := map[string]any{}
 	err := r.store.DB.Raw(`

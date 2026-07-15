@@ -25,6 +25,8 @@
                         'unrecognized-section':
                           param.key === '制作组' &&
                           (!param.value || param.value.toUpperCase() === 'NOGROUP'),
+                        'required-field-empty':
+                          param.key === '年份' && (!param.value || param.value.trim() === ''),
                       }"
                     >
                       <el-input
@@ -43,6 +45,8 @@
                         'unrecognized-section':
                           param.key === '制作组' &&
                           (!param.value || param.value.toUpperCase() === 'NOGROUP'),
+                        'required-field-empty':
+                          param.key === '年份' && (!param.value || param.value.trim() === ''),
                       }"
                     >
                       <el-input

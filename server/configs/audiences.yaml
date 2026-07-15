@@ -1,0 +1,151 @@
+site_name: "Audiences"
+
+# Audiences (人人) 上传页关键字段（upload.php）
+form_fields:
+  category: "type"
+  medium: "medium_sel"
+  video_codec: "codec_sel"
+  audio_codec: "audiocodec_sel"
+  resolution: "standard_sel"
+  "tags[]": "tags[]"
+
+source_parsers:
+  source_params:
+    type:
+      source_key: "类型"
+    medium:
+      source_key: "媒介"
+    video_codec:
+      source_key: "视频编码"
+    audio_codec:
+      source_key: "音频编码"
+    resolution:
+      source_key: "分辨率"
+
+  standard_keys:
+    type:
+      "Movies/电影": "category.movie"
+      "TV Series/电视剧": "category.tv_series"
+      "Documentaries/纪录片": "category.documentaries"
+      "Music/音乐": "category.music"
+      "TV Shows/综艺": "category.tv_shows"
+      "Animations/动漫、动画": "category.animation"
+      "Music Videos/音乐视频": "category.mv"
+      "Concert/演唱会": "category.stage"
+      "Education/教育": "category.study"
+      "Audio Books/有声读物": "category.audiobook"
+      "Sports/体育": "category.sports"
+      "E-Books/电子书": "category.ebook"
+      "Games/游戏": "category.game"
+      "Others/其他": "category.other"
+
+    medium:
+      "UHD原盘": "medium.uhd_bluray"
+      "UHD DIY": "medium.uhd_diy"
+      "BD原盘": "medium.bluray"
+      "BD DIY": "medium.bluray_diy"
+      "Remux": "medium.remux"
+      "Encode": "medium.encode"
+      "WEB-DL": "medium.webdl"
+      "HDTV": "medium.hdtv"
+      "DVD": "medium.dvd"
+      "CD": "medium.cd"
+      "Other": "medium.other"
+
+mappings:
+  type:
+    "category.movie": "401"
+    "category.tv_series": "402"
+    "category.tv_shows": "403"
+    "category.documentaries": "406"
+    "category.music": "408"
+    "category.mv": "408"
+    "category.audiobook": "404"
+    "category.ebook": "405"
+    "category.sports": "407"
+    "category.game": "410"
+    "category.study": "412"
+    "category.stage": "409"
+    "category.animation": "409"
+    "category.drama": "409"
+    "category.software": "409"
+    "category.other": "409"
+    "default": "401"
+
+  medium:
+    "medium.uhd_bluray": "12"
+    "medium.uhd_diy": "13"
+    "medium.bluray": "1"
+    "medium.bluray_diy": "14"
+    "medium.remux": "3"
+    "medium.encode_2160p": "15"
+    "medium.encode_1080p": "15"
+    "medium.encode_720p": "15"
+    "medium.encode": "15"
+    "medium.hdtv": "5"
+    "medium.webdl": "10"
+    "medium.dvd": "2"
+    "medium.cd": "8"
+    "medium.track": "9"
+    "medium.other": "11"
+    "default": "11"
+
+  video_codec:
+    "video.h265": "6"
+    "video.x265": "6"
+    "video.h264": "1"
+    "video.x264": "1"
+    "video.vc1": "2"
+    "video.mpeg2": "4"
+    "video.av1": "7"
+    "video.other": "5"
+    "default": "5"
+
+  audio_codec:
+    "audio.dtsx": "25"
+    "audio.truehd_atmos": "26"
+    "audio.dts_hd_ma": "19"
+    "audio.truehd": "20"
+    "audio.lpcm": "21"
+    "audio.dts": "3"
+    "audio.ac3": "18"
+    "audio.ddp": "18"
+    "audio.ddp_atmos": "18"
+    "audio.opus": "27"
+    "audio.aac": "6"
+    "audio.flac": "1"
+    "audio.ape": "2"
+    "audio.wav": "22"
+    "audio.mp3": "23"
+    "audio.mpeg": "23"
+    "audio.m4a": "24"
+    "audio.other": "7"
+    "default": "7"
+
+  resolution:
+    "resolution.r4320p": "10"
+    "resolution.r2160p": "5"
+    "resolution.r1080p": "1"
+    "resolution.r1080i": "2"
+    "resolution.r720p": "3"
+    "resolution.sd": "4"
+    "resolution.other": "11"
+    "default": "11"
+
+  tag:
+    "tag.原创": "yc"
+    "tag.国语": "gy"
+    "tag.粤语": "yy"
+    "tag.中字": "zz"
+    "tag.官字组": "gz"
+    "tag.DIY": "diy"
+    "tag.动画": "dh"
+    "tag.完结": "wj"
+    "tag.杜比": "db"
+    "tag.HDR10": "hdr10"
+    "tag.HDR10+": "hdrm"
+    "tag.禁转": "jz"
+    "tag.限转": "xz"
+    "tag.首发": "sf"
+    "tag.应求": "yq"
+    "default": null

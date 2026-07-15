@@ -147,6 +147,37 @@ func (h *SitesHandler) usesPublicPublisher(siteCode string) bool {
 	return !isSpecialPublisher
 }
 
+func (h *SitesHandler) UpdateSitesOrder(c *gin.Context) {
+	payload := map[string]any{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少必要参数"})
+		return
+	}
+	rawIDs, ok := payload["ids"].([]any)
+	if !ok || len(rawIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "必须提供站点ID列表"})
+		return
+	}
+	siteIDs := make([]int64, 0, len(rawIDs))
+	for _, raw := range rawIDs {
+		id, err := parseInt64(raw)
+		if err != nil || id <= 0 {
+			continue
+		}
+		siteIDs = append(siteIDs, id)
+	}
+	if len(siteIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未找到有效的站点ID"})
+		return
+	}
+	updated, err := h.repo.UpdateSitesSortOrder(siteIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新排序失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("已更新 %d 个站点的排序", updated)})
+}
+
 func (h *SitesHandler) SetNotExist(c *gin.Context) {
 	payload := map[string]any{}
 	if err := c.ShouldBindJSON(&payload); err != nil {

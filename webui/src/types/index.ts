@@ -24,6 +24,7 @@ export interface Torrent {
   downloaderId?: string
   downloaderIds?: string[]
   target_sites_count?: number
+  publish_at?: string | null
 }
 
 export interface ISourceInfo {

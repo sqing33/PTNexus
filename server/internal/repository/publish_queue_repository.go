@@ -362,6 +362,35 @@ func (r *PublishQueueRepository) CancelQueuedTask(id int64, reason string) error
 	return ErrPublishQueueTaskNotQueued
 }
 
+// BatchCancelByTaskIDs 批量取消 queued 状态的队列任务（仅取消仍处于 queued 的任务，跳过其他状态）。
+// 参数/返回：ids 为队列任务主键列表；reason 为取消原因；返回实际取消行数与 error。
+// 失败场景：DB 未初始化或更新失败返回 error。
+// 副作用：UPDATE publish_queue_tasks 状态为 cancelled。
+func (r *PublishQueueRepository) BatchCancelByTaskIDs(ids []int64, reason string) (int64, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return 0, errors.New("publish queue repo is nil")
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	nowText := time.Now().Format(PublishQueueTimeLayout)
+	result := r.store.DB.Table("publish_queue_tasks").
+		Where("id IN ? AND status = ?", ids, PublishQueueStatusQueued).
+		Updates(map[string]any{
+			"status":      PublishQueueStatusCancelled,
+			"next_run_at": nil,
+			"started_at":  nil,
+			"finished_at": nowText,
+			"last_error":  strings.TrimSpace(reason),
+			"updated_at":  nowText,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
 // CleanupFinishedTasks 清理已完成任务，避免队列表无限增长。
 // 参数/返回：olderThan 为截止时间；返回删除条数与 error。
 // 失败场景：数据库删除失败返回 error。

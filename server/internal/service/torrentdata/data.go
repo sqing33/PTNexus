@@ -45,6 +45,10 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 	if err != nil {
 		uploadTotals = map[string]int64{}
 	}
+	publishAtMap, err := s.repo.PublishAtByNames()
+	if err != nil {
+		publishAtMap = map[string]string{}
+	}
 
 	aggregated := map[string]*torrentSummary{}
 	for _, row := range torrentRows {
@@ -152,6 +156,7 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 			"downloader_ids":           downloaderIDs,
 			"downloaderId":             s.selectBestDownloader(downloaderIDs),
 			"unique_id":                fmt.Sprintf("%s_%d", value.Name, value.Size),
+			"publish_at":               publishAtMap[value.Name],
 		}
 		allItems = append(allItems, item)
 	}
@@ -193,4 +198,37 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		"site_link_rules":      siteLinkRules,
 		"active_path_filters":  params.PathFilters,
 	}, nil
+}
+
+func (s *TorrentDataService) UpdatePublishAt(payload map[string]any) (map[string]any, int) {
+	name, _ := payload["name"].(string)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return map[string]any{"success": false, "error": "缺少 name 参数"}, 400
+	}
+
+	publishAtRaw, exists := payload["publish_at"]
+	if !exists {
+		return map[string]any{"success": false, "error": "缺少 publish_at 参数"}, 400
+	}
+
+	var publishAt any
+	if publishAtRaw == nil || publishAtRaw == "" {
+		publishAt = nil
+	} else {
+		publishAtStr, ok := publishAtRaw.(string)
+		if !ok {
+			return map[string]any{"success": false, "error": "publish_at 格式错误"}, 400
+		}
+		publishAt = strings.TrimSpace(publishAtStr)
+	}
+
+	affected, err := s.repo.UpdatePublishAtByName(name, publishAt)
+	if err != nil {
+		return map[string]any{"success": false, "error": err.Error()}, 500
+	}
+	if affected == 0 {
+		return map[string]any{"success": false, "error": "未找到匹配的种子数据"}, 404
+	}
+	return map[string]any{"success": true, "message": "可发种时间已更新"}, 200
 }

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 type SiteRepository struct {
@@ -24,7 +26,7 @@ func (r *SiteRepository) ListSourceAndTargetSites() ([]string, []string, error) 
 		SELECT nickname FROM sites
 		WHERE (migration = 1 OR migration = 3)
 		AND cookie IS NOT NULL AND cookie != ''
-		ORDER BY nickname
+		ORDER BY sort_order, nickname
 	`)
 	if err != nil {
 		return nil, nil, err
@@ -43,7 +45,7 @@ func (r *SiteRepository) ListSourceAndTargetSites() ([]string, []string, error) 
 	targetRows, err := sqlDB.Query(`
 		SELECT nickname FROM sites
 		WHERE (migration = 2 OR migration = 3)
-		ORDER BY nickname
+		ORDER BY sort_order, nickname
 	`)
 	if err != nil {
 		return nil, nil, err
@@ -66,7 +68,7 @@ func (r *SiteRepository) ListSites(filterByTorrents string) ([]map[string]any, e
 	groupColumn := r.store.GroupColumn()
 	selectFields := fmt.Sprintf(`
 		s.id, s.nickname, s.site, s.base_url, s.special_tracker_domain, s.%s, s.speed_limit,
-		s.ratio_threshold, s.seed_speed_limit, s.can_publish,
+		s.ratio_threshold, s.seed_speed_limit, s.can_publish, s.sort_order,
 		CASE WHEN s.cookie IS NOT NULL AND s.cookie != '' THEN 1 ELSE 0 END as has_cookie,
 		CASE WHEN s.passkey IS NOT NULL AND s.passkey != '' THEN 1 ELSE 0 END as has_passkey,
 		s.cookie, s.passkey
@@ -84,7 +86,7 @@ func (r *SiteRepository) ListSites(filterByTorrents string) ([]map[string]any, e
 						  AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
 					)
 					OR (s.cookie IS NOT NULL AND s.cookie != '')
-					ORDER BY s.nickname COLLATE utf8mb4_unicode_ci
+					ORDER BY s.sort_order, s.nickname COLLATE utf8mb4_unicode_ci
 			`, selectFields)
 		} else {
 			query = fmt.Sprintf(`
@@ -94,14 +96,14 @@ func (r *SiteRepository) ListSites(filterByTorrents string) ([]map[string]any, e
 						SELECT 1 FROM torrents t WHERE LOWER(s.nickname) = LOWER(t.sites) AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
 					)
 					OR (s.cookie IS NOT NULL AND s.cookie != '')
-					ORDER BY s.nickname
+					ORDER BY s.sort_order, s.nickname
 			`, selectFields)
 		}
 	} else {
 		if r.store.DBType == "mysql" {
-			query = fmt.Sprintf("SELECT %s FROM sites s ORDER BY s.nickname COLLATE utf8mb4_unicode_ci", selectFields)
+			query = fmt.Sprintf("SELECT %s FROM sites s ORDER BY s.sort_order, s.nickname COLLATE utf8mb4_unicode_ci", selectFields)
 		} else {
-			query = fmt.Sprintf("SELECT %s FROM sites s ORDER BY s.nickname", selectFields)
+			query = fmt.Sprintf("SELECT %s FROM sites s ORDER BY s.sort_order, s.nickname", selectFields)
 		}
 	}
 
@@ -114,7 +116,14 @@ func (r *SiteRepository) ListSites(filterByTorrents string) ([]map[string]any, e
 		return nil, err
 	}
 	defer rows.Close()
-	return rowsToMaps(rows)
+	sites, err := rowsToMaps(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range sites {
+		s["can_publish"] = toIntWithDefault(s["can_publish"], 1) != 0
+	}
+	return sites, nil
 }
 
 func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
@@ -130,6 +139,7 @@ func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
 	}
 	seedSpeedLimit := toIntWithDefault(data["seed_speed_limit"], 5)
 	canPublish := toIntWithDefault(data["can_publish"], 1)
+	sortOrder := toIntWithDefault(data["sort_order"], 0)
 
 	groupColumn := r.store.GroupColumn()
 	sql := fmt.Sprintf(`
@@ -144,7 +154,8 @@ func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
 			speed_limit = ?,
 			ratio_threshold = ?,
 			seed_speed_limit = ?,
-			can_publish = ?
+			can_publish = ?,
+			sort_order = ?
 		WHERE id = ?
 	`, groupColumn)
 
@@ -161,6 +172,7 @@ func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
 		ratioThreshold,
 		seedSpeedLimit,
 		canPublish,
+		sortOrder,
 		siteID,
 	)
 	if result.Error != nil {
@@ -202,7 +214,7 @@ func (r *SiteRepository) SitesStatus() ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := sqlDB.Query("SELECT nickname, site, cookie, passkey, migration, can_publish FROM sites")
+	rows, err := sqlDB.Query("SELECT nickname, site, cookie, passkey, migration, can_publish, sort_order FROM sites ORDER BY sort_order, nickname")
 	if err != nil {
 		return nil, err
 	}
@@ -243,4 +255,29 @@ func (r *SiteRepository) UpdateTorrentComment(torrentName, siteName, comment str
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+// UpdateSitesSortOrder 批量更新站点排序序号。
+// 参数/返回：siteIDs 为按目标顺序排列的站点 ID 列表；返回更新条数与错误。
+// 失败场景：事务或 SQL 执行失败时返回错误。
+// 副作用：写入 sites 表的 sort_order 字段。
+func (r *SiteRepository) UpdateSitesSortOrder(siteIDs []int64) (int, error) {
+	if len(siteIDs) == 0 {
+		return 0, nil
+	}
+	updated := 0
+	err := r.store.DB.Transaction(func(tx *gorm.DB) error {
+		for idx, id := range siteIDs {
+			if id <= 0 {
+				continue
+			}
+			result := tx.Exec("UPDATE sites SET sort_order = ? WHERE id = ?", idx+1, id)
+			if result.Error != nil {
+				return result.Error
+			}
+			updated += int(result.RowsAffected)
+		}
+		return nil
+	})
+	return updated, err
 }

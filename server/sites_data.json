@@ -106,7 +106,7 @@
     "special_tracker_domain": null,
     "group": "-WiKi,-TTG,-NGB",
     "description": "TTG",
-    "migration": 0,
+    "migration": 2,
     "speed_limit": 95
   },
   {
@@ -411,7 +411,7 @@
     "special_tracker_domain": null,
     "group": "-ADE,-Audies,-ADWeb,-ADEbook,-ADAudio",
     "description": "Audiences",
-    "migration": 0,
+    "migration": 2,
     "speed_limit": 80
   },
   {
@@ -758,10 +758,10 @@
   {
     "site": "hdclone",
     "nickname": "HDClone",
-    "base_url": "pt.hdclone.org",
+    "base_url": "pt.hdclone.top",
     "special_tracker_domain": null,
     "group": null,
-    "migration": 0,
+    "migration": 2,
     "speed_limit": 10
   },
   {
@@ -1052,7 +1052,7 @@
     "base_url": "hdbao.cc",
     "special_tracker_domain": null,
     "group": null,
-    "migration": 0,
+    "migration": 2,
     "speed_limit": 10
   },
   {

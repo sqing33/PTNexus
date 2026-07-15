@@ -24,7 +24,7 @@ func (h *Handler) PublishQueueEnqueue(c *gin.Context) {
 	c.JSON(status, result)
 }
 
-// PublishQueueEnqueueBatch 接收“一站多种”批量入队请求，一次性写入多个队列任务。
+// PublishQueueEnqueueBatch 接收”一站多种”批量入队请求，一次性写入多个队列任务。
 // 参数/返回：请求体需包含 target_site_name 与 seeds；返回批量入队统计与批次标识。
 // 失败场景：参数缺失、队列未初始化、入队失败会返回 4xx/5xx。
 // 副作用：写入 publish_queue_tasks 与 publish_logs。
@@ -34,6 +34,22 @@ func (h *Handler) PublishQueueEnqueueBatch(c *gin.Context) {
 		return
 	}
 	result, status := h.service.EnqueuePublishQueueBatch(payload)
+	if status == 0 {
+		status = http.StatusOK
+	}
+	c.JSON(status, result)
+}
+
+// PublishQueueEnqueueBatchByNames 接收”一种多站”批量入队请求，根据种子名称查找 seed_parameters 后加入队列。
+// 参数/返回：请求体需包含 torrent_names 与 target_site_name；返回批量入队统计与批次标识。
+// 失败场景：参数缺失、队列未初始化、seed_parameters 未找到会跳过。
+// 副作用：写入 publish_queue_tasks 与 publish_logs。
+func (h *Handler) PublishQueueEnqueueBatchByNames(c *gin.Context) {
+	payload, ok := bindMapPayload(c)
+	if !ok {
+		return
+	}
+	result, status := h.service.EnqueuePublishQueueBatchByNames(payload)
 	if status == 0 {
 		status = http.StatusOK
 	}

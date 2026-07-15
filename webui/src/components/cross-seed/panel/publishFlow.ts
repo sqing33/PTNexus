@@ -1060,6 +1060,15 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     )
     const hasUnrecognized = unrecognized && unrecognized.value !== ''
 
+    // 1.5 检查年份是否为空
+    const yearComponent = torrentData.value.title_components.find(
+      (param) => param.key === '年份',
+    )
+    const hasEmptyYear = !yearComponent || !yearComponent.value || yearComponent.value.trim() === ''
+    if (hasEmptyYear) {
+      return true
+    }
+
     // 2. 检查禁转标签（仅警告，不阻止继续）
 
     // 3. 【新增】检查简介、海报、截图是否为空
@@ -1146,6 +1155,14 @@ export function createPublishFlow(deps: PublishFlowDeps): PublishFlowApi {
     )
     if (unrecognized && unrecognized.value !== '') {
       return '存在无法识别的标题内容，请手动修正或删除'
+    }
+
+    // 1.5 检查年份是否为空
+    const yearComponent = torrentData.value.title_components.find(
+      (param) => param.key === '年份',
+    )
+    if (!yearComponent || !yearComponent.value || yearComponent.value.trim() === '') {
+      return '年份不能为空'
     }
 
     // 3. 检查制作组是否为空或为NOGROUP
