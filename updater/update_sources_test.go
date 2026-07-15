@@ -441,9 +441,14 @@ func TestGetLocalVersionPrefersCurrentRuntimeOverImageVersion(t *testing.T) {
 	if err := os.Symlink(releaseServerDir, currentLink); err != nil {
 		t.Skipf("symlink unsupported in current environment: %v", err)
 	}
+	baseDir := filepath.Join(root, "server")
+	if err := os.Symlink(currentLink, baseDir); err != nil {
+		t.Skipf("symlink unsupported in current environment: %v", err)
+	}
 
 	t.Setenv("PTNEXUS_VERSION", "")
 	t.Setenv("VERSION_FILE", "")
+	t.Setenv("PTNEXUS_BASE_DIR", baseDir)
 
 	appVersionPath := filepath.Join(root, "VERSION")
 	if err := os.WriteFile(appVersionPath, []byte("v4.0.0\n"), 0o644); err != nil {
@@ -487,7 +492,7 @@ func TestGetLocalVersionDetailsFallsBackToEnvVersion(t *testing.T) {
 	}
 }
 
-func TestGetLocalVersionDetailsPrefersPersistedVersionOverEnvFallback(t *testing.T) {
+func TestGetLocalVersionDetailsPrefersImageVersionOverPersistedMarker(t *testing.T) {
 	oldUpdateDir := updateDir
 	oldLocalConfigFile := localConfigFile
 	oldEmbeddedConfigFile := embeddedConfigFile
@@ -519,11 +524,105 @@ func TestGetLocalVersionDetailsPrefersPersistedVersionOverEnvFallback(t *testing
 	t.Setenv("VERSION_FILE", "")
 
 	details := getLocalVersionDetails()
-	if details.Version != "v4.0.24" {
-		t.Fatalf("expected persisted version v4.0.24, got %#v", details)
+	if details.Version != "v4.0.23" {
+		t.Fatalf("expected image version v4.0.23, got %#v", details)
 	}
-	if details.Source != localConfigFile {
-		t.Fatalf("expected persisted version source %q, got %#v", localConfigFile, details)
+	if details.Source != localVersionFilePath {
+		t.Fatalf("expected image version source %q, got %#v", localVersionFilePath, details)
+	}
+}
+
+func TestGetLocalVersionDetailsIgnoresInactiveCurrentRuntime(t *testing.T) {
+	oldUpdateDir := updateDir
+	oldLocalConfigFile := localConfigFile
+	oldEmbeddedConfigFile := embeddedConfigFile
+	oldLocalVersionFilePath := localVersionFilePath
+	t.Cleanup(func() {
+		updateDir = oldUpdateDir
+		localConfigFile = oldLocalConfigFile
+		embeddedConfigFile = oldEmbeddedConfigFile
+		localVersionFilePath = oldLocalVersionFilePath
+	})
+
+	root := t.TempDir()
+	updateDir = filepath.Join(root, "updates")
+	localConfigFile = filepath.Join(updateDir, "local", "CHANGELOG.json")
+	embeddedConfigFile = filepath.Join(root, "embedded", "CHANGELOG.json")
+	localVersionFilePath = filepath.Join(root, "VERSION")
+
+	oldRuntime := filepath.Join(updateDir, "releases", "v4.0.52", "server")
+	if err := os.MkdirAll(oldRuntime, 0o755); err != nil {
+		t.Fatalf("mkdir old runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(oldRuntime, "server"), []byte("old"), 0o755); err != nil {
+		t.Fatalf("write old server: %v", err)
+	}
+	if err := os.Symlink(oldRuntime, filepath.Join(updateDir, "current")); err != nil {
+		t.Skipf("symlink unsupported in current environment: %v", err)
+	}
+	imageRuntime := filepath.Join(root, "image-server")
+	if err := os.MkdirAll(imageRuntime, 0o755); err != nil {
+		t.Fatalf("mkdir image runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(imageRuntime, "server"), []byte("new"), 0o755); err != nil {
+		t.Fatalf("write image server: %v", err)
+	}
+	if err := os.WriteFile(localVersionFilePath, []byte("v4.0.55\n"), 0o644); err != nil {
+		t.Fatalf("write image version: %v", err)
+	}
+
+	t.Setenv("PTNEXUS_BASE_DIR", imageRuntime)
+	t.Setenv("PTNEXUS_VERSION", "")
+	t.Setenv("VERSION_FILE", "")
+
+	details := getLocalVersionDetails()
+	if details.Version != "v4.0.55" {
+		t.Fatalf("expected active image version v4.0.55, got %#v", details)
+	}
+	if details.Source != localVersionFilePath {
+		t.Fatalf("expected image version source %q, got %#v", localVersionFilePath, details)
+	}
+}
+
+func TestGetLocalVersionDetailsPrefersEmbeddedImageConfigOverPersistedMarker(t *testing.T) {
+	oldUpdateDir := updateDir
+	oldLocalConfigFile := localConfigFile
+	oldEmbeddedConfigFile := embeddedConfigFile
+	oldLocalVersionFilePath := localVersionFilePath
+	t.Cleanup(func() {
+		updateDir = oldUpdateDir
+		localConfigFile = oldLocalConfigFile
+		embeddedConfigFile = oldEmbeddedConfigFile
+		localVersionFilePath = oldLocalVersionFilePath
+	})
+
+	root := t.TempDir()
+	updateDir = filepath.Join(root, "updates")
+	localConfigFile = filepath.Join(root, "local", "CHANGELOG.json")
+	embeddedConfigFile = filepath.Join(root, "embedded", "CHANGELOG.json")
+	localVersionFilePath = filepath.Join(root, "missing-version")
+	if err := os.MkdirAll(filepath.Dir(localConfigFile), 0o755); err != nil {
+		t.Fatalf("mkdir local config dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(embeddedConfigFile), 0o755); err != nil {
+		t.Fatalf("mkdir embedded config dir: %v", err)
+	}
+	if err := os.WriteFile(localConfigFile, []byte(`{"history":[{"version":"v4.0.52"}]}`), 0o644); err != nil {
+		t.Fatalf("write persisted config: %v", err)
+	}
+	if err := os.WriteFile(embeddedConfigFile, []byte(`{"history":[{"version":"v4.0.54"}]}`), 0o644); err != nil {
+		t.Fatalf("write embedded config: %v", err)
+	}
+
+	t.Setenv("PTNEXUS_VERSION", "")
+	t.Setenv("VERSION_FILE", "")
+
+	details := getLocalVersionDetails()
+	if details.Version != "v4.0.54" {
+		t.Fatalf("expected embedded image version v4.0.54, got %#v", details)
+	}
+	if details.Source != embeddedConfigFile {
+		t.Fatalf("expected embedded config source %q, got %#v", embeddedConfigFile, details)
 	}
 }
 
@@ -703,11 +802,11 @@ func TestGetLocalVersionHandlerReturnsLocalVersionAndSource(t *testing.T) {
 	if !resp.Success {
 		t.Fatalf("expected success true, got %#v", resp)
 	}
-	if resp.LocalVersion != "v4.0.24" {
-		t.Fatalf("expected local_version v4.0.24, got %#v", resp)
+	if resp.LocalVersion != "v4.0.23" {
+		t.Fatalf("expected local_version v4.0.23, got %#v", resp)
 	}
-	if resp.LocalVersionSource != localConfigFile {
-		t.Fatalf("expected local_version_source %q, got %#v", localConfigFile, resp)
+	if resp.LocalVersionSource != localVersionFilePath {
+		t.Fatalf("expected local_version_source %q, got %#v", localVersionFilePath, resp)
 	}
 	if cacheControl := rec.Header().Get("Cache-Control"); !strings.Contains(cacheControl, "no-cache") {
 		t.Fatalf("expected no-cache header, got %q", cacheControl)

@@ -459,6 +459,9 @@ func getLocalVersionDetails() localVersionDetails {
 	if version := inferVersionFromCurrentRuntime(); version != "" {
 		return localVersionDetails{Version: version, Source: "current_runtime"}
 	}
+	if version := readVersionFromPlainFile(localVersionFilePath); version != "" {
+		return localVersionDetails{Version: version, Source: localVersionFilePath}
+	}
 	for _, path := range localVersionConfigCandidates() {
 		version, err := readVersionFromConfig(path)
 		if err == nil {
@@ -467,9 +470,6 @@ func getLocalVersionDetails() localVersionDetails {
 		if !errors.Is(err, os.ErrNotExist) {
 			log.Printf("读取本地版本配置失败: path=%s err=%v", path, err)
 		}
-	}
-	if version := readVersionFromPlainFile(localVersionFilePath); version != "" {
-		return localVersionDetails{Version: version, Source: localVersionFilePath}
 	}
 	if version := strings.TrimSpace(getEnv("PTNEXUS_VERSION", "")); version != "" {
 		return localVersionDetails{Version: version, Source: "env:PTNEXUS_VERSION"}
@@ -887,7 +887,7 @@ func readVersionFromPlainFile(path string) string {
 
 func localVersionConfigCandidates() []string {
 	candidates := make([]string, 0, 2)
-	for _, path := range []string{localConfigFile, embeddedConfigFile} {
+	for _, path := range []string{embeddedConfigFile, localConfigFile} {
 		path = strings.TrimSpace(path)
 		if path == "" {
 			continue
@@ -926,6 +926,15 @@ func inferVersionFromCurrentRuntime() string {
 	currentLink := filepath.Join(updateDir, "current")
 	resolvedTarget, err := filepath.EvalSymlinks(currentLink)
 	if err != nil {
+		return ""
+	}
+	activeRuntime := getEnv("PTNEXUS_BASE_DIR", "/app/server")
+	activeInfo, err := os.Stat(activeRuntime)
+	if err != nil {
+		return ""
+	}
+	currentInfo, err := os.Stat(resolvedTarget)
+	if err != nil || !os.SameFile(activeInfo, currentInfo) {
 		return ""
 	}
 

@@ -3,11 +3,15 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
 
 
 API_BASE = "https://gitee.com/api/v5"
@@ -17,7 +21,6 @@ RUNTIME_NAMES = (
     "ptnexus-runtime-linux-amd64.tar.gz",
     "ptnexus-runtime-linux-arm64.tar.gz",
 )
-REQUIRED_ASSET_NAMES = (*RUNTIME_NAMES, MANIFEST_NAME)
 
 
 def add_query(url: str, **params: str) -> str:
@@ -163,48 +166,86 @@ def list_release_assets(owner: str, repo: str, release_id: int, token: str) -> l
     return result
 
 
-def delete_release_asset(owner: str, repo: str, release_id: int, attach_file_id: int, token: str) -> None:
-    url = (
-        f"{API_BASE}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/releases/"
-        f"{release_id}/attach_files/{attach_file_id}"
-    )
-    api_request("DELETE", url, token)
-
-
-def upload_release_asset(owner: str, repo: str, release_id: int, token: str, file_path: Path) -> None:
+def upload_release_asset(
+    owner: str, repo: str, release_id: int, token: str, file_path: Path
+) -> dict[str, Any]:
     url = f"{API_BASE}/repos/{owner}/{repo}/releases/{release_id}/attach_files"
+    is_manifest = file_path.name == MANIFEST_NAME
+    max_attempts = 3 if is_manifest else 2
+    max_time_seconds = "60" if is_manifest else "180"
     command = [
         "curl",
-        "--fail",
+        "--fail-with-body",
         "--silent",
         "--show-error",
-        "--location",
         "--connect-timeout",
-        "10",
-        "-X",
-        "POST",
+        "20",
+        "--max-time",
+        max_time_seconds,
+        "--speed-limit",
+        "1024",
+        "--speed-time",
+        "60",
         "-H",
         "Expect:",
-        "-H",
-        "Content-Type: multipart/form-data",
         "-F",
         f"access_token={token}",
-        "-F",
-        f"owner={owner}",
-        "-F",
-        f"repo={repo}",
-        "-F",
-        f"release_id={release_id}",
         "-F",
         f"file=@{file_path}",
         url,
     ]
-    completed = subprocess.run(command, capture_output=True, text=True)
-    if completed.returncode != 0:
+    last_detail = "unknown curl error"
+    for attempt in range(1, max_attempts + 1):
+        completed = subprocess.run(command, capture_output=True, text=True)
+        if completed.returncode == 0:
+            try:
+                result = json.loads(completed.stdout)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"upload {file_path.name} returned invalid JSON: "
+                    f"{completed.stdout[:500]!r}"
+                ) from exc
+            if not isinstance(result, dict) or result.get("id") is None:
+                raise RuntimeError(
+                    f"upload {file_path.name} returned unexpected response: {result!r}"
+                )
+            return result
+
         stderr = completed.stderr.strip()
         stdout = completed.stdout.strip()
-        detail = stderr or stdout or "unknown curl error"
-        raise RuntimeError(f"upload {file_path.name} failed: {detail}")
+        last_detail = (
+            " | ".join(part for part in (stderr, stdout) if part)
+            or "unknown curl error"
+        )
+
+        try:
+            assets = list_release_assets(owner, repo, release_id, token)
+        except RuntimeError as exc:
+            print(
+                f"[gitee-release] failed to verify {file_path.name} after "
+                f"upload error: {exc}",
+                file=sys.stderr,
+            )
+        else:
+            for asset in assets:
+                if str(asset.get("name", "")).strip() != file_path.name:
+                    continue
+                if asset.get("id") is not None:
+                    print(
+                        f"[gitee-release] upload response failed but asset exists: "
+                        f"{file_path.name} (id={asset['id']})"
+                    )
+                    return asset
+
+        if attempt < max_attempts:
+            print(
+                f"[gitee-release] retrying {file_path.name} after upload failure "
+                f"({attempt}/{max_attempts}): {last_detail}",
+                file=sys.stderr,
+            )
+            time.sleep(2)
+
+    raise RuntimeError(f"upload {file_path.name} failed: {last_detail}")
 
 
 def collect_asset_paths(assets_dir: Path, max_bytes: int) -> tuple[list[Path], list[str]]:
@@ -212,18 +253,54 @@ def collect_asset_paths(assets_dir: Path, max_bytes: int) -> tuple[list[Path], l
     skipped: list[str] = []
     available_files = {path.name: path for path in assets_dir.iterdir() if path.is_file()}
 
-    for name in REQUIRED_ASSET_NAMES:
+    manifest_path = available_files.get(MANIFEST_NAME)
+    if manifest_path is None:
+        raise RuntimeError(f"{MANIFEST_NAME} not found in {assets_dir}")
+    selected.append(manifest_path)
+
+    runtime_paths: list[Path] = []
+    for name in RUNTIME_NAMES:
         path = available_files.get(name)
         if path is None:
             skipped.append(f"{name}: skipped (not found)")
             continue
         size = path.stat().st_size
-        if name != MANIFEST_NAME and size > max_bytes:
+        if size > max_bytes:
             skipped.append(f"{name}: skipped ({size} bytes > {max_bytes})")
             continue
-        selected.append(path)
+        runtime_paths.append(path)
+
+    selected.extend(
+        sorted(runtime_paths, key=lambda path: (path.stat().st_size, path.name))
+    )
 
     return selected, skipped
+
+
+def upload_release_assets(
+    owner: str,
+    repo: str,
+    release_id: int,
+    token: str,
+    selected_paths: list[Path],
+    existing_by_name: dict[str, int],
+) -> list[str]:
+    warnings: list[str] = []
+    for path in selected_paths:
+        try:
+            attach_id = existing_by_name.get(path.name)
+            if attach_id is not None:
+                print(
+                    f"[gitee-release] keeping existing {path.name} (id={attach_id})"
+                )
+                continue
+            upload_release_asset(owner, repo, release_id, token, path)
+            print(f"[gitee-release] uploaded {path.name}")
+        except RuntimeError as exc:
+            if path.name == MANIFEST_NAME:
+                raise
+            warnings.append(f"{path.name}: optional mirror upload failed: {exc}")
+    return warnings
 
 
 def read_body(body_file: Path) -> str:
@@ -252,8 +329,6 @@ def main() -> int:
         raise RuntimeError(f"assets directory not found: {assets_dir}")
 
     selected_paths, skipped = collect_asset_paths(assets_dir, args.max_bytes)
-    if not selected_paths:
-        raise RuntimeError(f"no assets selected from {assets_dir}")
 
     print(
         f"[gitee-release] repo={args.owner}/{args.repo} tag={args.tag} target_commitish={args.target_commitish}"
@@ -300,13 +375,16 @@ def main() -> int:
         if str(item.get("name", "")).strip() and item.get("id") is not None
     }
 
-    for path in selected_paths:
-        attach_id = existing_by_name.get(path.name)
-        if attach_id is not None:
-            print(f"[gitee-release] replacing {path.name}")
-            delete_release_asset(args.owner, args.repo, release_id, attach_id, args.token)
-        upload_release_asset(args.owner, args.repo, release_id, args.token, path)
-        print(f"[gitee-release] uploaded {path.name}")
+    upload_warnings = upload_release_assets(
+        args.owner,
+        args.repo,
+        release_id,
+        args.token,
+        selected_paths,
+        existing_by_name,
+    )
+    for warning in upload_warnings:
+        print(f"[gitee-release] warning: {warning}", file=sys.stderr)
 
     print(f"[gitee-release] release ready: {release.get('html_url', '')}")
     return 0

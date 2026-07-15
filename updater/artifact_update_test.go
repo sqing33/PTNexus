@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,53 @@ import (
 	"testing"
 	"time"
 )
+
+func TestServerHealthTimeoutConfiguration(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected time.Duration
+	}{
+		{name: "default", value: "", expected: defaultServerHealthTimeout},
+		{name: "custom", value: "45s", expected: 45 * time.Second},
+		{name: "invalid", value: "not-a-duration", expected: defaultServerHealthTimeout},
+		{name: "non-positive", value: "0s", expected: defaultServerHealthTimeout},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("UPDATE_HEALTH_TIMEOUT", tt.value)
+			if got := serverHealthTimeout(); got != tt.expected {
+				t.Fatalf("serverHealthTimeout() = %s, want %s", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWaitForServerHealthyUsesConfiguredTimeout(t *testing.T) {
+	oldServerPort := serverPort
+	t.Cleanup(func() { serverPort = oldServerPort })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	parsedURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	serverPort = parsedURL.Port()
+	t.Setenv("UPDATE_HEALTH_TIMEOUT", "20ms")
+
+	started := time.Now()
+	err = waitForServerHealthy(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "健康检查超时") {
+		t.Fatalf("expected health timeout, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("configured health timeout was not applied, elapsed=%s", elapsed)
+	}
+}
 
 func TestDownloadWithSHA256RetriesRenameOnWindowsStyleFileLock(t *testing.T) {
 	restore := stubDownloadFileOps(t)

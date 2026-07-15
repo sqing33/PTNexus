@@ -38,6 +38,7 @@ type PreparedUpdate struct {
 
 const (
 	defaultDownloadIdleTimeout = 30 * time.Second
+	defaultServerHealthTimeout = 2 * time.Minute
 	maxDownloadTimeout         = 2 * time.Hour
 	minDownloadSpeedBytes      = int64(512 * 1024) // 512KiB/s
 )
@@ -1200,20 +1201,29 @@ func ensureRuntimeSymlinks() (baseDir, currentLink, currentTarget string, err er
 	return baseDir, currentLink, currentTarget, nil
 }
 
+func serverHealthTimeout() time.Duration {
+	raw := strings.TrimSpace(getEnv("UPDATE_HEALTH_TIMEOUT", ""))
+	if raw == "" {
+		return defaultServerHealthTimeout
+	}
+	timeout, err := time.ParseDuration(raw)
+	if err != nil || timeout <= 0 {
+		log.Printf("UPDATE_HEALTH_TIMEOUT 无效，使用默认值 %s: value=%q", defaultServerHealthTimeout, raw)
+		return defaultServerHealthTimeout
+	}
+	return timeout
+}
+
 func waitForServerHealthy(ctx context.Context) error {
-	deadline := time.Now().Add(30 * time.Second)
+	healthCtx, cancel := context.WithTimeout(ctx, serverHealthTimeout())
+	defer cancel()
+
 	urlStr := fmt.Sprintf("http://127.0.0.1:%s/health", serverPort)
 	client := &http.Client{Timeout: 3 * time.Second}
 	var lastErr string
 
 	for {
-		if time.Now().After(deadline) {
-			if strings.TrimSpace(lastErr) != "" {
-				return fmt.Errorf("健康检查超时: %s (last=%s)", urlStr, lastErr)
-			}
-			return fmt.Errorf("健康检查超时: %s", urlStr)
-		}
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+		req, _ := http.NewRequestWithContext(healthCtx, http.MethodGet, urlStr, nil)
 		resp, err := client.Do(req)
 		if err == nil {
 			_, _ = io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -1226,7 +1236,17 @@ func waitForServerHealthy(ctx context.Context) error {
 		} else {
 			lastErr = err.Error()
 		}
-		time.Sleep(1 * time.Second)
+
+		retryTimer := time.NewTimer(1 * time.Second)
+		select {
+		case <-healthCtx.Done():
+			retryTimer.Stop()
+			if strings.TrimSpace(lastErr) != "" {
+				return fmt.Errorf("健康检查超时: %s (last=%s)", urlStr, lastErr)
+			}
+			return fmt.Errorf("健康检查超时: %s", urlStr)
+		case <-retryTimer.C:
+		}
 	}
 }
 
