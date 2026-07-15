@@ -45,14 +45,36 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		return nil, fmt.Errorf("load discovered sites failed: %w", err)
 	}
 
-	torrentRows, err := s.repo.ListTorrentsWithFilters(repository.TorrentListFilters{
+	listFilters := repository.TorrentListFilters{
 		OnlyCompleted:     params.OnlyCompleted,
 		NameSearch:        params.NameSearch,
 		PathFilters:       params.PathFilters,
 		StateFilters:      params.StateFilters,
 		DownloaderFilters: params.DownloaderFilters,
 		ExcludeExisting:   params.ExcludeExisting,
-	})
+	}
+	databasePaginated := canPrePaginateTorrentGroups(params)
+	databasePaginatedTotal := 0
+	if databasePaginated {
+		groupKeys, groupErr := s.repo.ListTorrentGroupKeysWithFilters(listFilters)
+		if groupErr != nil {
+			return nil, fmt.Errorf("load torrent group keys failed: %w", groupErr)
+		}
+		sortTorrentGroupKeys(groupKeys, params.SortProp, params.SortOrder)
+		databasePaginatedTotal = len(groupKeys)
+		groupKeys = paginateTorrentGroupKeys(groupKeys, params.Page, params.PageSize)
+		if len(groupKeys) == 0 {
+			listFilters = repository.TorrentListFilters{Groups: []repository.TorrentNameSizeKey{}}
+		} else {
+			// 分组键已经完成筛选，只按当前页键读取明细，避免再次扫描完成状态和已维护分组。
+			listFilters = repository.TorrentListFilters{Groups: groupKeys}
+		}
+	}
+
+	torrentRows := make([]repository.TorrentRecord, 0)
+	if !databasePaginated || len(listFilters.Groups) > 0 {
+		torrentRows, err = s.repo.ListTorrentsWithFilters(listFilters)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load torrents failed: %w", err)
 	}
@@ -177,15 +199,20 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 	s.sortData(filtered, params.SortProp, params.SortOrder)
 
 	total := len(filtered)
-	start := (params.Page - 1) * params.PageSize
-	if start > total {
-		start = total
+	paginated := filtered
+	if databasePaginated {
+		total = databasePaginatedTotal
+	} else {
+		start := (params.Page - 1) * params.PageSize
+		if start > total {
+			start = total
+		}
+		end := start + params.PageSize
+		if end > total {
+			end = total
+		}
+		paginated = filtered[start:end]
 	}
-	end := start + params.PageSize
-	if end > total {
-		end = total
-	}
-	paginated := filtered[start:end]
 
 	result := map[string]any{
 		"data":     paginated,
@@ -203,6 +230,72 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		}
 	}
 	return result, nil
+}
+
+// canPrePaginateTorrentGroups 判断当前筛选和排序能否在聚合明细前先分页。
+// 参数/返回：params 为列表参数；返回 true 时只需读取当前页 name+size 分组的明细。
+// 失败场景：无；依赖站点明细或聚合数值的筛选/排序会返回 false 并走兼容路径。
+// 副作用：无。
+func canPrePaginateTorrentGroups(params TorrentsDataParams) bool {
+	if len(params.SourceAvailabilityFilters) > 0 || len(params.ExistSiteNames) > 0 || len(params.NotExistSiteNames) > 0 {
+		return false
+	}
+	sortProp := strings.TrimSpace(params.SortProp)
+	switch sortProp {
+	case "", "name", "size", "size_formatted":
+		return true
+	default:
+		return false
+	}
+}
+
+func sortTorrentGroupKeys(groups []repository.TorrentNameSizeKey, sortProp string, sortOrder string) {
+	descending := strings.EqualFold(strings.TrimSpace(sortOrder), "descending")
+	sortProp = strings.TrimSpace(sortProp)
+	if sortProp == "size_formatted" {
+		sortProp = "size"
+	}
+
+	sort.SliceStable(groups, func(i, j int) bool {
+		left := groups[i]
+		right := groups[j]
+		if sortProp == "size" {
+			if left.Size != right.Size {
+				if descending {
+					return left.Size > right.Size
+				}
+				return left.Size < right.Size
+			}
+		} else if left.Name != right.Name {
+			if descending {
+				return customNameLess(right.Name, left.Name)
+			}
+			return customNameLess(left.Name, right.Name)
+		}
+
+		if left.Name != right.Name {
+			if descending {
+				return customNameLess(right.Name, left.Name)
+			}
+			return customNameLess(left.Name, right.Name)
+		}
+		if descending {
+			return left.Size > right.Size
+		}
+		return left.Size < right.Size
+	})
+}
+
+func paginateTorrentGroupKeys(groups []repository.TorrentNameSizeKey, page int, pageSize int) []repository.TorrentNameSizeKey {
+	start := (page - 1) * pageSize
+	if start >= len(groups) {
+		return []repository.TorrentNameSizeKey{}
+	}
+	end := start + pageSize
+	if end > len(groups) {
+		end = len(groups)
+	}
+	return groups[start:end]
 }
 
 // getDataMetadataResponse 返回维护种子列表筛选器需要的轻量元数据。

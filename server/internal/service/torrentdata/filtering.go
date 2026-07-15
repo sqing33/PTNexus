@@ -202,6 +202,9 @@ func (s *TorrentDataService) selectBestDownloader(ids []string) string {
 	if len(ids) == 0 {
 		return ""
 	}
+	if s.cfg == nil {
+		return ids[0]
+	}
 	cfg := s.cfg.Get()
 	downloaders := toSlice(cfg["downloaders"])
 	enabledOrder := make([]string, 0)

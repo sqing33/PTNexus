@@ -2333,25 +2333,32 @@ onMounted(async () => {
 
   // 2. 根据是否是首次进入决定刷新方式
   if (!torrentsViewState.hasInitializedOnce) {
-    // 首次进入页面：强制刷新所有数据（调用后端刷新接口）
-    // 先加载 UI 设置（强制刷新）
+    // 首次进入先展示数据库中已经持久化的列表。下载器全量同步只由用户点击刷新触发，
+    // 避免启动后把远程下载器请求、辅助接口和列表查询串成阻塞首屏的瀑布。
     await loadUiSettings(true)
-    // 然后执行完整刷新
-    await refreshBackendAndReload()
-    await fetchCrossSeedSettings()
+    await Promise.all([
+      fetchDownloadersList(true),
+      fetchAllSitesStatus(true),
+      fetchCrossSeedSettings(),
+      fetchDataWithoutLoadingControl({ includeMetadata: true }),
+    ])
     torrentsViewState.setInitialized()
   } else {
     // 非首次进入：使用缓存数据，不调用 API
     // 从缓存加载 UI 设置
     await loadUiSettings(false)
     // 从缓存加载下载器和站点状态
-    await Promise.all([fetchDownloadersList(false), fetchAllSitesStatus(false)])
-    await fetchCrossSeedSettings()
-    // 只获取种子数据（这个不缓存，每次都需要获取）
-    await fetchDataWithoutLoadingControl()
-    loading.value = false
-    emitGlobalRefreshLoading(false)
+    await Promise.all([
+      fetchDownloadersList(false),
+      fetchAllSitesStatus(false),
+      fetchCrossSeedSettings(),
+      // 种子列表不缓存，每次进入都读取最新的数据库快照。
+      fetchDataWithoutLoadingControl(),
+    ])
   }
+
+  loading.value = false
+  emitGlobalRefreshLoading(false)
 
   // 3. 将刷新方法注册给 App 顶部全局刷新按钮
   emits('ready', refreshBackendAndReload)

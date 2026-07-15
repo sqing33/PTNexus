@@ -1332,10 +1332,10 @@ onMounted(() => {
 })
 
 onMounted(async () => {
-  await loadUiSettings()
-  if (isMaintenanceMode.value) {
-    await loadReviewStatusFilter()
-  }
+  await Promise.all([
+    loadUiSettings(),
+    isMaintenanceMode.value ? loadReviewStatusFilter() : Promise.resolve(),
+  ])
   uiInitializing.value = false
   void fetchData()
   window.addEventListener('resize', handleResize)

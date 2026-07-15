@@ -53,6 +53,7 @@ type TorrentListFilters struct {
 	StateFilters      []string
 	DownloaderFilters []string
 	ExcludeExisting   bool
+	Groups            []TorrentNameSizeKey
 }
 
 // TorrentNameSizeKey 表示按种子名与体积聚合后的唯一业务分组。
@@ -361,48 +362,8 @@ func (r *TorrentDataRepository) ListTorrents(onlyCompleted bool) ([]TorrentRecor
 // 副作用：仅读取 torrents/seed_parameters，不写入数据。
 func (r *TorrentDataRepository) ListTorrentsWithFilters(filters TorrentListFilters) ([]TorrentRecord, error) {
 	groupColumn := r.store.GroupColumn()
-	query := `SELECT hash, name, save_path, size, progress, state, sites, ` + groupColumn + ` AS torrent_group, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders
-		FROM torrents t
-		WHERE t.state != ? AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
-		  AND (
-			NOT EXISTS (
-				SELECT 1 FROM seed_parameters sp_any
-				WHERE sp_any.hash = t.hash
-			)
-			OR EXISTS (
-				SELECT 1 FROM seed_parameters sp
-				WHERE sp.hash = t.hash
-				  AND sp.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')
-			)
-		  )`
-	args := []any{"不存在"}
-
-	if filters.OnlyCompleted {
-		appendCompletedTorrentGroupFilter(&query, &args)
-	}
-
-	nameSearch := strings.ToLower(strings.TrimSpace(filters.NameSearch))
-	if nameSearch != "" {
-		query += " AND LOWER(t.name) LIKE ?"
-		args = append(args, "%"+nameSearch+"%")
-	}
-
-	appendTorrentGroupStringFilter(&query, &args, "path_match", "save_path", filters.PathFilters)
-	appendTorrentGroupStringFilter(&query, &args, "state_match", "state", filters.StateFilters)
-	appendTorrentGroupStringFilter(&query, &args, "downloader_match", "downloader_id", filters.DownloaderFilters)
-
-	if filters.ExcludeExisting {
-		query += ` AND NOT EXISTS (
-			SELECT 1 FROM seed_parameters sp_existing
-			INNER JOIN torrents t_existing ON t_existing.hash = sp_existing.hash
-			WHERE sp_existing.name = t.name
-			  AND sp_existing.name IS NOT NULL
-			  AND TRIM(sp_existing.name) != ''
-			  AND t_existing.size = t.size
-			  AND t_existing.size > 0
-			  AND (t_existing.is_hidden = 0 OR t_existing.is_hidden IS NULL)
-		)`
-	}
+	fromWhere, args := r.buildTorrentListFromWhere(filters)
+	query := `SELECT t.hash, t.name, t.save_path, t.size, t.progress, t.state, t.sites, ` + groupColumn + ` AS torrent_group, t.details, t.downloader_id AS downloader, t.last_seen, t.iyuu_last_check AS iyuu_last, t.seeders` + fromWhere
 
 	rows := make([]TorrentRecord, 0)
 	if err := r.store.DB.Raw(query, args...).Scan(&rows).Error; err != nil {
@@ -411,47 +372,138 @@ func (r *TorrentDataRepository) ListTorrentsWithFilters(filters TorrentListFilte
 	return rows, nil
 }
 
+// ListTorrentGroupKeysWithFilters 只读取匹配列表条件的 name+size 分组键。
+// 参数/返回：filters 与 ListTorrentsWithFilters 一致；返回去重后的轻量分组键，供 Service 先分页再读取当前页明细。
+// 失败场景：数据库查询失败时返回错误。
+// 副作用：仅读取 torrents/seed_parameters，不写入数据。
+func (r *TorrentDataRepository) ListTorrentGroupKeysWithFilters(filters TorrentListFilters) ([]TorrentNameSizeKey, error) {
+	fromWhere, args := r.buildTorrentListFromWhere(filters)
+	rows := make([]TorrentNameSizeKey, 0)
+	if err := r.store.DB.Raw(`SELECT DISTINCT t.name AS name, t.size AS size`+fromWhere, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// buildTorrentListFromWhere 构造维护种子列表共用的 FROM/JOIN/WHERE。
+// 参数/返回：filters 为数据库层筛选条件；返回 SQL 片段及按占位符顺序排列的参数。
+// 失败场景：无；调用方负责执行 SQL 并处理数据库错误。
+// 副作用：无。
+func (r *TorrentDataRepository) buildTorrentListFromWhere(filters TorrentListFilters) (string, []any) {
+	joins := "\n\t\tFROM torrents t"
+	joinArgs := make([]any, 0)
+	whereConditions := []string{
+		"t.state != ?",
+		"(t.is_hidden = 0 OR t.is_hidden IS NULL)",
+	}
+	whereArgs := []any{"不存在"}
+	if len(filters.Groups) > 0 {
+		// 当前页明细只涉及少量 hash，复用 hash 索引比再次聚合整张 seed_parameters 更快。
+		whereConditions = append(whereConditions, `(
+			NOT EXISTS (SELECT 1 FROM seed_parameters sp_any WHERE sp_any.hash = t.hash)
+			OR EXISTS (
+				SELECT 1 FROM seed_parameters sp_supported
+				WHERE sp_supported.hash = t.hash
+				  AND sp_supported.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')
+			)
+		)`)
+	} else {
+		joins += `
+		LEFT JOIN (
+			SELECT hash,
+			       MAX(CASE WHEN type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows') THEN 1 ELSE 0 END) AS has_supported_type
+			FROM seed_parameters
+			GROUP BY hash
+		) seed_status ON seed_status.hash = t.hash`
+		whereConditions = append(whereConditions, "(seed_status.hash IS NULL OR seed_status.has_supported_type = 1)")
+	}
+
+	if filters.OnlyCompleted {
+		joins += `
+		INNER JOIN (
+			SELECT DISTINCT name, size
+			FROM torrents
+			WHERE state != ?
+			  AND (is_hidden = 0 OR is_hidden IS NULL)
+			  AND progress >= 100
+		) completed_groups ON completed_groups.name = t.name AND completed_groups.size = t.size`
+		joinArgs = append(joinArgs, "不存在")
+	}
+
+	joins, joinArgs = appendTorrentGroupFilterJoin(joins, joinArgs, "path_match", "save_path", filters.PathFilters)
+	joins, joinArgs = appendTorrentGroupFilterJoin(joins, joinArgs, "state_match", "state", filters.StateFilters)
+	joins, joinArgs = appendTorrentGroupFilterJoin(joins, joinArgs, "downloader_match", "downloader_id", filters.DownloaderFilters)
+
+	if filters.ExcludeExisting {
+		joins += `
+		LEFT JOIN (
+			SELECT DISTINCT sp_existing.name AS name, t_existing.size AS size
+			FROM seed_parameters sp_existing
+			INNER JOIN torrents t_existing ON t_existing.hash = sp_existing.hash
+			WHERE sp_existing.name IS NOT NULL
+			  AND TRIM(sp_existing.name) != ''
+			  AND t_existing.size > 0
+			  AND (t_existing.is_hidden = 0 OR t_existing.is_hidden IS NULL)
+		) existing_groups ON existing_groups.name = t.name AND existing_groups.size = t.size`
+		whereConditions = append(whereConditions, "existing_groups.name IS NULL")
+	}
+
+	nameSearch := strings.ToLower(strings.TrimSpace(filters.NameSearch))
+	if nameSearch != "" {
+		whereConditions = append(whereConditions, "LOWER(t.name) LIKE ?")
+		whereArgs = append(whereArgs, "%"+nameSearch+"%")
+	}
+
+	if len(filters.Groups) > 0 {
+		groupConditions := make([]string, 0, len(filters.Groups))
+		for _, group := range filters.Groups {
+			groupConditions = append(groupConditions, "(t.name = ? AND t.size = ?)")
+			whereArgs = append(whereArgs, group.Name, group.Size)
+		}
+		whereConditions = append(whereConditions, "("+strings.Join(groupConditions, " OR ")+")")
+	}
+
+	args := make([]any, 0, len(joinArgs)+len(whereArgs))
+	args = append(args, joinArgs...)
+	args = append(args, whereArgs...)
+	return joins + "\n\t\tWHERE " + strings.Join(whereConditions, " AND "), args
+}
+
 // ListTorrentFilterOptions 读取列表筛选器需要的路径和状态候选值。
 // 参数/返回：onlyCompleted 为 true 时仅统计存在完成记录的 name+size 分组；返回去重排序后的保存路径和状态。
 // 失败场景：数据库查询失败时返回错误。
 // 副作用：仅读取 torrents/seed_parameters，不写入数据。
 func (r *TorrentDataRepository) ListTorrentFilterOptions(onlyCompleted bool) ([]string, []string, error) {
-	baseQuery := ` FROM torrents t
-		WHERE t.state != ? AND (t.is_hidden = 0 OR t.is_hidden IS NULL)
-		  AND (
-			NOT EXISTS (
-				SELECT 1 FROM seed_parameters sp_any
-				WHERE sp_any.hash = t.hash
-			)
-			OR EXISTS (
-				SELECT 1 FROM seed_parameters sp
-				WHERE sp.hash = t.hash
-				  AND sp.type IN ('category.movie', 'category.tv_series', 'category.animation', 'category.documentaries', 'category.tv_shows')
-			)
-		  )`
-	args := []any{"不存在"}
-	if onlyCompleted {
-		appendCompletedTorrentGroupFilter(&baseQuery, &args)
+	fromWhere, args := r.buildTorrentListFromWhere(TorrentListFilters{OnlyCompleted: onlyCompleted})
+	type filterOptionRow struct {
+		SavePath string `gorm:"column:save_path"`
+		State    string `gorm:"column:state"`
 	}
-
-	pathArgs := append([]any{}, args...)
-	paths := make([]string, 0)
-	if err := r.store.DB.Raw(
-		`SELECT DISTINCT save_path`+baseQuery+` AND save_path IS NOT NULL AND TRIM(save_path) != '' ORDER BY save_path ASC`,
-		pathArgs...,
-	).Pluck("save_path", &paths).Error; err != nil {
+	rows := make([]filterOptionRow, 0)
+	if err := r.store.DB.Raw(`SELECT DISTINCT t.save_path, t.state`+fromWhere, args...).Scan(&rows).Error; err != nil {
 		return nil, nil, err
 	}
 
-	stateArgs := append([]any{}, args...)
-	states := make([]string, 0)
-	if err := r.store.DB.Raw(
-		`SELECT DISTINCT state`+baseQuery+` AND state IS NOT NULL AND TRIM(state) != '' ORDER BY state ASC`,
-		stateArgs...,
-	).Pluck("state", &states).Error; err != nil {
-		return nil, nil, err
+	pathSet := map[string]struct{}{}
+	stateSet := map[string]struct{}{}
+	for _, row := range rows {
+		if value := strings.TrimSpace(row.SavePath); value != "" {
+			pathSet[value] = struct{}{}
+		}
+		if value := strings.TrimSpace(row.State); value != "" {
+			stateSet[value] = struct{}{}
+		}
 	}
-
+	paths := make([]string, 0, len(pathSet))
+	for value := range pathSet {
+		paths = append(paths, value)
+	}
+	states := make([]string, 0, len(stateSet))
+	for value := range stateSet {
+		states = append(states, value)
+	}
+	sort.Strings(paths)
+	sort.Strings(states)
 	return paths, states, nil
 }
 
@@ -555,36 +607,25 @@ func (r *TorrentDataRepository) CachedSitesByNameAndSize(name string, size int64
 	return cachedSites, matchedHashes, nil
 }
 
-func appendCompletedTorrentGroupFilter(query *string, args *[]any) {
-	*query += ` AND EXISTS (
-		SELECT 1 FROM torrents completed
-		WHERE completed.name = t.name
-		  AND completed.size = t.size
-		  AND completed.state != ?
-		  AND (completed.is_hidden = 0 OR completed.is_hidden IS NULL)
-		  AND completed.progress >= 100
-	)`
-	*args = append(*args, "不存在")
-}
-
-func appendTorrentGroupStringFilter(query *string, args *[]any, alias string, column string, values []string) {
+func appendTorrentGroupFilterJoin(query string, args []any, alias string, column string, values []string) (string, []any) {
 	cleaned := cleanStringValues(values)
 	if len(cleaned) == 0 {
-		return
+		return query, args
 	}
 
-	*query += ` AND EXISTS (
-		SELECT 1 FROM torrents ` + alias + `
-		WHERE ` + alias + `.name = t.name
-		  AND ` + alias + `.size = t.size
-		  AND ` + alias + `.state != ?
-		  AND (` + alias + `.is_hidden = 0 OR ` + alias + `.is_hidden IS NULL)
-		  AND ` + alias + `.` + column + ` IN (` + sqlPlaceholders(len(cleaned)) + `)
-	)`
-	*args = append(*args, "不存在")
+	query += `
+		INNER JOIN (
+			SELECT DISTINCT name, size
+			FROM torrents
+			WHERE state != ?
+			  AND (is_hidden = 0 OR is_hidden IS NULL)
+			  AND ` + column + ` IN (` + sqlPlaceholders(len(cleaned)) + `)
+		) ` + alias + ` ON ` + alias + `.name = t.name AND ` + alias + `.size = t.size`
+	args = append(args, "不存在")
 	for _, value := range cleaned {
-		*args = append(*args, value)
+		args = append(args, value)
 	}
+	return query, args
 }
 
 func cleanStringValues(values []string) []string {

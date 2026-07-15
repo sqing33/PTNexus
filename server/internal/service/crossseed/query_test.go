@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func newCrossSeedTestStore(t *testing.T) *repository.Store {
+func newCrossSeedTestStore(t testing.TB) *repository.Store {
 	t.Helper()
 
 	dsn := "file:" + strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace(t.Name()) + "?mode=memory&cache=shared"

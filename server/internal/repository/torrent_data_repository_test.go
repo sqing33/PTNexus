@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func newTorrentDataRepositoryTestStore(t *testing.T) *Store {
+func newTorrentDataRepositoryTestStore(t testing.TB) *Store {
 	t.Helper()
 
 	dsn := "file:" + strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace(t.Name()) + "?mode=memory&cache=shared"
@@ -176,5 +176,42 @@ func TestExistingSeedParameterGroupsUsesNameAndSize(t *testing.T) {
 	}
 	if groups[0].Name != "Same.Name" || groups[0].Size != 1000 {
 		t.Fatalf("expected Same.Name size 1000, got %#v", groups[0])
+	}
+}
+
+func TestListTorrentGroupKeysWithFiltersSupportsPageDetailLookup(t *testing.T) {
+	store := newTorrentDataRepositoryTestStore(t)
+	repo := NewTorrentDataRepository(store)
+
+	for _, row := range []struct {
+		hash string
+		name string
+		size int64
+	}{
+		{hash: "hash-a-1", name: "Release.A", size: 1000},
+		{hash: "hash-a-2", name: "Release.A", size: 1000},
+		{hash: "hash-b", name: "Release.B", size: 2000},
+		{hash: "hash-c", name: "Release.C", size: 3000},
+	} {
+		mustExecTorrentDataRepoTest(t, store.DB, `INSERT INTO torrents (hash, name, save_path, size, progress, state, sites, downloader_id, last_seen, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+			row.hash, row.name, "/movie", row.size, 100.0, "做种中", "憨憨", "qb", "2026-07-01 00:00:00")
+	}
+	mustExecTorrentDataRepoTest(t, store.DB, `INSERT INTO seed_parameters (hash, name, type) VALUES (?, ?, ?)`,
+		"hash-c", "Release.C", "category.movie")
+
+	groups, err := repo.ListTorrentGroupKeysWithFilters(TorrentListFilters{OnlyCompleted: true, ExcludeExisting: true})
+	if err != nil {
+		t.Fatalf("ListTorrentGroupKeysWithFilters returned error: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 non-existing groups, got %d: %#v", len(groups), groups)
+	}
+
+	rows, err := repo.ListTorrentsWithFilters(TorrentListFilters{Groups: []TorrentNameSizeKey{{Name: "Release.A", Size: 1000}}})
+	if err != nil {
+		t.Fatalf("page detail lookup returned error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected both rows from selected group, got %d: %#v", len(rows), rows)
 	}
 }

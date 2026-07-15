@@ -1250,8 +1250,14 @@ const shortenPath = (path: string, maxLength: number = 50) => {
 }
 
 onMounted(async () => {
+  // 下载器、站点状态和筛选元数据不依赖已保存的弹窗筛选，先发起请求以缩短首屏等待。
+  const auxiliaryDataPromise = Promise.all([
+    fetchDownloadersList(),
+    loadSiteStatuses(),
+    fetchAllPaths(),
+  ])
   await loadFiltersFromConfig()
-  await loadPanelData()
+  await Promise.all([auxiliaryDataPromise, fetchData()])
 })
 
 onUnmounted(() => {

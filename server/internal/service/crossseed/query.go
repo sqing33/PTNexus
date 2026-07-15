@@ -98,6 +98,10 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 
 	offset := (params.Page - 1) * params.PageSize
 	dbType := s.repo.DBType()
+	normalizedReviewStatus := normalizeReviewStatus(params.ReviewStatus)
+	if canUseReviewQueryFastPath(params, normalizedReviewStatus) {
+		return s.queryReviewFilteredData(params, normalizedReviewStatus)
+	}
 	currentTorrentsSubquery := buildCurrentTorrentsSubquery(dbType)
 	hasPublishQueueTable := s.repo.DB() != nil && s.repo.DB().Migrator().HasTable("publish_queue_tasks")
 	hasPublishLogTable := s.repo.DB() != nil && s.repo.DB().Migrator().HasTable("publish_logs")
@@ -106,6 +110,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		FROM seed_parameters sp
 		LEFT JOIN (%s) ct ON sp.hash = ct.hash
 	`, currentTorrentsSubquery)
+	fromArgs := make([]any, 0)
 
 	whereConditions := make([]string, 0)
 	args := make([]any, 0)
@@ -145,7 +150,6 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		whereConditions = append(whereConditions, "ct.hash IS NOT NULL")
 	}
 
-	normalizedReviewStatus := normalizeReviewStatus(params.ReviewStatus)
 	if normalizedReviewStatus == "" {
 		if reviewCondition, reviewArgs := buildReviewStatusCondition(dbType, params.ReviewStatus); reviewCondition != "" {
 			whereConditions = append(whereConditions, reviewCondition)
@@ -153,79 +157,35 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		}
 	}
 	if excludedTarget := strings.TrimSpace(params.ExcludeTargetSites); excludedTarget != "" {
-		targetAliases, err := s.repo.ResolveSiteAliases(excludedTarget)
+		excludeJoins, excludeJoinArgs, excludeCondition, excludeArgs, err := s.buildExcludeTargetCondition(dbType, excludedTarget, hasPublishQueueTable, hasPublishLogTable)
 		if err != nil {
-			return nil, fmt.Errorf("resolve target site aliases failed: %w", err)
+			return nil, err
 		}
-		if len(targetAliases) == 0 {
-			targetAliases = []string{excludedTarget}
-		}
-
-		spNicknameCondition := buildAliasMatchCondition(dbType, "sp.nickname", targetAliases)
-		spSiteCondition := buildAliasMatchCondition(dbType, "sp.site_name", targetAliases)
-		txSiteCondition := buildAliasMatchCondition(dbType, "tx.sites", targetAliases)
-		aliasArgs := aliasMatchArgs(dbType, targetAliases)
-
-		conditionParts := []string{
-			fmt.Sprintf(`ct.hash IS NOT NULL AND NOT EXISTS (
-					SELECT 1
-					FROM torrents tx
-					WHERE (tx.is_hidden = 0 OR tx.is_hidden IS NULL)
-					  AND %s
-					  AND (tx.hash = ct.hash OR (tx.name = ct.name AND tx.size = ct.size))
-				)`, txSiteCondition),
-		}
-		args = append(args, aliasArgs...)
-
-		if hasPublishQueueTable {
-			queueSiteCondition := buildAliasMatchCondition(dbType, "pqt.target_site", targetAliases)
-			conditionParts = append(conditionParts, fmt.Sprintf(`NOT EXISTS (
-				SELECT 1
-				FROM publish_queue_tasks pqt
-				WHERE pqt.torrent_id = sp.torrent_id
-				  AND %s
-				  AND pqt.status IN (?, ?, ?)
-			)`, queueSiteCondition))
-			args = append(args, aliasArgs...)
-			args = append(args, repository.PublishQueueStatusQueued, repository.PublishQueueStatusRunning, repository.PublishQueueStatusSuccess)
-		}
-
-		if hasPublishLogTable {
-			logSiteCondition := buildAliasMatchCondition(dbType, "pl.target_site", targetAliases)
-			conditionParts = append(conditionParts, fmt.Sprintf(`NOT EXISTS (
-				SELECT 1
-				FROM publish_logs pl
-				WHERE pl.torrent_id = sp.torrent_id
-				  AND %s
-				  AND pl.status = ?
-			)`, logSiteCondition))
-			args = append(args, aliasArgs...)
-			args = append(args, "success")
-		}
-
-		conditionParts = append(conditionParts, fmt.Sprintf("NOT (%s OR %s)", spNicknameCondition, spSiteCondition))
-		args = append(args, aliasArgs...)
-		args = append(args, aliasArgs...)
-
-		whereConditions = append(whereConditions, strings.Join(conditionParts, " AND "))
+		fromClause += excludeJoins
+		fromArgs = append(fromArgs, excludeJoinArgs...)
+		whereConditions = append(whereConditions, excludeCondition)
+		args = append(args, excludeArgs...)
 	}
 
 	whereClause := ""
 	if len(whereConditions) > 0 {
 		whereClause = "WHERE " + strings.Join(whereConditions, " AND ")
 	}
+	queryArgs := make([]any, 0, len(fromArgs)+len(args))
+	queryArgs = append(queryArgs, fromArgs...)
+	queryArgs = append(queryArgs, args...)
 
 	type countRow struct {
 		Total int64 `gorm:"column:total"`
 	}
 	var count countRow
-	countQuery := fmt.Sprintf("SELECT COUNT(*) AS total %s %s", fromClause, whereClause)
-	if err := s.repo.DB().Raw(countQuery, args...).Scan(&count).Error; err != nil {
-		return nil, err
-	}
-
-	if normalizedReviewStatus != "" {
-		count.Total = 0
+	// reviewed/unreviewed 需要按标准映射在 Go 中判定可发布性，最终总数会由过滤结果给出；
+	// 此时提前执行同一套重型 JOIN 的 COUNT 没有意义，只会让列表首屏重复扫描数据库。
+	if normalizedReviewStatus == "" {
+		countQuery := fmt.Sprintf("SELECT COUNT(*) AS total %s %s", fromClause, whereClause)
+		if err := s.repo.DB().Raw(countQuery, queryArgs...).Scan(&count).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	isDeletedExpr := "CASE WHEN ct.hash IS NULL THEN 1 ELSE 0 END AS is_deleted"
@@ -247,11 +207,11 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 			ORDER BY sp.created_at DESC
 		`, isDeletedExpr, fromClause, whereClause)
 
-	dataArgs := args
+	dataArgs := queryArgs
 	if normalizedReviewStatus == "" {
 		dataQuery += "\n\t\t\tLIMIT ? OFFSET ?"
-		dataArgs = make([]any, 0, len(args)+2)
-		dataArgs = append(dataArgs, args...)
+		dataArgs = make([]any, 0, len(queryArgs)+2)
+		dataArgs = append(dataArgs, queryArgs...)
 		dataArgs = append(dataArgs, params.PageSize, offset)
 	}
 
@@ -276,31 +236,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		pageData = paginateMaps(filteredData, offset, params.PageSize)
 	}
 
-	targetSites, err := s.repo.RawStrings("SELECT nickname FROM sites WHERE migration IN (2, 3) ORDER BY nickname", "nickname")
-	if err != nil {
-		targetSites = []string{}
-	}
-	result := map[string]any{
-		"success":          true,
-		"data":             pageData,
-		"count":            len(pageData),
-		"total":            int(count.Total),
-		"page":             params.Page,
-		"page_size":        params.PageSize,
-		"reverse_mappings": reverseMappings,
-		"target_sites":     targetSites,
-	}
-
-	if params.IncludeUniquePaths {
-		uniquePaths, err := s.UniquePaths()
-		if err == nil {
-			if values, ok := uniquePaths["unique_paths"]; ok {
-				result["unique_paths"] = values
-			}
-		}
-	}
-
-	return result, nil
+	return s.buildCrossSeedQueryResult(params, pageData, int(count.Total), reverseMappings)
 }
 
 func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[string]any, int) {
@@ -369,4 +305,74 @@ func aliasMatchArgs(dbType string, aliases []string) []any {
 		result = append(result, strings.ToLower(value))
 	}
 	return result
+}
+
+func (s *CrossSeedService) buildExcludeTargetCondition(dbType string, excludedTarget string, hasPublishQueueTable bool, hasPublishLogTable bool) (string, []any, string, []any, error) {
+	targetAliases, err := s.repo.ResolveSiteAliases(excludedTarget)
+	if err != nil {
+		return "", nil, "", nil, fmt.Errorf("resolve target site aliases failed: %w", err)
+	}
+	if len(targetAliases) == 0 {
+		targetAliases = []string{excludedTarget}
+	}
+
+	spNicknameCondition := buildAliasMatchCondition(dbType, "sp.nickname", targetAliases)
+	spSiteCondition := buildAliasMatchCondition(dbType, "sp.site_name", targetAliases)
+	targetHashSiteCondition := buildAliasMatchCondition(dbType, "target_hash_source.sites", targetAliases)
+	targetGroupSiteCondition := buildAliasMatchCondition(dbType, "target_group_source.sites", targetAliases)
+	aliasArgs := aliasMatchArgs(dbType, targetAliases)
+	joins := fmt.Sprintf(`
+		LEFT JOIN (
+			SELECT DISTINCT target_hash_source.hash
+			FROM torrents target_hash_source
+			WHERE (target_hash_source.is_hidden = 0 OR target_hash_source.is_hidden IS NULL)
+			  AND %s
+		) target_hashes ON target_hashes.hash = ct.hash
+		LEFT JOIN (
+			SELECT DISTINCT target_group_source.name, target_group_source.size
+			FROM torrents target_group_source
+			WHERE (target_group_source.is_hidden = 0 OR target_group_source.is_hidden IS NULL)
+			  AND %s
+		) target_groups ON target_groups.name = ct.name AND target_groups.size = ct.size
+	`, targetHashSiteCondition, targetGroupSiteCondition)
+	joinArgs := make([]any, 0, len(aliasArgs)*2)
+	joinArgs = append(joinArgs, aliasArgs...)
+	joinArgs = append(joinArgs, aliasArgs...)
+	args := make([]any, 0)
+	conditionParts := []string{
+		"ct.hash IS NOT NULL",
+		"target_hashes.hash IS NULL",
+		"target_groups.name IS NULL",
+	}
+
+	if hasPublishQueueTable {
+		queueSiteCondition := buildAliasMatchCondition(dbType, "pqt.target_site", targetAliases)
+		conditionParts = append(conditionParts, fmt.Sprintf(`NOT EXISTS (
+			SELECT 1
+			FROM publish_queue_tasks pqt
+			WHERE pqt.torrent_id = sp.torrent_id
+			  AND %s
+			  AND pqt.status IN (?, ?, ?)
+		)`, queueSiteCondition))
+		args = append(args, aliasArgs...)
+		args = append(args, repository.PublishQueueStatusQueued, repository.PublishQueueStatusRunning, repository.PublishQueueStatusSuccess)
+	}
+
+	if hasPublishLogTable {
+		logSiteCondition := buildAliasMatchCondition(dbType, "pl.target_site", targetAliases)
+		conditionParts = append(conditionParts, fmt.Sprintf(`NOT EXISTS (
+			SELECT 1
+			FROM publish_logs pl
+			WHERE pl.torrent_id = sp.torrent_id
+			  AND %s
+			  AND pl.status = ?
+		)`, logSiteCondition))
+		args = append(args, aliasArgs...)
+		args = append(args, "success")
+	}
+
+	conditionParts = append(conditionParts, fmt.Sprintf("NOT (%s OR %s)", spNicknameCondition, spSiteCondition))
+	args = append(args, aliasArgs...)
+	args = append(args, aliasArgs...)
+	return joins, joinArgs, strings.Join(conditionParts, " AND "), args, nil
 }
