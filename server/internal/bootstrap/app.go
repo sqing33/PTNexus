@@ -376,6 +376,7 @@ func registerRoutes(
 		scheduledSeedAPI.PUT("/tasks/:id", scheduledSeedHandler.UpdateTask)
 		scheduledSeedAPI.DELETE("/tasks/:id", scheduledSeedHandler.DeleteTask)
 		scheduledSeedAPI.POST("/tasks/:id/toggle", scheduledSeedHandler.ToggleTask)
+		scheduledSeedAPI.POST("/tasks/:id/trigger", scheduledSeedHandler.TriggerTask)
 		scheduledSeedAPI.GET("/seeds", scheduledSeedHandler.ListAvailableSeeds)
 		scheduledSeedAPI.GET("/seed-sites", scheduledSeedHandler.GetSeedSites)
 	}

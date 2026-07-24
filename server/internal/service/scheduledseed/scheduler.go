@@ -20,15 +20,17 @@ type Scheduler struct {
 	enqueueFn      EnqueueFn
 	stopCh         chan struct{}
 	doneCh         chan struct{}
+	triggerCh      chan int64
 	once           sync.Once
 }
 
 // NewScheduler 创建调度器实例。
 func NewScheduler(repo *repository.ScheduledSeedRepository) *Scheduler {
 	return &Scheduler{
-		repo:   repo,
-		stopCh: make(chan struct{}),
-		doneCh: make(chan struct{}),
+		repo:      repo,
+		stopCh:    make(chan struct{}),
+		doneCh:    make(chan struct{}),
+		triggerCh: make(chan int64, 16),
 	}
 }
 
@@ -85,10 +87,42 @@ func (s *Scheduler) run() {
 		select {
 		case <-ticker.C:
 			s.processTick()
+		case taskID := <-s.triggerCh:
+			s.processTriggeredTask(taskID)
 		case <-s.stopCh:
 			return
 		}
 	}
+}
+
+// TriggerTask 手动触发指定任务立即执行一次。
+func (s *Scheduler) TriggerTask(taskID int64) {
+	if s == nil {
+		return
+	}
+	select {
+	case s.triggerCh <- taskID:
+		logx.Infof(schedulerLogModule, "任务 %d 已手动触发", taskID)
+	default:
+		logx.Warnf(schedulerLogModule, "任务 %d 触发队列已满，丢弃", taskID)
+	}
+}
+
+func (s *Scheduler) processTriggeredTask(taskID int64) {
+	if s.enqueueFn == nil {
+		return
+	}
+	task, err := s.repo.GetByID(taskID)
+	if err != nil {
+		logx.Errorf(schedulerLogModule, "手动触发任务 %d 查询失败: %v", taskID, err)
+		return
+	}
+	if task.Status != repository.ScheduledSeedStatusActive {
+		logx.Warnf(schedulerLogModule, "手动触发任务 %d 状态为 %s，跳过", taskID, task.Status)
+		return
+	}
+	logx.Infof(schedulerLogModule, "手动触发任务 %d 开始执行", taskID)
+	s.processTask(task, time.Now())
 }
 
 func (s *Scheduler) processTick() {
@@ -126,140 +160,159 @@ func (s *Scheduler) processTask(task *repository.ScheduledSeedTask, now time.Tim
 		return
 	}
 
-	// 确保种子索引在范围内
-	seedIdx := task.CurrentSeedIndex
-	if seedIdx >= len(seeds) {
-		seedIdx = 0
-	}
+	processedSeeds := make(map[int]bool)
 
-	currentSeed := seeds[seedIdx]
-	totalPublished := 0
-	totalSkipped := 0
-
-	// 一个种子同时向所有目标站点发种
-	for _, site := range targetSites {
-		// 查重
-		isDup, dupErr := s.repo.CheckDuplicate(currentSeed.TorrentID, currentSeed.SiteName, site)
-		if dupErr != nil {
-			logx.Warnf(schedulerLogModule, "任务 %d 查重失败(%s→%s): %v，继续执行", task.ID, currentSeed.TorrentID, site, dupErr)
+	for {
+		// 确保种子索引在范围内
+		seedIdx := task.CurrentSeedIndex
+		if seedIdx >= len(seeds) {
+			seedIdx = 0
 		}
 
-		if isDup {
-			totalSkipped++
-			logx.Infof(schedulerLogModule, "任务 %d 种子 %s → %s 已发布过，跳过",
-				task.ID, currentSeed.TorrentID, site)
+		// 所有种子都已处理过（循环模式下防止无限循环）
+		if processedSeeds[seedIdx] {
+			nextRun := now.Add(time.Duration(task.IntervalMinutes) * time.Minute).Format(repository.PublishQueueTimeLayout)
+			lastRun := now.Format(repository.PublishQueueTimeLayout)
+			s.repo.ClaimAndAdvance(task.ID, task.UpdatedAt, seedIdx, 0, repository.ScheduledSeedStatusActive, nextRun, lastRun, 0, 0)
+			logx.Infof(schedulerLogModule, "任务 %d 所有种子均已处理，等待下一轮", task.ID)
+			return
+		}
+		processedSeeds[seedIdx] = true
 
-			// 记录已存在的发布日志
-			if s.publishLogRepo != nil {
-				logEntry := &repository.PublishLogEntry{
-					Trigger:    task.TriggerTag,
-					Scene:      "scheduled_seeding",
-					TorrentID:  currentSeed.TorrentID,
-					SourceSite: currentSeed.SiteName,
-					TargetSite: site,
-					Title:      currentSeed.Title,
-					Status:     "exists",
-					Logs:       "该种子已成功发布过，跳过重复发种",
-				}
-				if _, insertErr := s.publishLogRepo.Insert(logEntry); insertErr != nil {
-					logx.Warnf(schedulerLogModule, "任务 %d 写入跳过日志失败: %v", task.ID, insertErr)
-				}
+		currentSeed := seeds[seedIdx]
+		totalPublished := 0
+		totalSkipped := 0
+
+		// 一个种子同时向所有目标站点发种
+		for _, site := range targetSites {
+			// 查重
+			isDup, dupErr := s.repo.CheckDuplicate(currentSeed.TorrentID, currentSeed.SiteName, site)
+			if dupErr != nil {
+				logx.Warnf(schedulerLogModule, "任务 %d 查重失败(%s→%s): %v，继续执行", task.ID, currentSeed.TorrentID, site, dupErr)
 			}
+
+			if isDup {
+				totalSkipped++
+				logx.Infof(schedulerLogModule, "任务 %d 种子 %s → %s 已发布过，跳过",
+					task.ID, currentSeed.TorrentID, site)
+
+				// 记录已存在的发布日志
+				if s.publishLogRepo != nil {
+					logEntry := &repository.PublishLogEntry{
+						Trigger:    task.TriggerTag,
+						Scene:      "scheduled_seeding",
+						TorrentID:  currentSeed.TorrentID,
+						SourceSite: currentSeed.SiteName,
+						TargetSite: site,
+						Title:      currentSeed.Title,
+						Status:     "exists",
+						Logs:       "该种子已成功发布过，跳过重复发种",
+					}
+					if _, insertErr := s.publishLogRepo.Insert(logEntry); insertErr != nil {
+						logx.Warnf(schedulerLogModule, "任务 %d 写入跳过日志失败: %v", task.ID, insertErr)
+					}
+				}
+				continue
+			}
+
+			// 入队发布
+			payload := map[string]any{
+				"target_site_name": site,
+				"publish_scene":   "scheduled_seeding",
+				"publish_trigger":  task.TriggerTag,
+				"seeds": []any{
+					map[string]any{
+						"torrent_id": currentSeed.TorrentID,
+						"site_name":  currentSeed.SiteName,
+						"nickname":   currentSeed.SiteName,
+					},
+				},
+			}
+
+			result, code := s.enqueueFn(payload)
+			if code != 200 {
+				msg := "未知错误"
+				if m, ok := result["message"].(string); ok {
+					msg = m
+				}
+				logx.Errorf(schedulerLogModule, "任务 %d 入队失败(%s→%s): %s", task.ID, currentSeed.TorrentID, site, msg)
+
+				// 写入失败记录到 publish_logs
+				if s.publishLogRepo != nil {
+					logEntry := &repository.PublishLogEntry{
+						Trigger:    task.TriggerTag,
+						Scene:      "scheduled_seeding",
+						TorrentID:  currentSeed.TorrentID,
+						SourceSite: currentSeed.SiteName,
+						TargetSite: site,
+						Title:      currentSeed.Title,
+						Status:     "failed",
+						Logs:       "入队失败: " + msg,
+					}
+					if _, insertErr := s.publishLogRepo.Insert(logEntry); insertErr != nil {
+						logx.Warnf(schedulerLogModule, "任务 %d 写入失败日志失败: %v", task.ID, insertErr)
+					}
+				}
+				totalSkipped++
+			} else {
+				totalPublished++
+				logx.Infof(schedulerLogModule, "任务 %d 已入队: 种子 %s → %s",
+					task.ID, currentSeed.TorrentID, site)
+			}
+		}
+
+		// 推进种子索引
+		newSeedIdx := seedIdx + 1
+		newStatus := repository.ScheduledSeedStatusActive
+		if newSeedIdx >= len(seeds) {
+			if task.LoopEnabled {
+				newSeedIdx = 0
+				logx.Infof(schedulerLogModule, "任务 %d 种子已全部发布，循环模式重置", task.ID)
+			} else {
+				newStatus = repository.ScheduledSeedStatusCompleted
+				newSeedIdx = len(seeds) // 保持在末尾
+				logx.Infof(schedulerLogModule, "任务 %d 所有种子已发布完毕", task.ID)
+			}
+		}
+
+		nextRun := now.Add(time.Duration(task.IntervalMinutes) * time.Minute).Format(repository.PublishQueueTimeLayout)
+		lastRun := now.Format(repository.PublishQueueTimeLayout)
+
+		ok, err := s.repo.ClaimAndAdvance(
+			task.ID,
+			task.UpdatedAt,
+			newSeedIdx,
+			0, // siteIdx 不再使用
+			newStatus,
+			nextRun,
+			lastRun,
+			totalPublished,
+			totalSkipped,
+		)
+		if err != nil {
+			logx.Errorf(schedulerLogModule, "任务 %d 更新调度状态失败: %v", task.ID, err)
+			return
+		}
+		if !ok {
+			logx.Warnf(schedulerLogModule, "任务 %d 更新调度状态未生效（任务可能已被删除）", task.ID)
+			return
+		}
+
+		logx.Infof(schedulerLogModule, "任务 %d 种子[%d] 发布完成: 成功 %d 跳过 %d → 下一索引 %d",
+			task.ID, seedIdx, totalPublished, totalSkipped, newSeedIdx)
+
+		// 更新内存中的任务状态，供下一轮循环使用
+		task.CurrentSeedIndex = newSeedIdx
+		task.Status = newStatus
+		task.UpdatedAt = now.Format(repository.PublishQueueTimeLayout)
+
+		// 如果所有站点都跳过了（全部重复），立即处理下一个种子，不等待下次发种时间
+		if totalPublished == 0 && totalSkipped > 0 && newStatus == repository.ScheduledSeedStatusActive {
+			logx.Infof(schedulerLogModule, "任务 %d 种子[%d] 已存在，立即处理下一个种子", task.ID, seedIdx)
 			continue
 		}
 
-		// 入队发布
-		payload := map[string]any{
-			"target_site_name": site,
-			"publish_scene":   "scheduled_seeding",
-			"publish_trigger":  task.TriggerTag,
-			"seeds": []any{
-				map[string]any{
-					"torrent_id": currentSeed.TorrentID,
-					"site_name":  currentSeed.SiteName,
-					"nickname":   currentSeed.SiteName,
-				},
-			},
-		}
-
-		result, code := s.enqueueFn(payload)
-		if code != 200 {
-			msg := "未知错误"
-			if m, ok := result["message"].(string); ok {
-				msg = m
-			}
-			logx.Errorf(schedulerLogModule, "任务 %d 入队失败(%s→%s): %s", task.ID, currentSeed.TorrentID, site, msg)
-
-			// 写入失败记录到 publish_logs
-			if s.publishLogRepo != nil {
-				logEntry := &repository.PublishLogEntry{
-					Trigger:    task.TriggerTag,
-					Scene:      "scheduled_seeding",
-					TorrentID:  currentSeed.TorrentID,
-					SourceSite: currentSeed.SiteName,
-					TargetSite: site,
-					Title:      currentSeed.Title,
-					Status:     "failed",
-					Logs:       "入队失败: " + msg,
-				}
-				if _, insertErr := s.publishLogRepo.Insert(logEntry); insertErr != nil {
-					logx.Warnf(schedulerLogModule, "任务 %d 写入失败日志失败: %v", task.ID, insertErr)
-				}
-			}
-			totalSkipped++
-		} else {
-			totalPublished++
-			logx.Infof(schedulerLogModule, "任务 %d 已入队: 种子 %s → %s",
-				task.ID, currentSeed.TorrentID, site)
-		}
-	}
-
-	// 推进种子索引（不再使用站点索引）
-	newSeedIdx := seedIdx + 1
-	newStatus := repository.ScheduledSeedStatusActive
-	if newSeedIdx >= len(seeds) {
-		if task.LoopEnabled {
-			newSeedIdx = 0
-			logx.Infof(schedulerLogModule, "任务 %d 种子已全部发布，循环模式重置", task.ID)
-		} else {
-			newStatus = repository.ScheduledSeedStatusCompleted
-			newSeedIdx = len(seeds) // 保持在末尾
-			logx.Infof(schedulerLogModule, "任务 %d 所有种子已发布完毕", task.ID)
-		}
-	}
-
-	nextRun := now.Add(time.Duration(task.IntervalMinutes) * time.Minute).Format(repository.PublishQueueTimeLayout)
-	lastRun := now.Format(repository.PublishQueueTimeLayout)
-
-	ok, err := s.repo.ClaimAndAdvance(
-		task.ID,
-		task.UpdatedAt,
-		newSeedIdx,
-		0, // siteIdx 不再使用
-		newStatus,
-		nextRun,
-		lastRun,
-		totalPublished,
-		totalSkipped,
-	)
-	if err != nil {
-		logx.Errorf(schedulerLogModule, "任务 %d 更新调度状态失败: %v", task.ID, err)
+		// 有实际发布或任务已完成，等待下次调度
 		return
-	}
-	if !ok {
-		logx.Warnf(schedulerLogModule, "任务 %d 更新调度状态未生效（任务可能已被删除）", task.ID)
-		return
-	}
-
-	logx.Infof(schedulerLogModule, "任务 %d 种子[%d] 发布完成: 成功 %d 跳过 %d → 下一索引 %d",
-		task.ID, seedIdx, totalPublished, totalSkipped, newSeedIdx)
-
-	// 如果所有站点都跳过了（全部重复），立即尝试下一个种子
-	if totalPublished == 0 && totalSkipped > 0 && newStatus == repository.ScheduledSeedStatusActive {
-		time.Sleep(100 * time.Millisecond)
-		refreshed, err := s.repo.GetByID(task.ID)
-		if err == nil {
-			s.processTask(refreshed, time.Now())
-		}
 	}
 }

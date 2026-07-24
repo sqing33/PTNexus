@@ -85,8 +85,8 @@ func (h *ScheduledSeedHandler) CreateTask(c *gin.Context) {
 
 	// 验证
 	if strings.TrimSpace(req.Name) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "任务名称不能为空"})
-		return
+		// 新建任务未指定名称时，按当前时间自动生成
+		req.Name = time.Now().Format("20060102-150405")
 	}
 	if len(req.Seeds) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "至少选择一个种子"})
@@ -158,8 +158,8 @@ func (h *ScheduledSeedHandler) UpdateTask(c *gin.Context) {
 	}
 
 	if strings.TrimSpace(req.Name) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "任务名称不能为空"})
-		return
+		// 未指定名称时沿用原任务名称
+		req.Name = existing.Name
 	}
 	if len(req.Seeds) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "至少选择一个种子"})
@@ -339,4 +339,27 @@ func (h *ScheduledSeedHandler) GetSeedSites(c *gin.Context) {
 		"success": true,
 		"data":    sites,
 	})
+}
+
+// TriggerTask 手动触发指定任务立即执行下一次发种。
+func (h *ScheduledSeedHandler) TriggerTask(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的任务 ID"})
+		return
+	}
+
+	task, err := h.repo.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "任务不存在"})
+		return
+	}
+
+	if task.Status != repository.ScheduledSeedStatusActive {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "任务当前状态不允许手动触发"})
+		return
+	}
+
+	h.scheduler.TriggerTask(id)
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "已触发发种任务"})
 }

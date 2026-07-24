@@ -14,7 +14,7 @@
       label-width="100px"
       label-position="right"
     >
-      <el-form-item label="任务名称" prop="name">
+      <el-form-item v-if="isEdit" label="任务名称" prop="name">
         <el-input v-model="form.name" placeholder="请输入任务名称" clearable />
       </el-form-item>
 
@@ -189,11 +189,13 @@ watch([intervalValue, intervalUnit], () => {
     : intervalValue.value
 })
 
+const generateTimeBasedName = () => {
+  const now = new Date()
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+}
+
 const formRules: FormRules = {
-  name: [
-    { required: true, message: '请输入任务名称', trigger: 'blur' },
-    { min: 1, max: 100, message: '长度在 1 到 100 个字符', trigger: 'blur' },
-  ],
   seeds: [
     {
       validator: (_rule, _value, callback) => {
@@ -304,7 +306,7 @@ const fetchSiteList = async () => {
 
 // ---- 表单生命周期 ----
 const resetForm = () => {
-  form.name = ''
+  form.name = generateTimeBasedName()
   form.seeds = []
   form.target_sites = []
   form.interval_minutes = 30

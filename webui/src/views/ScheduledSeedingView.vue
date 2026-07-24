@@ -132,9 +132,17 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="240" align="center" fixed="right">
+        <el-table-column label="操作" width="300" align="center" fixed="right">
           <template #default="{ row }">
             <div class="action-buttons">
+              <el-button
+                size="small"
+                type="success"
+                @click="triggerTask(row)"
+                :disabled="row.status !== 'active'"
+              >
+                发下一个
+              </el-button>
               <el-button
                 size="small"
                 :type="row.status === 'active' ? 'warning' : 'success'"
@@ -402,6 +410,26 @@ const deleteTask = async (row: ScheduledSeedTask) => {
       : e instanceof Error
         ? e.message
         : '删除失败'
+    ElMessage.error(message)
+  }
+}
+
+const triggerTask = async (row: ScheduledSeedTask) => {
+  try {
+    const response = await axios.post(`/api/scheduled-seed/tasks/${row.id}/trigger`)
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || '触发失败')
+    }
+    ElMessage.success(response.data?.message || '已触发发种任务')
+    await fetchTasks()
+  } catch (e: unknown) {
+    const message = axios.isAxiosError(e)
+      ? ((e.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (e.response?.data as { error?: string } | undefined)?.error ||
+        e.message)
+      : e instanceof Error
+        ? e.message
+        : '触发失败'
     ElMessage.error(message)
   }
 }
