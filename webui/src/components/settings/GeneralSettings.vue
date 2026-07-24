@@ -714,7 +714,7 @@
 
         <div class="card-content">
           <el-form :model="tagsForm" label-position="top" class="settings-form">
-            <!-- 第一行：标签开关 + 分类开关 -->
+            <!-- 第一行：标签开关 + 站点名开关 + 分类开关 -->
             <el-form-item label="" class="form-item">
               <div style="display: flex; align-items: center; gap: 30px">
                 <div style="display: flex; align-items: center; gap: 12px">
@@ -723,6 +723,16 @@
                   </el-icon>
                   <span style="font-weight: 500; font-size: 14px">标签</span>
                   <el-switch v-model="tagsForm.tags.enabled" @change="autoSaveTagsSettings" />
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px">
+                  <el-icon size="20">
+                    <LocationFilled />
+                  </el-icon>
+                  <span style="font-weight: 500; font-size: 14px">站点名</span>
+                  <el-switch
+                    v-model="siteNameTagEnabled"
+                    @change="onSiteNameTagChange"
+                  />
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px">
                   <el-icon size="20">
@@ -753,15 +763,15 @@
                 </div>
               </el-form-item>
 
-              <!-- 第四行：标签列表 -->
+              <!-- 第四行：标签列表（不包含站点名占位标签） -->
 
               <el-form-item label="" class="form-item">
                 <div
-                  v-if="tagsForm.tags.tags.length > 0"
+                  v-if="displayTags.length > 0"
                   style="display: flex; flex-wrap: wrap; gap: 8px"
                 >
                   <el-tag
-                    v-for="(tag, index) in tagsForm.tags.tags"
+                    v-for="(tag, index) in displayTags"
                     :key="index"
                     closable
                     @close="removeCustomTag(index)"
@@ -801,7 +811,7 @@
                 <InfoFilled />
               </el-icon>
               启用标签与分类功能后，会自动为种子添加标签与分类<br />
-              默认添加"站点/{站点名称}"和"PT Nexus"标签<br />
+              开启“站点名”后，会为种子添加“站点/{站点名称}”标签<br />
               自定义标签：可以为转种的种子添加自定义标签
             </el-text>
           </el-form>
@@ -921,6 +931,7 @@ import {
   Hide,
   FolderOpened,
   Collection,
+  LocationFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from '@/utils/uiNotify'
 const router = useRouter()
@@ -1154,9 +1165,26 @@ const tagsForm = reactive({
   },
   tags: {
     enabled: true,
-    tags: ['PT Nexus', '站点/{站点名称}'],
+    tags: ['PT Nexus'],
   },
 })
+
+// 站点名标签开关（控制是否自动打上 "站点/{站点名称}" 标签）
+const SITE_NAME_TAG = '站点/{站点名称}'
+const siteNameTagEnabled = ref(true)
+
+const onSiteNameTagChange = (val: boolean) => {
+  const idx = tagsForm.tags.tags.indexOf(SITE_NAME_TAG)
+  if (val && idx === -1) {
+    tagsForm.tags.tags.push(SITE_NAME_TAG)
+  } else if (!val && idx !== -1) {
+    tagsForm.tags.tags.splice(idx, 1)
+  }
+  autoSaveTagsSettings()
+}
+
+// 过滤掉站点名占位标签，不在自定义标签列表中显示
+const displayTags = computed(() => tagsForm.tags.tags.filter((t) => t !== SITE_NAME_TAG))
 
 // 新标签输入框的值
 const newTagInput = ref('')
@@ -1166,6 +1194,10 @@ const addCustomTag = () => {
   const newTag = newTagInput.value
   if (newTag && newTag.trim()) {
     const trimmedTag = newTag.trim()
+    if (trimmedTag === SITE_NAME_TAG) {
+      ElMessage.warning('请使用“站点名”开关来控制该标签')
+      return
+    }
     // 检查是否已存在
     if (!tagsForm.tags.tags.includes(trimmedTag)) {
       tagsForm.tags.tags.push(trimmedTag)
@@ -1181,9 +1213,12 @@ const addCustomTag = () => {
 
 // 删除自定义标签
 const removeCustomTag = (index: number) => {
-  tagsForm.tags.tags.splice(index, 1)
-  // 自动保存
-  autoSaveTagsSettings()
+  // 使用 displayTags 索引映射到实际 tags 索引
+  const actualIndex = tagsForm.tags.tags.indexOf(displayTags.value[index])
+  if (actualIndex !== -1) {
+    tagsForm.tags.tags.splice(actualIndex, 1)
+    autoSaveTagsSettings()
+  }
 }
 
 // 自动保存标签设置
@@ -1340,6 +1375,8 @@ const fetchSettings = async () => {
         tagsForm.tags.enabled = config.tags_config.tags.enabled
         tagsForm.tags.tags = config.tags_config.tags.tags || []
       }
+      // 根据标签列表中是否包含站点名占位符来设置开关状态
+      siteNameTagEnabled.value = tagsForm.tags.tags.includes('站点/{站点名称}')
     }
 
     // 获取下载器列表

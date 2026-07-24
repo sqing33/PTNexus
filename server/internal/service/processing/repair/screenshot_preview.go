@@ -277,8 +277,8 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 	selectedSubtitleSID, selectedSubtitleProvided := parseSelectedSubtitleSIDAny(payload["selected_subtitle_sid"])
 
 	logx.PlainInfof("开始执行截图和上传任务 (智能 HDR/SDR + 自动中文字幕)...")
-	hoster := "pixhost"
-	logx.PlainInfof("已选择图床服务: %s, 截图数量: %d", hoster, screenshotTotalCount)
+	uploadCtx := PrepareScreenshotUploadContext(input.RootConfig)
+	logx.PlainInfof("已选择图床服务: %s, 截图数量: %d", uploadCtx.Hoster, screenshotTotalCount)
 
 	savePath, downloaderID, torrentName, contentName := parseScreenshotSourceParams(payload, sourceInfo, input.ContentName)
 
@@ -440,21 +440,14 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 					buf.WriteString(fmt.Sprintf(format, args...))
 					buf.WriteByte('\n')
 				}
-				showURL, err := UploadImageToPixhostNarrativeWithLogger(job.FilePath, logLine)
+				showURL, err := uploadCtx.UploadScreenshot(job.FilePath, logLine)
 				if err != nil || strings.TrimSpace(showURL) == "" {
 					results <- uploadResult{Index: job.Index, OK: false, LogBlock: buf.String()}
 					continue
 				}
 				logLine("   🚀 上传成功: %s", showURL)
 
-				finalURL := strings.TrimSpace(showURL)
-				if direct := PixhostShowToDirectURL(showURL); strings.TrimSpace(direct) != "" {
-					if normalized := NormalizePixhostDirectHost(direct); strings.TrimSpace(normalized) != "" {
-						finalURL = normalized
-					} else {
-						finalURL = direct
-					}
-				}
+				finalURL := uploadCtx.NormalizeScreenshotURL(showURL)
 				results <- uploadResult{Index: job.Index, OK: true, URL: finalURL, LogBlock: buf.String()}
 			}
 		}()

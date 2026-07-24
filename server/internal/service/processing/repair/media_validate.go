@@ -114,7 +114,7 @@ func ValidateMediaPayload(payload map[string]any, rootConfig map[string]any, csp
 		if errMsg != "" {
 			return map[string]any{"success": false, "error": errMsg}, 400
 		}
-		result.Poster = NormalizePosterBBCode(result.Poster)
+		result.Poster = NormalizePosterBBCodeWithConfig(result.Poster, rootConfig)
 		return map[string]any{
 			"success":               true,
 			"posters":               result.Poster,

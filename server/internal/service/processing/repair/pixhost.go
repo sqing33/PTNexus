@@ -36,6 +36,11 @@ var (
 
 // NormalizePosterBBCode 规范化海报字段，统一输出为单个 [img]...[/img]。
 func NormalizePosterBBCode(raw string) string {
+	return NormalizePosterBBCodeWithConfig(raw, nil)
+}
+
+// NormalizePosterBBCodeWithConfig 按 rootConfig 中的 image_hoster 规范化海报字段。
+func NormalizePosterBBCodeWithConfig(raw string, rootConfig map[string]any) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return ""
@@ -50,7 +55,7 @@ func NormalizePosterBBCode(raw string) string {
 		return trimmed
 	}
 
-	normalized := NormalizePosterURL(primary)
+	normalized := NormalizePosterURLWithConfig(primary, rootConfig)
 	if normalized == "" {
 		normalized = primary
 	}
@@ -59,11 +64,50 @@ func NormalizePosterBBCode(raw string) string {
 
 // NormalizePosterURL 对海报 URL 做直链修复，并尽量转存到 Pixhost。
 func NormalizePosterURL(raw string) string {
+	return NormalizePosterURLWithConfig(raw, nil)
+}
+
+// NormalizePosterURLWithConfig 按 rootConfig 中的 image_hoster 对海报 URL 做直链修复并转存。
+func NormalizePosterURLWithConfig(raw string, rootConfig map[string]any) string {
 	url := strings.TrimSpace(raw)
 	if url == "" {
 		return ""
 	}
 
+	hoster := GetImageHosterFromConfig(rootConfig)
+	if hoster == "agsv" {
+		return normalizePosterURLForChevereto(url, GetCheveretoConfigFromRootConfig(rootConfig))
+	}
+	return normalizePosterURLForPixhost(url)
+}
+
+func normalizePosterURLForChevereto(url string, cfg CheveretoUploadConfig) string {
+	if cfg.BaseURL == "" {
+		// 没有配置域名，回退到原始 URL
+		logx.Warnf(posterTransferLogModule, "末日图床域名未配置，回退原始URL source=%s", CompactLogText(url, 160))
+		return url
+	}
+
+	token, err := CheveretoLogin(cfg)
+	if err != nil {
+		logx.Warnf(posterTransferLogModule, "末日图床登录失败，回退原始URL source=%s err=%v", CompactLogText(url, 160), err)
+		return url
+	}
+
+	transferred, err := TransferRemoteImageToChevereto(url, cfg, token)
+	if err != nil || strings.TrimSpace(transferred) == "" {
+		if err != nil {
+			logx.Warnf(posterTransferLogModule, "海报转存末日图床失败，回退原始URL source=%s err=%v", CompactLogText(url, 160), err)
+		} else {
+			logx.Warnf(posterTransferLogModule, "海报转存末日图床失败，回退原始URL source=%s err=empty transfer result", CompactLogText(url, 160))
+		}
+		return url
+	}
+	logx.Infof(posterTransferLogModule, "海报转存末日图床成功 source=%s target=%s", CompactLogText(url, 160), CompactLogText(transferred, 160))
+	return strings.TrimSpace(transferred)
+}
+
+func normalizePosterURLForPixhost(url string) string {
 	lower := strings.ToLower(url)
 	if strings.Contains(lower, "pixhost.to") {
 		if resolved, err := ResolvePixhostImageURL(url); err == nil && strings.TrimSpace(resolved) != "" {

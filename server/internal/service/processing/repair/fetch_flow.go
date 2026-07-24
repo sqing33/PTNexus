@@ -369,7 +369,7 @@ func repairPosterDuringFetch(
 		return
 	}
 
-	reviewData.Poster = NormalizePosterBBCode(reviewData.Poster)
+	reviewData.Poster = NormalizePosterBBCodeWithConfig(reviewData.Poster, deps.RootConfig)
 	posterURL := ""
 	if urls := ExtractImageURLsFromText(reviewData.Poster); len(urls) > 0 {
 		posterURL = strings.TrimSpace(urls[0])
@@ -426,7 +426,7 @@ func repairPosterDuringFetch(
 	)
 
 	if strings.TrimSpace(posterResult.Poster) != "" {
-		reviewData.Poster = NormalizePosterBBCode(posterResult.Poster)
+		reviewData.Poster = NormalizePosterBBCodeWithConfig(posterResult.Poster, deps.RootConfig)
 		normalizedPosterURLs := ExtractImageURLsFromText(reviewData.Poster)
 		firstURL := ""
 		if len(normalizedPosterURLs) > 0 {

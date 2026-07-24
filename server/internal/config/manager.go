@@ -159,6 +159,8 @@ func defaultConfig() map[string]any {
 		"network_proxy": DefaultNetworkProxyConfig().ToMap(),
 		"cross_seed": map[string]any{
 			"image_hoster":                     "pixhost",
+			"agsv_email":                        "",
+			"agsv_password":                     "",
 			"seedvault_email":                  "",
 			"seedvault_password":               "",
 			"default_downloader":               "",
