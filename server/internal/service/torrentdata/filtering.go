@@ -120,13 +120,13 @@ func (s *TorrentDataService) sortData(data []map[string]any, sortProp, sortOrder
 		return
 	}
 
-	// Python baseline sorts by a custom "name" comparator by default, and also uses it for
-	// all non-numeric sorts (even when sortProp is provided).
+	// 默认按种子大小降序排列。
+	// 若指定了排序字段，则按指定字段排序，并以种子大小降序作为次要排序。
 	hasExplicit := strings.TrimSpace(sortProp) != "" && strings.TrimSpace(sortOrder) != ""
 	descending := hasExplicit && strings.EqualFold(sortOrder, "descending")
 	if !hasExplicit {
 		sort.SliceStable(data, func(i, j int) bool {
-			return customNameLess(stringValue(data[i]["name"], ""), stringValue(data[j]["name"], ""))
+			return numberValue(data[i]["size"]) > numberValue(data[j]["size"])
 		})
 		return
 	}
@@ -151,10 +151,14 @@ func (s *TorrentDataService) sortData(data []map[string]any, sortProp, sortOrder
 		sort.SliceStable(data, func(i, j int) bool {
 			left := numberValue(data[i][sortProp])
 			right := numberValue(data[j][sortProp])
-			if descending {
-				return left > right
+			if left != right {
+				if descending {
+					return left > right
+				}
+				return left < right
 			}
-			return left < right
+			// 相同时按种子大小降序作为次要排序
+			return numberValue(data[i]["size"]) > numberValue(data[j]["size"])
 		})
 		return
 	}
@@ -162,10 +166,14 @@ func (s *TorrentDataService) sortData(data []map[string]any, sortProp, sortOrder
 	sort.SliceStable(data, func(i, j int) bool {
 		left := stringValue(data[i]["name"], "")
 		right := stringValue(data[j]["name"], "")
-		if descending {
-			return customNameLess(right, left)
+		if left != right {
+			if descending {
+				return customNameLess(right, left)
+			}
+			return customNameLess(left, right)
 		}
-		return customNameLess(left, right)
+		// 相同时按种子大小降序作为次要排序
+		return numberValue(data[i]["size"]) > numberValue(data[j]["size"])
 	})
 }
 

@@ -966,7 +966,7 @@ const SAVE_PATH_DISPLAY_MAX_LENGTH = 30
 const nameSearch = ref<string>('')
 type SortOrder = 'ascending' | 'descending' | null
 type SortState = { prop: string; order: SortOrder }
-const currentSort = ref<SortState>({ prop: 'name', order: 'ascending' })
+const currentSort = ref<SortState>({ prop: 'size', order: 'descending' })
 const defaultSortForTable = computed<Sort | undefined>(() => {
   const order = currentSort.value.order
   if (order === null) return undefined
@@ -1345,9 +1345,9 @@ const loadUiSettings = async (forceRefresh = false) => {
         ? null
         : settings.sort_order === 'ascending' || settings.sort_order === 'descending'
           ? settings.sort_order
-          : 'ascending'
+          : 'descending'
     currentSort.value = {
-      prop: settings.sort_prop || 'name',
+      prop: settings.sort_prop || 'size',
       // --- [修改] 正确处理 null (取消排序) 状态 ---
       order,
     }
@@ -1444,8 +1444,8 @@ const fetchDataWithoutLoadingControl = async () => {
       page: currentPage.value.toString(),
       pageSize: pageSize.value.toString(),
       nameSearch: nameSearch.value,
-      sortProp: currentSort.value.prop || 'name',
-      sortOrder: currentSort.value.order || 'ascending',
+      sortProp: currentSort.value.prop || 'size',
+      sortOrder: currentSort.value.order || 'descending',
       existSiteNames: JSON.stringify(activeFilters.existSiteNames),
       notExistSiteNames: JSON.stringify(activeFilters.notExistSiteNames),
       path_filters: JSON.stringify(activeFilters.paths || []),
@@ -1893,8 +1893,8 @@ const triggerIYUUQueryForFiltered = async () => {
       page: '1',
       pageSize: planned.toString(),
       nameSearch: nameSearch.value,
-      sortProp: currentSort.value.prop || 'name',
-      sortOrder: currentSort.value.order || 'ascending',
+      sortProp: currentSort.value.prop || 'size',
+      sortOrder: currentSort.value.order || 'descending',
       existSiteNames: JSON.stringify(activeFilters.existSiteNames),
       notExistSiteNames: JSON.stringify(activeFilters.notExistSiteNames),
       path_filters: JSON.stringify(activeFilters.paths || []),
