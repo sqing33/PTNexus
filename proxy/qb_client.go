@@ -444,3 +444,74 @@ func uploadLimitBatchHandler(w http.ResponseWriter, r *http.Request) {
 		Results: results,
 	})
 }
+
+func deleteTorrentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONResponse(w, r, http.StatusMethodNotAllowed, DeleteTorrentsResponse{Success: false})
+		return
+	}
+
+	var req DeleteTorrentsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONResponse(w, r, http.StatusBadRequest, map[string]any{"success": false, "message": "invalid JSON: " + err.Error()})
+		return
+	}
+
+	results := make([]DeleteTorrentsResult, 0, len(req.Downloaders))
+	success := true
+	for _, downloader := range req.Downloaders {
+		result := DeleteTorrentsResult{DownloaderID: downloader.ID}
+		if downloader.Type != "qbittorrent" {
+			success = false
+			result.Errors = append(result.Errors, fmt.Sprintf("unsupported downloader type: %s", downloader.Type))
+			results = append(results, result)
+			continue
+		}
+
+		hashes := make([]string, 0, len(downloader.Hashes))
+		for _, hash := range downloader.Hashes {
+			hash = strings.TrimSpace(hash)
+			if hash != "" {
+				hashes = append(hashes, hash)
+			}
+		}
+		if len(hashes) == 0 {
+			success = false
+			result.Errors = append(result.Errors, "hash list is empty")
+			results = append(results, result)
+			continue
+		}
+
+		client, err := newQBHTTPClient(downloader.Host)
+		if err != nil {
+			success = false
+			result.Errors = append(result.Errors, err.Error())
+			results = append(results, result)
+			continue
+		}
+		if err := client.Login(downloader.Username, downloader.Password); err != nil {
+			success = false
+			result.Errors = append(result.Errors, err.Error())
+			results = append(results, result)
+			continue
+		}
+
+		form := url.Values{}
+		form.Set("hashes", strings.Join(hashes, "|"))
+		form.Set("deleteFiles", fmt.Sprintf("%t", downloader.DeleteFiles))
+		if _, err := client.PostForm("torrents/delete", form); err != nil {
+			success = false
+			result.Errors = append(result.Errors, err.Error())
+			results = append(results, result)
+			continue
+		}
+
+		result.DeletedTorrents = len(hashes)
+		results = append(results, result)
+	}
+
+	writeJSONResponse(w, r, http.StatusOK, DeleteTorrentsResponse{
+		Success: success,
+		Results: results,
+	})
+}

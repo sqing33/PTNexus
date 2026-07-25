@@ -136,3 +136,16 @@ func (h *Handler) GetAggregatedTorrents(c *gin.Context) {
 	result, status := h.service.GetAggregatedTorrents(payload)
 	c.JSON(status, result)
 }
+
+// DeleteAggregatedTorrent 删除“一种多站”列表聚合行对应的下载器种子。
+// 参数/返回：请求体包含 name、size、downloader_ids、delete_files；返回每个下载器的处理结果。
+// 失败场景：请求体无效、目标不存在、下载器删除失败或本地记录隐藏失败时返回错误。
+// 副作用：会调用下载器/盒子代理删除任务，delete_files=true 时会删除实际文件。
+func (h *Handler) DeleteAggregatedTorrent(c *gin.Context) {
+	payload, ok := bindMapPayload(c)
+	if !ok {
+		return
+	}
+	result, status := h.service.DeleteAggregatedTorrent(payload)
+	c.JSON(status, result)
+}

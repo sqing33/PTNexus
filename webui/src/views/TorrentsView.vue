@@ -330,13 +330,14 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="100" align="center" header-align="center">
+      <el-table-column label="操作" width="145" align="center" header-align="center">
         <template #default="scope">
           <div
             style="
               display: flex;
               justify-content: center;
               align-items: center;
+              gap: 6px;
               width: 100%;
               height: 100%;
             "
@@ -349,6 +350,17 @@
             >
               转种
             </el-button>
+            <el-tooltip content="删除种子和文件" placement="top">
+              <el-button
+                type="danger"
+                size="small"
+                circle
+                :icon="Delete"
+                :loading="isDeletingTorrent(scope.row)"
+                :disabled="isDeletingTorrent(scope.row) || !hasDownloaderTask(scope.row)"
+                @click.stop="deleteTorrent(scope.row)"
+              />
+            </el-tooltip>
           </div>
         </template>
       </el-table-column>
@@ -857,6 +869,7 @@ import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import type { TableInstance, Sort } from 'element-plus'
 import type { ElTree } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
 import axios from 'axios'
 import CrossSeedPanel from '../components/CrossSeedPanel.vue'
 import SiteDataViewer from '../components/SiteDataViewer.vue'
@@ -914,6 +927,7 @@ const selectedRows = ref<Torrent[]>([])
 const batchPublishDialogVisible = ref(false)
 const batchPublishTargetSite = ref('')
 const batchPublishLoading = ref(false)
+const deletingTorrentIds = ref<Set<string>>(new Set())
 
 const emitGlobalRefreshLoading = (refreshing: boolean) => {
   window.dispatchEvent(
@@ -1479,6 +1493,78 @@ const fetchData = async () => {
     await fetchDataWithoutLoadingControl()
   } finally {
     loading.value = false
+  }
+}
+
+const torrentDownloaderIds = (row: Torrent) => {
+  const ids = row.downloaderIds || row.downloader_ids || []
+  return ids.filter((id) => typeof id === 'string' && id.trim() !== '')
+}
+
+const hasDownloaderTask = (row: Torrent) => torrentDownloaderIds(row).length > 0
+
+const isDeletingTorrent = (row: Torrent) => deletingTorrentIds.value.has(row.unique_id)
+
+const setTorrentDeleting = (row: Torrent, deleting: boolean) => {
+  const next = new Set(deletingTorrentIds.value)
+  if (deleting) {
+    next.add(row.unique_id)
+  } else {
+    next.delete(row.unique_id)
+  }
+  deletingTorrentIds.value = next
+}
+
+const deleteTorrent = async (row: Torrent) => {
+  const downloaderIds = torrentDownloaderIds(row)
+  if (downloaderIds.length === 0) {
+    ElMessage.warning('该种子没有关联的下载器任务')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定删除【${row.name}】？\n\n将从 ${downloaderIds.length} 个下载器中删除任务，并同时删除下载器上的数据文件。远程下载器会通过代理或下载器 API 删除远程服务器文件。`,
+      '删除种子和文件',
+      {
+        type: 'warning',
+        confirmButtonText: '删除种子和文件',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+  } catch {
+    return
+  }
+
+  setTorrentDeleting(row, true)
+  try {
+    const response = await axios.post('/api/migrate/delete_aggregated_torrent', {
+      name: row.name,
+      size: row.size,
+      downloader_ids: downloaderIds,
+      delete_files: true,
+    })
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || '删除失败')
+    }
+    ElMessage.success(response.data?.message || '删除成功')
+    await fetchData()
+  } catch (error) {
+    const partialDeleted = axios.isAxiosError(error)
+      ? Number(error.response?.data?.deleted_torrents || 0)
+      : 0
+    const message = axios.isAxiosError(error)
+      ? error.response?.data?.message || error.message
+      : error instanceof Error
+        ? error.message
+        : '删除失败'
+    ElMessage.error(message)
+    if (partialDeleted > 0) {
+      await fetchData()
+    }
+  } finally {
+    setTorrentDeleting(row, false)
   }
 }
 

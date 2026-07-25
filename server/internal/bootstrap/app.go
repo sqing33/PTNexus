@@ -325,6 +325,7 @@ func registerRoutes(
 		migrateAPI.POST("/batch_fetch_seed_data", migrateHandler.BatchFetchSeedData)
 		migrateAPI.POST("/update_preview_data", migrateHandler.UpdatePreviewData)
 		migrateAPI.POST("/get_aggregated_torrents", migrateHandler.GetAggregatedTorrents)
+		migrateAPI.POST("/delete_aggregated_torrent", migrateHandler.DeleteAggregatedTorrent)
 		migrateAPI.GET("/batch_fetch_progress", migrateHandler.BatchFetchProgress)
 		migrateAPI.GET("/logs/stream/:task_id", migrateHandler.LogsStream)
 
