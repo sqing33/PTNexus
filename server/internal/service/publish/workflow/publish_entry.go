@@ -287,15 +287,6 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 			} else if raw, exists := payload["use_default_downloader"]; exists {
 				addPayload["useDefaultDownloader"] = raw
 			}
-			if tags, exists := uploadData["tags"]; exists {
-				addPayload["tags"] = tags
-			}
-			if standardized, ok := uploadData["standardized_params"].(map[string]any); ok && standardized != nil {
-				if tags, exists := standardized["tags"]; exists {
-					addPayload["tags"] = tags
-				}
-			}
-
 			addResult, _ := deps.AddToDownloader(addPayload)
 			autoAddResult = addResult
 		}
