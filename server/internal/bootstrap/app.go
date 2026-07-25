@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -75,13 +76,25 @@ func NewApp() (*App, error) {
 	migrateService := migrationflow.NewMigrateService(migrateRepo, cfgManager)
 	migrateService.InitPublishQueue(queueRepo, statsRepo)
 	migrateService.InitPublishLogs(publishLogRepo)
-	migrateService.StartPublishQueueWorker()
 	torrentTransferService := service.NewTorrentTransferService(migrateRepo, cfgManager)
 
 	scheduledSeedRepo := repository.NewScheduledSeedRepository(store)
 	scheduledSeedScheduler := scheduledseed.NewScheduler(scheduledSeedRepo)
 	scheduledSeedScheduler.SetEnqueueFn(migrateService.EnqueuePublishQueueBatch)
 	scheduledSeedScheduler.SetPublishLogRepo(publishLogRepo)
+	migrateService.SetPublishQueueExistingTorrentHook(func(trigger string) {
+		trimmed := strings.TrimSpace(trigger)
+		if !strings.HasPrefix(trimmed, "sched:") {
+			return
+		}
+		taskID, parseErr := strconv.ParseInt(strings.TrimPrefix(trimmed, "sched:"), 10, 64)
+		if parseErr != nil || taskID <= 0 {
+			logx.Warnf("启动", "定时发种继续触发失败 trigger=%s err=%v", trimmed, parseErr)
+			return
+		}
+		scheduledSeedScheduler.TriggerTask(taskID)
+	})
+	migrateService.StartPublishQueueWorker()
 	scheduledSeedScheduler.Start()
 	scheduledSeedHandler := handler.NewScheduledSeedHandler(scheduledSeedRepo, scheduledSeedScheduler)
 

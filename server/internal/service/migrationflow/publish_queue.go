@@ -55,6 +55,17 @@ func (s *MigrateService) InitPublishQueue(queueRepo *repository.PublishQueueRepo
 	s.statsRepo = statsRepo
 }
 
+// SetPublishQueueExistingTorrentHook 注入发布队列“目标站点已存在”后的外部通知回调。
+// 参数/返回：fn 接收队列任务 trigger；无返回值。
+// 失败场景：服务为空时忽略。
+// 副作用：保存回调引用，队列任务完成时可能触发定时发种调度。
+func (s *MigrateService) SetPublishQueueExistingTorrentHook(fn func(trigger string)) {
+	if s == nil {
+		return
+	}
+	s.publishQueueExistingTorrentHook = fn
+}
+
 // StartPublishQueueWorker 启动发布队列后台监控线程（重复调用仅生效一次）。
 // 参数/返回：无参数无返回。
 // 失败场景：队列仓储未初始化时会记录日志并直接返回，不会影响主服务启动。
@@ -967,6 +978,9 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 		if err := s.queueRepo.UpdateTaskAfterSuccess(taskID, resultText); err != nil {
 			logx.Warnf(publishQueueLogModule, "标记任务成功失败 id=%d err=%v", taskID, err)
 		}
+		if processingshared.ToBool(result["is_existing_torrent"]) {
+			s.notifyQueueExistingTorrent(taskRecord)
+		}
 		logx.Infof(publishQueueLogModule, "队列任务完成 id=%d success=true status=%d", taskID, status)
 		return
 	}
@@ -1017,6 +1031,28 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 		_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", logText)
 	}
 	logx.Warnf(publishQueueLogModule, "队列任务失败，已重试入队 id=%d attempt=%d next_run_at=%s", taskID, attempt, nextRunAt.Format(time.RFC3339))
+}
+
+func (s *MigrateService) notifyQueueExistingTorrent(task repository.PublishQueueTask) {
+	if s == nil || s.publishQueueExistingTorrentHook == nil {
+		return
+	}
+	if strings.TrimSpace(task.Scene) != "scheduled_seeding" {
+		return
+	}
+	trigger := strings.TrimSpace(task.Trigger)
+	if trigger == "" {
+		return
+	}
+	logx.Infof(
+		publishQueueLogModule,
+		"定时发种队列任务提示已存在，触发继续处理下一种子 queue_task_id=%d trigger=%s torrent_id=%s target_site=%s",
+		task.ID,
+		trigger,
+		strings.TrimSpace(task.TorrentID),
+		strings.TrimSpace(task.TargetSite),
+	)
+	s.publishQueueExistingTorrentHook(trigger)
 }
 
 func (s *MigrateService) checkQueueVideoSizePrecondition(task repository.PublishQueueTask, payload map[string]any, ctx publishworkflow.Context) (bool, string) {
