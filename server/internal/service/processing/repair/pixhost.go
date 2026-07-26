@@ -21,13 +21,15 @@ import (
 const maxPosterBytes = 25 * 1024 * 1024
 const posterTransferLogModule = "迁移-海报转存"
 const posterTransferDownloadRetry = 2
+const pixhostOutputDirectHost = "img2.pixhost.cc"
+const pixhostUploadAPIURL = "https://api.pixhost.cc/images"
 
 var (
 	rePixhostDirect             = regexp.MustCompile(`(\d+)/([^/]+\.(?:jpg|jpeg|png|gif|webp))`)
 	rePixhostOgImage            = regexp.MustCompile(`(?is)<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']`)
 	rePixhostImageTag           = regexp.MustCompile(`(?is)<img[^>]+id=["']image["'][^>]*src=["']([^"']+)["']`)
 	rePixhostThumbSuffix        = regexp.MustCompile(`_[^.]{1,3}\.(jpg|jpeg|png|gif|webp)$`)
-	rePixhostDirectURL          = regexp.MustCompile(`^https://img[12]\.pixhost\.to/images/\d+/[^/]+\.(jpg|jpeg|png|gif|webp)$`)
+	rePixhostDirectURL          = regexp.MustCompile(`^https://img\d+\.pixhost\.(?:to|cc)/images/\d+/[^/]+\.(jpg|jpeg|png|gif|webp)$`)
 	posterTransferProxyPrefixes = []string{
 		"http://pt-nexus-proxy.sqing33.dpdns.org/",
 		"http://pt-nexus-proxy.1395251710.workers.dev/",
@@ -109,7 +111,7 @@ func normalizePosterURLForChevereto(url string, cfg CheveretoUploadConfig) strin
 
 func normalizePosterURLForPixhost(url string) string {
 	lower := strings.ToLower(url)
-	if strings.Contains(lower, "pixhost.to") {
+	if strings.Contains(lower, "pixhost.to") || strings.Contains(lower, "pixhost.cc") {
 		if resolved, err := ResolvePixhostImageURL(url); err == nil && strings.TrimSpace(resolved) != "" {
 			logx.Infof(posterTransferLogModule, "海报URL已是Pixhost，直链解析成功 source=%s resolved=%s", CompactLogText(url, 160), CompactLogText(resolved, 160))
 			return strings.TrimSpace(resolved)
@@ -365,7 +367,7 @@ func writePosterTempFile(data []byte, contentType string) (string, error) {
 
 // UploadImageToPixhost 上传本地图片到 Pixhost，返回 show_url。
 func UploadImageToPixhost(imagePath string) (string, error) {
-	showURL, _, err := uploadToPixhostDirectStream(imagePath, "https://api.pixhost.to/images", func(string, ...any) {})
+	showURL, _, err := uploadToPixhostDirectStream(imagePath, pixhostUploadAPIURL, func(string, ...any) {})
 	return showURL, err
 }
 
@@ -381,9 +383,9 @@ func UploadImageToPixhostNarrative(imagePath string) (string, error) {
 // 参数/返回：logLine 用于输出单行日志（可用于并发场景下的日志缓冲）。
 func UploadImageToPixhostNarrativeWithLogger(imagePath string, logLine func(string, ...any)) (string, error) {
 	apiURLs := []string{
-		"https://api.pixhost.to/images",
-		"http://pt-nexus-proxy.sqing33.dpdns.org/https://api.pixhost.to/images",
-		"http://pt-nexus-proxy.1395251710.workers.dev/https://api.pixhost.to/images",
+		pixhostUploadAPIURL,
+		"http://pt-nexus-proxy.sqing33.dpdns.org/" + pixhostUploadAPIURL,
+		"http://pt-nexus-proxy.1395251710.workers.dev/" + pixhostUploadAPIURL,
 	}
 
 	logLine("准备上传图片: %s", imagePath)
@@ -503,7 +505,7 @@ func uploadToPixhostDirectStream(imagePath string, apiURL string, logLine func(s
 
 	parsed := map[string]any{}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", resp.StatusCode, fmt.Errorf("Pixhost 响应解析失败: %w", err)
+		return "", resp.StatusCode, fmt.Errorf("Pixhost 响应解析失败: %w body=%s", err, CompactLogText(string(respBody), 240))
 	}
 	showURL := strings.TrimSpace(toStringAny(parsed["show_url"], ""))
 	if showURL == "" {
@@ -559,7 +561,7 @@ func ResolvePixhostImageURL(showURL string) (string, error) {
 			if candidate == "" {
 				continue
 			}
-			if strings.Contains(candidate, "pixhost.to/show/") || strings.Contains(candidate, "pixhost.to/th/") {
+			if isPixhostShowOrThumbURL(candidate) {
 				candidate = PixhostShowToDirectURL(candidate)
 			}
 			candidate = NormalizePixhostDirectHost(candidate)
@@ -582,23 +584,35 @@ func PixhostShowToDirectURL(showURL string) string {
 		return ""
 	}
 
-	direct := strings.Replace(trimmed, "https://pixhost.to/show/", "https://img2.pixhost.to/images/", 1)
-	direct = strings.Replace(direct, "https://pixhost.to/th/", "https://img2.pixhost.to/images/", 1)
-	direct = strings.Replace(direct, "http://pixhost.to/show/", "https://img2.pixhost.to/images/", 1)
-	direct = strings.Replace(direct, "http://pixhost.to/th/", "https://img2.pixhost.to/images/", 1)
+	direct := trimmed
+	if parsed, err := neturl.Parse(trimmed); err == nil && parsed != nil {
+		host := strings.ToLower(strings.TrimSpace(parsed.Host))
+		path := strings.TrimSpace(parsed.Path)
+		for _, prefix := range []string{"/show/", "/th/"} {
+			if (host == "pixhost.to" || host == "pixhost.cc") && strings.HasPrefix(path, prefix) {
+				parsed.Scheme = "https"
+				parsed.Host = pixhostOutputDirectHost
+				parsed.Path = "/images/" + strings.TrimPrefix(path, prefix)
+				parsed.RawQuery = ""
+				parsed.Fragment = ""
+				direct = parsed.String()
+				break
+			}
+		}
+	}
 	direct = rePixhostThumbSuffix.ReplaceAllString(direct, `.$1`)
 
 	if rePixhostDirectURL.MatchString(direct) {
-		return direct
+		return NormalizePixhostDirectHost(direct)
 	}
 	if match := rePixhostDirect.FindStringSubmatch(direct); len(match) >= 3 {
-		candidate := fmt.Sprintf("https://img2.pixhost.to/images/%s/%s", match[1], match[2])
+		candidate := fmt.Sprintf("https://%s/images/%s/%s", pixhostOutputDirectHost, match[1], match[2])
 		if rePixhostDirectURL.MatchString(candidate) {
 			return candidate
 		}
 	}
 	if match := rePixhostDirect.FindStringSubmatch(trimmed); len(match) >= 3 {
-		candidate := fmt.Sprintf("https://img2.pixhost.to/images/%s/%s", match[1], match[2])
+		candidate := fmt.Sprintf("https://%s/images/%s/%s", pixhostOutputDirectHost, match[1], match[2])
 		if rePixhostDirectURL.MatchString(candidate) {
 			return candidate
 		}
@@ -620,18 +634,28 @@ func NormalizePixhostDirectHost(value string) string {
 		parsed.Scheme = "https"
 	}
 	host := strings.ToLower(strings.TrimSpace(parsed.Host))
-	if strings.HasPrefix(host, "img1.pixhost.to") || strings.HasPrefix(host, "img2.pixhost.to") {
+	if strings.HasPrefix(host, "img") && (strings.Contains(host, ".pixhost.to") || strings.Contains(host, ".pixhost.cc")) && strings.Contains(parsed.Path, "/images/") {
+		parsed.Host = pixhostOutputDirectHost
+		parsed.Scheme = "https"
 		return parsed.String()
 	}
-	if strings.Contains(host, "pixhost.to") && strings.Contains(parsed.Path, "/images/") {
-		parsed.Host = "img2.pixhost.to"
+	if (strings.Contains(host, "pixhost.to") || strings.Contains(host, "pixhost.cc")) && strings.Contains(parsed.Path, "/images/") {
+		parsed.Host = pixhostOutputDirectHost
 		parsed.Scheme = "https"
 		return parsed.String()
 	}
 	if match := rePixhostDirect.FindStringSubmatch(trimmed); len(match) >= 3 {
-		return fmt.Sprintf("https://img2.pixhost.to/images/%s/%s", match[1], match[2])
+		return fmt.Sprintf("https://%s/images/%s/%s", pixhostOutputDirectHost, match[1], match[2])
 	}
 	return ""
+}
+
+func isPixhostShowOrThumbURL(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return strings.Contains(lower, "pixhost.to/show/") ||
+		strings.Contains(lower, "pixhost.to/th/") ||
+		strings.Contains(lower, "pixhost.cc/show/") ||
+		strings.Contains(lower, "pixhost.cc/th/")
 }
 
 // IsImageURLReachable 通过 HEAD/GET 探测 URL 是否可访问且内容类型为图片。

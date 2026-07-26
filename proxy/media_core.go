@@ -20,6 +20,8 @@ import (
 	"time"
 )
 
+const pixhostUploadAPIURL = "https://api.pixhost.cc/images"
+
 func normalizePath(path string) string {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
@@ -880,9 +882,9 @@ func findTargetVideoFile(path string, contentName string) (string, error) {
 
 func uploadToPixhost(imagePath string) (string, error) {
 	apiURLs := []string{
-		"https://api.pixhost.to/images",
-		"http://pt-nexus-proxy.sqing33.dpdns.org/https://api.pixhost.to/images",
-		"http://pt-nexus-proxy.1395251710.workers.dev/https://api.pixhost.to/images",
+		pixhostUploadAPIURL,
+		"http://pt-nexus-proxy.sqing33.dpdns.org/" + pixhostUploadAPIURL,
+		"http://pt-nexus-proxy.1395251710.workers.dev/" + pixhostUploadAPIURL,
 	}
 
 	var lastErr error
@@ -976,7 +978,7 @@ func uploadToPixhostDirectStream(imagePath string, apiURL string) (string, int, 
 
 	parsed := map[string]any{}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", resp.StatusCode, fmt.Errorf("failed to parse pixhost response: %w", err)
+		return "", resp.StatusCode, fmt.Errorf("failed to parse pixhost response: %w body=%s", err, compactResponseBody(string(respBody)))
 	}
 	showURL := strings.TrimSpace(toStringAny(parsed["show_url"], ""))
 	if showURL == "" {
@@ -988,4 +990,13 @@ func uploadToPixhostDirectStream(imagePath string, apiURL string) (string, int, 
 		return "", resp.StatusCode, fmt.Errorf("pixhost response did not include show_url")
 	}
 	return showURL, resp.StatusCode, nil
+}
+
+func compactResponseBody(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if len([]rune(trimmed)) <= 240 {
+		return trimmed
+	}
+	runes := []rune(trimmed)
+	return string(runes[:240]) + "..."
 }

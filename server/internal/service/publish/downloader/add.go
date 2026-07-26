@@ -234,20 +234,23 @@ func resolveConfiguredTagsAndCategory(rootConfig map[string]any, siteNickname st
 
 	finalTags := []string{}
 	if tagsConfigMap, ok := tagsConfig["tags"].(map[string]any); ok {
-		if processingpersist.BoolFromAny(tagsConfigMap["enabled"]) {
-			for _, rawTag := range processingpersist.ParseStringArray(tagsConfigMap["tags"]) {
-				tag := strings.TrimSpace(rawTag)
-				if tag == "" {
+		tagsEnabled := processingpersist.BoolFromAny(tagsConfigMap["enabled"])
+		for _, rawTag := range processingpersist.ParseStringArray(tagsConfigMap["tags"]) {
+			tag := strings.TrimSpace(rawTag)
+			if tag == "" {
+				continue
+			}
+			isSiteNameTag := tag == "站点/{站点名称}"
+			if !tagsEnabled && !isSiteNameTag {
+				continue
+			}
+			if isSiteNameTag {
+				if siteNickname == "" {
 					continue
 				}
-				if tag == "站点/{站点名称}" {
-					if siteNickname == "" {
-						continue
-					}
-					tag = "站点/" + siteNickname
-				}
-				finalTags = appendUniqueTag(finalTags, tag)
+				tag = "站点/" + siteNickname
 			}
+			finalTags = appendUniqueTag(finalTags, tag)
 		}
 	}
 

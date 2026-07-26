@@ -172,7 +172,7 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			directURL := strings.Replace(showURL, "https://pixhost.to/show/", "https://img2.pixhost.to/images/", 1)
+			directURL := normalizePixhostShowURL(showURL)
 			uploadedURLs = append(uploadedURLs, directURL)
 		}
 
@@ -205,6 +205,23 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONResponse(w, r, statusCode, response)
+}
+
+func normalizePixhostShowURL(showURL string) string {
+	directURL := strings.TrimSpace(showURL)
+	for _, from := range []string{
+		"https://pixhost.to/show/",
+		"https://pixhost.to/th/",
+		"http://pixhost.to/show/",
+		"http://pixhost.to/th/",
+		"https://pixhost.cc/show/",
+		"https://pixhost.cc/th/",
+		"http://pixhost.cc/show/",
+		"http://pixhost.cc/th/",
+	} {
+		directURL = strings.Replace(directURL, from, "https://img2.pixhost.cc/images/", 1)
+	}
+	return directURL
 }
 
 func mediainfoHandler(w http.ResponseWriter, r *http.Request) {

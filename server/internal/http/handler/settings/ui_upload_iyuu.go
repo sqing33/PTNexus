@@ -15,6 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const pixhostUploadAPIURL = "https://api.pixhost.cc/images"
+
 func (h *Handler) GetUISettings(c *gin.Context) {
 	c.JSON(http.StatusOK, h.settings.GetTorrentsUIViewSettings())
 }
@@ -118,10 +120,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload to image host: " + err.Error()})
 		return
 	}
-	directURL := strings.TrimSpace(showURL)
-	if strings.Contains(directURL, "pixhost.to/show/") {
-		directURL = strings.Replace(directURL, "https://pixhost.to/show/", "https://img2.pixhost.to/images/", 1)
-	}
+	directURL := normalizePixhostShowURL(showURL)
 	c.JSON(http.StatusOK, gin.H{"url": directURL})
 }
 
@@ -202,7 +201,7 @@ func uploadToPixhost(imagePath string) (string, error) {
 			return "", err
 		}
 
-		req, err := http.NewRequest(http.MethodPost, "https://api.pixhost.to/images", body)
+		req, err := http.NewRequest(http.MethodPost, pixhostUploadAPIURL, body)
 		if err != nil {
 			return "", err
 		}
@@ -256,4 +255,21 @@ func uploadToPixhost(imagePath string) (string, error) {
 		lastErr = fmt.Errorf("未知上传错误")
 	}
 	return "", lastErr
+}
+
+func normalizePixhostShowURL(showURL string) string {
+	directURL := strings.TrimSpace(showURL)
+	for _, from := range []string{
+		"https://pixhost.to/show/",
+		"https://pixhost.to/th/",
+		"http://pixhost.to/show/",
+		"http://pixhost.to/th/",
+		"https://pixhost.cc/show/",
+		"https://pixhost.cc/th/",
+		"http://pixhost.cc/show/",
+		"http://pixhost.cc/th/",
+	} {
+		directURL = strings.Replace(directURL, from, "https://img2.pixhost.cc/images/", 1)
+	}
+	return directURL
 }

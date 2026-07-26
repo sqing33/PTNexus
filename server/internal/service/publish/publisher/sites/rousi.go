@@ -49,7 +49,7 @@ var (
 	reRousiMDImgSource      = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
 	reRousiHTMLImgSource    = regexp.MustCompile(`(?is)<img[^>]+src=["']([^"']+)["']`)
 	reRousiImageExt         = regexp.MustCompile(`(?i)\.(png|jpe?g|gif|webp)(\?.*)?$`)
-	reRousiPixhostThumb     = regexp.MustCompile(`(?i)^https?://t(\d+)\.pixhost\.to/thumbs/(.+)$`)
+	reRousiPixhostThumb     = regexp.MustCompile(`(?i)^https?://t(\d+)\.pixhost\.(?:to|cc)/thumbs/(.+)$`)
 	reRousiTorrentFilename  = regexp.MustCompile(`^([^-]+)-(\d+)-`)
 )
 
@@ -476,9 +476,9 @@ func extractRousiImageSourcesFromText(text string) []rousiImageSource {
 			continue
 		}
 
-		if strings.Contains(strings.ToLower(url), "pixhost.to") && strings.Contains(url, "/thumbs/") {
+		if isRousiPixhostURL(url) && strings.Contains(url, "/thumbs/") {
 			if sub := reRousiPixhostThumb.FindStringSubmatch(url); len(sub) >= 3 {
-				url = "https://img" + strings.TrimSpace(sub[1]) + ".pixhost.to/images/" + strings.TrimSpace(sub[2])
+				url = "https://img" + strings.TrimSpace(sub[1]) + ".pixhost.cc/images/" + strings.TrimSpace(sub[2])
 			}
 		}
 
@@ -504,10 +504,15 @@ func isProbableRousiImageURL(url string) bool {
 	if reRousiImageExt.MatchString(lower) {
 		return true
 	}
-	if strings.Contains(lower, "pixhost.to") && (strings.Contains(lower, "/images/") || strings.Contains(lower, "/thumbs/")) {
+	if isRousiPixhostURL(lower) && (strings.Contains(lower, "/images/") || strings.Contains(lower, "/thumbs/")) {
 		return true
 	}
 	return false
+}
+
+func isRousiPixhostURL(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return strings.Contains(lower, "pixhost.to") || strings.Contains(lower, "pixhost.cc")
 }
 
 func collectRousiImageSources(uploadData map[string]any) []rousiImageSource {

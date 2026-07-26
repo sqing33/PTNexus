@@ -3,7 +3,7 @@ package migrationflow
 import (
 	"errors"
 	"os"
-	"path/filepath"
+	pathpkg "path"
 	"strings"
 	"time"
 
@@ -141,12 +141,32 @@ func buildBDInfoRemoteCandidates(savePath, torrentName string) []string {
 	trimmedTorrentName := strings.TrimSpace(torrentName)
 	candidates := make([]string, 0, 2)
 	if trimmedSavePath != "" && trimmedTorrentName != "" {
-		candidates = append(candidates, filepath.Join(trimmedSavePath, trimmedTorrentName))
+		candidates = append(candidates, joinBDInfoProxyRemotePath(trimmedSavePath, trimmedTorrentName))
 	}
 	if trimmedSavePath != "" {
-		candidates = append(candidates, trimmedSavePath)
+		candidates = append(candidates, normalizeBDInfoProxyRemotePath(trimmedSavePath))
 	}
 	return candidates
+}
+
+func joinBDInfoProxyRemotePath(base, name string) string {
+	normalizedBase := normalizeBDInfoProxyRemotePath(base)
+	normalizedName := strings.Trim(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"), "/")
+	if normalizedBase == "" {
+		return normalizedName
+	}
+	if normalizedName == "" {
+		return normalizedBase
+	}
+	return pathpkg.Join(normalizedBase, normalizedName)
+}
+
+func normalizeBDInfoProxyRemotePath(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	return strings.ReplaceAll(trimmed, "\\", "/")
 }
 
 // runLocalBDInfoTask 使用本地 BDInfo 流程执行任务（复用已写库/已注册的 task_id）。

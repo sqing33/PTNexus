@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -326,15 +327,35 @@ func buildRemotePathCandidatesForProxy(savePath, torrentName, contentName string
 
 	candidates := make([]string, 0, 3)
 	if trimmedSavePath != "" && trimmedTorrentName != "" {
-		candidates = append(candidates, filepath.Join(trimmedSavePath, trimmedTorrentName))
+		candidates = append(candidates, joinProxyRemotePath(trimmedSavePath, trimmedTorrentName))
 	}
 	if trimmedSavePath != "" && trimmedContentName != "" && !strings.EqualFold(trimmedContentName, trimmedTorrentName) {
-		candidates = append(candidates, filepath.Join(trimmedSavePath, trimmedContentName))
+		candidates = append(candidates, joinProxyRemotePath(trimmedSavePath, trimmedContentName))
 	}
 	if trimmedSavePath != "" {
-		candidates = append(candidates, trimmedSavePath)
+		candidates = append(candidates, normalizeProxyRemotePath(trimmedSavePath))
 	}
 	return candidates
+}
+
+func joinProxyRemotePath(base, name string) string {
+	normalizedBase := normalizeProxyRemotePath(base)
+	normalizedName := strings.Trim(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"), "/")
+	if normalizedBase == "" {
+		return normalizedName
+	}
+	if normalizedName == "" {
+		return normalizedBase
+	}
+	return pathpkg.Join(normalizedBase, normalizedName)
+}
+
+func normalizeProxyRemotePath(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	return strings.ReplaceAll(trimmed, "\\", "/")
 }
 
 func fileSizeBytes(path string) int64 {
