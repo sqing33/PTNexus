@@ -166,7 +166,12 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			showURL, err := uploadToPixhost(finalPngPath)
+			uploadPath, err := preparePixhostUploadImage(finalPngPath)
+			if err != nil {
+				log.Printf("screenshot %d failed during upload image preparation: %v", i+1, err)
+				continue
+			}
+			showURL, err := uploadToPixhost(uploadPath)
 			if err != nil {
 				log.Printf("screenshot %d failed during upload: %v", i+1, err)
 				continue

@@ -300,6 +300,43 @@ func convertPngToOptimizedPng(sourcePath, destPath string) error {
 	return nil
 }
 
+func preparePixhostUploadImage(sourcePath string) (string, error) {
+	const maxUploadSize = 4 * 1024 * 1024
+
+	if stat, err := os.Stat(sourcePath); err == nil && stat != nil && stat.Size() > 0 && stat.Size() <= maxUploadSize {
+		return sourcePath, nil
+	}
+
+	qualities := []int{4, 6, 8, 10, 12}
+	for _, quality := range qualities {
+		candidatePath := strings.TrimSuffix(sourcePath, filepath.Ext(sourcePath)) + fmt.Sprintf(".q%d.jpg", quality)
+		args := []string{
+			"-y", "-v", "error", "-i", sourcePath,
+			"-frames:v", "1",
+			"-vf", "scale='min(1920,iw)':-2,format=yuv420p",
+			"-q:v", strconv.Itoa(quality),
+			candidatePath,
+		}
+		_, stderrStr, err := executeCommandWithTimeoutAndStderr(300*time.Second, "ffmpeg", args...)
+		if err != nil {
+			_ = os.Remove(candidatePath)
+			return "", fmt.Errorf("ffmpeg JPEG compression failed: %v, stderr: %s", err, stderrStr)
+		}
+		stat, statErr := os.Stat(candidatePath)
+		if statErr != nil || stat == nil || stat.Size() == 0 {
+			_ = os.Remove(candidatePath)
+			continue
+		}
+		if stat.Size() <= maxUploadSize || quality == qualities[len(qualities)-1] {
+			log.Printf("prepared screenshot for Pixhost upload: %s -> %s (%.2f MB)", filepath.Base(sourcePath), filepath.Base(candidatePath), float64(stat.Size())/1024/1024)
+			return candidatePath, nil
+		}
+		_ = os.Remove(candidatePath)
+	}
+
+	return sourcePath, nil
+}
+
 type subtitleStreamProbe struct {
 	Streams []struct {
 		Index       int               `json:"index"`
