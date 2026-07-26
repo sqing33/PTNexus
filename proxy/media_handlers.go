@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func screenshotHandler(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +39,39 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		selectedSubtitleSID = *reqData.SelectedSubtitleSID
 	}
 	log.Printf("screenshot request received: mode=%s remote_path=%s content_name=%q preview_count=%d selected_times=%d selected_subtitle_sid=%d", mode, initialPath, reqData.ContentName, reqData.PreviewCount, len(reqData.SelectedTimes), selectedSubtitleSID)
+
+	var minfoFallbackErr error
+	if mode == "finalize" && isMInfoConfigured() {
+		screenshotPoints := sanitizeMInfoScreenshotTimes(reqData.SelectedTimes)
+		if len(screenshotPoints) == 0 {
+			writeJSONResponse(w, r, http.StatusBadRequest, ScreenshotResponse{Success: false, Message: "selected_times must contain at least one valid timestamp"})
+			return
+		}
+
+		startedAt := time.Now()
+		log.Printf("MInfo screenshot started: remote_path=%s timestamps=%d variant=jpg hdr_processor=libplacebo subtitle_mode=auto", initialPath, len(screenshotPoints))
+		if selectedSubtitleSID > 0 {
+			log.Printf("MInfo controls subtitle selection automatically; selected_subtitle_sid=%d is reserved for local fallback", selectedSubtitleSID)
+		}
+		links, minfoErr := requestScreenshotsFromMInfo(r.Context(), initialPath, screenshotPoints)
+		if minfoErr == nil {
+			urls := make([]string, 0, len(links))
+			for index, item := range links {
+				log.Printf("MInfo screenshot item: index=%d filename=%q size=%d width=%d height=%d", index+1, item.Filename, item.Size, item.Width, item.Height)
+				urls = append(urls, item.URL)
+			}
+			log.Printf("MInfo screenshot succeeded: remote_path=%s uploaded=%d requested=%d elapsed_ms=%d", initialPath, len(urls), len(screenshotPoints), time.Since(startedAt).Milliseconds())
+			writeJSONResponse(w, r, http.StatusOK, ScreenshotResponse{
+				Success: true,
+				Message: fmt.Sprintf("MInfo uploaded %d/%d screenshots", len(urls), len(screenshotPoints)),
+				BBCode:  buildScreenshotBBCode(urls),
+			})
+			return
+		}
+
+		minfoFallbackErr = minfoErr
+		log.Printf("MInfo screenshot failed; falling back to local pipeline: remote_path=%s elapsed_ms=%d err=%v", initialPath, time.Since(startedAt).Milliseconds(), minfoErr)
+	}
 
 	err := withMountedISOIfNeeded(initialPath, "screenshot request", func(resolvedPath string) error {
 		videoPath, err := findTargetVideoFile(resolvedPath, reqData.ContentName)
@@ -145,6 +179,32 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if mode != "finalize" && isMInfoConfigured() {
+			startedAt := time.Now()
+			log.Printf("MInfo automatic screenshot started: remote_path=%s timestamps=%d variant=jpg hdr_processor=libplacebo subtitle_mode=auto", initialPath, len(screenshotPoints))
+			if selectedSubtitleSID > 0 {
+				log.Printf("MInfo controls subtitle selection automatically; selected_subtitle_sid=%d is reserved for local fallback", selectedSubtitleSID)
+			}
+			links, minfoErr := requestScreenshotsFromMInfo(r.Context(), initialPath, screenshotPoints)
+			if minfoErr == nil {
+				urls := make([]string, 0, len(links))
+				for index, item := range links {
+					log.Printf("MInfo screenshot item: index=%d filename=%q size=%d width=%d height=%d", index+1, item.Filename, item.Size, item.Width, item.Height)
+					urls = append(urls, item.URL)
+				}
+				log.Printf("MInfo automatic screenshot succeeded: remote_path=%s uploaded=%d requested=%d elapsed_ms=%d", initialPath, len(urls), len(screenshotPoints), time.Since(startedAt).Milliseconds())
+				response = ScreenshotResponse{
+					Success: true,
+					Message: fmt.Sprintf("MInfo uploaded %d/%d screenshots", len(urls), len(screenshotPoints)),
+					BBCode:  buildScreenshotBBCode(urls),
+				}
+				return nil
+			}
+
+			minfoFallbackErr = minfoErr
+			log.Printf("MInfo automatic screenshot failed; falling back to local pipeline: remote_path=%s elapsed_ms=%d err=%v", initialPath, time.Since(startedAt).Milliseconds(), minfoErr)
+		}
+
 		tempDir, err := os.MkdirTemp("", "screenshots-*")
 		if err != nil {
 			statusCode = http.StatusInternalServerError
@@ -212,15 +272,10 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("%s", msg)
 		}
 
-		var bbcodeBuilder strings.Builder
-		for _, url := range uploadedURLs {
-			bbcodeBuilder.WriteString(fmt.Sprintf("[img]%s[/img]\n", url))
-		}
-
 		response = ScreenshotResponse{
 			Success: true,
 			Message: fmt.Sprintf("uploaded %d/%d screenshots", len(uploadedURLs), len(screenshotPoints)),
-			BBCode:  strings.TrimSpace(bbcodeBuilder.String()),
+			BBCode:  buildScreenshotBBCode(uploadedURLs),
 		}
 		return nil
 	})
@@ -228,6 +283,9 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		if statusCode == http.StatusOK || response.Success {
 			statusCode = http.StatusInternalServerError
 			response = ScreenshotResponse{Success: false, Message: err.Error()}
+		}
+		if minfoFallbackErr != nil {
+			response.Message = fmt.Sprintf("MInfo screenshot failed (%v); local fallback failed (%s)", minfoFallbackErr, response.Message)
 		}
 		writeJSONResponse(w, r, statusCode, response)
 		return
