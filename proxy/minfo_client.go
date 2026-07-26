@@ -116,7 +116,8 @@ func requestScreenshotsFromMInfo(ctx context.Context, remotePath string, timesta
 		}
 	}
 	for _, timestamp := range timestamps {
-		if err := writer.WriteField("timestamp", strconv.FormatFloat(timestamp, 'f', 3, 64)); err != nil {
+		// MInfo accepts timestamp values as whole seconds, not decimal seconds.
+		if err := writer.WriteField("timestamp", strconv.FormatInt(int64(math.Round(timestamp)), 10)); err != nil {
 			return nil, fmt.Errorf("failed to build MInfo timestamp: %w", err)
 		}
 	}
