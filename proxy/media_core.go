@@ -245,23 +245,39 @@ func takePreviewScreenshotWithSubtitle(videoPath, outputPath string, timePoint f
 	return nil
 }
 
-func convertPngToOptimizedPng(sourcePath, destPath string) error {
+func convertPngToOptimizedImage(sourcePath, destPath string) (string, error) {
 	const maxUploadSize = 10 * 1024 * 1024
 
 	ffprobePath, err := resolveToolCommandPath("ffprobe")
 	if err != nil {
-		return err
+		return "", err
 	}
 	checkCmd := exec.Command(ffprobePath, "-v", "error", "-show_streams", sourcePath)
 	output, err := checkCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("ffprobe inspection failed: %v", err)
+		return "", fmt.Errorf("ffprobe inspection failed: %v", err)
 	}
 	isHDR := strings.Contains(string(output), "smpte2084") || strings.Contains(string(output), "bt2020")
 
 	vfFilter := "format=rgb24"
 	if isHDR {
-		vfFilter = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=pc,format=rgb24"
+		jpegPath := strings.TrimSuffix(destPath, filepath.Ext(destPath)) + ".jpg"
+		vfFilter = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=pc,scale='min(3840,iw)':-2:flags=lanczos,unsharp=5:5:0.30:3:3:0.15,format=yuv420p"
+		args := []string{
+			"-y", "-v", "error", "-i", sourcePath, "-frames:v", "1",
+			"-vf", vfFilter,
+			"-q:v", "2",
+			jpegPath,
+		}
+		_, stderrStr, err := executeCommandWithTimeoutAndStderr(600*time.Second, "ffmpeg", args...)
+		if err != nil {
+			return "", fmt.Errorf("ffmpeg HDR JPEG optimization failed: %v, stderr: %s", err, stderrStr)
+		}
+		if stat, statErr := os.Stat(jpegPath); statErr != nil || stat == nil || stat.Size() == 0 {
+			return "", fmt.Errorf("HDR JPEG output was not generated")
+		}
+		log.Printf("HDR screenshot optimized directly as JPEG: %s (%.2f MB)", filepath.Base(jpegPath), fileSizeMB(jpegPath))
+		return jpegPath, nil
 	}
 
 	args := []string{
@@ -273,12 +289,12 @@ func convertPngToOptimizedPng(sourcePath, destPath string) error {
 	}
 	_, stderrStr, err := executeCommandWithTimeoutAndStderr(600*time.Second, "ffmpeg", args...)
 	if err != nil {
-		return fmt.Errorf("ffmpeg PNG optimization failed: %v, stderr: %s", err, stderrStr)
+		return "", fmt.Errorf("ffmpeg PNG optimization failed: %v, stderr: %s", err, stderrStr)
 	}
 
 	destInfo, err := os.Stat(destPath)
 	if err != nil {
-		return fmt.Errorf("failed to stat optimized PNG: %v", err)
+		return "", fmt.Errorf("failed to stat optimized PNG: %v", err)
 	}
 
 	if destInfo.Size() > maxUploadSize {
@@ -290,31 +306,58 @@ func convertPngToOptimizedPng(sourcePath, destPath string) error {
 		}
 		_, recompressStderrStr, err := executeCommandWithTimeoutAndStderr(600*time.Second, "ffmpeg", recompressArgs...)
 		if err != nil {
-			return fmt.Errorf("ffmpeg second-pass compression failed: %v, stderr: %s", err, recompressStderrStr)
+			return "", fmt.Errorf("ffmpeg second-pass compression failed: %v, stderr: %s", err, recompressStderrStr)
 		}
 		if err := os.Rename(tempRecompressPath, destPath); err != nil {
-			return fmt.Errorf("failed to replace optimized PNG: %v", err)
+			return "", fmt.Errorf("failed to replace optimized PNG: %v", err)
 		}
 	}
 
-	return nil
+	return destPath, nil
+}
+
+func fileSizeMB(path string) float64 {
+	stat, err := os.Stat(path)
+	if err != nil || stat == nil {
+		return 0
+	}
+	return float64(stat.Size()) / 1024 / 1024
 }
 
 func preparePixhostUploadImage(sourcePath string) (string, error) {
-	const maxUploadSize = 4 * 1024 * 1024
+	const maxUploadSize = 8 * 1024 * 1024
 
 	if stat, err := os.Stat(sourcePath); err == nil && stat != nil && stat.Size() > 0 && stat.Size() <= maxUploadSize {
 		return sourcePath, nil
 	}
 
-	qualities := []int{4, 6, 8, 10, 12}
-	for _, quality := range qualities {
-		candidatePath := strings.TrimSuffix(sourcePath, filepath.Ext(sourcePath)) + fmt.Sprintf(".q%d.jpg", quality)
+	type compressionProfile struct {
+		width   int
+		quality int
+	}
+
+	profiles := []compressionProfile{
+		{width: 3840, quality: 2},
+		{width: 3840, quality: 3},
+		{width: 3840, quality: 4},
+		{width: 3200, quality: 3},
+		{width: 3200, quality: 4},
+		{width: 3200, quality: 5},
+		{width: 2560, quality: 3},
+		{width: 2560, quality: 4},
+		{width: 2560, quality: 5},
+		{width: 1920, quality: 4},
+		{width: 1920, quality: 6},
+	}
+
+	for _, profile := range profiles {
+		candidatePath := strings.TrimSuffix(sourcePath, filepath.Ext(sourcePath)) + fmt.Sprintf(".w%d.q%d.jpg", profile.width, profile.quality)
+		vfFilter := fmt.Sprintf("scale='min(%d,iw)':-2:flags=lanczos,unsharp=5:5:0.35:3:3:0.20,format=yuv420p", profile.width)
 		args := []string{
 			"-y", "-v", "error", "-i", sourcePath,
 			"-frames:v", "1",
-			"-vf", "scale='min(1920,iw)':-2,format=yuv420p",
-			"-q:v", strconv.Itoa(quality),
+			"-vf", vfFilter,
+			"-q:v", strconv.Itoa(profile.quality),
 			candidatePath,
 		}
 		_, stderrStr, err := executeCommandWithTimeoutAndStderr(300*time.Second, "ffmpeg", args...)
@@ -327,8 +370,8 @@ func preparePixhostUploadImage(sourcePath string) (string, error) {
 			_ = os.Remove(candidatePath)
 			continue
 		}
-		if stat.Size() <= maxUploadSize || quality == qualities[len(qualities)-1] {
-			log.Printf("prepared screenshot for Pixhost upload: %s -> %s (%.2f MB)", filepath.Base(sourcePath), filepath.Base(candidatePath), float64(stat.Size())/1024/1024)
+		if stat.Size() <= maxUploadSize || profile == profiles[len(profiles)-1] {
+			log.Printf("prepared screenshot for Pixhost upload: %s -> %s (width<=%d q=%d %.2f MB)", filepath.Base(sourcePath), filepath.Base(candidatePath), profile.width, profile.quality, float64(stat.Size())/1024/1024)
 			return candidatePath, nil
 		}
 		_ = os.Remove(candidatePath)

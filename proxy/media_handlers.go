@@ -161,12 +161,13 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("screenshot %d failed during capture: %v", i+1, err)
 				continue
 			}
-			if err := convertPngToOptimizedPng(intermediatePngPath, finalPngPath); err != nil {
-				log.Printf("screenshot %d failed during PNG optimization: %v", i+1, err)
+			finalImagePath, err := convertPngToOptimizedImage(intermediatePngPath, finalPngPath)
+			if err != nil {
+				log.Printf("screenshot %d failed during image optimization: %v", i+1, err)
 				continue
 			}
 
-			uploadPath, err := preparePixhostUploadImage(finalPngPath)
+			uploadPath, err := preparePixhostUploadImage(finalImagePath)
 			if err != nil {
 				log.Printf("screenshot %d failed during upload image preparation: %v", i+1, err)
 				continue
