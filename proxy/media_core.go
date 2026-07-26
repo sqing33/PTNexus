@@ -267,13 +267,44 @@ func convertPngToOptimizedImage(sourcePath, destPath string, isHDR bool) (string
 	if isHDR {
 		jpegPath := strings.TrimSuffix(destPath, filepath.Ext(destPath)) + ".jpg"
 		vfFilter = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=pc,scale='min(3840,iw)':-2:flags=lanczos,unsharp=5:5:0.30:3:3:0.15,format=yuv420p"
-		args := []string{
-			"-y", "-v", "error", "-i", sourcePath, "-frames:v", "1",
-			"-vf", vfFilter,
-			"-q:v", "2",
-			jpegPath,
+		runJPEG := func(filter string) (string, error) {
+			args := []string{
+				"-y", "-v", "error", "-i", sourcePath, "-frames:v", "1",
+				"-vf", filter,
+				"-q:v", "2",
+				jpegPath,
+			}
+			_, stderrStr, err := executeCommandWithTimeoutAndStderr(600*time.Second, "ffmpeg", args...)
+			return stderrStr, err
 		}
-		_, stderrStr, err := executeCommandWithTimeoutAndStderr(600*time.Second, "ffmpeg", args...)
+
+		stderrStr, err := runJPEG(vfFilter)
+		if err != nil {
+			// MPV 导出的 PNG 可能没有完整 HDR 色彩元数据，补齐 HDR10 常用输入参数后重试。
+			explicitHDRFilter := "zscale=pin=bt2020:tin=smpte2084:rin=pc:t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=pc,scale='min(3840,iw)':-2:flags=lanczos,unsharp=5:5:0.30:3:3:0.15,format=yuv420p"
+			log.Printf("HDR JPEG zscale failed, retrying with explicit BT.2020/PQ input: source=%s err=%v", sourcePath, err)
+			if retryStderr, retryErr := runJPEG(explicitHDRFilter); retryErr == nil {
+				log.Printf("HDR JPEG explicit color conversion succeeded: output=%s", jpegPath)
+				err = nil
+				stderrStr = ""
+			} else {
+				stderrStr = retryStderr
+				err = retryErr
+			}
+		}
+		if err != nil {
+			// 如果源 PNG 已经由 MPV 渲染成可显示画面，直接编码 JPEG 比让整组截图失败更可靠。
+			fallbackFilter := "scale='min(3840,iw)':-2:flags=lanczos,unsharp=5:5:0.30:3:3:0.15,format=yuv420p"
+			log.Printf("HDR JPEG tone mapping unavailable, retrying direct JPEG conversion: source=%s err=%v", sourcePath, err)
+			if fallbackStderr, fallbackErr := runJPEG(fallbackFilter); fallbackErr == nil {
+				log.Printf("HDR JPEG direct conversion succeeded: output=%s", jpegPath)
+				err = nil
+				stderrStr = ""
+			} else {
+				stderrStr = fallbackStderr
+				err = fallbackErr
+			}
+		}
 		if err != nil {
 			return "", fmt.Errorf("ffmpeg HDR JPEG optimization failed: %v, stderr: %s", err, stderrStr)
 		}

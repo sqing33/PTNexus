@@ -430,17 +430,45 @@ func captureRawPNGWithMPV(mpvPath string, videoPath string, second float64, outp
 }
 
 func compressPNGWithFFmpeg(ffmpegPath string, srcPNG string, dstPNG string, vfFilter string) error {
-	args := []string{
-		"-y", "-v", "error", "-i", srcPNG, "-frames:v", "1", "-vf", vfFilter,
+	isJPEG := strings.EqualFold(filepath.Ext(dstPNG), ".jpg") || strings.EqualFold(filepath.Ext(dstPNG), ".jpeg")
+	runFilter := func(filter string) ([]byte, error) {
+		args := []string{
+			"-y", "-v", "error", "-i", srcPNG, "-frames:v", "1", "-vf", filter,
+		}
+		if isJPEG {
+			args = append(args, "-q:v", "2")
+		} else {
+			args = append(args, "-compression_level", "4", "-pred", "mixed")
+		}
+		args = append(args, dstPNG)
+		return exec.Command(ffmpegPath, args...).CombinedOutput()
 	}
-	if strings.EqualFold(filepath.Ext(dstPNG), ".jpg") || strings.EqualFold(filepath.Ext(dstPNG), ".jpeg") {
-		args = append(args, "-q:v", "2")
-	} else {
-		args = append(args, "-compression_level", "4", "-pred", "mixed")
+
+	out, err := runFilter(vfFilter)
+	if err != nil && isJPEG {
+		explicitHDRFilter := "zscale=pin=bt2020:tin=smpte2084:rin=pc:t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=pc,format=yuv420p"
+		logx.Infof(screenshotValidateLogModule, "HDR JPEG zscale 转换失败，尝试显式 BT.2020/PQ 输入 source=%s err=%v", srcPNG, err)
+		if retryOut, retryErr := runFilter(explicitHDRFilter); retryErr == nil {
+			out = retryOut
+			err = nil
+			logx.Infof(screenshotValidateLogModule, "HDR JPEG 显式色彩转换成功 output=%s", dstPNG)
+		} else {
+			out = retryOut
+			err = retryErr
+		}
 	}
-	args = append(args, dstPNG)
-	cmd := exec.Command(ffmpegPath, args...)
-	out, err := cmd.CombinedOutput()
+	if err != nil && isJPEG {
+		fallbackFilter := "scale='min(3840,iw)':-2:flags=lanczos,unsharp=5:5:0.30:3:3:0.15,format=yuv420p"
+		logx.Infof(screenshotValidateLogModule, "HDR JPEG 色调映射不可用，尝试直接 JPEG 转换 source=%s err=%v", srcPNG, err)
+		if retryOut, retryErr := runFilter(fallbackFilter); retryErr == nil {
+			out = retryOut
+			err = nil
+			logx.Infof(screenshotValidateLogModule, "HDR JPEG 直接转换成功 output=%s", dstPNG)
+		} else {
+			out = retryOut
+			err = retryErr
+		}
+	}
 	if err != nil {
 		text := strings.TrimSpace(string(out))
 		if text == "" {
