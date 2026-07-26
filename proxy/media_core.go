@@ -245,19 +245,8 @@ func takePreviewScreenshotWithSubtitle(videoPath, outputPath string, timePoint f
 	return nil
 }
 
-func convertPngToOptimizedImage(sourcePath, destPath string) (string, error) {
+func convertPngToOptimizedImage(sourcePath, destPath string, isHDR bool) (string, error) {
 	const maxUploadSize = 10 * 1024 * 1024
-
-	ffprobePath, err := resolveToolCommandPath("ffprobe")
-	if err != nil {
-		return "", err
-	}
-	checkCmd := exec.Command(ffprobePath, "-v", "error", "-show_streams", sourcePath)
-	output, err := checkCmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("ffprobe inspection failed: %v", err)
-	}
-	isHDR := strings.Contains(string(output), "smpte2084") || strings.Contains(string(output), "bt2020")
 
 	vfFilter := "format=rgb24"
 	if isHDR {

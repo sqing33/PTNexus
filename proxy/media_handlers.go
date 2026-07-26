@@ -148,6 +148,9 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer os.RemoveAll(tempDir)
 
+		videoIsHDR := detectHDRFromVideo(videoPath)
+		log.Printf("screenshot source HDR detection: video=%s hdr=%t", filepath.Base(videoPath), videoIsHDR)
+
 		uploadedURLs := make([]string, 0, len(screenshotPoints))
 		for i, point := range screenshotPoints {
 			totalSeconds := int(point)
@@ -161,7 +164,7 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("screenshot %d failed during capture: %v", i+1, err)
 				continue
 			}
-			finalImagePath, err := convertPngToOptimizedImage(intermediatePngPath, finalPngPath)
+			finalImagePath, err := convertPngToOptimizedImage(intermediatePngPath, finalPngPath, videoIsHDR)
 			if err != nil {
 				log.Printf("screenshot %d failed during image optimization: %v", i+1, err)
 				continue
