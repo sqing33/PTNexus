@@ -34,7 +34,7 @@ func TestRequestScreenshotsFromMInfo(t *testing.T) {
 				t.Errorf("field %s: got %q, want %q", key, actual, expected)
 			}
 		}
-		if actual := r.MultipartForm.Value["timestamp"]; !reflect.DeepEqual(actual, []string{"120", "481"}) {
+		if actual := r.MultipartForm.Value["timestamp"]; !reflect.DeepEqual(actual, []string{"00:02:00", "00:08:00"}) {
 			t.Errorf("timestamps: got %#v", actual)
 		}
 

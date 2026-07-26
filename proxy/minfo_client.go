@@ -88,6 +88,17 @@ func sanitizeMInfoScreenshotTimes(values []float64) []float64 {
 	return clean
 }
 
+func formatMInfoTimestamp(value float64) string {
+	totalSeconds := int(math.Floor(value))
+	if totalSeconds < 0 {
+		totalSeconds = 0
+	}
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+}
+
 func requestScreenshotsFromMInfo(ctx context.Context, remotePath string, timestamps []float64) ([]minfoScreenshotLink, error) {
 	endpoint, err := resolveMInfoScreenshotEndpoint()
 	if err != nil {
@@ -116,8 +127,8 @@ func requestScreenshotsFromMInfo(ctx context.Context, remotePath string, timesta
 		}
 	}
 	for _, timestamp := range timestamps {
-		// MInfo accepts timestamp values as whole seconds, not decimal seconds.
-		if err := writer.WriteField("timestamp", strconv.FormatInt(int64(math.Round(timestamp)), 10)); err != nil {
+		// MInfo parses requested screenshots as HH:MM:SS clock timestamps.
+		if err := writer.WriteField("timestamp", formatMInfoTimestamp(timestamp)); err != nil {
 			return nil, fmt.Errorf("failed to build MInfo timestamp: %w", err)
 		}
 	}
