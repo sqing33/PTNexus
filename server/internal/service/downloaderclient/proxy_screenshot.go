@@ -237,6 +237,7 @@ func (d Downloader) requestProxyScreenshots(
 	}
 
 	proxyURL := fmt.Sprintf("http://%s:%d/api/media/screenshot", proxyIP, proxyPort)
+	logx.Infof(proxyScreenshotLogModule, "代理截图目标 mode=%s proxy_url=%s remote_path=%s", strings.TrimSpace(mode), proxyURL, compactProxyBody(trimmedPath))
 	request, err := http.NewRequest(http.MethodPost, proxyURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return proxyScreenshotResponse{}, &ProxyAPIError{StatusCode: 500, Message: "创建请求失败: " + err.Error()}
@@ -274,10 +275,11 @@ func (d Downloader) requestProxyScreenshots(
 
 	logx.Infof(
 		proxyScreenshotLogModule,
-		"请求截图成功 remote_path=%s mode=%s bbcode_len=%d preview_count=%d subtitle_state=%s current_sid=%d",
+		"请求截图成功 remote_path=%s mode=%s bbcode_len=%d image_urls=%d preview_count=%d subtitle_state=%s current_sid=%d",
 		compactProxyBody(trimmedPath),
 		strings.TrimSpace(mode),
 		len([]rune(strings.TrimSpace(resp.BBCode))),
+		strings.Count(strings.ToLower(resp.BBCode), "[img]"),
 		len(resp.PreviewCandidates),
 		strings.TrimSpace(resp.SubtitleState),
 		resp.CurrentSubtitleSID,

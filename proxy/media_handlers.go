@@ -33,6 +33,11 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 	statusCode := http.StatusOK
 	response := ScreenshotResponse{}
 	mode := strings.ToLower(strings.TrimSpace(reqData.Mode))
+	selectedSubtitleSID := 0
+	if reqData.SelectedSubtitleSID != nil {
+		selectedSubtitleSID = *reqData.SelectedSubtitleSID
+	}
+	log.Printf("screenshot request received: mode=%s remote_path=%s content_name=%q preview_count=%d selected_times=%d selected_subtitle_sid=%d", mode, initialPath, reqData.ContentName, reqData.PreviewCount, len(reqData.SelectedTimes), selectedSubtitleSID)
 
 	err := withMountedISOIfNeeded(initialPath, "screenshot request", func(resolvedPath string) error {
 		videoPath, err := findTargetVideoFile(resolvedPath, reqData.ContentName)
@@ -41,13 +46,13 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			response = ScreenshotResponse{Success: false, Message: err.Error()}
 			return err
 		}
-
 		duration, err := getVideoDuration(videoPath)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			response = ScreenshotResponse{Success: false, Message: "failed to get video duration: " + err.Error()}
 			return err
 		}
+		log.Printf("screenshot target resolved: mode=%s video=%s duration=%.3fs", mode, videoPath, duration)
 
 		if mode == "preview" {
 			inspection, selectedCandidate, hasSelectedCandidate, currentSubtitleSID, inspectErr := resolveSubtitleCandidate(videoPath, reqData.SelectedSubtitleSID)
@@ -148,11 +153,17 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer os.RemoveAll(tempDir)
 
-		videoIsHDR := detectHDRFromVideo(videoPath) || hasHDRKeyword(reqData.ContentName) || hasHDRKeyword(reqData.RemotePath)
+		videoHDR := detectHDRFromVideo(videoPath)
+		contentHDR := hasHDRKeyword(reqData.ContentName)
+		pathHDR := hasHDRKeyword(reqData.RemotePath)
+		videoIsHDR := videoHDR || contentHDR || pathHDR
 		log.Printf(
-			"screenshot source HDR detection: video=%s hdr=%t content_name=%q remote_path=%q",
+			"screenshot source HDR detection: video=%s hdr=%t video_metadata=%t content_keyword=%t path_keyword=%t content_name=%q remote_path=%q",
 			filepath.Base(videoPath),
 			videoIsHDR,
+			videoHDR,
+			contentHDR,
+			pathHDR,
 			reqData.ContentName,
 			reqData.RemotePath,
 		)
@@ -175,12 +186,14 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("screenshot %d failed during image optimization: %v", i+1, err)
 				continue
 			}
+			log.Printf("screenshot image optimized: index=%d hdr=%t output=%s size_mb=%.2f", i+1, videoIsHDR, finalImagePath, fileSizeMB(finalImagePath))
 
 			uploadPath, err := preparePixhostUploadImage(finalImagePath)
 			if err != nil {
 				log.Printf("screenshot %d failed during upload image preparation: %v", i+1, err)
 				continue
 			}
+			log.Printf("screenshot upload prepared: index=%d path=%s size_mb=%.2f", i+1, uploadPath, fileSizeMB(uploadPath))
 			showURL, err := uploadToPixhost(uploadPath)
 			if err != nil {
 				log.Printf("screenshot %d failed during upload: %v", i+1, err)
@@ -188,6 +201,7 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			directURL := normalizePixhostShowURL(showURL)
+			log.Printf("screenshot upload succeeded: index=%d source=%s direct_url=%s", i+1, uploadPath, directURL)
 			uploadedURLs = append(uploadedURLs, directURL)
 		}
 

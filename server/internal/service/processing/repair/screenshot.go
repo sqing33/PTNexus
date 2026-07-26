@@ -49,10 +49,12 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 
 	// 对齐 MediaInfo：当 downloader.use_proxy=true 且本机不挂载媒体目录时，优先通过盒子代理远程截图。
 	downloader, decision, dErr := downloaderclient.DecideProxy(input.RootConfig, downloaderID)
+	logx.Infof(screenshotValidateLogModule, "截图代理判定 downloader_id=%s enabled=%t reason=%s proxy_host=%s proxy_port=%d err=%v", downloaderID, decision.Enabled, decision.Reason, downloader.Host, downloader.ProxyPort, dErr)
 	if decision.Enabled {
 		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName)
 		var lastErr error
-		for _, remoteCandidate := range remoteCandidates {
+		for candidateIndex, remoteCandidate := range remoteCandidates {
+			logx.Infof(screenshotValidateLogModule, "截图代理尝试 scene=自动截图 candidate=%d/%d remote_path=%s", candidateIndex+1, len(remoteCandidates), remoteCandidate)
 			bbcode, err := downloader.FetchScreenshotsByProxy(
 				remoteCandidate,
 				contentName,
@@ -60,6 +62,7 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 			)
 			if err == nil && strings.TrimSpace(bbcode) != "" {
 				urls := ExtractImageURLsFromText(bbcode)
+				logx.Infof(screenshotValidateLogModule, "截图代理响应 scene=自动截图 remote_path=%s bbcode_len=%d image_urls=%d", remoteCandidate, len([]rune(strings.TrimSpace(bbcode))), len(urls))
 				if len(urls) > 0 {
 					logx.PlainInfof("已通过盒子代理生成截图 remote_path=%s count=%d", remoteCandidate, len(urls))
 					return urls, nil
@@ -221,9 +224,8 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 
 	for i, point := range points {
 		timeStr := formatSecondHMS(point)
-		fileName := fmt.Sprintf("s%d_%s.png", i+1, timeStr)
-		rawPNG := filepath.Join(tmpDir, "raw_"+fileName)
-		finalPNG := filepath.Join(tmpDir, fileName)
+		fileStem := fmt.Sprintf("s%d_%s", i+1, timeStr)
+		rawPNG := filepath.Join(tmpDir, "raw_"+fileStem+".png")
 
 		logx.PlainInfof("")
 		logx.PlainInfof("--- 处理第 %d/%d 张截图 (%s) ---", i+1, len(points), timeStr)
@@ -237,12 +239,20 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 			continue
 		}
 
-		isHDR := false
+		keywordHDR := hasScreenshotHDRKeyword(contentName) || hasScreenshotHDRKeyword(torrentName)
+		metadataHDR := false
 		if hdr, hdrErr := detectHDRFromPNG(ffprobePath, rawPNG); hdrErr == nil {
-			isHDR = hdr
+			metadataHDR = hdr
 		} else {
 			logx.PlainInfof("   ⚠️ 检测 HDR 信息失败，假定为 SDR: %v", hdrErr)
 		}
+		isHDR := keywordHDR || metadataHDR
+		finalExt := ".png"
+		if isHDR {
+			finalExt = ".jpg"
+		}
+		finalImagePath := filepath.Join(tmpDir, fileStem+finalExt)
+		logx.Infof(screenshotValidateLogModule, "截图 HDR 判定 scene=自动截图 index=%d keyword_hdr=%t metadata_hdr=%t hdr=%t output=%s", i+1, keywordHDR, metadataHDR, isHDR, finalImagePath)
 
 		vfFilter := "format=rgb24"
 		if isHDR {
@@ -253,14 +263,14 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 		}
 
 		startCompress := time.Now()
-		if err := compressPNGWithFFmpeg(ffmpegPath, rawPNG, finalPNG, vfFilter); err != nil {
+		if err := compressPNGWithFFmpeg(ffmpegPath, rawPNG, finalImagePath, vfFilter); err != nil {
 			logx.PlainInfof("❌ ffmpeg 压缩失败: %s", sanitizeCommandErrForLog(err))
 			continue
 		}
 		compressTime := time.Since(startCompress).Seconds()
 
 		srcSize := fileSizeBytes(rawPNG)
-		dstSize := fileSizeBytes(finalPNG)
+		dstSize := fileSizeBytes(finalImagePath)
 		ratio := 0.0
 		if srcSize > 0 {
 			ratio = float64(dstSize) / float64(srcSize) * 100
@@ -268,7 +278,7 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 		logx.PlainInfof("   ✅ 压缩完成: %.2f MB (压缩率 %.1f%%) | 耗时 %.2fs | HDR: %v", float64(dstSize)/1024.0/1024.0, ratio, compressTime, isHDR)
 
 		// 上传不并发截图，但上传并发。
-		jobs <- uploadJob{Index: i, TimeStr: timeStr, FilePath: finalPNG}
+		jobs <- uploadJob{Index: i, TimeStr: timeStr, FilePath: finalImagePath}
 	}
 
 	close(jobs)
@@ -380,6 +390,15 @@ func detectHDRFromPNG(ffprobePath string, pngPath string) (bool, error) {
 	return strings.Contains(text, "smpte2084") || strings.Contains(text, "bt2020"), nil
 }
 
+// hasScreenshotHDRKeyword 根据下载任务名称补充 HDR 判断，避免截图文件缺少色彩元数据时被误判为 SDR。
+func hasScreenshotHDRKeyword(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return strings.Contains(lower, "hdr") ||
+		strings.Contains(lower, "dovi") ||
+		strings.Contains(lower, "dolby vision") ||
+		strings.Contains(lower, "dv ")
+}
+
 func captureRawPNGWithMPV(mpvPath string, videoPath string, second float64, outputPath string, subtitleSID int) error {
 	cmd := []string{
 		mpvPath,
@@ -411,17 +430,16 @@ func captureRawPNGWithMPV(mpvPath string, videoPath string, second float64, outp
 }
 
 func compressPNGWithFFmpeg(ffmpegPath string, srcPNG string, dstPNG string, vfFilter string) error {
-	cmd := exec.Command(
-		ffmpegPath,
-		"-y",
-		"-v", "error",
-		"-i", srcPNG,
-		"-frames:v", "1",
-		"-vf", vfFilter,
-		"-compression_level", "4",
-		"-pred", "mixed",
-		dstPNG,
-	)
+	args := []string{
+		"-y", "-v", "error", "-i", srcPNG, "-frames:v", "1", "-vf", vfFilter,
+	}
+	if strings.EqualFold(filepath.Ext(dstPNG), ".jpg") || strings.EqualFold(filepath.Ext(dstPNG), ".jpeg") {
+		args = append(args, "-q:v", "2")
+	} else {
+		args = append(args, "-compression_level", "4", "-pred", "mixed")
+	}
+	args = append(args, dstPNG)
+	cmd := exec.Command(ffmpegPath, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		text := strings.TrimSpace(string(out))
