@@ -76,6 +76,7 @@ func PublishZhuque(input publisher.PublishInput) (publisher.PublishResult, error
 		strings.TrimSpace(input.MediaInfo),
 		strings.TrimSpace(input.IMDbLink),
 		strings.TrimSpace(input.DoubanLink),
+		input.RootConfig,
 	)
 	if buildErr != nil {
 		appendLog(fmt.Sprintf("朱雀参数构建失败: %v", buildErr))
@@ -146,7 +147,7 @@ func PublishZhuque(input publisher.PublishInput) (publisher.PublishResult, error
 // 参数/返回：uploadData 为发布 payload；title/subtitle/mediainfo/imdbLink/doubanLink 为最终展示字段；返回可直接提交给 /api/torrent/upload 的字段映射。
 // 失败场景：配置缺失、必需映射字段缺失时返回 error。
 // 副作用：读取运行时配置中的匿名发布开关。
-func BuildZhuqueUploadFields(uploadData map[string]any, title, subtitle, mediainfo, imdbLink, doubanLink string) (map[string]string, error) {
+func BuildZhuqueUploadFields(uploadData map[string]any, title, subtitle, mediainfo, imdbLink, doubanLink string, rootConfig map[string]any) (map[string]string, error) {
 	siteCfg, err := publishmapping.LoadSitePublishConfig("zhuque")
 	if err != nil {
 		return nil, err
@@ -164,7 +165,7 @@ func BuildZhuqueUploadFields(uploadData map[string]any, title, subtitle, mediain
 	videoCoding := strings.TrimSpace(publishmapping.PickMappedValueWithFallback("video_codec", siteCfg.Mappings["video_codec"], strings.TrimSpace(toStringAny(standardized["video_codec"], ""))))
 	resolution := strings.TrimSpace(publishmapping.PickMappedValueWithFallback("resolution", siteCfg.Mappings["resolution"], strings.TrimSpace(toStringAny(standardized["resolution"], ""))))
 
-	anonymousUpload := publisher.ResolveAnonymousUploadEnabled()
+	anonymousUpload := publisher.ResolveAnonymousUploadEnabled(rootConfig)
 
 	tmdbID, tmdbType := extractZhuqueTMDBInfo(uploadData, imdbLink)
 	screenshots := extractZhuqueScreenshots(uploadData)

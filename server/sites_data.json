@@ -1062,7 +1062,7 @@
     "special_tracker_domain": null,
     "group": "-LongPT,-LongWeb",
     "description": "LongPT",
-    "migration": 2,
+    "migration": 3,
     "speed_limit": 10
   },
   {

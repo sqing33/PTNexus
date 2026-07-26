@@ -115,6 +115,7 @@ func PublishRousi(input publisher.PublishInput) (publisher.PublishResult, error)
 		torrentFile,
 		strings.TrimSpace(input.Title),
 		strings.TrimSpace(input.Description),
+		input.RootConfig,
 	)
 	appendLog(attemptDetail)
 	if attemptErr != nil {
@@ -144,6 +145,7 @@ func tryUploadTorrentRousiAPI(
 	torrentFile []byte,
 	title string,
 	description string,
+	rootConfig map[string]any,
 ) (string, bool, string, error) {
 	trimmedBaseURL := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	detailLines := []string{
@@ -167,7 +169,7 @@ func tryUploadTorrentRousiAPI(
 	}
 
 	siteCode := strings.TrimSpace(toStringAny(targetInfo["site"], "rousi"))
-	payload, err := buildRousiAPIPayload(siteCode, uploadData, torrentFile, title, description)
+	payload, err := buildRousiAPIPayload(siteCode, uploadData, torrentFile, title, description, rootConfig)
 	if err != nil {
 		detailLines = append(detailLines, fmt.Sprintf("构建 API 参数失败: %v", err))
 		return "", false, buildDetail(), err
@@ -286,7 +288,7 @@ func tryUploadTorrentRousiAPI(
 	return publishURL, isExisting, buildDetail(), nil
 }
 
-func buildRousiAPIPayload(siteCode string, uploadData map[string]any, torrentFile []byte, title string, description string) (map[string]any, error) {
+func buildRousiAPIPayload(siteCode string, uploadData map[string]any, torrentFile []byte, title string, description string, rootConfig map[string]any) (map[string]any, error) {
 	trimmedTitle := strings.TrimSpace(title)
 	if trimmedTitle == "" {
 		return nil, fmt.Errorf("标题为空")
@@ -310,7 +312,7 @@ func buildRousiAPIPayload(siteCode string, uploadData map[string]any, torrentFil
 		"torrent":     base64.StdEncoding.EncodeToString(torrentFile),
 		"title":       trimmedTitle,
 		"description": trimmedDescription,
-		"anonymous":   publisher.ResolveAnonymousUploadEnabled(),
+		"anonymous":   publisher.ResolveAnonymousUploadEnabled(rootConfig),
 	}
 
 	if subtitle := strings.TrimSpace(toStringLoose(uploadData["subtitle"])); subtitle != "" {

@@ -37,10 +37,6 @@ func NewApp() (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("初始化配置管理器失败: %w", err)
 	}
-	if err := netproxy.Install(cfgManager.NetworkProxyConfig()); err != nil {
-		return nil, fmt.Errorf("初始化网络代理失败: %w", err)
-	}
-
 	store, err := repository.NewStore(paths)
 	if err != nil {
 		return nil, fmt.Errorf("初始化数据库失败: %w", err)
@@ -51,6 +47,13 @@ func NewApp() (*App, error) {
 	}
 	if err := schemaManager.SyncSitesFromJSON(paths.SitesData); err != nil {
 		logx.Warnf("启动", "同步站点配置失败 path=%s err=%v", paths.SitesData, err)
+	}
+
+	if err := cfgManager.UseStore(repository.NewAppSettingsRepository(store)); err != nil {
+		return nil, fmt.Errorf("init database settings failed: %w", err)
+	}
+	if err := netproxy.Install(cfgManager.NetworkProxyConfig()); err != nil {
+		return nil, fmt.Errorf("init network proxy failed: %w", err)
 	}
 
 	authService := service.NewAuthService(cfgManager)
@@ -325,7 +328,6 @@ func registerRoutes(
 		migrateAPI.POST("/batch_fetch_seed_data", migrateHandler.BatchFetchSeedData)
 		migrateAPI.POST("/update_preview_data", migrateHandler.UpdatePreviewData)
 		migrateAPI.POST("/get_aggregated_torrents", migrateHandler.GetAggregatedTorrents)
-		migrateAPI.POST("/delete_aggregated_torrent", migrateHandler.DeleteAggregatedTorrent)
 		migrateAPI.GET("/batch_fetch_progress", migrateHandler.BatchFetchProgress)
 		migrateAPI.GET("/logs/stream/:task_id", migrateHandler.LogsStream)
 

@@ -20,7 +20,6 @@ func main() {
 	}
 
 	http.HandleFunc("/api/torrents/all", allTorrentsHandler)
-	http.HandleFunc("/api/torrents/delete", deleteTorrentsHandler)
 	http.HandleFunc("/api/stats/server", statsHandler)
 	http.HandleFunc("/api/torrents/upload-limit/batch", uploadLimitBatchHandler)
 	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

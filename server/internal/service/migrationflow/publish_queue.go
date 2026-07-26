@@ -641,8 +641,8 @@ func (s *MigrateService) EnqueuePublishQueueBatchByNames(payload map[string]any)
 
 	if len(seeds) == 0 {
 		return map[string]any{
-			"success":         false,
-			"message":         fmt.Sprintf("所有 %d 个种子均未找到 seed_parameters 记录", len(uniqueNames)),
+			"success":          false,
+			"message":          fmt.Sprintf("所有 %d 个种子均未找到 seed_parameters 记录", len(uniqueNames)),
 			"unresolved_names": unresolvedNames,
 		}, 400
 	}
@@ -854,7 +854,11 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 
 	downloaderID := s.resolveQueueTaskDownloaderID(taskRecord, payload, ctx)
 	if strings.TrimSpace(downloaderID) != "" {
-		stats, err := publishguard.CheckDownloaderGateStats(downloaderID)
+		rootConfig := map[string]any{}
+		if s.cfg != nil {
+			rootConfig = s.cfg.Get()
+		}
+		stats, err := publishguard.CheckDownloaderGateStats(downloaderID, rootConfig)
 		if err != nil {
 			nextRunAt := time.Now().Add(time.Duration(clampInt(cfg.MonitorIntervalSec, 5, 3600)) * time.Second)
 			reason := "预检查统计失败: " + err.Error()
@@ -937,6 +941,10 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	logx.Infof(publishQueueLogModule, "开始执行队列任务 id=%d torrent_id=%s target_site=%s attempt=%d", taskID, torrentID, targetSite, taskRecord.AttemptCount)
 
 	startedAt := time.Now()
+	rootConfig := map[string]any{}
+	if s.cfg != nil {
+		rootConfig = s.cfg.Get()
+	}
 	result, status := publishworkflow.ExecutePublishWithContext(
 		publishworkflow.PublishWithContextInput{
 			TargetSite:          targetSite,
@@ -946,6 +954,7 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 			Context:             ctx,
 			TorrentPath:         "",
 			DefaultDownloaderID: s.resolveDefaultPublishDownloaderID(),
+			RootConfig:          rootConfig,
 		},
 		publishworkflow.PublishWithContextDeps{
 			GetSiteByName: s.repo.GetSiteByName,

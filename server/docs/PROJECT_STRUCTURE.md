@@ -68,6 +68,7 @@
 |---|---|
 | `internal/repository/db.go` | DB 初始化与连接（sqlite/mysql/postgresql） |
 | `internal/repository/schema_manager.go` | 建表/补字段/索引/结构维护 |
+| `internal/repository/app_settings_repository.go` | 设置与下载器配置的数据库读写 |
 | `internal/repository/sites_sync.go` | 从 `sites_data.json` 同步站点元数据 |
 | `internal/repository/migrate_repository.go` | 迁移相关查询与写入 |
 | `internal/repository/torrent_repository.go` | 种子基础查询、路径列表等 |

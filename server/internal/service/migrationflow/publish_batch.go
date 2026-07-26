@@ -16,12 +16,17 @@ func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
 
 	normalizedPayload := s.normalizePublishPayloadWithCrossSeedDefaults(payload)
 	defaultDownloaderID := s.resolveDefaultPublishDownloaderID()
+	rootConfig := map[string]any{}
+	if s.cfg != nil {
+		rootConfig = s.cfg.Get()
+	}
 
 	result, status := publishworkflow.ExecutePublishFromPayload(
 		publishworkflow.PublishFromPayloadInput{
 			Payload:             normalizedPayload,
 			TorrentPath:         "",
 			DefaultDownloaderID: defaultDownloaderID,
+			RootConfig:          rootConfig,
 		},
 		publishworkflow.PublishFromPayloadDeps{
 			ContextState:            s.contextState,

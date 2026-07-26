@@ -15,7 +15,14 @@ import (
 type Manager struct {
 	mu     sync.RWMutex
 	path   string
+	store  SettingsStore
 	config map[string]any
+}
+
+// SettingsStore persists the root application settings snapshot.
+type SettingsStore interface {
+	LoadConfig() (map[string]any, bool, error)
+	SaveConfig(configData map[string]any) error
 }
 
 func NewManager(paths RuntimePaths) (*Manager, error) {
@@ -23,7 +30,6 @@ func NewManager(paths RuntimePaths) (*Manager, error) {
 	if err := manager.load(); err != nil {
 		return nil, err
 	}
-	manager.ensureAuthBootstrap()
 	return manager, nil
 }
 
@@ -34,7 +40,7 @@ func (m *Manager) load() error {
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
 			m.config = deepCopyMap(defaultConfig)
-			return m.Save(m.config)
+			return nil
 		}
 		return fmt.Errorf("read config failed: %w", statErr)
 	}
@@ -46,7 +52,7 @@ func (m *Manager) load() error {
 
 	parsed := map[string]any{}
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		logx.Warnf("配置", "解析配置文件失败，将回退默认配置 err=%v", err)
+		logx.Warnf("配置", "解析配置文件失败，回退默认配置 err=%v", err)
 		m.config = deepCopyMap(defaultConfig)
 		return nil
 	}
@@ -61,6 +67,42 @@ func (m *Manager) Get() map[string]any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return deepCopyMap(m.config)
+}
+
+// UseStore switches settings persistence to the configured database store.
+func (m *Manager) UseStore(store SettingsStore) error {
+	if store == nil {
+		return nil
+	}
+
+	dbConfig, found, err := store.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load database config failed: %w", err)
+	}
+
+	m.mu.Lock()
+	if found {
+		merged := deepCopyMap(defaultConfig())
+		mergeMap(merged, dbConfig)
+		m.config = merged
+	} else {
+		m.config = deepCopyMap(m.config)
+	}
+	m.store = store
+	m.ensureAuthBootstrapLocked()
+	configToPersist := deepCopyMap(m.config)
+	m.mu.Unlock()
+
+	if err := store.SaveConfig(configToPersist); err != nil {
+		if found {
+			return fmt.Errorf("save merged database config failed: %w", err)
+		}
+		return fmt.Errorf("import config to database failed: %w", err)
+	}
+	if !found {
+		logx.Infof("配置", "已将文件配置导入数据库")
+	}
+	return nil
 }
 
 func (m *Manager) Save(configData map[string]any) error {
@@ -79,8 +121,16 @@ func (m *Manager) Save(configData map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("marshal config failed: %w", err)
 	}
-	content = append(content, '\n')
 
+	if m.store != nil {
+		if err := m.store.SaveConfig(configToSave); err != nil {
+			return fmt.Errorf("write database config failed: %w", err)
+		}
+		m.config = deepCopyMap(configData)
+		return nil
+	}
+
+	content = append(content, '\n')
 	if err := os.WriteFile(m.path, content, 0o644); err != nil {
 		return fmt.Errorf("write config failed: %w", err)
 	}
@@ -93,6 +143,10 @@ func (m *Manager) ensureAuthBootstrap() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.ensureAuthBootstrapLocked()
+}
+
+func (m *Manager) ensureAuthBootstrapLocked() {
 	auth, ok := asMap(m.config["auth"])
 	if !ok {
 		auth = map[string]any{}
@@ -127,7 +181,7 @@ func (m *Manager) ensureAuthBootstrap() {
 		generated[idx] = alphabet[rnd.Int64()]
 	}
 	_ = os.Setenv("AUTH_PASSWORD", string(generated))
-	logx.Infof("启动", "首次启动未检测到密码，已生成临时登录密码（请尽快修改） password=%s", string(generated))
+	logx.Infof("启动", "首次启动未检测到密码，已生成临时登录密码 password=%s", string(generated))
 }
 
 func defaultConfig() map[string]any {
@@ -159,8 +213,8 @@ func defaultConfig() map[string]any {
 		"network_proxy": DefaultNetworkProxyConfig().ToMap(),
 		"cross_seed": map[string]any{
 			"image_hoster":                     "pixhost",
-			"agsv_email":                        "",
-			"agsv_password":                     "",
+			"agsv_email":                       "",
+			"agsv_password":                    "",
 			"seedvault_email":                  "",
 			"seedvault_password":               "",
 			"default_downloader":               "",
@@ -220,7 +274,7 @@ func defaultConfig() map[string]any {
 		},
 		"tags_config": map[string]any{
 			"category": map[string]any{"enabled": true, "category": ""},
-			"tags":     map[string]any{"enabled": true, "tags": []any{"PT Nexus", "站点/{站点名称}"}},
+			"tags":     map[string]any{"enabled": true, "tags": []any{"PT Nexus", "\u7ad9\u70b9/{\u7ad9\u70b9\u540d\u79f0}"}},
 		},
 	}
 }

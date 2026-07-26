@@ -205,31 +205,6 @@ type UploadLimitBatchResponse struct {
 	Results []UploadLimitResult `json:"results"`
 }
 
-type DeleteTorrentsDownloader struct {
-	ID          string   `json:"id"`
-	Type        string   `json:"type"`
-	Host        string   `json:"host"`
-	Username    string   `json:"username"`
-	Password    string   `json:"password"`
-	Hashes      []string `json:"hashes"`
-	DeleteFiles bool     `json:"delete_files"`
-}
-
-type DeleteTorrentsRequest struct {
-	Downloaders []DeleteTorrentsDownloader `json:"downloaders"`
-}
-
-type DeleteTorrentsResult struct {
-	DownloaderID    string   `json:"downloader_id"`
-	DeletedTorrents int      `json:"deleted_torrents"`
-	Errors          []string `json:"errors"`
-}
-
-type DeleteTorrentsResponse struct {
-	Success bool                   `json:"success"`
-	Results []DeleteTorrentsResult `json:"results"`
-}
-
 type subtitleStreamCandidate struct {
 	SubtitleSID        int
 	StreamIndex        int

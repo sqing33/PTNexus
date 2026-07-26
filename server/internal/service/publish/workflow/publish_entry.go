@@ -26,6 +26,7 @@ type PublishExecutionInput struct {
 	FallbackSavePath     string
 	FallbackDownloaderID string
 	DefaultDownloaderID  string
+	RootConfig           map[string]any
 }
 
 // PublishExecutionDeps 定义单站发布执行依赖。
@@ -98,7 +99,7 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 		return buildPreCheckFailure("缺少有效 downloaderId，已停止发布")
 	}
 
-	canContinue, limitMessage := publishguard.CheckDownloaderGate(resolvedDownloaderID)
+	canContinue, limitMessage := publishguard.CheckDownloaderGate(resolvedDownloaderID, input.RootConfig)
 	if !canContinue {
 		if strings.TrimSpace(limitMessage) == "" {
 			limitMessage = "已触发限制"
@@ -112,8 +113,9 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 		strings.TrimSpace(input.TorrentPath),
 		strings.TrimSpace(input.SourceSiteNickname),
 		deps.FindSiteNicknameByGroup,
+		input.RootConfig,
 	)
-	targetNickname := strings.TrimSpace(toStringAny(targetInfo["nickname"], targetSite))
+	targetNickname := resolveTargetSiteLabel(targetInfo, targetSite)
 	if publishErr != nil {
 		failureLogs := strings.TrimSpace(logs)
 		if failureLogs == "" {
@@ -273,11 +275,10 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 				downloadURLForDownloader = strings.TrimSpace(directDownloadURL)
 			}
 			addPayload := map[string]any{
-				"url":      downloadURLForDownloader,
-				"savePath": resolvedSavePath,
-			}
-			if targetNickname != "" {
-				addPayload["siteNickname"] = targetNickname
+				"url":          downloadURLForDownloader,
+				"savePath":     resolvedSavePath,
+				"targetSite":   targetSite,
+				"siteNickname": targetNickname,
 			}
 			if resolvedDownloaderID != "" {
 				addPayload["downloaderId"] = resolvedDownloaderID
@@ -304,6 +305,25 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 		"auto_edit_result":    autoEditResult,
 		"is_existing_torrent": isExistingTorrent,
 	}, 200
+}
+
+// resolveTargetSiteLabel 解析发布目标站点的显示名。
+// 参数/返回：targetInfo 为 sites 表记录，targetSite 为请求中的目标站标识；返回用于日志和下载器标签的站点名。
+// 失败场景：所有候选字段为空时返回空字符串。
+// 副作用：无。
+func resolveTargetSiteLabel(targetInfo map[string]any, targetSite string) string {
+	for _, value := range []string{
+		toStringAny(targetInfo["nickname"], ""),
+		toStringAny(targetInfo["site_name"], ""),
+		toStringAny(targetInfo["name"], ""),
+		strings.TrimSpace(targetSite),
+		toStringAny(targetInfo["site"], ""),
+	} {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func extractTorrentIDFromPublishURL(publishURL string) string {

@@ -206,6 +206,13 @@ func (m *SchemaManager) createTableSQLs() []string {
 				sort_order INT NOT NULL DEFAULT 0,
 				PRIMARY KEY (id)
 			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
+			`CREATE TABLE IF NOT EXISTS app_settings (
+				setting_key VARCHAR(64) NOT NULL,
+				value_json LONGTEXT NOT NULL,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				PRIMARY KEY (setting_key)
+			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
 			`CREATE TABLE IF NOT EXISTS seed_parameters (
 				hash VARCHAR(64) NOT NULL,
 				torrent_id VARCHAR(255) NOT NULL,
@@ -379,6 +386,12 @@ func (m *SchemaManager) createTableSQLs() []string {
 				seed_speed_limit INTEGER NOT NULL DEFAULT 5,
 				can_publish INTEGER NOT NULL DEFAULT 1,
 				sort_order INTEGER NOT NULL DEFAULT 0
+			)`,
+			`CREATE TABLE IF NOT EXISTS app_settings (
+				setting_key VARCHAR(64) PRIMARY KEY,
+				value_json TEXT NOT NULL,
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL
 			)`,
 			`CREATE TABLE IF NOT EXISTS seed_parameters (
 				hash VARCHAR(64) NOT NULL,
@@ -554,6 +567,12 @@ func (m *SchemaManager) createTableSQLs() []string {
 				can_publish INTEGER NOT NULL DEFAULT 1,
 				sort_order INTEGER NOT NULL DEFAULT 0
 			)`,
+			`CREATE TABLE IF NOT EXISTS app_settings (
+				setting_key TEXT PRIMARY KEY,
+				value_json TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
 			`CREATE TABLE IF NOT EXISTS seed_parameters (
 				hash TEXT NOT NULL,
 				torrent_id TEXT NOT NULL,
@@ -725,6 +744,12 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "seed_speed_limit", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 5", "mysql": "INT NOT NULL DEFAULT 5", "postgresql": "INTEGER NOT NULL DEFAULT 5"}},
 			{name: "can_publish", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 1", "mysql": "TINYINT(1) NOT NULL DEFAULT 1", "postgresql": "INTEGER NOT NULL DEFAULT 1"}},
 			{name: "sort_order", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
+		},
+		"app_settings": {
+			{name: "setting_key", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(64) NOT NULL", "postgresql": "VARCHAR(64) NOT NULL"}},
+			{name: "value_json", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "LONGTEXT NOT NULL", "postgresql": "TEXT NOT NULL"}},
+			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 		},
 		"seed_parameters": {
 			{name: "hash", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(64) NOT NULL", "postgresql": "VARCHAR(64) NOT NULL"}},

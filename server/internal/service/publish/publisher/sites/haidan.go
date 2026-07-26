@@ -64,6 +64,7 @@ func PublishHaidan(input publisher.PublishInput) (publisher.PublishResult, error
 		strings.TrimSpace(input.MediaInfo),
 		strings.TrimSpace(input.IMDbLink),
 		strings.TrimSpace(input.DoubanLink),
+		input.RootConfig,
 	)
 	if buildErr != nil {
 		appendLog(fmt.Sprintf("海胆参数构建失败: %v", buildErr))
@@ -134,7 +135,7 @@ func PublishHaidan(input publisher.PublishInput) (publisher.PublishResult, error
 // 返回可直接提交给 takeupload.php 的字段映射。
 // 失败场景：配置缺失、必需映射字段缺失时返回 error。
 // 副作用：读取运行时配置中的匿名发布开关。
-func BuildHaidanUploadFields(uploadData map[string]any, title, subtitle, mediainfo, imdbLink, doubanLink string) (map[string]string, error) {
+func BuildHaidanUploadFields(uploadData map[string]any, title, subtitle, mediainfo, imdbLink, doubanLink string, rootConfig map[string]any) (map[string]string, error) {
 	siteCfg, err := publishmapping.LoadSitePublishConfig("haidan")
 	if err != nil {
 		return nil, err
@@ -173,7 +174,7 @@ func BuildHaidanUploadFields(uploadData map[string]any, title, subtitle, mediain
 	resolutionValue := publishmapping.PickMappedValue(resolutionMapping, resolutionStr)
 
 	// 匿名上传设置
-	anonymousUpload := publisher.ResolveAnonymousUploadEnabled()
+	anonymousUpload := publisher.ResolveAnonymousUploadEnabled(rootConfig)
 	uplverValue := "yes"
 	if !anonymousUpload {
 		uplverValue = "no"

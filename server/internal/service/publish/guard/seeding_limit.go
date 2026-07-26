@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server/internal/config"
 	"github.com/pt-nexus/server/internal/platform/logx"
 )
 
@@ -35,6 +34,13 @@ func init() {
 	if os.Getenv("VIP") == "true" {
 		maxRecentAdditions = 999
 	}
+}
+
+func firstRootConfig(configs []map[string]any) map[string]any {
+	if len(configs) == 0 || configs[0] == nil {
+		return map[string]any{}
+	}
+	return configs[0]
 }
 
 type seedingLimitResponse struct {
@@ -104,7 +110,7 @@ type transmissionResponse struct {
 // 参数/返回：downloaderID 为下载器 ID；返回 canContinue 与 message；检查异常时默认放行（返回 true, ""）。
 // 失败场景：远端预检查不可用或本地检查异常时记录日志并默认放行。
 // 副作用：可能访问远端预检查接口（当 GO_SERVICE_URL 配置存在），并可能直接连接下载器执行本地检查。
-func CheckDownloaderGate(downloaderID string) (bool, string) {
+func CheckDownloaderGate(downloaderID string, rootConfigs ...map[string]any) (bool, string) {
 	trimmedID := strings.TrimSpace(downloaderID)
 	if trimmedID == "" {
 		return true, ""
@@ -114,14 +120,14 @@ func CheckDownloaderGate(downloaderID string) (bool, string) {
 		return canContinue, message
 	}
 
-	return checkByLocalGuard(trimmedID)
+	return checkByLocalGuard(trimmedID, firstRootConfig(rootConfigs))
 }
 
 // CheckDownloaderGateStats 返回指定 downloader_id 对应网段组的限制统计信息（仅本地检查）。
 // 参数/返回：downloaderID 为下载器 ID；返回统计快照与 error。
 // 失败场景：读取配置失败、解析 host 失败或下载器连接失败等会返回 error。
 // 副作用：可能直连下载器拉取做种/暂停列表用于统计。
-func CheckDownloaderGateStats(downloaderID string) (SeedingLimitStats, error) {
+func CheckDownloaderGateStats(downloaderID string, rootConfigs ...map[string]any) (SeedingLimitStats, error) {
 	stats := SeedingLimitStats{
 		CanContinue:      true,
 		Message:          "",
@@ -137,7 +143,7 @@ func CheckDownloaderGateStats(downloaderID string) (SeedingLimitStats, error) {
 		return stats, nil
 	}
 
-	downloaders, err := loadDownloadersConfig()
+	downloaders, err := loadDownloadersConfig(firstRootConfig(rootConfigs))
 	if err != nil {
 		return SeedingLimitStats{}, err
 	}
@@ -228,8 +234,8 @@ func checkByRemoteGuard(downloaderID string) (bool, string, bool) {
 	return payload.CanContinue, strings.TrimSpace(payload.Message), true
 }
 
-func checkByLocalGuard(downloaderID string) (bool, string) {
-	downloaders, err := loadDownloadersConfig()
+func checkByLocalGuard(downloaderID string, rootConfig map[string]any) (bool, string) {
+	downloaders, err := loadDownloadersConfig(rootConfig)
 	if err != nil {
 		logx.Warnf(seedingLimitGuardLogModule, "加载下载器配置失败 downloader_id=%s err=%v", downloaderID, err)
 		return true, ""
@@ -271,15 +277,12 @@ func checkByLocalGuard(downloaderID string) (bool, string) {
 	return checkSeedingLimitForGroup(targetSubnet, group)
 }
 
-func loadDownloadersConfig() ([]seedingLimitDownloader, error) {
-	paths := config.ResolveRuntimePaths()
-	manager, err := config.NewManager(paths)
-	if err != nil {
-		return nil, err
+func loadDownloadersConfig(rootConfig map[string]any) ([]seedingLimitDownloader, error) {
+	if len(rootConfig) == 0 {
+		return nil, fmt.Errorf("root config is empty")
 	}
 
-	root := manager.Get()
-	rawDownloaders := toSliceAny(root["downloaders"])
+	rawDownloaders := toSliceAny(rootConfig["downloaders"])
 	result := make([]seedingLimitDownloader, 0, len(rawDownloaders))
 	for _, raw := range rawDownloaders {
 		item := toMapAny(raw)

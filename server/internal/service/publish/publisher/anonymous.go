@@ -3,7 +3,6 @@ package publisher
 import (
 	"strings"
 
-	"github.com/pt-nexus/server/internal/config"
 	publishmapping "github.com/pt-nexus/server/internal/service/publish/mapping"
 )
 
@@ -11,13 +10,11 @@ import (
 // 参数/返回：无参数，返回当前是否启用匿名发布；读取失败时默认返回 true。
 // 失败场景：配置文件不存在、读取失败或字段缺失时，按默认启用匿名处理。
 // 副作用：读取运行时配置文件。
-func ResolveAnonymousUploadEnabled() bool {
-	paths := config.ResolveRuntimePaths()
-	manager, err := config.NewManager(paths)
-	if err != nil {
+func ResolveAnonymousUploadEnabled(rootConfigs ...map[string]any) bool {
+	if len(rootConfigs) == 0 || rootConfigs[0] == nil {
 		return true
 	}
-	root := manager.Get()
+	root := rootConfigs[0]
 	uploadSettings, ok := root["upload_settings"].(map[string]any)
 	if !ok || uploadSettings == nil {
 		return true
@@ -29,7 +26,7 @@ func ResolveAnonymousUploadEnabled() bool {
 // 参数/返回：siteCode 为目标站点 code，siteCfg 为站点发布配置，formFields 为最终表单字段集合。
 // 失败场景：站点未配置匿名字段且无法命中默认规则时直接跳过，不返回错误。
 // 副作用：会原地修改 formFields。
-func ApplyAnonymousFormFields(siteCode string, siteCfg *publishmapping.SitePublishConfig, formFields map[string]string) {
+func ApplyAnonymousFormFields(siteCode string, siteCfg *publishmapping.SitePublishConfig, formFields map[string]string, rootConfigs ...map[string]any) {
 	if formFields == nil {
 		return
 	}
@@ -40,7 +37,7 @@ func ApplyAnonymousFormFields(siteCode string, siteCfg *publishmapping.SitePubli
 		return
 	}
 
-	enabled := ResolveAnonymousUploadEnabled()
+	enabled := ResolveAnonymousUploadEnabled(rootConfigs...)
 	if enabled {
 		value := strings.TrimSpace(cfg.EnabledValue)
 		if value == "" {

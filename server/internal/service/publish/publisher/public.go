@@ -79,7 +79,7 @@ func PublishPublic(input PublishInput) (PublishResult, error) {
 		formFields[trimmedKey] = trimmedValue
 	}
 
-	ApplyAnonymousFormFields(siteCode, siteCfg, formFields)
+	ApplyAnonymousFormFields(siteCode, siteCfg, formFields, input.RootConfig)
 
 	if input.AdjustFormFields != nil {
 		input.AdjustFormFields(formFields)

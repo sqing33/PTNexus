@@ -34,7 +34,7 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 	}
 
 	// 🚫 自动添加前预检查（对齐 Python）：避免触发做种/队列限制。
-	canContinue, limitMessage := publishguard.CheckDownloaderGate(downloaderID)
+	canContinue, limitMessage := publishguard.CheckDownloaderGate(downloaderID, rootConfig)
 	if !canContinue {
 		if strings.TrimSpace(limitMessage) == "" {
 			limitMessage = "已触发限制"
@@ -54,7 +54,7 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 	}
 
 	manualTags := processingpersist.ParseStringArray(payload["tags"])
-	siteNicknameHint := strings.TrimSpace(processingshared.ToString(payload["siteNickname"], processingshared.ToString(payload["site_nickname"], "")))
+	siteNicknameHint := resolvePayloadSiteNickname(payload)
 	addOptions := downloaderclient.AddTorrentOptions{Paused: false}
 	detailSite := map[string]any{}
 
@@ -79,6 +79,9 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 	resolvedSiteNickname := siteNicknameHint
 	if resolvedSiteNickname == "" {
 		resolvedSiteNickname = strings.TrimSpace(processingshared.ToString(detailSite["nickname"], ""))
+	}
+	if resolvedSiteNickname == "" {
+		resolvedSiteNickname = resolveSiteNicknameFromDetail(detailSite)
 	}
 	configuredTags, configuredCategory := resolveConfiguredTagsAndCategory(rootConfig, resolvedSiteNickname)
 	addOptions.Tags = mergeTagLists(manualTags, configuredTags)
@@ -137,12 +140,15 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 	}
 
 	return map[string]any{
-		"success":         true,
-		"message":         addMessage,
-		"downloader_id":   downloader.ID,
-		"downloader_name": downloader.Name,
-		"queued_torrent":  queuedTorrent,
-		"cost_ms":         time.Since(startedAt).Milliseconds(),
+		"success":          true,
+		"message":          addMessage,
+		"downloader_id":    downloader.ID,
+		"downloader_name":  downloader.Name,
+		"queued_torrent":   queuedTorrent,
+		"site_nickname":    resolvedSiteNickname,
+		"applied_tags":     addOptions.Tags,
+		"applied_category": configuredCategory,
+		"cost_ms":          time.Since(startedAt).Milliseconds(),
 	}, 200
 }
 
@@ -159,6 +165,51 @@ func resolveSiteSpeedLimitMBps(site map[string]any) int {
 		return 0
 	}
 	return limit
+}
+
+// resolvePayloadSiteNickname 从发布/加种请求中提取目标站点显示名。
+// 参数/返回：payload 为请求参数；优先返回 nickname 类字段，其次回退到 targetSite/site 字段。
+// 失败场景：payload 为空或字段为空时返回空字符串。
+// 副作用：无。
+func resolvePayloadSiteNickname(payload map[string]any) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	for _, key := range []string{
+		"siteNickname",
+		"site_nickname",
+		"targetSiteNickname",
+		"target_site_nickname",
+		"targetNickname",
+		"target_nickname",
+		"targetSite",
+		"target_site",
+		"siteName",
+		"site_name",
+		"nickname",
+		"site",
+	} {
+		if value := strings.TrimSpace(processingshared.ToString(payload[key], "")); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// resolveSiteNicknameFromDetail 从详情页反查到的站点记录中提取显示名。
+// 参数/返回：site 为 sites 表记录；优先返回 nickname，其次回退到站点名称或站点标识。
+// 失败场景：记录为空或字段为空时返回空字符串。
+// 副作用：无。
+func resolveSiteNicknameFromDetail(site map[string]any) string {
+	if len(site) == 0 {
+		return ""
+	}
+	for _, key := range []string{"nickname", "site_name", "name", "site"} {
+		if value := strings.TrimSpace(processingshared.ToString(site[key], "")); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // resolveConfiguredTagsAndCategory 解析设置中心下载器标签/分类配置。

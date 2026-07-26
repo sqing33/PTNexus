@@ -11,6 +11,7 @@ type PublishWithContextInput struct {
 	Context             Context
 	TorrentPath         string
 	DefaultDownloaderID string
+	RootConfig          map[string]any
 }
 
 // PublishWithContextDeps 定义基于迁移上下文发布所需依赖。
@@ -70,6 +71,7 @@ func ExecutePublishWithContext(input PublishWithContextInput, deps PublishWithCo
 			FallbackSavePath:     input.Context.SavePath,
 			FallbackDownloaderID: input.Context.DownloaderID,
 			DefaultDownloaderID:  input.DefaultDownloaderID,
+			RootConfig:           input.RootConfig,
 		},
 		PublishExecutionDeps{
 			AddToDownloader:         deps.AddToDownloader,

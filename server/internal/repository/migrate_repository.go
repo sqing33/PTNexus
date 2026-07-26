@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -19,107 +18,6 @@ func NewMigrateRepository(store *Store) *MigrateRepository {
 
 func (r *MigrateRepository) DB() *gorm.DB {
 	return r.store.DB
-}
-
-// AggregatedTorrentDeleteTarget 描述“一种多站”聚合行中待删除的下载器种子。
-type AggregatedTorrentDeleteTarget struct {
-	Hash         string `gorm:"column:hash"`
-	Name         string `gorm:"column:name"`
-	SavePath     string `gorm:"column:save_path"`
-	Size         int64  `gorm:"column:size"`
-	DownloaderID string `gorm:"column:downloader_id"`
-}
-
-// ListAggregatedTorrentDeleteTargets 按 name+size 定位“一种多站”行内可删除的种子记录。
-// 参数/返回：name 与 size 定位聚合行；downloaderIDs 为空时匹配所有下载器；返回 hash/downloader 列表。
-// 失败场景：repo 未初始化或数据库查询失败时返回 error。
-// 副作用：仅执行数据库只读查询。
-func (r *MigrateRepository) ListAggregatedTorrentDeleteTargets(name string, size int64, downloaderIDs []string) ([]AggregatedTorrentDeleteTarget, error) {
-	if r == nil || r.store == nil || r.store.DB == nil {
-		return nil, errors.New("repo is nil")
-	}
-	name = strings.TrimSpace(name)
-	if name == "" || size <= 0 {
-		return []AggregatedTorrentDeleteTarget{}, nil
-	}
-
-	ids := normalizeStringList(downloaderIDs)
-	rows := make([]AggregatedTorrentDeleteTarget, 0)
-	query := r.store.DB.Table("torrents").
-		Select("hash, name, save_path, size, downloader_id").
-		Where("name = ? AND size = ? AND state NOT IN ? AND hash IS NOT NULL AND hash != '' AND downloader_id IS NOT NULL AND downloader_id != '' AND (is_hidden = 0 OR is_hidden IS NULL)", name, size, []string{"未做种", "不存在"})
-	if len(ids) > 0 {
-		query = query.Where("downloader_id IN ?", ids)
-	}
-	if err := query.Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-	return rows, nil
-}
-
-// HideTorrentRowsByHashes 将已从下载器删除的种子记录标记为隐藏。
-// 参数/返回：downloaderID 与 hashes 精确定位记录；reason 写入隐藏原因；返回 torrents 影响行数。
-// 失败场景：参数为空、事务开启失败或更新数据库失败时返回 error。
-// 副作用：更新 torrents 与 torrent_upload_stats 的隐藏字段，不物理删除数据库行。
-func (r *MigrateRepository) HideTorrentRowsByHashes(downloaderID string, hashes []string, reason string) (int64, error) {
-	if r == nil || r.store == nil || r.store.DB == nil {
-		return 0, errors.New("repo is nil")
-	}
-	downloaderID = strings.TrimSpace(downloaderID)
-	normalizedHashes := normalizeStringList(hashes)
-	if downloaderID == "" || len(normalizedHashes) == 0 {
-		return 0, nil
-	}
-
-	hiddenAt := time.Now().Format("2006-01-02 15:04:05")
-	updateData := map[string]any{
-		"is_hidden":     1,
-		"hidden_reason": strings.TrimSpace(reason),
-		"hidden_at":     hiddenAt,
-	}
-
-	tx := r.store.DB.Begin()
-	if tx.Error != nil {
-		return 0, tx.Error
-	}
-
-	hideResult := tx.Table("torrents").
-		Where("downloader_id = ? AND hash IN ? AND (is_hidden = 0 OR is_hidden IS NULL)", downloaderID, normalizedHashes).
-		Updates(updateData)
-	if hideResult.Error != nil {
-		tx.Rollback()
-		return 0, hideResult.Error
-	}
-
-	hideUpload := tx.Table("torrent_upload_stats").
-		Where("downloader_id = ? AND hash IN ? AND (is_hidden = 0 OR is_hidden IS NULL)", downloaderID, normalizedHashes).
-		Updates(updateData)
-	if hideUpload.Error != nil {
-		tx.Rollback()
-		return 0, hideUpload.Error
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		return 0, err
-	}
-	return hideResult.RowsAffected, nil
-}
-
-func normalizeStringList(values []string) []string {
-	result := make([]string, 0, len(values))
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		if _, exists := seen[trimmed]; exists {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		result = append(result, trimmed)
-	}
-	return result
 }
 
 // ReplaceUnseededPlaceholderHash 将 torrents 表中指定站点的“未做种”占位记录 hash 替换为真实 infohash。

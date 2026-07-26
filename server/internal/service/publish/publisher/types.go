@@ -10,6 +10,7 @@ type PublishInput struct {
 
 	// TargetInfo 为站点完整配置（仅少数特殊发布器需要，例如 rousi 的 passkey/user_agent）。
 	TargetInfo map[string]any
+	RootConfig map[string]any
 
 	UploadData  map[string]any
 	TorrentPath string

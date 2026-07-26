@@ -7,6 +7,7 @@ type PublishFromPayloadInput struct {
 	Payload             map[string]any
 	TorrentPath         string
 	DefaultDownloaderID string
+	RootConfig          map[string]any
 }
 
 // PublishFromPayloadDeps 定义从 payload 发起发布所需依赖。
@@ -47,6 +48,7 @@ func ExecutePublishFromPayload(input PublishFromPayloadInput, deps PublishFromPa
 			Context:             ctx,
 			TorrentPath:         strings.TrimSpace(input.TorrentPath),
 			DefaultDownloaderID: strings.TrimSpace(input.DefaultDownloaderID),
+			RootConfig:          input.RootConfig,
 		},
 		PublishWithContextDeps{
 			GetSiteByName:           deps.GetSiteByName,

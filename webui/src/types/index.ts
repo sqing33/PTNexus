@@ -23,7 +23,6 @@ export interface Torrent {
   seeders: number
   downloaderId?: string
   downloaderIds?: string[]
-  downloader_ids?: string[]
   target_sites_count?: number
   publish_at?: string | null
 }
