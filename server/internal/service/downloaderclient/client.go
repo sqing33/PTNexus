@@ -47,6 +47,43 @@ type AddTorrentOptions struct {
 	UploadLimitMBps int
 }
 
+// ApplyTorrentTags 将标签补写到已存在的下载器任务。
+// 参数/返回：hashes 为下载器任务 hash；tags 为要追加的标签；返回下载器接口错误。
+// 失败场景：下载器连接失败、认证失败、任务不存在或接口返回异常时返回错误。
+// 副作用：会向 qBittorrent 或 Transmission 发起写入请求，修改任务标签。
+func (d Downloader) ApplyTorrentTags(hashes, tags []string) error {
+	hashes = compactStrings(hashes)
+	tags = compactStrings(tags)
+	if len(hashes) == 0 || len(tags) == 0 {
+		return nil
+	}
+
+	switch d.Type {
+	case "qbittorrent":
+		client, err := newQBClient(d)
+		if err != nil {
+			return err
+		}
+		if err := client.Login(); err != nil {
+			return err
+		}
+		values := url.Values{}
+		values.Set("hashes", strings.Join(hashes, "|"))
+		values.Set("tags", strings.Join(tags, ","))
+		_, err = client.PostForm("torrents/addTags", values)
+		return err
+	case "transmission":
+		client := newTransmissionClient(d)
+		_, err := client.Call("torrent-set", map[string]any{
+			"ids":    hashes,
+			"labels": tags,
+		})
+		return err
+	default:
+		return fmt.Errorf("不支持的下载器类型: %s", d.Type)
+	}
+}
+
 func FromConfig(root map[string]any, downloaderID string) (Downloader, error) {
 	downloadersRaw, ok := root["downloaders"]
 	if !ok {

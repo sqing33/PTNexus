@@ -3,10 +3,12 @@ package downloader
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
+	"github.com/pt-nexus/server/internal/platform/logx"
 	"github.com/pt-nexus/server/internal/service/downloaderclient"
 	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
 	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
@@ -60,6 +62,8 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 
 	addMessage := ""
 	queuedTorrent := ""
+	addedTorrentHash := ""
+	tagApplyError := ""
 	startedAt := time.Now()
 	isLocalTorrent := strings.HasPrefix(strings.ToLower(rawURL), "file://") || publishuploader.LooksLikeLocalTorrentPath(rawURL)
 
@@ -98,12 +102,18 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 			return map[string]any{"success": false, "message": "file:// URL 无效"}, 400
 		}
 		filePath := parsed.Path
+		if content, readErr := os.ReadFile(filePath); readErr == nil {
+			addedTorrentHash = parseTorrentInfoHash(content)
+		}
 		if err := downloader.AddTorrentFileWithOptions(filePath, savePath, addOptions); err != nil {
 			return map[string]any{"success": false, "message": "添加种子文件失败: " + err.Error()}, 500
 		}
 		queuedTorrent = filePath
 		addMessage = "已通过本地种子文件添加到下载器"
 	} else if publishuploader.LooksLikeLocalTorrentPath(rawURL) {
+		if content, readErr := os.ReadFile(rawURL); readErr == nil {
+			addedTorrentHash = parseTorrentInfoHash(content)
+		}
 		if err := downloader.AddTorrentFileWithOptions(rawURL, savePath, addOptions); err != nil {
 			return map[string]any{"success": false, "message": "添加种子文件失败: " + err.Error()}, 500
 		}
@@ -114,6 +124,7 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 		downloadByDataErr := error(nil)
 		if len(detailSite) > 0 {
 			if _, _, torrentBytes, dlErr := acquirefetch.DownloadTorrentForSource(detailSite, rawURL); dlErr == nil && len(torrentBytes) > 0 {
+				addedTorrentHash = parseTorrentInfoHash(torrentBytes)
 				fileName := fmt.Sprintf("auto-%d.torrent", time.Now().UnixNano())
 				if err := downloader.AddTorrentDataWithOptions(torrentBytes, fileName, savePath, addOptions); err == nil {
 					addedByData = true
@@ -139,17 +150,67 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 		}
 	}
 
+	if addedTorrentHash != "" && len(addOptions.Tags) > 0 {
+		if err := applyTorrentTagsWithRetry(downloader, addedTorrentHash, addOptions.Tags); err != nil {
+			tagApplyError = err.Error()
+			logx.Warnf(downloaderTagLogModule, "下载器任务已添加但站点标签补写失败 downloader=%s hash=%s site=%s tags=%v err=%v", downloader.Name, addedTorrentHash, resolvedSiteNickname, addOptions.Tags, err)
+		} else {
+			logx.Infof(downloaderTagLogModule, "下载器站点标签补写成功 downloader=%s hash=%s site=%s tags=%v", downloader.Name, addedTorrentHash, resolvedSiteNickname, addOptions.Tags)
+		}
+	}
+
+	resultMessage := addMessage
+	if tagApplyError != "" {
+		resultMessage += "；任务已添加，但标签补写失败"
+	}
 	return map[string]any{
 		"success":          true,
-		"message":          addMessage,
+		"message":          resultMessage,
 		"downloader_id":    downloader.ID,
 		"downloader_name":  downloader.Name,
 		"queued_torrent":   queuedTorrent,
 		"site_nickname":    resolvedSiteNickname,
 		"applied_tags":     addOptions.Tags,
+		"tag_apply_error":  tagApplyError,
 		"applied_category": configuredCategory,
 		"cost_ms":          time.Since(startedAt).Milliseconds(),
 	}, 200
+}
+
+const downloaderTagLogModule = "发布-下载器标签"
+
+// parseTorrentInfoHash 从 torrent 文件内容中提取 infohash。
+// 参数/返回：content 为 bencode 编码的 torrent 文件；解析成功返回小写 infohash，否则返回空字符串。
+// 失败场景：内容为空或 torrent 格式非法时返回空字符串。
+// 副作用：无。
+func parseTorrentInfoHash(content []byte) string {
+	if len(content) == 0 {
+		return ""
+	}
+	meta, err := acquirefetch.ParseTorrentMeta(content)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(meta.InfoHash)
+}
+
+// applyTorrentTagsWithRetry 在添加任务后等待下载器完成入库，再补写标签。
+// 参数/返回：downloader 为目标下载器；hash 为任务 infohash；tags 为要写入的标签；返回最后一次接口错误。
+// 失败场景：下载器暂时未完成任务入库或标签接口持续返回错误时返回错误。
+// 副作用：最多向下载器发起三次标签写入请求，并短暂等待任务可见。
+func applyTorrentTagsWithRetry(downloader downloaderclient.Downloader, hash string, tags []string) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := downloader.ApplyTorrentTags([]string{hash}, tags); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if attempt < 2 {
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
+	return lastErr
 }
 
 func resolveSiteSpeedLimitMBps(site map[string]any) int {
