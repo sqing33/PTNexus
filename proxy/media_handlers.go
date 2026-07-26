@@ -148,8 +148,14 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer os.RemoveAll(tempDir)
 
-		videoIsHDR := detectHDRFromVideo(videoPath)
-		log.Printf("screenshot source HDR detection: video=%s hdr=%t", filepath.Base(videoPath), videoIsHDR)
+		videoIsHDR := detectHDRFromVideo(videoPath) || hasHDRKeyword(reqData.ContentName) || hasHDRKeyword(reqData.RemotePath)
+		log.Printf(
+			"screenshot source HDR detection: video=%s hdr=%t content_name=%q remote_path=%q",
+			filepath.Base(videoPath),
+			videoIsHDR,
+			reqData.ContentName,
+			reqData.RemotePath,
+		)
 
 		uploadedURLs := make([]string, 0, len(screenshotPoints))
 		for i, point := range screenshotPoints {

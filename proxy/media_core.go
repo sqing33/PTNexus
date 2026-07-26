@@ -175,7 +175,22 @@ func detectHDRFromVideo(videoPath string) bool {
 		return false
 	}
 	text := strings.ToLower(output)
-	return strings.Contains(text, "smpte2084") || strings.Contains(text, "bt2020")
+	return strings.Contains(text, "smpte2084") ||
+		strings.Contains(text, "bt2020") ||
+		strings.Contains(text, "dovi") ||
+		strings.Contains(text, "dolby vision")
+}
+
+func hasHDRKeyword(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return false
+	}
+	return strings.Contains(lower, "hdr") ||
+		strings.Contains(lower, "hdr10") ||
+		strings.Contains(lower, "dovi") ||
+		strings.Contains(lower, "dolby vision") ||
+		strings.Contains(lower, "dv ")
 }
 
 func takePreviewScreenshot(videoPath, outputPath string, timePoint float64, isHDR bool) error {
