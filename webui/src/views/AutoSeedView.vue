@@ -62,7 +62,20 @@
         >
           <el-table-column type="selection" width="44" />
           <el-table-column prop="source_site" label="源站" width="110" />
-          <el-table-column prop="name" label="名称" min-width="260" show-overflow-tooltip />
+          <el-table-column label="名称" min-width="260" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-link
+                v-if="sourceDetailURL(row)"
+                :href="sourceDetailURL(row)"
+                target="_blank"
+                :underline="false"
+                class="source-torrent-link"
+              >
+                {{ row.name }}
+              </el-link>
+              <span v-else>{{ row.name }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="大小" width="90" align="right">
             <template #default="{ row }">{{ formatGB(row.size_bytes) }}</template>
           </el-table-column>
@@ -882,6 +895,7 @@ const openLogs = (row: Item) => {
 
 const downloaderName = (id: string) =>
   downloaders.value.find((item) => item.id === id)?.name || id || '-'
+const sourceDetailURL = (row: Item) => row.detail_url || row.torrent_url || ''
 const formatGB = (bytes: number) =>
   bytes > 0 ? `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB` : '-'
 const displayType = (value: string) => typeDisplayMap[(value || '').trim()] || value || '-'

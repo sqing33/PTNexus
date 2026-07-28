@@ -201,13 +201,30 @@ func (s *Service) processRule(rule *repository.AutoSeedRule) {
 		if !isNew || created == nil {
 			continue
 		}
+		fetchResult, fetchReason := s.fetchItemDetails(created)
+		if fetchReason != "" {
+			_ = s.repo.MarkItemRejected(created.ID, fetchReason)
+			continue
+		}
+		if reason := rejectReason(rule, created); reason != "" {
+			_ = s.repo.MarkItemRejected(created.ID, reason)
+			continue
+		}
 		skipChecking := false
-		if err := downloader.AddTorrentURLWithOptions(created.TorrentURL, "", downloaderclient.AddTorrentOptions{
+		options := downloaderclient.AddTorrentOptions{
 			Paused:       rule.AutoPause,
 			Tags:         parseJSONStrings(rule.TagsJSON),
 			SkipChecking: &skipChecking,
-		}); err != nil {
-			_ = s.repo.MarkItemRejected(created.ID, "推送下载器失败: "+err.Error())
+		}
+		torrentPath := strings.TrimSpace(toString(fetchResult["torrent_path"], ""))
+		var addErr error
+		if torrentPath != "" {
+			addErr = downloader.AddTorrentFileWithOptions(torrentPath, "", options)
+		} else {
+			addErr = downloader.AddTorrentURLWithOptions(created.TorrentURL, "", options)
+		}
+		if addErr != nil {
+			_ = s.repo.MarkItemRejected(created.ID, "推送下载器失败: "+addErr.Error())
 			continue
 		}
 		hash := s.findDownloaderHash(downloader, created.Name)
@@ -335,23 +352,14 @@ func (s *Service) AddManualURL(torrentURL, downloaderID, sourceSite string) erro
 	if err := s.repo.CreateManualItem(item); err != nil {
 		return err
 	}
-	fetchResult := map[string]any{}
-	if s.fetchFn != nil {
-		result, status := s.fetchFn(map[string]any{
-			"sourceSite":           sourceSite,
-			"searchTerm":           torrentID,
-			"downloaderId":         downloaderID,
-			"savePath":             "",
-			"screenshotReviewMode": "background",
-			"task_id":              fmt.Sprintf("auto-seed-%d", item.ID),
-		})
-		fetchResult = result
-		if status >= 400 || !boolFromAny(result["success"]) {
-			message := toString(result["message"], "详情页数据抓取失败")
-			_ = s.repo.MarkItemRejected(item.ID, "详情页数据抓取失败: "+message)
-			return nil
-		}
-		s.applyFetchedDetails(item, fetchResult)
+	fetchResult, fetchReason := s.fetchItemDetails(item)
+	if fetchReason != "" {
+		_ = s.repo.MarkItemRejected(item.ID, fetchReason)
+		return nil
+	}
+	if reason := restrictedTagRejectReason(item); reason != "" {
+		_ = s.repo.MarkItemRejected(item.ID, reason)
+		return nil
 	}
 	if strings.TrimSpace(downloaderID) == "" {
 		_ = s.repo.MarkItemRejected(item.ID, "未获取到下载器")
@@ -520,12 +528,43 @@ func (s *Service) buildItemFromEntry(rule *repository.AutoSeedRule, entry feedEn
 		SizeBytes:    entry.SizeBytes,
 		ResourceType: resourceType,
 		Medium:       medium,
-		TagsJSON:     rule.TagsJSON,
+		TagsJSON:     encodeStrings(entry.Categories),
 		Status:       repository.AutoSeedItemStatusPending,
 		DownloaderID: rule.DownloaderID,
 		SiteName:     rule.SourceSite,
 		TorrentID:    inferTorrentIDFromURL(firstNonEmpty(entry.Link, torrentURL)),
 	}
+}
+
+// fetchItemDetails 抓取源站详情并回填自动发种记录，确保推送下载器前已取得源站标签。
+// 参数/返回：item 为已写入数据库的自动发种记录；成功返回抓取结果，失败返回可直接展示的未推送原因。
+// 失败场景：详情抓取函数未注入、缺少源站定位信息或抓取接口返回失败。
+// 副作用：会发起源站请求，并更新自动发种记录及对应的种子参数。
+func (s *Service) fetchItemDetails(item *repository.AutoSeedItem) (map[string]any, string) {
+	if s == nil || s.fetchFn == nil {
+		return nil, "未获取到源站标签，不允许下载"
+	}
+	if item == nil {
+		return nil, "RSS 数据为空"
+	}
+	searchTerm := firstNonEmpty(item.TorrentID, item.DetailURL, item.TorrentURL)
+	if strings.TrimSpace(item.SourceSite) == "" || strings.TrimSpace(searchTerm) == "" {
+		return nil, "未获取到源站详情，不允许下载"
+	}
+	result, status := s.fetchFn(map[string]any{
+		"sourceSite":           item.SourceSite,
+		"searchTerm":           searchTerm,
+		"torrentName":          item.Name,
+		"downloaderId":         item.DownloaderID,
+		"savePath":             "",
+		"screenshotReviewMode": "background",
+		"task_id":              fmt.Sprintf("auto-seed-%d", item.ID),
+	})
+	if status >= 400 || !boolFromAny(result["success"]) {
+		return result, "详情页数据抓取失败: " + toString(result["message"], "未知错误")
+	}
+	s.applyFetchedDetails(item, result)
+	return result, ""
 }
 
 func (s *Service) findDownloaderHash(d downloaderclient.Downloader, title string) string {
@@ -585,10 +624,8 @@ func (s *Service) applyFetchedDetails(item *repository.AutoSeedItem, fetchResult
 	if size := toInt64(fetchResult["size_bytes"], 0); size > 0 {
 		item.SizeBytes = size
 	}
-	if strings.TrimSpace(item.TagsJSON) == "" || item.TagsJSON == "[]" {
-		if tags := parseStringArrayAny(row["tags"]); len(tags) > 0 {
-			item.TagsJSON = encodeStrings(tags)
-		}
+	if tags := parseStringArrayAny(row["tags"]); len(tags) > 0 {
+		item.TagsJSON = encodeStrings(tags)
 	}
 	if strings.TrimSpace(item.TagsJSON) == "" {
 		item.TagsJSON = encodeStrings([]string{"PT Nexus", "自动发种"})
@@ -737,6 +774,12 @@ func rejectReason(rule *repository.AutoSeedRule, item *repository.AutoSeedItem) 
 	if strings.TrimSpace(item.TorrentURL) == "" {
 		return "未获取到种子地址"
 	}
+	if reason := restrictedTagRejectReason(item); reason != "" {
+		return reason
+	}
+	if rule == nil {
+		return ""
+	}
 	sizeGB := float64(item.SizeBytes) / 1024 / 1024 / 1024
 	if rule.MinSizeGB > 0 && item.SizeBytes > 0 && sizeGB < rule.MinSizeGB {
 		return "因大小限制"
@@ -749,6 +792,21 @@ func rejectReason(rule *repository.AutoSeedRule, item *repository.AutoSeedItem) 
 	}
 	if allowed := parseJSONStrings(rule.MediaJSON); len(allowed) > 0 && !containsFold(allowed, item.Medium) {
 		return "媒介不符合"
+	}
+	return ""
+}
+
+func restrictedTagRejectReason(item *repository.AutoSeedItem) string {
+	if item == nil {
+		return ""
+	}
+	for _, rawTag := range parseJSONStrings(item.TagsJSON) {
+		tag := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rawTag), "tag."))
+		for _, restricted := range []string{"分集", "禁转", "限转"} {
+			if strings.Contains(tag, restricted) {
+				return fmt.Sprintf("因%s标签不允许下载", restricted)
+			}
+		}
 	}
 	return ""
 }
