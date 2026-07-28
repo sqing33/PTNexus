@@ -444,8 +444,24 @@ func (r *AutoSeedRepository) MarkItemPublished(id int64, resultsJSON string) err
 	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(map[string]any{
 		"status":               AutoSeedItemStatusPublished,
 		"publish_results_json": strings.TrimSpace(resultsJSON),
+		"reject_reason":        "",
 		"published_at":         nowText,
 		"updated_at":           nowText,
+	}).Error
+}
+
+// UpdateItemPublishFeedback 回写发布队列反馈，不改变自动发种记录的流程状态。
+// 参数/返回：id 为自动发种记录主键，resultsJSON 为各目标站点的结果，reason 为未成功入队原因。
+// 失败场景：仓储未初始化或数据库更新失败时返回错误。
+// 副作用：更新 auto_seed_items 的发布结果、原因与更新时间。
+func (r *AutoSeedRepository) UpdateItemPublishFeedback(id int64, resultsJSON, reason string) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(map[string]any{
+		"publish_results_json": strings.TrimSpace(resultsJSON),
+		"reject_reason":        strings.TrimSpace(reason),
+		"updated_at":           time.Now().Format(PublishQueueTimeLayout),
 	}).Error
 }
 

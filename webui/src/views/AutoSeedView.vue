@@ -79,6 +79,9 @@
           <el-table-column label="大小" width="90" align="right">
             <template #default="{ row }">{{ formatGB(row.size_bytes) }}</template>
           </el-table-column>
+          <el-table-column label="下载时间" width="170">
+            <template #default="{ row }">{{ formatDownloadTime(row.pushed_at) }}</template>
+          </el-table-column>
           <el-table-column label="类型" width="90">
             <template #default="{ row }">{{ displayType(row.resource_type) }}</template>
           </el-table-column>
@@ -219,8 +222,28 @@
           <el-table-column label="进度" width="120">
             <template #default="{ row }">{{ Number(row.progress || 0).toFixed(1) }}%</template>
           </el-table-column>
+          <el-table-column label="下载时间" width="170">
+            <template #default="{ row }">{{ formatDownloadTime(row.pushed_at) }}</template>
+          </el-table-column>
           <el-table-column label="分组" width="100">
             <template #default="{ row }">{{ progressGroup(row) }}</template>
+          </el-table-column>
+          <el-table-column label="发布结果" min-width="260">
+            <template #default="{ row }">
+              <div v-if="publishResults(row).length" class="publish-results">
+                <el-link
+                  v-for="result in publishResults(row)"
+                  :key="result.label"
+                  :href="result.url || undefined"
+                  target="_blank"
+                  :underline="false"
+                  class="publish-result"
+                >
+                  {{ result.label }}
+                </el-link>
+              </div>
+              <span v-else>-</span>
+            </template>
           </el-table-column>
           <el-table-column label="操作" width="120">
             <template #default="{ row }">
@@ -528,6 +551,7 @@ type Item = {
   downloader_hash: string
   progress: number
   downloaded: boolean
+  pushed_at?: string
   torrent_id: string
   site_name: string
 }
@@ -932,15 +956,34 @@ const publishResults = (row: Item): { label: string; url?: string }[] => {
       const target = item?.target_site || item?.targetSite || item?.result?.target_site || '站点'
       const result = item?.result || {}
       const status = item?.status_text || result?.message || (result?.success ? '发布成功' : '已入队')
-      const seedingTime = item?.seeding_time ? `-${item.seeding_time}` : ''
+      const seedingTime = item?.seeding_time || elapsedSince(item?.updated_at)
       return {
-        label: `${target}-${status}${seedingTime}`,
+        label: [target, status, seedingTime].filter(Boolean).join(' · '),
         url: item?.result_url || result?.result_url || result?.url,
       }
     })
   } catch {
     return []
   }
+}
+
+const elapsedSince = (value?: string): string => {
+  if (!value) return ''
+  const publishedAt = new Date(value.replace(' ', 'T'))
+  const elapsed = Date.now() - publishedAt.getTime()
+  if (!Number.isFinite(elapsed) || elapsed < 0) return ''
+  const minutes = Math.floor(elapsed / 60_000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes}分钟`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}小时`
+  const days = Math.floor(hours / 24)
+  return `${days}天${hours % 24 ? `${hours % 24}小时` : ''}`
+}
+
+const formatDownloadTime = (value?: string): string => {
+  if (!value) return '-'
+  return value.replace('T', ' ').slice(0, 16) || '-'
 }
 
 watch(activeTab, (tab) => {

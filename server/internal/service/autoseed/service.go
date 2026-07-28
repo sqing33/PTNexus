@@ -9,10 +9,12 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/pt-nexus/server/internal/config"
 	"github.com/pt-nexus/server/internal/platform/logx"
@@ -24,6 +26,8 @@ const (
 	moduleAutoSeed         = "自动发种"
 	minDownloaderFreeBytes = int64(10 * 1024 * 1024 * 1024)
 )
+
+var autoSeedEpisodePattern = regexp.MustCompile(`(?i)(?:\bs\d{1,3}e\d{1,4}\b|\bep\d{1,4}\b|第\s*\d{1,4}\s*集)`)
 
 // EnqueueFn 定义自动发种向现有发布队列投递任务的函数签名。
 type EnqueueFn func(payload map[string]any) (map[string]any, int)
@@ -227,7 +231,7 @@ func (s *Service) processRule(rule *repository.AutoSeedRule) {
 			_ = s.repo.MarkItemRejected(created.ID, "推送下载器失败: "+addErr.Error())
 			continue
 		}
-		hash := s.findDownloaderHash(downloader, created.Name)
+		hash := firstNonEmpty(toString(fetchResult["hash"], ""), s.findDownloaderHash(downloader, created.Name))
 		_ = s.repo.MarkItemPushed(created.ID, hash, "")
 	}
 
@@ -260,10 +264,17 @@ func (s *Service) SyncProgressAndAutoPublish(downloaderID string) {
 			continue
 		}
 		for _, item := range rows {
+			if strings.TrimSpace(item.DownloaderHash) == "" {
+				item.DownloaderHash = s.findItemInfoHash(item)
+			}
 			if snapshot, ok := matchSnapshot(item, snapshots); ok {
 				downloaded := snapshot.Progress >= 99.9
 				_ = s.repo.UpdateItemProgress(item.ID, snapshot.Progress, downloaded, snapshot.Hash)
-				if downloaded && item.Status == repository.AutoSeedItemStatusPushed {
+				if reason := restrictedTagRejectReason(&item); reason != "" {
+					_ = s.repo.MarkItemRejected(item.ID, reason)
+					continue
+				}
+				if downloaded && (item.Status == repository.AutoSeedItemStatusPushed || item.Status == repository.AutoSeedItemStatusOrganized) {
 					s.autoOrganizeAndPublish(item)
 				}
 			}
@@ -271,9 +282,34 @@ func (s *Service) SyncProgressAndAutoPublish(downloaderID string) {
 	}
 }
 
+func (s *Service) findItemInfoHash(item repository.AutoSeedItem) string {
+	if s == nil || s.repo == nil || strings.TrimSpace(item.TorrentID) == "" {
+		return ""
+	}
+	siteName := firstNonEmpty(item.SiteName, item.SourceSite)
+	if siteName == "" {
+		return ""
+	}
+	row, err := s.repo.GetSeedParameter(item.TorrentID, siteName)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(toString(row["hash"], ""))
+}
+
+// autoOrganizeAndPublish 在种子下载完成后补全整理状态并投递自动发种任务。
+// 参数/返回：item 为已完成下载的自动发种记录；发布结果写入记录和发布队列。
+// 失败场景：规则不存在、未配置目标站点、缺少源站种子信息或入队失败时记录原因并保留可重试状态。
+// 副作用：更新自动发种记录，并向发布队列写入任务和日志。
 func (s *Service) autoOrganizeAndPublish(item repository.AutoSeedItem) {
+	if item.RuleID <= 0 {
+		return
+	}
 	rule, err := s.repo.GetRule(item.RuleID)
 	if err != nil {
+		reason := "自动发种未执行：未找到规则"
+		_ = s.repo.UpdateItemPublishFeedback(item.ID, item.PublishResultsJSON, reason)
+		logx.Warnf(moduleAutoSeed, "%s item_id=%d rule_id=%d err=%v", reason, item.ID, item.RuleID, err)
 		return
 	}
 	nowText := time.Now().Format(repository.PublishQueueTimeLayout)
@@ -288,8 +324,21 @@ func (s *Service) autoOrganizeAndPublish(item repository.AutoSeedItem) {
 		}
 		_ = s.repo.UpdateItemBasics(&item)
 	}
-	if len(parseJSONStrings(rule.TargetSitesJSON)) > 0 && strings.TrimSpace(item.TorrentID) != "" {
-		_, _ = s.PublishItems([]int64{item.ID}, parseJSONStrings(rule.TargetSitesJSON))
+	targetSites := parseJSONStrings(rule.TargetSitesJSON)
+	if len(targetSites) == 0 {
+		reason := "自动发种未执行：规则未配置发布站点"
+		_ = s.repo.UpdateItemPublishFeedback(item.ID, item.PublishResultsJSON, reason)
+		logx.Warnf(moduleAutoSeed, "%s item_id=%d rule_id=%d", reason, item.ID, rule.ID)
+		return
+	}
+	if strings.TrimSpace(item.TorrentID) == "" || strings.TrimSpace(firstNonEmpty(item.SiteName, item.SourceSite)) == "" {
+		reason := "自动发种未执行：缺少源站种子信息"
+		_ = s.repo.UpdateItemPublishFeedback(item.ID, item.PublishResultsJSON, reason)
+		logx.Warnf(moduleAutoSeed, "%s item_id=%d", reason, item.ID)
+		return
+	}
+	if _, err := s.PublishItems([]int64{item.ID}, targetSites); err != nil {
+		logx.Warnf(moduleAutoSeed, "自动发种入队失败 item_id=%d rule_id=%d err=%v", item.ID, rule.ID, err)
 	}
 }
 
@@ -428,6 +477,7 @@ func (s *Service) PublishItems(ids []int64, targetSites []string) (map[string]an
 		return nil, errors.New("请选择发布站点")
 	}
 	results := make([]map[string]any, 0, len(ids)*len(targetSites))
+	queuedItems := 0
 	for _, id := range ids {
 		item, err := s.repo.GetItem(id)
 		if err != nil {
@@ -447,6 +497,8 @@ func (s *Service) PublishItems(ids []int64, targetSites []string) (map[string]an
 		interval, concurrency := s.resolveDownloaderPublishSettings(item.DownloaderID)
 		now := time.Now()
 		itemResults := make([]map[string]any, 0, len(targetSites))
+		queuedTargets := 0
+		failedTargets := make([]string, 0, len(targetSites))
 		for idx, target := range targetSites {
 			seed := map[string]any{
 				"torrent_id":    torrentID,
@@ -471,9 +523,26 @@ func (s *Service) PublishItems(ids []int64, targetSites []string) (map[string]an
 			entry := map[string]any{"id": id, "target_site": target, "status": code, "result": result}
 			results = append(results, entry)
 			itemResults = append(itemResults, entry)
+			if code < 400 && boolFromAny(result["success"]) {
+				queuedTargets++
+			} else {
+				failedTargets = append(failedTargets, target+"："+toString(result["message"], fmt.Sprintf("入队失败（HTTP %d）", code)))
+			}
 		}
 		encoded, _ := json.Marshal(mergeAutoSeedPublishResults(item.PublishResultsJSON, itemResults))
-		_ = s.repo.MarkItemPublished(id, string(encoded))
+		if queuedTargets > 0 {
+			queuedItems++
+			_ = s.repo.MarkItemPublished(id, string(encoded))
+			continue
+		}
+		reason := "自动发种未入队"
+		if len(failedTargets) > 0 {
+			reason += "：" + strings.Join(failedTargets, "；")
+		}
+		_ = s.repo.UpdateItemPublishFeedback(id, string(encoded), reason)
+	}
+	if queuedItems == 0 {
+		return map[string]any{"success": false, "results": results}, errors.New("所有目标站点均未加入发布队列")
 	}
 	return map[string]any{"success": true, "results": results}, nil
 }
@@ -505,6 +574,7 @@ func (s *Service) Progress(downloaderID string) ([]repository.AutoSeedItem, erro
 		return nil, err
 	}
 	s.enrichItemSavePaths(rows)
+	s.enrichItemPublishResults(rows)
 	return rows, nil
 }
 
@@ -572,10 +642,8 @@ func (s *Service) findDownloaderHash(d downloaderclient.Downloader, title string
 	if err != nil {
 		return ""
 	}
-	for _, item := range snapshots {
-		if strings.TrimSpace(item.Name) == strings.TrimSpace(title) {
-			return item.Hash
-		}
+	if snapshot, ok := matchSnapshot(repository.AutoSeedItem{Name: title}, snapshots); ok {
+		return snapshot.Hash
 	}
 	return ""
 }
@@ -808,6 +876,9 @@ func restrictedTagRejectReason(item *repository.AutoSeedItem) string {
 			}
 		}
 	}
+	if autoSeedEpisodePattern.MatchString(item.Name) {
+		return "因分集标签不允许下载"
+	}
 	return ""
 }
 
@@ -840,7 +911,41 @@ func matchSnapshot(item repository.AutoSeedItem, snapshots []downloaderclient.To
 			return snapshot, true
 		}
 	}
+	normalizedName := normalizeTorrentName(name)
+	if normalizedName == "" {
+		return downloaderclient.TorrentSnapshot{}, false
+	}
+	var matched downloaderclient.TorrentSnapshot
+	matchedCount := 0
+	for _, snapshot := range snapshots {
+		if normalizeTorrentName(snapshot.Name) != normalizedName {
+			continue
+		}
+		matched = snapshot
+		matchedCount++
+	}
+	if matchedCount == 1 {
+		return matched, true
+	}
 	return downloaderclient.TorrentSnapshot{}, false
+}
+
+func normalizeTorrentName(value string) string {
+	value = strings.TrimSuffix(strings.TrimSpace(value), ".torrent")
+	for strings.HasPrefix(value, "[") {
+		end := strings.Index(value, "]")
+		if end <= 0 {
+			break
+		}
+		value = strings.TrimSpace(value[end+1:])
+	}
+	var builder strings.Builder
+	for _, char := range strings.ToLower(value) {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) {
+			builder.WriteRune(char)
+		}
+	}
+	return builder.String()
 }
 
 func (s *Service) enrichItemSavePaths(items []repository.AutoSeedItem) {
@@ -914,7 +1019,13 @@ func (s *Service) enrichItemPublishResults(items []repository.AutoSeedItem) {
 			continue
 		}
 		encoded, _ := json.Marshal(mergeAutoSeedPublishResults(items[idx].PublishResultsJSON, latestBySite))
-		items[idx].PublishResultsJSON = string(encoded)
+		merged := string(encoded)
+		if merged != items[idx].PublishResultsJSON {
+			if err := s.repo.UpdateItemPublishFeedback(items[idx].ID, merged, ""); err != nil {
+				logx.Warnf(moduleAutoSeed, "更新自动发种发布结果失败 item_id=%d err=%v", items[idx].ID, err)
+			}
+		}
+		items[idx].PublishResultsJSON = merged
 	}
 }
 
