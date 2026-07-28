@@ -30,6 +30,7 @@ type RefreshMediainfoDeps struct {
 	FetchProxyMediaInfo func(downloaderID, remotePath, contentName string) ProxyMediaInfoProbe
 
 	TranslateDownloaderPath func(downloaderID string, savePath string) string
+	ShouldSkipLocalFallback func(downloaderID string, savePath string, translatedSavePath string) bool
 
 	AfterPersist func(hash, torrentID, siteName string, row map[string]any, savePath string, torrentName string, mediainfo string)
 }
@@ -67,6 +68,7 @@ func RefreshMediainfoAsync(payload map[string]any, repo RefreshMediainfoRepo, de
 	downloaderID := strings.TrimSpace(toStringWithDefault(payload["downloader_id"], toStringWithDefault(payload["downloaderId"], "")))
 	torrentName := strings.TrimSpace(toStringWithDefault(payload["torrent_name"], toStringWithDefault(payload["torrentName"], "")))
 	currentMediainfo := strings.TrimSpace(toStringWithDefault(payload["current_mediainfo"], toStringWithDefault(payload["mediainfo"], "")))
+	preferExactRemotePath := boolWithDefault(payload["prefer_exact_remote_path"], false)
 	logx.Infof(
 		logModule,
 		"开始刷新：seed_id=%s save_path=%s torrent_name=%s content_name=%s downloader_id=%s",
@@ -101,7 +103,7 @@ func RefreshMediainfoAsync(payload map[string]any, repo RefreshMediainfoRepo, de
 	// 优先尝试盒子代理远程提取 MediaInfo：适用于 downloader.use_proxy=true 且本机不挂载媒体目录的场景。
 	// 注意：此处使用原始 save_path 作为 remote_path 候选，避免被本地路径映射污染。
 	if deps.FetchProxyMediaInfo != nil && strings.TrimSpace(downloaderID) != "" {
-		remoteCandidates := buildRemotePathCandidates(savePath, torrentName, contentName)
+		remoteCandidates := buildRemotePathCandidates(savePath, torrentName, contentName, preferExactRemotePath)
 		for _, remoteCandidate := range remoteCandidates {
 			probe := deps.FetchProxyMediaInfo(downloaderID, remoteCandidate, contentName)
 			if probe.StatusCode == 0 {
@@ -188,6 +190,12 @@ func RefreshMediainfoAsync(payload map[string]any, repo RefreshMediainfoRepo, de
 		seedID, savePath, translatedSavePath,
 	)
 
+	if deps.ShouldSkipLocalFallback != nil && deps.ShouldSkipLocalFallback(downloaderID, savePath, translatedSavePath) {
+		message := "下载器已启用远程模式，代理未能定位媒体文件，且未配置本地路径映射，已停止本地扫描"
+		logx.Warnf(logModule, "跳过本地媒体扫描：seed_id=%s downloader_id=%s save_path=%s translated_save_path=%s", seedID, downloaderID, savePath, translatedSavePath)
+		return map[string]any{"success": false, "message": message}, 400
+	}
+
 	isBluray, detectedPath := DetectBlurayDiscByCandidates(translatedSavePath, torrentName, contentName)
 	if isBluray {
 		logx.Warnf(logModule, "蓝光判定命中：seed_id=%s resolved_path=%s action=启动BDInfo", seedID, detectedPath)
@@ -262,20 +270,35 @@ func RefreshMediainfoAsync(payload map[string]any, repo RefreshMediainfoRepo, de
 	}, 200
 }
 
-func buildRemotePathCandidates(savePath, torrentName, contentName string) []string {
+func buildRemotePathCandidates(savePath, torrentName, contentName string, preferExactPath bool) []string {
 	trimmedSavePath := strings.TrimSpace(savePath)
 	trimmedTorrentName := strings.TrimSpace(torrentName)
 	trimmedContentName := strings.TrimSpace(contentName)
 
 	candidates := make([]string, 0, 3)
+	appendCandidate := func(candidate string) {
+		normalized := normalizeProxyRemotePath(candidate)
+		if normalized == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if normalizeProxyRemotePath(existing) == normalized {
+				return
+			}
+		}
+		candidates = append(candidates, normalized)
+	}
+	if preferExactPath && trimmedSavePath != "" {
+		appendCandidate(trimmedSavePath)
+	}
 	if trimmedSavePath != "" && trimmedTorrentName != "" {
-		candidates = append(candidates, joinProxyRemotePath(trimmedSavePath, trimmedTorrentName))
+		appendCandidate(joinProxyRemotePath(trimmedSavePath, trimmedTorrentName))
 	}
 	if trimmedSavePath != "" && trimmedContentName != "" && !strings.EqualFold(trimmedContentName, trimmedTorrentName) {
-		candidates = append(candidates, joinProxyRemotePath(trimmedSavePath, trimmedContentName))
+		appendCandidate(joinProxyRemotePath(trimmedSavePath, trimmedContentName))
 	}
 	if trimmedSavePath != "" {
-		candidates = append(candidates, normalizeProxyRemotePath(trimmedSavePath))
+		appendCandidate(trimmedSavePath)
 	}
 	return candidates
 }
@@ -485,6 +508,29 @@ func toStringWithDefault(value any, fallback string) string {
 			return fallback
 		}
 		return trimmed
+	default:
+		return fallback
+	}
+}
+
+func boolWithDefault(value any, fallback bool) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		normalized := strings.ToLower(strings.TrimSpace(typed))
+		if normalized == "" {
+			return fallback
+		}
+		return normalized == "true" || normalized == "1" || normalized == "yes" || normalized == "on"
+	case []byte:
+		return boolWithDefault(string(typed), fallback)
+	case int:
+		return typed != 0
+	case int64:
+		return typed != 0
+	case float64:
+		return typed != 0
 	default:
 		return fallback
 	}

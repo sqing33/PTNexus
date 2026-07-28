@@ -50,6 +50,7 @@ export type SeedFlowDeps = {
   openFetchedScreenshotPreview: () => Promise<void>
   handleApiError: (error: unknown, defaultMessage: string) => void
   isTargetSiteSelectable: (siteName: string) => boolean
+  onSeedInfoUpdated?: () => void
 
   screenshotValid: Ref<boolean>
   screenshotImages: ComputedRef<string[]>
@@ -136,6 +137,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     openFetchedScreenshotPreview,
     handleApiError,
     isTargetSiteSelectable,
+    onSeedInfoUpdated,
     screenshotValid,
     screenshotImages,
   } = deps
@@ -1169,6 +1171,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           message: '参数已更新并重新标准化，请核对预览内容。',
         })
 
+        onSeedInfoUpdated?.()
         activeStep.value = 1
       } else {
         ElNotification.error({

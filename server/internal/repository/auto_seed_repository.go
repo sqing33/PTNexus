@@ -1,0 +1,538 @@
+package repository
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+)
+
+const (
+	AutoSeedRuleStatusEnabled   = "enabled"
+	AutoSeedRuleStatusPaused    = "paused"
+	AutoSeedItemStatusPending   = "pending"
+	AutoSeedItemStatusPushed    = "pushed"
+	AutoSeedItemStatusOrganized = "organized"
+	AutoSeedItemStatusPublished = "published"
+	AutoSeedItemStatusRejected  = "rejected"
+)
+
+// AutoSeedRule 表示一条 RSS 自动发种规则，包含过滤条件、下载器和发布目标。
+// 参数/返回：字段直接映射 auto_seed_rules 表，供仓储和接口复用。
+// 失败场景：无直接失败场景。
+// 副作用：无副作用，仅承载数据。
+type AutoSeedRule struct {
+	ID int64 `json:"id" gorm:"column:id;primaryKey"`
+
+	Name         string `json:"name" gorm:"column:name"`
+	Enabled      bool   `json:"enabled" gorm:"column:enabled"`
+	PausedReason string `json:"paused_reason" gorm:"column:paused_reason"`
+
+	SourceSite string `json:"source_site" gorm:"column:source_site"`
+	RSSURL     string `json:"rss_url" gorm:"column:rss_url"`
+
+	DownloaderID string `json:"downloader_id" gorm:"column:downloader_id"`
+	SavePath     string `json:"save_path" gorm:"column:save_path"`
+	AutoPause    bool   `json:"auto_pause" gorm:"column:auto_pause"`
+	AutoOrganize bool   `json:"auto_organize" gorm:"column:auto_organize"`
+
+	MinSizeGB       float64 `json:"min_size_gb" gorm:"column:min_size_gb"`
+	MaxSizeGB       float64 `json:"max_size_gb" gorm:"column:max_size_gb"`
+	TypesJSON       string  `json:"types_json" gorm:"column:types_json"`
+	MediaJSON       string  `json:"media_json" gorm:"column:media_json"`
+	TagsJSON        string  `json:"tags_json" gorm:"column:tags_json"`
+	TargetSitesJSON string  `json:"target_sites_json" gorm:"column:target_sites_json"`
+
+	PullIntervalMinutes    int     `json:"pull_interval_minutes" gorm:"column:pull_interval_minutes"`
+	PublishIntervalMinutes int     `json:"publish_interval_minutes" gorm:"column:publish_interval_minutes"`
+	PublishConcurrency     int     `json:"publish_concurrency" gorm:"column:publish_concurrency"`
+	LastRunAt              *string `json:"last_run_at,omitempty" gorm:"column:last_run_at"`
+	NextRunAt              string  `json:"next_run_at" gorm:"column:next_run_at"`
+
+	CreatedAt string `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt string `json:"updated_at" gorm:"column:updated_at"`
+}
+
+func (AutoSeedRule) TableName() string { return "auto_seed_rules" }
+
+// AutoSeedItem 表示从 RSS 或手工 URL 进入自动发种列表的一条种子记录。
+// 参数/返回：字段直接映射 auto_seed_items 表，供列表、整理、发布、删除流程复用。
+// 失败场景：无直接失败场景。
+// 副作用：无副作用，仅承载数据。
+type AutoSeedItem struct {
+	ID int64 `json:"id" gorm:"column:id;primaryKey"`
+
+	RuleID       int64  `json:"rule_id" gorm:"column:rule_id"`
+	SourceSite   string `json:"source_site" gorm:"column:source_site"`
+	GUID         string `json:"guid" gorm:"column:guid"`
+	TorrentURL   string `json:"torrent_url" gorm:"column:torrent_url"`
+	DetailURL    string `json:"detail_url" gorm:"column:detail_url"`
+	Name         string `json:"name" gorm:"column:name"`
+	SavePath     string `json:"save_path" gorm:"-"`
+	SizeBytes    int64  `json:"size_bytes" gorm:"column:size_bytes"`
+	ResourceType string `json:"resource_type" gorm:"column:resource_type"`
+	Medium       string `json:"medium" gorm:"column:medium"`
+	TagsJSON     string `json:"tags_json" gorm:"column:tags_json"`
+
+	Status             string `json:"status" gorm:"column:status"`
+	RejectReason       string `json:"reject_reason" gorm:"column:reject_reason"`
+	PublishResultsJSON string `json:"publish_results_json" gorm:"column:publish_results_json"`
+
+	DownloaderID   string  `json:"downloader_id" gorm:"column:downloader_id"`
+	DownloaderHash string  `json:"downloader_hash" gorm:"column:downloader_hash"`
+	Progress       float64 `json:"progress" gorm:"column:progress"`
+	Downloaded     bool    `json:"downloaded" gorm:"column:downloaded"`
+
+	TorrentID string `json:"torrent_id" gorm:"column:torrent_id"`
+	SiteName  string `json:"site_name" gorm:"column:site_name"`
+
+	PushedAt    *string `json:"pushed_at,omitempty" gorm:"column:pushed_at"`
+	OrganizedAt *string `json:"organized_at,omitempty" gorm:"column:organized_at"`
+	PublishedAt *string `json:"published_at,omitempty" gorm:"column:published_at"`
+	CreatedAt   string  `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt   string  `json:"updated_at" gorm:"column:updated_at"`
+}
+
+func (AutoSeedItem) TableName() string { return "auto_seed_items" }
+
+// AutoSeedListQuery 定义自动发种列表的分页、筛选与搜索条件。
+type AutoSeedListQuery struct {
+	Page         int
+	PageSize     int
+	SourceSite   string
+	Status       string
+	ResourceType string
+	DownloaderID string
+	Search       string
+}
+
+// AutoSeedRepository 负责自动发种规则和 RSS 种子记录的数据库读写。
+// 参数/返回：依赖 Store 访问数据库，方法返回 error 表示失败原因。
+// 失败场景：数据库未初始化、查询或写入失败时返回 error。
+// 副作用：会写入 auto_seed_rules、auto_seed_items 表。
+type AutoSeedRepository struct {
+	store *Store
+}
+
+// NewAutoSeedRepository 创建自动发种仓储实例。
+// 参数/返回：store 为数据库连接容器，返回可复用的仓储对象。
+// 失败场景：无直接失败场景。
+// 副作用：无副作用。
+func NewAutoSeedRepository(store *Store) *AutoSeedRepository {
+	return &AutoSeedRepository{store: store}
+}
+
+// CreateRule 新增一条自动发种规则并补齐默认时间字段。
+func (r *AutoSeedRepository) CreateRule(rule *AutoSeedRule) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	now := time.Now().Format(PublishQueueTimeLayout)
+	rule.CreatedAt = now
+	rule.UpdatedAt = now
+	if rule.PullIntervalMinutes <= 0 {
+		rule.PullIntervalMinutes = 30
+	}
+	if rule.PublishIntervalMinutes < 0 {
+		rule.PublishIntervalMinutes = 0
+	}
+	if rule.PublishConcurrency <= 0 {
+		rule.PublishConcurrency = 1
+	}
+	if strings.TrimSpace(rule.NextRunAt) == "" {
+		rule.NextRunAt = now
+	}
+	return r.store.DB.Table("auto_seed_rules").Create(rule).Error
+}
+
+// UpdateRule 更新一条自动发种规则的可编辑字段。
+func (r *AutoSeedRepository) UpdateRule(rule *AutoSeedRule) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	rule.UpdatedAt = time.Now().Format(PublishQueueTimeLayout)
+	return r.store.DB.Table("auto_seed_rules").Where("id = ?", rule.ID).Updates(map[string]any{
+		"name":                     rule.Name,
+		"enabled":                  rule.Enabled,
+		"paused_reason":            rule.PausedReason,
+		"source_site":              rule.SourceSite,
+		"rss_url":                  rule.RSSURL,
+		"downloader_id":            rule.DownloaderID,
+		"save_path":                rule.SavePath,
+		"auto_pause":               rule.AutoPause,
+		"auto_organize":            rule.AutoOrganize,
+		"min_size_gb":              rule.MinSizeGB,
+		"max_size_gb":              rule.MaxSizeGB,
+		"types_json":               rule.TypesJSON,
+		"media_json":               rule.MediaJSON,
+		"tags_json":                rule.TagsJSON,
+		"target_sites_json":        rule.TargetSitesJSON,
+		"pull_interval_minutes":    rule.PullIntervalMinutes,
+		"publish_interval_minutes": rule.PublishIntervalMinutes,
+		"publish_concurrency":      rule.PublishConcurrency,
+		"next_run_at":              rule.NextRunAt,
+		"updated_at":               rule.UpdatedAt,
+	}).Error
+}
+
+// DeleteRule 删除规则以及该规则下尚未发布的 RSS 记录。
+func (r *AutoSeedRepository) DeleteRule(id int64) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	return r.store.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Table("auto_seed_items").
+			Where("rule_id = ? AND status NOT IN ?", id, []string{AutoSeedItemStatusPublished}).
+			Delete(&AutoSeedItem{}).Error; err != nil {
+			return err
+		}
+		result := tx.Table("auto_seed_rules").Where("id = ?", id).Delete(&AutoSeedRule{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("规则不存在")
+		}
+		return nil
+	})
+}
+
+// GetRule 按 ID 查询自动发种规则。
+func (r *AutoSeedRepository) GetRule(id int64) (*AutoSeedRule, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("auto seed repo is nil")
+	}
+	row := AutoSeedRule{}
+	if err := r.store.DB.Table("auto_seed_rules").Where("id = ?", id).First(&row).Error; err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// ListRules 返回全部自动发种规则，按最近创建倒序。
+func (r *AutoSeedRepository) ListRules() ([]AutoSeedRule, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("auto seed repo is nil")
+	}
+	rows := make([]AutoSeedRule, 0)
+	if err := r.store.DB.Table("auto_seed_rules").Order("id DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// FindDueRules 查询到期且启用的 RSS 拉取规则。
+func (r *AutoSeedRepository) FindDueRules(now time.Time) ([]AutoSeedRule, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("auto seed repo is nil")
+	}
+	rows := make([]AutoSeedRule, 0)
+	nowText := now.Format(PublishQueueTimeLayout)
+	if err := r.store.DB.Table("auto_seed_rules").
+		Where("enabled = ? AND next_run_at <= ?", true, nowText).
+		Order("next_run_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// MarkRulePulled 更新规则的最近拉取时间、下次拉取时间和暂停原因。
+func (r *AutoSeedRepository) MarkRulePulled(id int64, nextRunAt time.Time, pausedReason string, enabled bool) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	nowText := time.Now().Format(PublishQueueTimeLayout)
+	return r.store.DB.Table("auto_seed_rules").Where("id = ?", id).Updates(map[string]any{
+		"enabled":       enabled,
+		"paused_reason": strings.TrimSpace(pausedReason),
+		"last_run_at":   nowText,
+		"next_run_at":   nextRunAt.Format(PublishQueueTimeLayout),
+		"updated_at":    nowText,
+	}).Error
+}
+
+// UpsertItem 按 rule_id + guid 幂等写入 RSS 种子记录。
+func (r *AutoSeedRepository) UpsertItem(item *AutoSeedItem) (*AutoSeedItem, bool, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, false, errors.New("auto seed repo is nil")
+	}
+	if item == nil {
+		return nil, false, errors.New("item is nil")
+	}
+	existing := AutoSeedItem{}
+	err := r.store.DB.Table("auto_seed_items").
+		Where("rule_id = ? AND guid = ?", item.RuleID, item.GUID).
+		Limit(1).
+		Find(&existing).Error
+	if err != nil {
+		return nil, false, err
+	}
+	if existing.ID > 0 {
+		return &existing, false, nil
+	}
+	now := time.Now().Format(PublishQueueTimeLayout)
+	item.CreatedAt = now
+	item.UpdatedAt = now
+	if strings.TrimSpace(item.Status) == "" {
+		item.Status = AutoSeedItemStatusPending
+	}
+	if err := r.store.DB.Table("auto_seed_items").Create(item).Error; err != nil {
+		return nil, false, err
+	}
+	return item, true, nil
+}
+
+// CreateManualItem 写入用户手动添加的种子 URL。
+func (r *AutoSeedRepository) CreateManualItem(item *AutoSeedItem) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	now := time.Now().Format(PublishQueueTimeLayout)
+	item.CreatedAt = now
+	item.UpdatedAt = now
+	if strings.TrimSpace(item.Status) == "" {
+		item.Status = AutoSeedItemStatusPending
+	}
+	return r.store.DB.Table("auto_seed_items").Create(item).Error
+}
+
+// ListItems 分页查询自动发种种子列表。
+func (r *AutoSeedRepository) ListItems(query AutoSeedListQuery) ([]AutoSeedItem, int64, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, 0, errors.New("auto seed repo is nil")
+	}
+	if query.Page < 1 {
+		query.Page = 1
+	}
+	if query.PageSize < 1 || query.PageSize > 200 {
+		query.PageSize = 20
+	}
+	db := r.store.DB.Table("auto_seed_items")
+	if value := strings.TrimSpace(query.SourceSite); value != "" {
+		db = db.Where("source_site = ?", value)
+	}
+	if value := strings.TrimSpace(query.Status); value != "" {
+		db = db.Where("status = ?", value)
+	}
+	if value := strings.TrimSpace(query.ResourceType); value != "" {
+		db = db.Where("resource_type = ?", value)
+	}
+	if value := strings.TrimSpace(query.DownloaderID); value != "" {
+		db = db.Where("downloader_id = ?", value)
+	}
+	if value := strings.TrimSpace(query.Search); value != "" {
+		like := "%" + value + "%"
+		db = db.Where("(name LIKE ? OR torrent_url LIKE ? OR detail_url LIKE ?)", like, like, like)
+	}
+	total := int64(0)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	rows := make([]AutoSeedItem, 0)
+	offset := (query.Page - 1) * query.PageSize
+	if err := db.Order("id DESC").Offset(offset).Limit(query.PageSize).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
+// GetItem 按 ID 查询自动发种种子记录。
+func (r *AutoSeedRepository) GetItem(id int64) (*AutoSeedItem, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("auto seed repo is nil")
+	}
+	row := AutoSeedItem{}
+	if err := r.store.DB.Table("auto_seed_items").Where("id = ?", id).First(&row).Error; err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// UpdateItemBasics 更新种子的人工整理字段。
+func (r *AutoSeedRepository) UpdateItemBasics(item *AutoSeedItem) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	nowText := time.Now().Format(PublishQueueTimeLayout)
+	updates := map[string]any{
+		"name":          item.Name,
+		"resource_type": item.ResourceType,
+		"medium":        item.Medium,
+		"tags_json":     item.TagsJSON,
+		"torrent_id":    item.TorrentID,
+		"site_name":     item.SiteName,
+		"status":        item.Status,
+		"organized_at":  item.OrganizedAt,
+		"updated_at":    nowText,
+	}
+	return r.store.DB.Table("auto_seed_items").Where("id = ?", item.ID).Updates(updates).Error
+}
+
+// UpdateItemFetchedDetails 回填自动抓取到的种子基础信息，不改变当前流程状态。
+func (r *AutoSeedRepository) UpdateItemFetchedDetails(item *AutoSeedItem) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	if item == nil || item.ID <= 0 {
+		return errors.New("item is nil")
+	}
+	return r.store.DB.Table("auto_seed_items").Where("id = ?", item.ID).Updates(map[string]any{
+		"name":          item.Name,
+		"detail_url":    item.DetailURL,
+		"size_bytes":    item.SizeBytes,
+		"resource_type": item.ResourceType,
+		"medium":        item.Medium,
+		"tags_json":     item.TagsJSON,
+		"torrent_id":    item.TorrentID,
+		"site_name":     item.SiteName,
+		"updated_at":    time.Now().Format(PublishQueueTimeLayout),
+	}).Error
+}
+
+// MarkItemPushed 更新种子推送下载器后的状态。
+func (r *AutoSeedRepository) MarkItemPushed(id int64, downloaderHash string, rejectReason string) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	nowText := time.Now().Format(PublishQueueTimeLayout)
+	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(map[string]any{
+		"status":          AutoSeedItemStatusPushed,
+		"downloader_hash": strings.TrimSpace(downloaderHash),
+		"reject_reason":   strings.TrimSpace(rejectReason),
+		"pushed_at":       nowText,
+		"updated_at":      nowText,
+	}).Error
+}
+
+// MarkItemRejected 标记种子未通过规则或推送失败。
+func (r *AutoSeedRepository) MarkItemRejected(id int64, reason string) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(map[string]any{
+		"status":        AutoSeedItemStatusRejected,
+		"reject_reason": strings.TrimSpace(reason),
+		"updated_at":    time.Now().Format(PublishQueueTimeLayout),
+	}).Error
+}
+
+// UpdateItemProgress 更新自动发种记录的下载进度。
+func (r *AutoSeedRepository) UpdateItemProgress(id int64, progress float64, downloaded bool, hash string) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	updates := map[string]any{
+		"progress":   progress,
+		"downloaded": downloaded,
+		"updated_at": time.Now().Format(PublishQueueTimeLayout),
+	}
+	if strings.TrimSpace(hash) != "" {
+		updates["downloader_hash"] = strings.TrimSpace(hash)
+	}
+	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(updates).Error
+}
+
+// MarkItemPublished 写入发布结果并标记为已发布。
+func (r *AutoSeedRepository) MarkItemPublished(id int64, resultsJSON string) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	nowText := time.Now().Format(PublishQueueTimeLayout)
+	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(map[string]any{
+		"status":               AutoSeedItemStatusPublished,
+		"publish_results_json": strings.TrimSpace(resultsJSON),
+		"published_at":         nowText,
+		"updated_at":           nowText,
+	}).Error
+}
+
+// GetSeedParameter 查询自动抓取后写入的种子参数记录。
+func (r *AutoSeedRepository) GetSeedParameter(torrentID, siteName string) (map[string]any, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("auto seed repo is nil")
+	}
+	row := map[string]any{}
+	err := r.store.DB.Table("seed_parameters").
+		Where("torrent_id = ? AND (site_name = ? OR nickname = ?)", strings.TrimSpace(torrentID), strings.TrimSpace(siteName), strings.TrimSpace(siteName)).
+		Order("updated_at DESC").
+		Limit(1).
+		Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(row) == 0 {
+		lowered := strings.ToLower(strings.TrimSpace(siteName))
+		if lowered != "" {
+			err = r.store.DB.Table("seed_parameters").
+				Where("torrent_id = ? AND (LOWER(site_name) = ? OR LOWER(nickname) = ?)", strings.TrimSpace(torrentID), lowered, lowered).
+				Order("updated_at DESC").
+				Limit(1).
+				Scan(&row).Error
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(row) == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return row, nil
+}
+
+// DeleteItems 删除自动发种种子记录。
+func (r *AutoSeedRepository) DeleteItems(ids []int64) (int64, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return 0, errors.New("auto seed repo is nil")
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	result := r.store.DB.Table("auto_seed_items").Where("id IN ?", ids).Delete(&AutoSeedItem{})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+// ListProgressItems 查询下载器进度页所需的全部自动发种记录。
+func (r *AutoSeedRepository) ListProgressItems(downloaderID string) ([]AutoSeedItem, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("auto seed repo is nil")
+	}
+	db := r.store.DB.Table("auto_seed_items")
+	if strings.TrimSpace(downloaderID) != "" {
+		db = db.Where("downloader_id = ?", strings.TrimSpace(downloaderID))
+	}
+	rows := make([]AutoSeedItem, 0)
+	if err := db.Order("updated_at DESC, id DESC").Limit(500).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// FindPublishLogsForItems 查询指定种子集合的最新发布日志，用于聚合发布结果。
+func (r *AutoSeedRepository) FindPublishLogsForItems(items []AutoSeedItem) ([]PublishLogEntry, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("auto seed repo is nil")
+	}
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.TorrentID) != "" {
+			keys = append(keys, strings.TrimSpace(item.TorrentID))
+		}
+	}
+	if len(keys) == 0 {
+		return []PublishLogEntry{}, nil
+	}
+	rows := make([]PublishLogEntry, 0)
+	if err := r.store.DB.Model(&PublishLogEntry{}).
+		Where("scene = ? AND torrent_id IN ?", "auto_seed", keys).
+		Order("id DESC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("查询自动发种发布日志失败: %w", err)
+	}
+	return rows, nil
+}

@@ -42,6 +42,7 @@
         <el-menu-item index="/torrents">一种多站</el-menu-item>
         <el-menu-item index="/data">一站多种</el-menu-item>
         <el-menu-item index="/scheduled-seeding">定时发种</el-menu-item>
+        <el-menu-item index="/auto-seed">自动发种</el-menu-item>
         <el-menu-item index="/publish-logs">发种日志</el-menu-item>
         <el-menu-item index="/sites">做种检索</el-menu-item>
         <el-menu-item index="/settings">设置</el-menu-item>
@@ -158,6 +159,7 @@
         <el-menu-item index="/torrents">一种多站</el-menu-item>
         <el-menu-item index="/data">一站多种</el-menu-item>
         <el-menu-item index="/scheduled-seeding">定时发种</el-menu-item>
+        <el-menu-item index="/auto-seed">自动发种</el-menu-item>
         <el-menu-item index="/publish-logs">发种日志</el-menu-item>
         <el-menu-item index="/sites">做种检索</el-menu-item>
         <el-menu-item index="/settings">设置</el-menu-item>
@@ -262,6 +264,7 @@ const routeTitleMap: Record<string, string> = {
   '/torrents': '一种多站',
   '/data': '一站多种',
   '/scheduled-seeding': '定时发种',
+  '/auto-seed': '自动发种',
   '/publish-logs': '发种日志',
   '/sites': '做种检索',
   '/settings': '设置',
@@ -292,6 +295,7 @@ const isRefreshSupportedRoute = (path: string) => {
     path.startsWith('/torrents') ||
     path.startsWith('/sites') ||
     path.startsWith('/data') ||
+    path.startsWith('/auto-seed') ||
     path.startsWith('/publish-logs') ||
     path.startsWith('/batch-fetch')
   )
@@ -356,7 +360,9 @@ const handleExportLogs = async () => {
       timeout: 120000,
     })
 
-    const contentType = response.headers['content-type'] || 'text/plain; charset=utf-8'
+    const rawContentType = response.headers['content-type']
+    const contentType =
+      typeof rawContentType === 'string' ? rawContentType : 'text/plain; charset=utf-8'
     const blob = new Blob([response.data], { type: contentType })
     const fileName = parseFileName(response.headers['content-disposition'])
 

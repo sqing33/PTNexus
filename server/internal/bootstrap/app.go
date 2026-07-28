@@ -20,6 +20,7 @@ import (
 	"github.com/pt-nexus/server/internal/platform/netproxy"
 	"github.com/pt-nexus/server/internal/repository"
 	"github.com/pt-nexus/server/internal/service"
+	"github.com/pt-nexus/server/internal/service/autoseed"
 	migrationflow "github.com/pt-nexus/server/internal/service/migrationflow"
 	"github.com/pt-nexus/server/internal/service/scheduledseed"
 )
@@ -100,6 +101,13 @@ func NewApp() (*App, error) {
 	migrateService.StartPublishQueueWorker()
 	scheduledSeedScheduler.Start()
 	scheduledSeedHandler := handler.NewScheduledSeedHandler(scheduledSeedRepo, scheduledSeedScheduler)
+
+	autoSeedRepo := repository.NewAutoSeedRepository(store)
+	autoSeedService := autoseed.NewService(autoSeedRepo, cfgManager)
+	autoSeedService.SetEnqueueFn(migrateService.EnqueuePublishQueueBatch)
+	autoSeedService.SetFetchSeedFn(migrateService.FetchAndStore)
+	autoSeedService.Start()
+	autoSeedHandler := handler.NewAutoSeedHandler(autoSeedService)
 
 	settingsService.SetIYUUTrigger(func() map[string]any {
 		settings := cfgManager.Get()
@@ -204,6 +212,7 @@ func NewApp() (*App, error) {
 		torrentTransferHandler,
 		logsHandler,
 		scheduledSeedHandler,
+		autoSeedHandler,
 	)
 
 	return &App{Engine: engine, trackerWorker: trackerService}, nil
@@ -226,6 +235,7 @@ func registerRoutes(
 	torrentTransferHandler *handler.TorrentTransferHandler,
 	logsHandler *handler.LogsHandler,
 	scheduledSeedHandler *handler.ScheduledSeedHandler,
+	autoSeedHandler *handler.AutoSeedHandler,
 ) {
 	engine.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "服务正常", "service": "pt-nexus-go"})
@@ -395,6 +405,21 @@ func registerRoutes(
 		scheduledSeedAPI.POST("/tasks/:id/trigger", scheduledSeedHandler.TriggerTask)
 		scheduledSeedAPI.GET("/seeds", scheduledSeedHandler.ListAvailableSeeds)
 		scheduledSeedAPI.GET("/seed-sites", scheduledSeedHandler.GetSeedSites)
+	}
+
+	autoSeedAPI := engine.Group("/api/auto-seed")
+	{
+		autoSeedAPI.GET("/rules", autoSeedHandler.ListRules)
+		autoSeedAPI.POST("/rules", autoSeedHandler.SaveRule)
+		autoSeedAPI.PUT("/rules/:id", autoSeedHandler.SaveRule)
+		autoSeedAPI.DELETE("/rules/:id", autoSeedHandler.DeleteRule)
+		autoSeedAPI.POST("/rules/:id/trigger", autoSeedHandler.TriggerRule)
+		autoSeedAPI.GET("/items", autoSeedHandler.ListItems)
+		autoSeedAPI.POST("/items/manual", autoSeedHandler.AddManualURL)
+		autoSeedAPI.PUT("/items/:id/organize", autoSeedHandler.OrganizeItem)
+		autoSeedAPI.POST("/items/publish", autoSeedHandler.PublishItems)
+		autoSeedAPI.POST("/items/delete", autoSeedHandler.DeleteItems)
+		autoSeedAPI.GET("/progress", autoSeedHandler.Progress)
 	}
 
 	logsAPI := engine.Group("/api/logs")

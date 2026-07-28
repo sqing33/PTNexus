@@ -337,6 +337,7 @@ interface SiteStatus {
   has_passkey: boolean
   is_source: boolean
   is_target: boolean
+  can_publish: boolean
   uses_public_publisher?: boolean
   uses_public_extractor?: boolean
 }
@@ -385,7 +386,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['complete', 'cancel', 'close-with-refresh'])
+const emit = defineEmits(['complete', 'cancel', 'close-with-refresh', 'seed-info-updated'])
 
 const crossSeedStore = useCrossSeedStore()
 
@@ -849,6 +850,7 @@ const buildScreenshotPayload = (type: string, extra: Record<string, unknown> = {
   savePath: torrent.value.save_path,
   torrentName: torrent.value.name,
   downloaderId: torrent.value.downloaderId,
+  downloader_hash: torrent.value.downloaderHash,
   ...extra,
 })
 
@@ -1805,6 +1807,7 @@ const refreshMediainfo = async () => {
       save_path: torrent.value.save_path,
       content_name: torrentData.value.original_main_title,
       downloader_id: torrent.value.downloaderId,
+      downloader_hash: torrent.value.downloaderHash,
       torrent_name: torrent.value.name,
       current_mediainfo: torrentData.value.mediainfo,
       force_refresh: true,
@@ -2220,6 +2223,7 @@ const refreshPosters = async () => {
     savePath: torrent.value.save_path,
     torrentName: torrent.value.name,
     downloaderId: torrent.value.downloaderId, // 添加下载器ID
+    downloader_hash: torrent.value.downloaderHash,
   }
 
   try {
@@ -2351,6 +2355,7 @@ const handleImageError = async (url: string, type: 'poster' | 'screenshot', inde
     savePath: torrent.value.save_path,
     torrentName: torrent.value.name,
     downloaderId: torrent.value.downloaderId, // 添加下载器ID
+    downloader_hash: torrent.value.downloaderHash,
   }
 
   try {
@@ -2457,6 +2462,7 @@ const seedFlow = createSeedFlow({
   openFetchedScreenshotPreview,
   handleApiError,
   isTargetSiteSelectable,
+  onSeedInfoUpdated: () => emit('seed-info-updated'),
 
   screenshotValid,
   screenshotImages,

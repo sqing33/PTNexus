@@ -132,6 +132,14 @@ func BuildFetchAndStoreOutcome(input FetchAndStoreOutcomeInput, deps FetchAndSto
 		response["screenshot_review_status"] = screenshotReviewStatus
 		response["screenshot_review_required"] = processingshared.NeedsScreenshotManualReview(screenshotReviewStatus)
 		response["screenshot_preview_required"] = repairResult.ScreenshotPreviewRequired
+		response["torrent_path"] = processResult.TorrentPath
+		response["detail_url"] = processResult.DetailURL
+		response["torrent_id"] = strings.TrimSpace(input.SearchTerm)
+		response["site_name"] = processResult.SiteIdentifier
+		response["nickname"] = processResult.Nickname
+		response["name"] = torrentName
+		response["size_bytes"] = processResult.Meta.Size
+		response["hash"] = processResult.Meta.InfoHash
 		return response, 200
 	}
 	screenshotReviewStatus := processingshared.NormalizeScreenshotReviewStatus(repairResult.ScreenshotReviewStatus)

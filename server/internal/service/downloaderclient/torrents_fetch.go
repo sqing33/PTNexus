@@ -16,17 +16,18 @@ import (
 // 失败场景：无直接失败场景，具体失败由 FetchTorrents 返回。
 // 副作用：无副作用，仅承载数据。
 type TorrentSnapshot struct {
-	Hash     string
-	Name     string
-	SavePath string
-	Size     int64
-	Progress float64
-	State    string
-	Trackers []string
-	Comment  string
-	Group    string
-	Seeders  int64
-	Uploaded int64
+	Hash        string
+	Name        string
+	SavePath    string
+	ContentPath string
+	Size        int64
+	Progress    float64
+	State       string
+	Trackers    []string
+	Comment     string
+	Group       string
+	Seeders     int64
+	Uploaded    int64
 }
 
 // FetchTorrents 拉取下载器当前全部种子并归一化为统一结构。
@@ -137,17 +138,18 @@ func (d Downloader) fetchQBTorrentsByProxy() ([]TorrentSnapshot, error) {
 		}
 
 		result = append(result, TorrentSnapshot{
-			Hash:     hash,
-			Name:     name,
-			SavePath: strings.TrimSpace(toString(row["save_path"], "")),
-			Size:     toInt64Any(row["size"]),
-			Progress: progress,
-			State:    formatTorrentState(toString(row["state"], "")),
-			Trackers: trackers,
-			Comment:  strings.TrimSpace(toString(row["comment"], "")),
-			Group:    group,
-			Seeders:  seeders,
-			Uploaded: toInt64Any(row["uploaded"]),
+			Hash:        hash,
+			Name:        name,
+			SavePath:    strings.TrimSpace(toString(row["save_path"], "")),
+			ContentPath: strings.TrimSpace(toString(row["content_path"], "")),
+			Size:        toInt64Any(row["size"]),
+			Progress:    progress,
+			State:       formatTorrentState(toString(row["state"], "")),
+			Trackers:    trackers,
+			Comment:     strings.TrimSpace(toString(row["comment"], "")),
+			Group:       group,
+			Seeders:     seeders,
+			Uploaded:    toInt64Any(row["uploaded"]),
 		})
 	}
 	return result, nil
@@ -199,17 +201,18 @@ func (d Downloader) fetchQBTorrents() ([]TorrentSnapshot, error) {
 		}
 
 		result = append(result, TorrentSnapshot{
-			Hash:     hash,
-			Name:     name,
-			SavePath: strings.TrimSpace(toString(row["save_path"], "")),
-			Size:     toInt64Any(row["size"]),
-			Progress: progress,
-			State:    formatTorrentState(toString(row["state"], "")),
-			Trackers: trackers,
-			Comment:  strings.TrimSpace(toString(row["comment"], "")),
-			Group:    group,
-			Seeders:  seeders,
-			Uploaded: toInt64Any(row["uploaded"]),
+			Hash:        hash,
+			Name:        name,
+			SavePath:    strings.TrimSpace(toString(row["save_path"], "")),
+			ContentPath: strings.TrimSpace(toString(row["content_path"], "")),
+			Size:        toInt64Any(row["size"]),
+			Progress:    progress,
+			State:       formatTorrentState(toString(row["state"], "")),
+			Trackers:    trackers,
+			Comment:     strings.TrimSpace(toString(row["comment"], "")),
+			Group:       group,
+			Seeders:     seeders,
+			Uploaded:    toInt64Any(row["uploaded"]),
 		})
 	}
 

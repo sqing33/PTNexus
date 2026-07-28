@@ -18,6 +18,7 @@ export interface WorkingTorrent {
   total_uploaded_formatted: string
   downloaderId?: string
   downloaderIds?: string[]
+  downloaderHash?: string
 }
 
 export interface DownloaderListItem {

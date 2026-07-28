@@ -45,6 +45,90 @@ type AddTorrentOptions struct {
 	Tags            []string
 	Category        string
 	UploadLimitMBps int
+	SkipChecking    *bool
+}
+
+// FetchFreeSpaceBytes 查询下载器默认下载目录的剩余空间。
+// 参数/返回：无入参，返回字节数；无法获取时返回错误。
+// 失败场景：下载器连接失败、认证失败、接口不支持或响应缺少空间字段时返回 error。
+// 副作用：会向下载器发起只读请求。
+func (d Downloader) FetchFreeSpaceBytes() (int64, error) {
+	switch d.Type {
+	case "qbittorrent":
+		client, err := newQBClient(d)
+		if err != nil {
+			return 0, err
+		}
+		if err := client.Login(); err != nil {
+			return 0, err
+		}
+		body, err := client.Get("sync/maindata", nil)
+		if err != nil {
+			return 0, err
+		}
+		data := map[string]any{}
+		if err := json.Unmarshal(body, &data); err != nil {
+			return 0, fmt.Errorf("qB 主数据解析失败: %w", err)
+		}
+		serverState := toMap(data["server_state"])
+		free := toInt64Any(serverState["free_space_on_disk"])
+		if free <= 0 {
+			return 0, errors.New("qB 未返回可用空间")
+		}
+		return free, nil
+	case "transmission":
+		client := newTransmissionClient(d)
+		response, err := client.Call("session-get", map[string]any{"fields": []string{"download-dir-free-space"}})
+		if err != nil {
+			return 0, err
+		}
+		arguments := toMap(response["arguments"])
+		free := toInt64Any(arguments["download-dir-free-space"])
+		if free <= 0 {
+			free = toInt64Any(arguments["downloadDirFreeSpace"])
+		}
+		if free <= 0 {
+			return 0, errors.New("Transmission 未返回可用空间")
+		}
+		return free, nil
+	default:
+		return 0, fmt.Errorf("不支持的下载器类型: %s", d.Type)
+	}
+}
+
+// DeleteTorrents 删除下载器中的种子任务，可选同步删除文件。
+// 参数/返回：hashes 为下载器任务 hash；deleteFiles 控制是否删除本地文件；返回接口错误。
+// 失败场景：hash 为空、下载器连接失败、认证失败或接口返回异常时返回 error。
+// 副作用：会向下载器发起删除请求，deleteFiles=true 时下载器会删除任务文件。
+func (d Downloader) DeleteTorrents(hashes []string, deleteFiles bool) error {
+	hashes = compactStrings(hashes)
+	if len(hashes) == 0 {
+		return errors.New("hash 列表为空")
+	}
+	switch d.Type {
+	case "qbittorrent":
+		client, err := newQBClient(d)
+		if err != nil {
+			return err
+		}
+		if err := client.Login(); err != nil {
+			return err
+		}
+		values := url.Values{}
+		values.Set("hashes", strings.Join(hashes, "|"))
+		values.Set("deleteFiles", strconv.FormatBool(deleteFiles))
+		_, err = client.PostForm("torrents/delete", values)
+		return err
+	case "transmission":
+		client := newTransmissionClient(d)
+		_, err := client.Call("torrent-remove", map[string]any{
+			"ids":               hashes,
+			"delete-local-data": deleteFiles,
+		})
+		return err
+	default:
+		return fmt.Errorf("不支持的下载器类型: %s", d.Type)
+	}
 }
 
 // ApplyTorrentTags 将标签补写到已存在的下载器任务。
@@ -335,7 +419,7 @@ func (d Downloader) AddTorrentURLWithOptions(torrentURL, savePath string, option
 			values.Set("savepath", savePath)
 		}
 		values.Set("paused", strconv.FormatBool(options.Paused))
-		values.Set("skip_checking", "true")
+		values.Set("skip_checking", strconv.FormatBool(resolveSkipChecking(options)))
 		if len(options.Tags) > 0 {
 			values.Set("tags", strings.Join(compactStrings(options.Tags), ","))
 		}
@@ -407,7 +491,7 @@ func (d Downloader) AddTorrentDataWithOptions(content []byte, fileName, savePath
 			_ = writer.WriteField("savepath", savePath)
 		}
 		_ = writer.WriteField("paused", strconv.FormatBool(options.Paused))
-		_ = writer.WriteField("skip_checking", "true")
+		_ = writer.WriteField("skip_checking", strconv.FormatBool(resolveSkipChecking(options)))
 		if len(options.Tags) > 0 {
 			_ = writer.WriteField("tags", strings.Join(compactStrings(options.Tags), ","))
 		}
@@ -472,6 +556,13 @@ func normalizeUploadLimitBytes(uploadLimitMBps int) int {
 		return 0
 	}
 	return uploadLimitMBps * 1024 * 1024
+}
+
+func resolveSkipChecking(options AddTorrentOptions) bool {
+	if options.SkipChecking == nil {
+		return true
+	}
+	return *options.SkipChecking
 }
 
 func normalizeUploadLimitKBps(uploadLimitMBps int) int {

@@ -19,12 +19,14 @@ func (s *MigrateService) ParseTitle(title string, mediainfo string, requestID st
 }
 
 func (s *MigrateService) MediaValidate(payload map[string]any) (map[string]any, int) {
+	rootConfig := map[string]any{}
+	if s != nil && s.cfg != nil {
+		rootConfig = s.cfg.Get()
+	}
+	s.enrichMediaPayloadSavePath(payload, rootConfig)
 	return processingrepair.MediaValidateEntry(payload, processingrepair.MediaValidateEntryDeps{
 		GetRootConfig: func() map[string]any {
-			if s == nil || s.cfg == nil {
-				return map[string]any{}
-			}
-			return s.cfg.Get()
+			return rootConfig
 		},
 		GetCSPTToken: s.csptToken,
 		GetSeedMedia: func(seedID string) string {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 	"github.com/pt-nexus/server/internal/platform/logx"
+	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 	"github.com/pt-nexus/server/internal/service/downloaderclient"
 	processingpersist "github.com/pt-nexus/server/internal/service/processing/persist"
 	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
@@ -24,15 +24,15 @@ type AddToDownloaderRepo interface {
 
 // AddToDownloader 将发布 URL 或本地种子添加到下载器。
 // 参数/返回：payload 为前端传参；rootConfig 为全局配置；repo 可用于从 URL 反查站点并下载种子；返回接口响应与状态码。
-// 失败场景：缺少 url/savePath/downloaderId、下载器配置错误、添加失败等会返回对应错误。
+// 失败场景：缺少 url/downloaderId、下载器配置错误、添加失败等会返回对应错误；savePath 为空时使用下载器默认路径。
 // 副作用：可能发起网络请求下载 torrent，并向下载器添加任务。
 func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo AddToDownloaderRepo) (map[string]any, int) {
 	rawURL := strings.TrimSpace(processingshared.ToString(payload["url"], ""))
 	defaultDownloaderID := resolveDefaultDownloaderID(rootConfig)
 	savePath, downloaderID := ResolveEffectiveTarget(payload, "", "", defaultDownloaderID)
 
-	if rawURL == "" || savePath == "" || downloaderID == "" {
-		return map[string]any{"success": false, "message": "错误：缺少必要参数 (url, savePath, downloaderId)。"}, 400
+	if rawURL == "" || downloaderID == "" {
+		return map[string]any{"success": false, "message": "错误：缺少必要参数 (url, downloaderId)。"}, 400
 	}
 
 	// 🚫 自动添加前预检查（对齐 Python）：避免触发做种/队列限制。

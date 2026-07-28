@@ -32,6 +32,11 @@ const router = createRouter({
       component: () => import('../views/ScheduledSeedingView.vue'),
     },
     {
+      path: '/auto-seed',
+      name: 'auto-seed',
+      component: () => import('../views/AutoSeedView.vue'),
+    },
+    {
       path: '/publish-logs',
       name: 'publish-logs',
       component: () => import('../views/PublishLogsView.vue'),

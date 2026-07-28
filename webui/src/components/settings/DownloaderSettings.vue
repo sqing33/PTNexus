@@ -204,6 +204,26 @@
               @input="resetConnectionStatus(downloader.id)"
             ></el-input>
           </el-form-item>
+          <el-form-item label="发布节奏">
+            <div class="publish-controls-row">
+              <el-input-number
+                v-model="downloader.publish_interval_minutes"
+                :min="0"
+                :max="1440"
+                controls-position="right"
+                class="publish-control"
+              />
+              <span class="publish-control-unit">分钟间隔</span>
+              <el-input-number
+                v-model="downloader.publish_concurrency"
+                :min="1"
+                :max="20"
+                controls-position="right"
+                class="publish-control"
+              />
+              <span class="publish-control-unit">并发数</span>
+            </div>
+          </el-form-item>
         </el-form>
       </el-card>
     </div>
@@ -280,6 +300,8 @@ type DownloaderConfig = {
   color: string
   path_mappings: PathMapping[]
   enable_ratio_limiter: boolean
+  publish_interval_minutes: number
+  publish_concurrency: number
   [key: string]: unknown
 }
 
@@ -422,6 +444,14 @@ const fetchSettings = async () => {
         path_mappings: pathMappings,
         enable_ratio_limiter:
           typeof record.enable_ratio_limiter === 'boolean' ? record.enable_ratio_limiter : false,
+        publish_interval_minutes:
+          typeof record.publish_interval_minutes === 'number'
+            ? record.publish_interval_minutes
+            : Number(record.publish_interval_minutes) || 0,
+        publish_concurrency:
+          typeof record.publish_concurrency === 'number'
+            ? record.publish_concurrency
+            : Number(record.publish_concurrency) || 1,
       } satisfies DownloaderConfig
     })
 
@@ -471,6 +501,8 @@ const addDownloader = () => {
     color: deriveDownloaderColor(id),
     path_mappings: [], // 初始化空的路径映射数组
     enable_ratio_limiter: false, // 默认关闭出种限速
+    publish_interval_minutes: 0,
+    publish_concurrency: 1,
   })
 }
 
@@ -767,6 +799,22 @@ const savePathMappings = async () => {
   white-space: nowrap;
 }
 
+.publish-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.publish-control {
+  width: 120px;
+}
+
+.publish-control-unit {
+  color: #606266;
+  white-space: nowrap;
+}
+
 .switch-form-item {
   margin-bottom: 0;
   margin-left: 8px;
@@ -833,6 +881,7 @@ const savePathMappings = async () => {
 
   .name-and-client-row,
   .proxy-settings-row,
+  .publish-controls-row,
   .mapping-item {
     flex-direction: column;
     align-items: stretch;

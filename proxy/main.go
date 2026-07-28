@@ -35,17 +35,6 @@ func main() {
 	http.HandleFunc("/api/file/batch-check", batchFileCheckHandler)
 	http.HandleFunc("/api/media/episode-count", episodeCountHandler)
 
-	if isMInfoConfigured() {
-		endpoint, err := resolveMInfoScreenshotEndpoint()
-		if err != nil {
-			log.Printf("MInfo screenshot integration is configured but invalid: err=%v", err)
-		} else {
-			log.Printf("MInfo screenshot integration enabled: endpoint=%s modes=automatic,finalize variant=jpg hdr_processor=libplacebo", endpoint)
-		}
-	} else {
-		log.Printf("MInfo screenshot integration disabled: set %s to enable HDR/DV automatic and finalize screenshots", minfoBaseURLEnv)
-	}
-
 	log.Printf("pt-nexus-box-proxy listening on %s", port)
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("server exited: %v", err)

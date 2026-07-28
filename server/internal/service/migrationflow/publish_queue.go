@@ -362,6 +362,14 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 	groupID := s.newID("queue")
 	now := time.Now()
 	nowText := now.Format(repository.PublishQueueTimeLayout)
+	scheduledAt := (*time.Time)(nil)
+	if rawScheduled := strings.TrimSpace(processingshared.ToString(payload["scheduled_at"], "")); rawScheduled != "" {
+		if t, err := time.Parse(time.RFC3339, rawScheduled); err == nil {
+			scheduledAt = &t
+		} else if t, err := time.Parse(repository.PublishQueueTimeLayout, rawScheduled); err == nil {
+			scheduledAt = &t
+		}
+	}
 
 	queueTasks := make([]repository.PublishQueueTask, 0, len(rawSeeds))
 	skipped := 0
@@ -386,6 +394,7 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 		siteName := strings.TrimSpace(processingshared.ToString(seed["site_name"], ""))
 		sourceSite := strings.TrimSpace(processingshared.ToString(seed["nickname"], siteName))
 		downloaderID := strings.TrimSpace(processingshared.ToString(seed["downloader_id"], ""))
+		seedSavePath := strings.TrimSpace(processingshared.ToString(seed["save_path"], processingshared.ToString(seed["savePath"], "")))
 
 		if torrentID == "" || siteName == "" {
 			skipped++
@@ -435,6 +444,9 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 		for key, value := range lookup.Normalized {
 			uploadData[key] = value
 		}
+		if strings.TrimSpace(processingshared.ToString(uploadData["save_path"], "")) == "" && seedSavePath != "" {
+			uploadData["save_path"] = seedSavePath
+		}
 
 		if strings.TrimSpace(sourceSite) == "" {
 			sourceSite = firstNonEmptyString(strings.TrimSpace(lookup.Nickname), strings.TrimSpace(lookup.SiteName), strings.TrimSpace(siteName))
@@ -462,7 +474,7 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 			strings.TrimSpace(firstNonEmptyString(lookup.SiteName, siteName)),
 			strings.TrimSpace(lookup.Hash),
 			strings.TrimSpace(firstNonEmptyString(lookup.Name, title)),
-			strings.TrimSpace(processingshared.ToString(uploadData["save_path"], lookup.SavePath)),
+			strings.TrimSpace(firstNonEmptyString(processingshared.ToString(uploadData["save_path"], ""), seedSavePath, lookup.SavePath)),
 			downloaderID,
 			sourceSite,
 			torrentID,
@@ -491,6 +503,12 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 		ctxBytes, _ := json.Marshal(ctx)
 
 		nextRunAt := nowText
+		scheduledAtText := (*string)(nil)
+		if scheduledAt != nil {
+			nextRunAt = scheduledAt.Format(repository.PublishQueueTimeLayout)
+			value := nextRunAt
+			scheduledAtText = &value
+		}
 		queueTasks = append(queueTasks, repository.PublishQueueTask{
 			GroupID:        groupID,
 			Status:         repository.PublishQueueStatusQueued,
@@ -508,7 +526,7 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 			ContextJSON:    string(ctxBytes),
 			AttemptCount:   0,
 			NextRunAt:      &nextRunAt,
-			ScheduledAt:    nil,
+			ScheduledAt:    scheduledAtText,
 			StartedAt:      nil,
 			FinishedAt:     nil,
 			LastError:      "",

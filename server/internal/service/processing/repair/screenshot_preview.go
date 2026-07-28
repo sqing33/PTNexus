@@ -56,11 +56,11 @@ func ShouldUseScreenshotPreview(input ScreenshotGenerateInput) (bool, error) {
 func InspectScreenshotSubtitles(input ScreenshotGenerateInput) (ScreenshotSubtitleInspection, error) {
 	payload := input.Payload
 	sourceInfo := input.SourceInfo
-	savePath, downloaderID, torrentName, contentName := parseScreenshotSourceParams(payload, sourceInfo, input.ContentName)
+	savePath, downloaderID, torrentName, contentName, preferExactRemotePath := parseScreenshotSourceParams(input.RootConfig, payload, sourceInfo, input.ContentName)
 
 	downloader, decision, dErr := downloaderclient.DecideProxy(input.RootConfig, downloaderID)
 	if decision.Enabled {
-		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName)
+		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName, preferExactRemotePath)
 		var lastErr error
 		for _, remoteCandidate := range remoteCandidates {
 			inspection, err := downloader.InspectScreenshotByProxy(remoteCandidate, contentName)
@@ -124,10 +124,10 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 	previewCount = normalizeScreenshotPreviewCount(previewCount)
 	selectedSubtitleSID, selectedSubtitleProvided := parseSelectedSubtitleSIDAny(payload["selected_subtitle_sid"])
 
-	savePath, downloaderID, torrentName, contentName := parseScreenshotSourceParams(payload, sourceInfo, input.ContentName)
+	savePath, downloaderID, torrentName, contentName, preferExactRemotePath := parseScreenshotSourceParams(input.RootConfig, payload, sourceInfo, input.ContentName)
 	downloader, decision, dErr := downloaderclient.DecideProxy(input.RootConfig, downloaderID)
 	if decision.Enabled {
-		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName)
+		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName, preferExactRemotePath)
 		var lastErr error
 		for _, remoteCandidate := range remoteCandidates {
 			previewBundle, err := downloader.FetchScreenshotPreviewsByProxy(
@@ -167,6 +167,11 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 		}
 	} else if dErr != nil && strings.TrimSpace(decision.Reason) == "config_error" {
 		logx.Warnf(screenshotPreviewLogModule, "盒子代理候选截图跳过：读取下载器配置失败 downloader_id=%s err=%v", downloaderID, dErr)
+	}
+
+	translatedSavePath := TranslateDownloaderPath(input.RootConfig, downloaderID, savePath)
+	if shouldSkipLocalScreenshotFallback(input.RootConfig, downloaderID, savePath, translatedSavePath, decision) {
+		return ScreenshotPreviewBundle{}, fmt.Errorf("下载器已启用远程模式，代理未能生成候选截图，且未配置本地路径映射，已停止本地扫描")
 	}
 
 	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "截图预览生成")
@@ -280,7 +285,7 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 	uploadCtx := PrepareScreenshotUploadContext(input.RootConfig)
 	logx.PlainInfof("已选择图床服务: %s, 截图数量: %d", uploadCtx.Hoster, screenshotTotalCount)
 
-	savePath, downloaderID, torrentName, contentName := parseScreenshotSourceParams(payload, sourceInfo, input.ContentName)
+	savePath, downloaderID, torrentName, contentName, preferExactRemotePath := parseScreenshotSourceParams(input.RootConfig, payload, sourceInfo, input.ContentName)
 	proxyScene := "自动截图"
 	if requireSelected {
 		proxyScene = "正式截图"
@@ -289,7 +294,7 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 	downloader, decision, dErr := downloaderclient.DecideProxy(input.RootConfig, downloaderID)
 	logx.Infof(screenshotPreviewLogModule, "截图代理判定 downloader_id=%s enabled=%t reason=%s proxy_host=%s proxy_port=%d err=%v", downloaderID, decision.Enabled, decision.Reason, downloader.Host, downloader.ProxyPort, dErr)
 	if decision.Enabled {
-		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName)
+		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName, preferExactRemotePath)
 		var lastErr error
 		for candidateIndex, remoteCandidate := range remoteCandidates {
 			logx.Infof(screenshotPreviewLogModule, "截图代理尝试 scene=%s candidate=%d/%d remote_path=%s", proxyScene, candidateIndex+1, len(remoteCandidates), remoteCandidate)
@@ -350,6 +355,10 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 	translatedSavePath := TranslateDownloaderPath(input.RootConfig, downloaderID, savePath)
 	if translatedSavePath != savePath && savePath != "" && translatedSavePath != "" {
 		logx.PlainInfof("路径映射: %s -> %s", savePath, translatedSavePath)
+	}
+
+	if shouldSkipLocalScreenshotFallback(input.RootConfig, downloaderID, savePath, translatedSavePath, decision) {
+		return nil, fmt.Errorf("下载器已启用远程模式，代理未能生成截图，且未配置本地路径映射，已停止本地扫描")
 	}
 
 	fullVideoPath := translatedSavePath
@@ -578,7 +587,7 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 	return finalList, nil
 }
 
-func parseScreenshotSourceParams(payload map[string]any, sourceInfo map[string]any, contentName string) (string, string, string, string) {
+func parseScreenshotSourceParams(rootConfig map[string]any, payload map[string]any, sourceInfo map[string]any, contentName string) (string, string, string, string, bool) {
 	savePath := strings.TrimSpace(toStringAny(payload["savePath"], toStringAny(payload["save_path"], "")))
 	if savePath == "" {
 		savePath = strings.TrimSpace(toStringAny(sourceInfo["save_path"], ""))
@@ -591,7 +600,9 @@ func parseScreenshotSourceParams(payload map[string]any, sourceInfo map[string]a
 	if torrentName == "" {
 		torrentName = strings.TrimSpace(toStringAny(sourceInfo["main_title"], ""))
 	}
-	return savePath, downloaderID, torrentName, strings.TrimSpace(contentName)
+	contentName = strings.TrimSpace(contentName)
+	savePath, torrentName, preferExactRemotePath := enrichScreenshotSourceFromDownloader(rootConfig, payload, downloaderID, savePath, torrentName, contentName)
+	return savePath, downloaderID, torrentName, contentName, preferExactRemotePath
 }
 
 func normalizeScreenshotPreviewCount(value int) int {

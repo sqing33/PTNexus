@@ -46,12 +46,14 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 		torrentName = strings.TrimSpace(toStringAny(sourceInfo["main_title"], ""))
 	}
 	contentName := strings.TrimSpace(input.ContentName)
+	preferExactRemotePath := false
+	savePath, torrentName, preferExactRemotePath = enrichScreenshotSourceFromDownloader(input.RootConfig, payload, downloaderID, savePath, torrentName, contentName)
 
 	// 对齐 MediaInfo：当 downloader.use_proxy=true 且本机不挂载媒体目录时，优先通过盒子代理远程截图。
 	downloader, decision, dErr := downloaderclient.DecideProxy(input.RootConfig, downloaderID)
 	logx.Infof(screenshotValidateLogModule, "截图代理判定 downloader_id=%s enabled=%t reason=%s proxy_host=%s proxy_port=%d err=%v", downloaderID, decision.Enabled, decision.Reason, downloader.Host, downloader.ProxyPort, dErr)
 	if decision.Enabled {
-		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName)
+		remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName, preferExactRemotePath)
 		var lastErr error
 		for candidateIndex, remoteCandidate := range remoteCandidates {
 			logx.Infof(screenshotValidateLogModule, "截图代理尝试 scene=自动截图 candidate=%d/%d remote_path=%s", candidateIndex+1, len(remoteCandidates), remoteCandidate)
@@ -94,6 +96,9 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 	translatedSavePath := TranslateDownloaderPath(input.RootConfig, downloaderID, savePath)
 	if translatedSavePath != savePath && savePath != "" && translatedSavePath != "" {
 		logx.PlainInfof("路径映射: %s -> %s", savePath, translatedSavePath)
+	}
+	if shouldSkipLocalScreenshotFallback(input.RootConfig, downloaderID, savePath, translatedSavePath, decision) {
+		return nil, fmt.Errorf("下载器已启用远程模式，代理未能生成截图，且未配置本地路径映射，已停止本地扫描")
 	}
 
 	fullVideoPath := translatedSavePath
@@ -330,22 +335,114 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 	return finalList, nil
 }
 
-func buildRemotePathCandidatesForProxy(savePath, torrentName, contentName string) []string {
+func buildRemotePathCandidatesForProxy(savePath, torrentName, contentName string, preferExactPath bool) []string {
 	trimmedSavePath := strings.TrimSpace(savePath)
 	trimmedTorrentName := strings.TrimSpace(torrentName)
 	trimmedContentName := strings.TrimSpace(contentName)
 
 	candidates := make([]string, 0, 3)
+	appendCandidate := func(candidate string) {
+		normalized := normalizeProxyRemotePath(candidate)
+		if normalized == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if normalizeScreenshotPathForCompare(existing) == normalizeScreenshotPathForCompare(normalized) {
+				return
+			}
+		}
+		candidates = append(candidates, normalized)
+	}
+	if preferExactPath && trimmedSavePath != "" {
+		appendCandidate(trimmedSavePath)
+	}
 	if trimmedSavePath != "" && trimmedTorrentName != "" {
-		candidates = append(candidates, joinProxyRemotePath(trimmedSavePath, trimmedTorrentName))
+		appendCandidate(joinProxyRemotePath(trimmedSavePath, trimmedTorrentName))
 	}
 	if trimmedSavePath != "" && trimmedContentName != "" && !strings.EqualFold(trimmedContentName, trimmedTorrentName) {
-		candidates = append(candidates, joinProxyRemotePath(trimmedSavePath, trimmedContentName))
+		appendCandidate(joinProxyRemotePath(trimmedSavePath, trimmedContentName))
 	}
 	if trimmedSavePath != "" {
-		candidates = append(candidates, normalizeProxyRemotePath(trimmedSavePath))
+		appendCandidate(trimmedSavePath)
 	}
 	return candidates
+}
+
+func enrichScreenshotSourceFromDownloader(rootConfig map[string]any, payload map[string]any, downloaderID, savePath, torrentName, contentName string) (string, string, bool) {
+	if strings.TrimSpace(downloaderID) == "" {
+		return savePath, torrentName, false
+	}
+	seedHash := firstNonEmptyScreenshotString(
+		toStringAny(payload["downloader_hash"], ""),
+		toStringAny(payload["downloaderHash"], ""),
+	)
+	if seedHash == "" && strings.TrimSpace(torrentName) == "" && strings.TrimSpace(contentName) == "" && strings.TrimSpace(savePath) == "" {
+		return savePath, torrentName, false
+	}
+	downloader, err := downloaderclient.FromConfig(rootConfig, downloaderID)
+	if err != nil {
+		logx.Warnf(screenshotValidateLogModule, "截图路径回填跳过：读取下载器失败 downloader_id=%s err=%v", downloaderID, err)
+		return savePath, torrentName, false
+	}
+	snapshots, err := downloader.FetchTorrents()
+	if err != nil {
+		logx.Warnf(screenshotValidateLogModule, "截图路径回填跳过：拉取下载器任务失败 downloader_id=%s err=%v", downloaderID, err)
+		return savePath, torrentName, false
+	}
+	for _, snapshot := range snapshots {
+		bestPath := strings.TrimSpace(snapshot.ContentPath)
+		preferExactPath := bestPath != ""
+		if bestPath == "" {
+			bestPath = strings.TrimSpace(snapshot.SavePath)
+		}
+		if bestPath == "" {
+			continue
+		}
+		matched := false
+		if seedHash != "" && strings.EqualFold(seedHash, strings.TrimSpace(snapshot.Hash)) {
+			matched = true
+		}
+		if !matched && strings.TrimSpace(snapshot.Name) != "" {
+			for _, candidateName := range []string{torrentName, contentName} {
+				if strings.TrimSpace(candidateName) != "" && strings.TrimSpace(snapshot.Name) == strings.TrimSpace(candidateName) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched && strings.TrimSpace(savePath) != "" && normalizeScreenshotPathForCompare(snapshot.ContentPath) == normalizeScreenshotPathForCompare(savePath) {
+			matched = true
+		}
+		if !matched {
+			continue
+		}
+		if strings.TrimSpace(snapshot.Name) != "" {
+			torrentName = strings.TrimSpace(snapshot.Name)
+		}
+		logx.Infof(
+			screenshotValidateLogModule,
+			"截图路径回填完成 downloader_id=%s hash=%s torrent_name=%s save_path=%s content_path=%s used_path=%s prefer_exact=%t",
+			downloaderID,
+			snapshot.Hash,
+			snapshot.Name,
+			snapshot.SavePath,
+			snapshot.ContentPath,
+			bestPath,
+			preferExactPath,
+		)
+		return bestPath, torrentName, preferExactPath
+	}
+	logx.Warnf(screenshotValidateLogModule, "截图路径回填未命中 downloader_id=%s seed_hash=%s torrent_name=%s", downloaderID, seedHash, torrentName)
+	return savePath, torrentName, false
+}
+
+func firstNonEmptyScreenshotString(items ...string) string {
+	for _, item := range items {
+		if strings.TrimSpace(item) != "" {
+			return strings.TrimSpace(item)
+		}
+	}
+	return ""
 }
 
 func joinProxyRemotePath(base, name string) string {
@@ -570,4 +667,22 @@ func sanitizeCommandErrForLog(err error) string {
 // TranslateDownloaderPath 按下载器路径映射把远端保存路径转换为本地路径。
 func TranslateDownloaderPath(rootConfig map[string]any, downloaderID, remotePath string) string {
 	return downloaderclient.TranslateDownloaderPath(rootConfig, downloaderID, remotePath)
+}
+
+func shouldSkipLocalScreenshotFallback(rootConfig map[string]any, downloaderID, savePath, translatedSavePath string, decision downloaderclient.ProxyDecision) bool {
+	if !decision.Enabled {
+		return false
+	}
+	if strings.TrimSpace(translatedSavePath) == "" {
+		translatedSavePath = TranslateDownloaderPath(rootConfig, downloaderID, savePath)
+	}
+	return normalizeScreenshotPathForCompare(savePath) == normalizeScreenshotPathForCompare(translatedSavePath)
+}
+
+func normalizeScreenshotPathForCompare(value string) string {
+	normalized := strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	for strings.Contains(normalized, "//") {
+		normalized = strings.ReplaceAll(normalized, "//", "/")
+	}
+	return strings.TrimRight(normalized, "/")
 }

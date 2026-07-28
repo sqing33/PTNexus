@@ -92,9 +92,6 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 			"url":           nil,
 		}, 200
 	}
-	if resolvedSavePath == "" {
-		return buildPreCheckFailure("缺少有效 savePath，已停止发布")
-	}
 	if resolvedDownloaderID == "" {
 		return buildPreCheckFailure("缺少有效 downloaderId，已停止发布")
 	}
@@ -263,8 +260,6 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 	if autoAdd {
 		if isExistingTorrent && !autoAddExistingToDownloader {
 			autoAddResult = map[string]any{"success": false, "message": "检测到目标站点种子已存在，按设置跳过自动添加"}
-		} else if resolvedSavePath == "" {
-			autoAddResult = map[string]any{"success": false, "message": "自动添加已跳过：缺少 savePath"}
 		} else if resolvedDownloaderID == "" && !useDefaultDownloader {
 			autoAddResult = map[string]any{"success": false, "message": "自动添加已跳过：缺少 downloaderId"}
 		} else if deps.AddToDownloader == nil {

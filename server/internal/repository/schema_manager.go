@@ -53,6 +53,19 @@ func (m *SchemaManager) EnsureSchema() error {
 		}
 	}
 
+	if m.store.DBType == "mysql" {
+		if err := m.createAutoSeedMySQLTables(); err != nil {
+			return err
+		}
+		if err := m.fixAutoSeedMySQLColumnTypes(); err != nil {
+			return err
+		}
+	} else {
+		if err := m.store.DB.AutoMigrate(&AutoSeedRule{}, &AutoSeedItem{}); err != nil {
+			return fmt.Errorf("创建自动发种表失败: %w", err)
+		}
+	}
+
 	for tableName, columns := range m.columnSpecs() {
 		if err := m.ensureTableColumns(tableName, columns); err != nil {
 			return err
@@ -873,6 +886,12 @@ func (m *SchemaManager) indexSpecs() []schemaIndexSpec {
 
 		{table: "scheduled_seed_tasks", name: "idx_sched_seed_status_next_run", columns: []string{"status", "next_run_at"}},
 		{table: "scheduled_seed_tasks", name: "idx_sched_seed_trigger_tag", columns: []string{"trigger_tag"}},
+
+		{table: "auto_seed_rules", name: "idx_auto_seed_rules_enabled_next", columns: []string{"enabled", "next_run_at"}},
+		{table: "auto_seed_items", name: "idx_auto_seed_items_rule_guid", columns: []string{"rule_id", "guid"}},
+		{table: "auto_seed_items", name: "idx_auto_seed_items_status", columns: []string{"status"}},
+		{table: "auto_seed_items", name: "idx_auto_seed_items_downloader", columns: []string{"downloader_id"}},
+		{table: "auto_seed_items", name: "idx_auto_seed_items_torrent_id", columns: []string{"torrent_id"}},
 	}
 }
 
@@ -1004,6 +1023,126 @@ func (m *SchemaManager) ensureIndex(spec schemaIndexSpec) error {
 		)
 		if err := m.store.DB.Exec(sqlText).Error; err != nil {
 			return fmt.Errorf("创建索引失败 table=%s index=%s err=%w", spec.table, spec.name, err)
+		}
+	}
+	return nil
+}
+
+// createAutoSeedMySQLTables 使用明确字段类型创建 MySQL 自动发种表。
+// 参数/返回：无入参；成功返回 nil，DDL 失败时返回具体错误。
+// 失败场景：数据库连接异常或 CREATE TABLE 失败。
+// 副作用：会创建 auto_seed_rules 与 auto_seed_items 表。
+func (m *SchemaManager) createAutoSeedMySQLTables() error {
+	sqls := []string{
+		`CREATE TABLE IF NOT EXISTS auto_seed_rules (
+			id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			name VARCHAR(255),
+			enabled TINYINT(1) NOT NULL DEFAULT 1,
+			paused_reason VARCHAR(255),
+			source_site VARCHAR(255),
+			rss_url LONGTEXT,
+			downloader_id VARCHAR(64),
+			save_path VARCHAR(1024),
+			auto_pause TINYINT(1) NOT NULL DEFAULT 0,
+			auto_organize TINYINT(1) NOT NULL DEFAULT 1,
+			min_size_gb DOUBLE DEFAULT 0,
+			max_size_gb DOUBLE DEFAULT 0,
+			types_json LONGTEXT,
+			media_json LONGTEXT,
+			tags_json LONGTEXT,
+			target_sites_json LONGTEXT,
+			pull_interval_minutes INT NOT NULL DEFAULT 30,
+			publish_interval_minutes INT NOT NULL DEFAULT 0,
+			publish_concurrency INT NOT NULL DEFAULT 1,
+			last_run_at DATETIME NULL,
+			next_run_at DATETIME NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
+		`CREATE TABLE IF NOT EXISTS auto_seed_items (
+			id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			rule_id BIGINT NOT NULL DEFAULT 0,
+			source_site VARCHAR(255),
+			guid VARCHAR(255),
+			torrent_url LONGTEXT,
+			detail_url LONGTEXT,
+			name LONGTEXT,
+			size_bytes BIGINT NOT NULL DEFAULT 0,
+			resource_type VARCHAR(32),
+			medium VARCHAR(64),
+			tags_json LONGTEXT,
+			status VARCHAR(32),
+			reject_reason VARCHAR(255),
+			publish_results_json LONGTEXT,
+			downloader_id VARCHAR(64),
+			downloader_hash VARCHAR(64),
+			progress DOUBLE NOT NULL DEFAULT 0,
+			downloaded TINYINT(1) NOT NULL DEFAULT 0,
+			torrent_id VARCHAR(255),
+			site_name VARCHAR(255),
+			pushed_at DATETIME NULL,
+			organized_at DATETIME NULL,
+			published_at DATETIME NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
+	}
+	for _, sqlText := range sqls {
+		if err := m.store.DB.Exec(sqlText).Error; err != nil {
+			return fmt.Errorf("创建自动发种表失败: %w", err)
+		}
+	}
+	return nil
+}
+
+// fixAutoSeedMySQLColumnTypes 修正 GORM 自动迁移在 MySQL 下生成的自动发种字段类型。
+// 参数/返回：无入参；成功返回 nil，DDL 失败时返回具体错误。
+// 失败场景：数据库连接异常、ALTER TABLE 执行失败。
+// 副作用：会把自动发种表中需索引或排序的 TEXT/LONGTEXT 字段调整为 VARCHAR/DATETIME。
+func (m *SchemaManager) fixAutoSeedMySQLColumnTypes() error {
+	if m.store.DBType != "mysql" {
+		return nil
+	}
+
+	sqls := []string{
+		"UPDATE `auto_seed_rules` SET `last_run_at` = NULL WHERE CAST(`last_run_at` AS CHAR) = ''",
+		"UPDATE `auto_seed_rules` SET `next_run_at` = NOW() WHERE `next_run_at` IS NULL OR CAST(`next_run_at` AS CHAR) = ''",
+		"UPDATE `auto_seed_rules` SET `created_at` = NOW() WHERE `created_at` IS NULL OR CAST(`created_at` AS CHAR) = ''",
+		"UPDATE `auto_seed_rules` SET `updated_at` = NOW() WHERE `updated_at` IS NULL OR CAST(`updated_at` AS CHAR) = ''",
+		"UPDATE `auto_seed_items` SET `pushed_at` = NULL WHERE CAST(`pushed_at` AS CHAR) = ''",
+		"UPDATE `auto_seed_items` SET `organized_at` = NULL WHERE CAST(`organized_at` AS CHAR) = ''",
+		"UPDATE `auto_seed_items` SET `published_at` = NULL WHERE CAST(`published_at` AS CHAR) = ''",
+		"UPDATE `auto_seed_items` SET `created_at` = NOW() WHERE `created_at` IS NULL OR CAST(`created_at` AS CHAR) = ''",
+		"UPDATE `auto_seed_items` SET `updated_at` = NOW() WHERE `updated_at` IS NULL OR CAST(`updated_at` AS CHAR) = ''",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `name` VARCHAR(255)",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `paused_reason` VARCHAR(255)",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `source_site` VARCHAR(255)",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `downloader_id` VARCHAR(64)",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `save_path` VARCHAR(1024)",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `last_run_at` DATETIME NULL",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `next_run_at` DATETIME NOT NULL",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `created_at` DATETIME NOT NULL",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `updated_at` DATETIME NOT NULL",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `source_site` VARCHAR(255)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `guid` VARCHAR(255)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `resource_type` VARCHAR(32)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `medium` VARCHAR(64)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `status` VARCHAR(32)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `reject_reason` VARCHAR(255)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `downloader_id` VARCHAR(64)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `downloader_hash` VARCHAR(64)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `torrent_id` VARCHAR(255)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `site_name` VARCHAR(255)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `pushed_at` DATETIME NULL",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `organized_at` DATETIME NULL",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `published_at` DATETIME NULL",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `created_at` DATETIME NOT NULL",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `updated_at` DATETIME NOT NULL",
+	}
+
+	for _, sqlText := range sqls {
+		if err := m.store.DB.Exec(sqlText).Error; err != nil {
+			return fmt.Errorf("修正自动发种字段类型失败 sql=%s err=%w", sqlText, err)
 		}
 	}
 	return nil
