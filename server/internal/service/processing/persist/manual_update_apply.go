@@ -16,6 +16,10 @@ type ManualUpdateRepo interface {
 	ListSitesGroupAndDescription() ([]map[string]any, error)
 }
 
+type manualUpdateExclusiveRepo interface {
+	UpsertSeedParameterKeepingOnlyCurrent(record map[string]any) error
+}
+
 // ApplyManualUpdateFromPayload 执行转种面板手工参数回写，并返回发布预览所需结构。
 // 参数/返回：payload 为前端提交参数；newID 用于生成兜底 hash；reverseMappings 为前端映射配置。
 // 失败场景：缺少 torrent_id/site_name 或写库失败时返回对应状态码。
@@ -60,7 +64,7 @@ func ApplyManualUpdateFromPayload(
 	record := buildResult.Record
 
 	applyManualUpdateTeamAcknowledgment(repo, record)
-	if err := repo.UpsertSeedParameter(record); err != nil {
+	if err := upsertManualSeedParameter(repo, record); err != nil {
 		return map[string]any{"success": false, "message": "更新失败: " + err.Error()}, 500
 	}
 
@@ -75,6 +79,13 @@ func ApplyManualUpdateFromPayload(
 		"reverse_mappings":         reverseMappings,
 		"message":                  "参数更新并标准化成功",
 	}, 200
+}
+
+func upsertManualSeedParameter(repo ManualUpdateRepo, record map[string]any) error {
+	if exclusiveRepo, ok := repo.(manualUpdateExclusiveRepo); ok {
+		return exclusiveRepo.UpsertSeedParameterKeepingOnlyCurrent(record)
+	}
+	return repo.UpsertSeedParameter(record)
 }
 
 func applyManualUpdateTeamAcknowledgment(repo ManualUpdateRepo, record map[string]any) {

@@ -70,6 +70,7 @@ type AutoSeedItem struct {
 	TorrentURL   string `json:"torrent_url" gorm:"column:torrent_url"`
 	DetailURL    string `json:"detail_url" gorm:"column:detail_url"`
 	Name         string `json:"name" gorm:"column:name"`
+	Subtitle     string `json:"subtitle" gorm:"column:subtitle"`
 	SavePath     string `json:"save_path" gorm:"-"`
 	SizeBytes    int64  `json:"size_bytes" gorm:"column:size_bytes"`
 	ResourceType string `json:"resource_type" gorm:"column:resource_type"`
@@ -359,6 +360,7 @@ func (r *AutoSeedRepository) UpdateItemBasics(item *AutoSeedItem) error {
 	nowText := time.Now().Format(PublishQueueTimeLayout)
 	updates := map[string]any{
 		"name":          item.Name,
+		"subtitle":      item.Subtitle,
 		"resource_type": item.ResourceType,
 		"medium":        item.Medium,
 		"tags_json":     item.TagsJSON,
@@ -381,6 +383,7 @@ func (r *AutoSeedRepository) UpdateItemFetchedDetails(item *AutoSeedItem) error 
 	}
 	return r.store.DB.Table("auto_seed_items").Where("id = ?", item.ID).Updates(map[string]any{
 		"name":          item.Name,
+		"subtitle":      item.Subtitle,
 		"detail_url":    item.DetailURL,
 		"size_bytes":    item.SizeBytes,
 		"resource_type": item.ResourceType,

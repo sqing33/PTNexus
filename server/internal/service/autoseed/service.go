@@ -367,6 +367,7 @@ func (s *Service) ListItems(query repository.AutoSeedListQuery) ([]repository.Au
 	if err != nil {
 		return nil, 0, err
 	}
+	s.enrichItemSeedParameters(rows)
 	s.enrichItemSavePaths(rows)
 	s.enrichItemPublishResults(rows)
 	return rows, total, nil
@@ -573,6 +574,7 @@ func (s *Service) Progress(downloaderID string) ([]repository.AutoSeedItem, erro
 	if err != nil {
 		return nil, err
 	}
+	s.enrichItemSeedParameters(rows)
 	s.enrichItemSavePaths(rows)
 	s.enrichItemPublishResults(rows)
 	return rows, nil
@@ -687,6 +689,7 @@ func (s *Service) applyFetchedDetails(item *repository.AutoSeedItem, fetchResult
 	item.SiteName = siteName
 	item.DetailURL = firstNonEmpty(toString(fetchResult["detail_url"], ""), item.DetailURL)
 	item.Name = firstNonEmpty(toString(row["title"], ""), toString(row["name"], ""), toString(fetchResult["name"], ""), item.Name)
+	item.Subtitle = firstNonEmpty(toString(row["subtitle"], ""), item.Subtitle)
 	item.ResourceType = firstNonEmpty(toString(row["type"], ""), item.ResourceType)
 	item.Medium = firstNonEmpty(toString(row["medium"], ""), item.Medium)
 	if size := toInt64(fetchResult["size_bytes"], 0); size > 0 {
@@ -710,6 +713,7 @@ func applySeedParameterRow(item *repository.AutoSeedItem, row map[string]any) {
 	item.TorrentID = firstNonEmpty(toString(row["torrent_id"], ""), item.TorrentID)
 	item.SiteName = firstNonEmpty(toString(row["site_name"], ""), item.SiteName)
 	item.Name = firstNonEmpty(toString(row["title"], ""), toString(row["name"], ""), item.Name)
+	item.Subtitle = firstNonEmpty(toString(row["subtitle"], ""), item.Subtitle)
 	item.ResourceType = firstNonEmpty(toString(row["type"], ""), item.ResourceType)
 	item.Medium = firstNonEmpty(toString(row["medium"], ""), item.Medium)
 	if tags := parseStringArrayAny(row["tags"]); len(tags) > 0 {
@@ -946,6 +950,29 @@ func normalizeTorrentName(value string) string {
 		}
 	}
 	return builder.String()
+}
+
+// enrichItemSeedParameters 从整理后的种子参数表回填自动发种列表展示字段。
+func (s *Service) enrichItemSeedParameters(items []repository.AutoSeedItem) {
+	if s == nil || s.repo == nil || len(items) == 0 {
+		return
+	}
+	for idx := range items {
+		torrentID := strings.TrimSpace(items[idx].TorrentID)
+		if torrentID == "" {
+			torrentID = inferTorrentID(items[idx])
+		}
+		siteName := firstNonEmpty(items[idx].SiteName, items[idx].SourceSite)
+		if torrentID == "" || siteName == "" {
+			continue
+		}
+		row, err := s.repo.GetSeedParameter(torrentID, siteName)
+		if err != nil {
+			logx.Warnf(moduleAutoSeed, "回填整理后的种子参数失败 item_id=%d torrent_id=%s site=%s err=%v", items[idx].ID, torrentID, siteName, err)
+			continue
+		}
+		applySeedParameterRow(&items[idx], row)
+	}
 }
 
 func (s *Service) enrichItemSavePaths(items []repository.AutoSeedItem) {

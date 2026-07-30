@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -17,14 +18,8 @@ type RuntimePaths struct {
 }
 
 func ResolveRuntimePaths() RuntimePaths {
-	isDev := os.Getenv("DEV_ENV") == "true"
-
-	defaultBaseDir := "/app/server"
-	defaultDataDir := "/app/server/data"
-	if isDev {
-		defaultBaseDir = detectDevBaseDir()
-		defaultDataDir = filepath.Join(defaultBaseDir, "data")
-	}
+	defaultBaseDir := detectDefaultBaseDir()
+	defaultDataDir := filepath.Join(defaultBaseDir, "data")
 
 	baseDir := getEnvOrDefault("PTNEXUS_BASE_DIR", defaultBaseDir)
 	dataDir := getEnvOrDefault("PTNEXUS_DATA_DIR", defaultDataDir)
@@ -44,6 +39,17 @@ func ResolveRuntimePaths() RuntimePaths {
 	return paths
 }
 
+func detectDefaultBaseDir() string {
+	containerBaseDir := "/app/server"
+	if os.Getenv("DEV_ENV") != "true" && runtime.GOOS != "windows" && looksLikeServerRuntimeRoot(containerBaseDir) {
+		return containerBaseDir
+	}
+	if hit := detectDevBaseDir(); hit != "" {
+		return hit
+	}
+	return containerBaseDir
+}
+
 func detectDevBaseDir() string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -56,26 +62,51 @@ func detectDevBaseDir() string {
 			filepath.Join(dir, "server"),
 		}
 		for _, candidate := range candidates {
-			if looksLikeServerGoRoot(candidate) {
+			if looksLikeServerRuntimeRoot(candidate) {
 				return candidate
 			}
 		}
 		return ""
 	}
 
-	dir := cwd
-	for i := 0; i < 10; i++ {
-		if hit := tryDirs(dir); hit != "" {
-			return hit
+	startDirs := []string{cwd}
+	if exePath, exeErr := os.Executable(); exeErr == nil {
+		if exeDir := strings.TrimSpace(filepath.Dir(exePath)); exeDir != "" {
+			startDirs = append(startDirs, exeDir)
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
+	}
+
+	for _, start := range startDirs {
+		dir := start
+		for i := 0; i < 10; i++ {
+			if hit := tryDirs(dir); hit != "" {
+				return hit
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
 		}
-		dir = parent
 	}
 
 	return cwd
+}
+
+func looksLikeServerRuntimeRoot(dir string) bool {
+	if strings.TrimSpace(dir) == "" {
+		return false
+	}
+	if looksLikeServerGoRoot(dir) {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sites_data.json")); err != nil {
+		return false
+	}
+	if stat, err := os.Stat(filepath.Join(dir, "configs")); err != nil || !stat.IsDir() {
+		return false
+	}
+	return true
 }
 
 func looksLikeServerGoRoot(dir string) bool {

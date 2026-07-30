@@ -339,6 +339,40 @@ func (r *MigrateRepository) UpsertSeedParameter(record map[string]any) error {
 	})
 }
 
+// UpsertSeedParameterKeepingOnlyCurrent 覆盖写入当前手工编辑的种子参数，并清理同名种子的其他站点缓存。
+// 参数/返回：record 必须包含 torrent_id/site_name；name 用于定位同一种子，缺失时回退到 hash；失败返回数据库错误。
+// 失败场景：参数缺失、事务写入失败、清理其他站点记录失败。
+// 副作用：写入 seed_parameters，并删除当前记录以外的同名或同 hash 站点参数记录。
+func (r *MigrateRepository) UpsertSeedParameterKeepingOnlyCurrent(record map[string]any) error {
+	torrentID := strings.TrimSpace(toString(record["torrent_id"], ""))
+	siteName := strings.TrimSpace(toString(record["site_name"], ""))
+	if torrentID == "" || siteName == "" {
+		return errors.New("missing torrent_id or site_name")
+	}
+	name := strings.TrimSpace(toString(record["name"], ""))
+	hash := strings.TrimSpace(toString(record["hash"], ""))
+
+	return r.store.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Table("seed_parameters").Where("torrent_id = ? AND site_name = ?", torrentID, siteName).Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("seed_parameters").Create(record).Error; err != nil {
+			return err
+		}
+
+		cleanup := tx.Table("seed_parameters").Where("NOT (torrent_id = ? AND site_name = ?)", torrentID, siteName)
+		switch {
+		case name != "":
+			cleanup = cleanup.Where("name = ?", name)
+		case hash != "":
+			cleanup = cleanup.Where("hash = ?", hash)
+		default:
+			return nil
+		}
+		return cleanup.Delete(nil).Error
+	})
+}
+
 func (r *MigrateRepository) UpdateSeedParameterByKey(hash, torrentID, siteName string, updates map[string]any) error {
 	return r.store.DB.Table("seed_parameters").Where("hash = ? AND torrent_id = ? AND site_name = ?", hash, torrentID, siteName).Updates(updates).Error
 }

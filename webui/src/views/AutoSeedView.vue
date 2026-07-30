@@ -76,6 +76,13 @@
               <span v-else>{{ row.name }}</span>
             </template>
           </el-table-column>
+          <el-table-column label="副标题" min-width="220">
+            <template #default="{ row }">
+              <el-tooltip :content="row.subtitle || ''" :disabled="!row.subtitle" placement="top">
+                <span class="subtitle-cell">{{ subtitlePreview(row.subtitle) }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
           <el-table-column label="大小" width="90" align="right">
             <template #default="{ row }">{{ formatGB(row.size_bytes) }}</template>
           </el-table-column>
@@ -543,6 +550,7 @@ type Item = {
   size_bytes: number
   resource_type: string
   medium: string
+  subtitle: string
   tags_json: string
   status: string
   reject_reason: string
@@ -924,6 +932,12 @@ const formatGB = (bytes: number) =>
   bytes > 0 ? `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB` : '-'
 const displayType = (value: string) => typeDisplayMap[(value || '').trim()] || value || '-'
 const displayMedium = (value: string) => mediumDisplayMap[(value || '').trim()] || value || '-'
+const subtitlePreview = (value: string) => {
+  const text = (value || '').trim()
+  if (!text) return '-'
+  const chars = Array.from(text)
+  return chars.length > 20 ? `${chars.slice(0, 20).join('')}...` : text
+}
 const statusText = (status: string) =>
   ({
     pending: '未推送',
@@ -1034,6 +1048,14 @@ onMounted(async () => {
 .table {
   flex: 1;
   min-height: 0;
+}
+.subtitle-cell {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 .pager {
   padding: 10px 14px;

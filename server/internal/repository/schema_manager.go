@@ -57,6 +57,9 @@ func (m *SchemaManager) EnsureSchema() error {
 		if err := m.createAutoSeedMySQLTables(); err != nil {
 			return err
 		}
+		if err := m.ensureTableColumns("auto_seed_items", m.columnSpecs()["auto_seed_items"]); err != nil {
+			return err
+		}
 		if err := m.fixAutoSeedMySQLColumnTypes(); err != nil {
 			return err
 		}
@@ -716,6 +719,33 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "cumulative_uploaded", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
 			{name: "cumulative_downloaded", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
 		},
+		"auto_seed_items": {
+			{name: "rule_id", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
+			{name: "source_site", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "guid", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "torrent_url", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "detail_url", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "name", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "subtitle", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
+			{name: "size_bytes", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
+			{name: "resource_type", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(32)", "postgresql": "VARCHAR(32)"}},
+			{name: "medium", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "tags_json", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "status", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(32)", "postgresql": "VARCHAR(32)"}},
+			{name: "reject_reason", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "publish_results_json", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "downloader_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "downloader_hash", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "progress", definition: map[string]string{"sqlite": "REAL NOT NULL DEFAULT 0", "mysql": "DOUBLE NOT NULL DEFAULT 0", "postgresql": "DOUBLE PRECISION NOT NULL DEFAULT 0"}},
+			{name: "downloaded", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "TINYINT(1) NOT NULL DEFAULT 0", "postgresql": "BOOLEAN NOT NULL DEFAULT FALSE"}},
+			{name: "torrent_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "site_name", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "pushed_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
+			{name: "organized_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
+			{name: "published_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
+			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+		},
 		"torrents": {
 			{name: "hash", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(64) NOT NULL", "postgresql": "VARCHAR(64) NOT NULL"}},
 			{name: "name", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "TEXT NOT NULL", "postgresql": "TEXT NOT NULL"}},
@@ -1067,6 +1097,7 @@ func (m *SchemaManager) createAutoSeedMySQLTables() error {
 			torrent_url LONGTEXT,
 			detail_url LONGTEXT,
 			name LONGTEXT,
+			subtitle TEXT,
 			size_bytes BIGINT NOT NULL DEFAULT 0,
 			resource_type VARCHAR(32),
 			medium VARCHAR(64),
@@ -1127,6 +1158,7 @@ func (m *SchemaManager) fixAutoSeedMySQLColumnTypes() error {
 		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `guid` VARCHAR(255)",
 		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `resource_type` VARCHAR(32)",
 		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `medium` VARCHAR(64)",
+		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `subtitle` TEXT",
 		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `status` VARCHAR(32)",
 		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `reject_reason` VARCHAR(255)",
 		"ALTER TABLE `auto_seed_items` MODIFY COLUMN `downloader_id` VARCHAR(64)",
