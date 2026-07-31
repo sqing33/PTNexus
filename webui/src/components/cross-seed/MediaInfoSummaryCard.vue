@@ -24,7 +24,7 @@
         <div class="mediainfo-summary-card__section-body">
           <div
             v-for="field in summary.video"
-            :key="field.label"
+            :key="`${field.label}-${field.value}`"
             class="mediainfo-summary-card__field"
           >
             <span class="mediainfo-summary-card__field-label">{{ field.label }}:</span>

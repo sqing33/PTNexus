@@ -112,6 +112,7 @@ const normalizeAudioCodec = (format: string, commercialName: string): string => 
   if (/truehd/i.test(source) && /atmos/i.test(source)) return 'TrueHD Atmos'
   if (/truehd/i.test(source)) return 'TrueHD'
   if (/dts-hd\s*master\s*audio/i.test(source) || /dts-hd\s*ma/i.test(source)) return 'DTS-HD MA'
+  if (/dts\s*xll/i.test(format)) return 'DTS-HD MA'
   if (/dts:x/i.test(source)) return 'DTS:X'
   if (/dolby\s*digital\s*plus/i.test(source)) return 'DD+'
   if (/dolby\s*digital/i.test(source)) return format || 'AC-3'
@@ -145,14 +146,20 @@ const buildVideoFields = (section: ParsedMediaInfoSection | undefined): MediaInf
     width && height
       ? `${normalizePixels(width)}*${normalizePixels(height)}${ratio ? ` (${ratio})` : ''}`
       : ''
+  const hdrFields = hdrFormat
+    .split(/\s+\/\s+/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => ({ label: 'HDR', value }))
 
-  return compactFields([
+  return [
     videoFormat ? { label: 'Format', value: videoFormat } : null,
     bitrate ? { label: 'Bit Rate', value: normalizeBitrate(bitrate) } : null,
     resolution ? { label: 'Resolution', value: resolution } : null,
     frameRate ? { label: 'Frame Rate', value: frameRate } : null,
-    hdrFormat ? { label: 'HDR', value: hdrFormat } : null,
-  ])
+  ]
+    .concat(hdrFields)
+    .filter((field): field is MediaInfoSummaryField => Boolean(field))
 }
 
 const buildAudioLine = (section: ParsedMediaInfoSection): string => {
