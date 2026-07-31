@@ -34,7 +34,9 @@
       </section>
 
       <section class="mediainfo-summary-card__section">
-        <div class="mediainfo-summary-card__section-title">Audio</div>
+        <div class="mediainfo-summary-card__section-title">
+          Audio<span v-if="summary.audio.length">({{ summary.audio.length }})</span>
+        </div>
         <div class="mediainfo-summary-card__section-body">
           <div
             v-for="(line, index) in summary.audio"

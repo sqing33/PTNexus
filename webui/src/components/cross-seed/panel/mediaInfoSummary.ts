@@ -93,6 +93,44 @@ const getFileName = (value: string): string => {
   return trimmed.split(/[\\/]/).pop() || trimmed
 }
 
+const normalizeBitrate = (value: string): string =>
+  value
+    .replace(/(\d)\s+(?=\d)/g, '$1')
+    .replace(/\s+(?=[kKmMgG]b\/s)/g, '')
+    .replace(/([kKmMgG])b\/s/g, (_, unit: string) => {
+      return `${unit.toLowerCase()}b/s`
+    })
+
+const normalizePixels = (value: string): string =>
+  value
+    .replace(/\s+/g, '')
+    .replace(/pixels?/gi, '')
+    .trim()
+
+const normalizeAudioCodec = (format: string, commercialName: string): string => {
+  const source = commercialName || format
+  if (/truehd/i.test(source) && /atmos/i.test(source)) return 'TrueHD Atmos'
+  if (/truehd/i.test(source)) return 'TrueHD'
+  if (/dts-hd\s*master\s*audio/i.test(source) || /dts-hd\s*ma/i.test(source)) return 'DTS-HD MA'
+  if (/dts:x/i.test(source)) return 'DTS:X'
+  if (/dolby\s*digital\s*plus/i.test(source)) return 'DD+'
+  if (/dolby\s*digital/i.test(source)) return format || 'AC-3'
+  return format || source
+}
+
+const normalizeAudioChannels = (value: string): string => {
+  const match = value.match(/(\d+(?:\.\d+)?)/)
+  if (!match) return value
+
+  const channels = Number(match[1])
+  if (!Number.isFinite(channels)) return value
+  if (channels === 1) return '1.0ch'
+  if (channels === 2) return '2.0ch'
+  if (channels === 6) return '5.1ch'
+  if (channels === 8) return '7.1ch'
+  return `${channels}ch`
+}
+
 const buildVideoFields = (section: ParsedMediaInfoSection | undefined): MediaInfoSummaryField[] => {
   const format = findFieldValue(section, ['Format'])
   const bitDepth = findFieldValue(section, ['Bit depth'])
@@ -100,39 +138,48 @@ const buildVideoFields = (section: ParsedMediaInfoSection | undefined): MediaInf
   const height = findFieldValue(section, ['Height'])
   const ratio = findFieldValue(section, ['Display aspect ratio'])
   const videoFormat = format ? `${format}${bitDepth ? ` (${bitDepth})` : ''}` : ''
-  const resolution = width && height ? `${width} * ${height}${ratio ? ` (${ratio})` : ''}` : ''
+  const bitrate = findFieldValue(section, ['Bit rate', 'Nominal bit rate'])
+  const frameRate = findFieldValue(section, ['Frame rate'])
+  const hdrFormat = findFieldValue(section, ['HDR format'])
+  const resolution =
+    width && height
+      ? `${normalizePixels(width)}*${normalizePixels(height)}${ratio ? ` (${ratio})` : ''}`
+      : ''
 
   return compactFields([
     videoFormat ? { label: 'Format', value: videoFormat } : null,
-    buildField(section, 'Bit Rate', ['Bit rate', 'Nominal bit rate']),
+    bitrate ? { label: 'Bit Rate', value: normalizeBitrate(bitrate) } : null,
     resolution ? { label: 'Resolution', value: resolution } : null,
-    buildField(section, 'Frame Rate', ['Frame rate']),
+    frameRate ? { label: 'Frame Rate', value: frameRate } : null,
+    hdrFormat ? { label: 'HDR', value: hdrFormat } : null,
   ])
 }
 
 const buildAudioLine = (section: ParsedMediaInfoSection): string => {
   const title = findFieldValue(section, ['Title'])
   const language = findFieldValue(section, ['Language'])
-  const format = findFieldValue(section, ['Format', 'Commercial name'])
+  const format = findFieldValue(section, ['Format'])
+  const commercialName = findFieldValue(section, ['Commercial name'])
   const channels = findFieldValue(section, ['Channel(s)'])
   const bitrate = findFieldValue(section, ['Bit rate'])
-  const prefix = title || language
-  const core = [prefix, format, channels].filter(Boolean).join(' ')
-  const withBitrate = bitrate ? `${core} @ ${bitrate}` : core
-
-  if (language && language !== prefix) return `${withBitrate} (${language})`
-  return withBitrate || section.title
+  const prefix = language || title
+  const codec = normalizeAudioCodec(format, commercialName)
+  const suffix = title ? ` (${title})` : ''
+  const core = [prefix, codec, channels ? normalizeAudioChannels(channels) : '']
+    .filter(Boolean)
+    .join(' ')
+  return (
+    `${core}${bitrate ? ` @ ${normalizeBitrate(bitrate)}` : ''}${suffix}`.trim() || section.title
+  )
 }
 
 const buildSubtitleLine = (section: ParsedMediaInfoSection): string => {
   const title = findFieldValue(section, ['Title'])
   const language = findFieldValue(section, ['Language'])
   const format = findFieldValue(section, ['Format', 'Codec ID'])
+  const suffix = title && title !== language ? ` (${title})` : ''
   const base = [language, format].filter(Boolean).join(' ')
-  const shouldShowTitle = title && title.toLowerCase() !== language.toLowerCase()
-
-  if (base && shouldShowTitle) return `${base} (${title})`
-  return base || title || section.title
+  return `${base}${suffix}`.trim() || title || section.title
 }
 
 export const buildMediaInfoSummary = (text: string): MediaInfoSummary => {
@@ -145,11 +192,12 @@ export const buildMediaInfoSummary = (text: string): MediaInfoSummary => {
   )
 
   const completeName = findFieldValue(generalSection, ['Complete name'])
+  const generalBitrate = findFieldValue(generalSection, ['Overall bit rate', 'Bit rate'])
   const general = compactFields([
     buildField(generalSection, 'Format', ['Format']),
     buildField(generalSection, 'Duration', ['Duration']),
     buildField(generalSection, 'File Size', ['File size']),
-    buildField(generalSection, 'Bit Rate', ['Overall bit rate', 'Bit rate']),
+    generalBitrate ? { label: 'Bit Rate', value: normalizeBitrate(generalBitrate) } : null,
   ])
   const video = buildVideoFields(videoSection)
   const audio = audioSections.map(buildAudioLine).filter(Boolean)
