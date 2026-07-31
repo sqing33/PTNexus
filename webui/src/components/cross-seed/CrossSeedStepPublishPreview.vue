@@ -193,6 +193,7 @@
       <div class="preview-row mediainfo-row">
         <div class="row-label">Mediainfo：</div>
         <div class="row-content mediainfo-content scrollable-content">
+          <MediaInfoSummaryCard :text="torrentData.mediainfo" />
           <pre class="mediainfo-pre">{{ torrentData.mediainfo || '暂无数据' }}</pre>
         </div>
       </div>
@@ -254,6 +255,7 @@
 
 <script setup lang="ts">
 import { useCrossSeedPanelContext } from './crossSeedPanelContext'
+import MediaInfoSummaryCard from './MediaInfoSummaryCard.vue'
 
 const {
   torrentData,
@@ -267,4 +269,3 @@ const {
   handleImageErrorWithProxy,
 } = useCrossSeedPanelContext()
 </script>
-

@@ -67,7 +67,10 @@
                     </el-form-item>
                   </div>
                   <!-- 无法识别占1列 -->
-                  <div :class="{ 'unrecognized-section': unrecognizedValue }" style="grid-column: span 1">
+                  <div
+                    :class="{ 'unrecognized-section': unrecognizedValue }"
+                    style="grid-column: span 1"
+                  >
                     <el-form-item label="无法识别">
                       <el-input v-model="unrecognizedValue" />
                     </el-form-item>
@@ -255,13 +258,16 @@
                           :label="option.label"
                           :value="option.value"
                         >
-                          <span :style="{ color: invalidTagsList.includes(option.value) ? '#F56C6C' : '' }">
+                          <span
+                            :style="{
+                              color: invalidTagsList.includes(option.value) ? '#F56C6C' : '',
+                            }"
+                          >
                             {{ option.label }}
                           </span>
                         </el-option>
                       </el-select>
                     </el-form-item>
-
                   </div>
                 </div>
               </div>
@@ -456,10 +462,22 @@
                       <span>BDInfo 获取中...</span>
                       <div class="header-buttons">
                         <span class="background-hint">可在后台继续获取</span>
-                        <el-button :icon="Monitor" @click="runInBackground" size="small" text type="primary">
+                        <el-button
+                          :icon="Monitor"
+                          @click="runInBackground"
+                          size="small"
+                          text
+                          type="primary"
+                        >
                           放置后台
                         </el-button>
-                        <el-button :icon="Close" @click="stopBDInfoSSE" size="small" text type="info">
+                        <el-button
+                          :icon="Close"
+                          @click="stopBDInfoSSE"
+                          size="small"
+                          text
+                          type="info"
+                        >
                           取消获取
                         </el-button>
                       </div>
@@ -480,6 +498,8 @@
                 </el-card>
               </div>
 
+              <MediaInfoSummaryCard :text="torrentData.mediainfo" />
+
               <!-- Mediainfo 文本框 -->
               <el-input
                 type="textarea"
@@ -492,7 +512,11 @@
         </el-form>
       </el-tab-pane>
 
-      <el-tab-pane label="已过滤声明" name="filtered-declarations" class="filtered-declarations-pane">
+      <el-tab-pane
+        label="已过滤声明"
+        name="filtered-declarations"
+        class="filtered-declarations-pane"
+      >
         <div class="filtered-declarations-container">
           <div class="filtered-declarations-header">
             <h3>已自动过滤的声明内容</h3>
@@ -525,6 +549,7 @@
 <script setup lang="ts">
 import { Close, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useCrossSeedPanelContext } from './crossSeedPanelContext'
+import MediaInfoSummaryCard from './MediaInfoSummaryCard.vue'
 
 const {
   activeTab,

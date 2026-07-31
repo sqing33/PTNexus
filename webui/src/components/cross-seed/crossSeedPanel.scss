@@ -42,6 +42,83 @@
     width: 100%;
   }
 
+  .mediainfo-summary-card {
+    width: 100%;
+    margin-bottom: 12px;
+    border: 1px solid #d2d2d2;
+    border-radius: 4px;
+    background: #fff;
+    color: #111827;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .mediainfo-summary-card__title {
+    min-height: 38px;
+    padding: 7px 10px;
+    display: flex;
+    align-items: center;
+    background: #f3b400;
+    color: #000;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.3;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .mediainfo-summary-card__grid {
+    display: grid;
+    grid-template-columns:
+      minmax(170px, 1.1fr) minmax(260px, 3fr) minmax(220px, 2fr)
+      minmax(190px, 1.25fr);
+  }
+
+  .mediainfo-summary-card__section {
+    min-width: 0;
+    border-right: 1px solid #d2d2d2;
+  }
+
+  .mediainfo-summary-card__section:last-child {
+    border-right: 0;
+  }
+
+  .mediainfo-summary-card__section-title {
+    min-height: 32px;
+    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #d2d2d2;
+    color: #000;
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.25;
+  }
+
+  .mediainfo-summary-card__section-body {
+    min-height: 118px;
+    padding: 28px 8px 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 7px;
+    font-size: 15px;
+    line-height: 1.35;
+  }
+
+  .mediainfo-summary-card__field,
+  .mediainfo-summary-card__line {
+    min-width: 0;
+    color: #000;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .mediainfo-summary-card__field-label {
+    margin-right: 4px;
+    font-weight: 500;
+  }
+
   /* BDInfo 进度条样式 */
   .bdinfo-progress-inline {
     margin-bottom: 12px;
