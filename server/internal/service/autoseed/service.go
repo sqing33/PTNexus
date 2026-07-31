@@ -202,8 +202,22 @@ func (s *Service) processRule(rule *repository.AutoSeedRule) {
 			logx.Warnf(moduleAutoSeed, "写入 RSS 记录失败 rule_id=%d name=%s err=%v", rule.ID, item.Name, err)
 			continue
 		}
-		if !isNew || created == nil {
+		if created == nil {
 			continue
+		}
+		if !isNew {
+			if !shouldRetryAutoSeedItem(created) {
+				continue
+			}
+			previousReason := created.RejectReason
+			item.ID = created.ID
+			item.CreatedAt = created.CreatedAt
+			if err := s.repo.ResetItemForRetry(item); err != nil {
+				logx.Warnf(moduleAutoSeed, "重置自动发种记录失败 rule_id=%d item_id=%d name=%s err=%v", rule.ID, created.ID, item.Name, err)
+				continue
+			}
+			created = item
+			logx.Infof(moduleAutoSeed, "自动发种记录重新推送 rule_id=%d item_id=%d name=%s previous_reason=%s", rule.ID, created.ID, created.Name, previousReason)
 		}
 		fetchResult, fetchReason := s.fetchItemDetails(created)
 		if fetchReason != "" {
@@ -884,6 +898,47 @@ func restrictedTagRejectReason(item *repository.AutoSeedItem) string {
 		return "因分集标签不允许下载"
 	}
 	return ""
+}
+
+// shouldRetryAutoSeedItem 判断已存在的 RSS 记录是否应在下一轮重新尝试推送。
+// 参数/返回：item 为数据库中的现有记录；返回 true 表示允许重新抓取详情并添加到下载器。
+// 失败场景：空记录或已推送、已整理、已发布记录不会重试。
+// 副作用：无，仅根据记录状态和失败原因做判断。
+func shouldRetryAutoSeedItem(item *repository.AutoSeedItem) bool {
+	if item == nil {
+		return false
+	}
+	switch strings.TrimSpace(item.Status) {
+	case repository.AutoSeedItemStatusPending:
+		return true
+	case repository.AutoSeedItemStatusRejected:
+		return isRetryableAutoSeedRejectReason(item.RejectReason)
+	default:
+		return false
+	}
+}
+
+// isRetryableAutoSeedRejectReason 判断失败原因是否属于可通过修复配置后恢复的错误。
+// 参数/返回：reason 为自动发种记录的失败原因；返回 true 表示下一轮 RSS 可以重新处理。
+// 失败场景：空原因或明确的规则过滤原因不允许重试。
+// 副作用：无。
+func isRetryableAutoSeedRejectReason(reason string) bool {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"详情页数据抓取失败",
+		"推送下载器失败",
+		"未获取到源站标签",
+		"未获取到源站详情",
+		"未获取到下载器",
+	} {
+		if strings.Contains(reason, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func classifyEntry(entry feedEntry) (string, string) {

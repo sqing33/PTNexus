@@ -286,6 +286,40 @@ func (r *AutoSeedRepository) UpsertItem(item *AutoSeedItem) (*AutoSeedItem, bool
 	return item, true, nil
 }
 
+// ResetItemForRetry 将已存在的 RSS 记录恢复为待推送状态，并刷新本次 RSS 提供的基础字段。
+// 参数/返回：item 必须带有已有记录 ID 和最新 RSS 字段；返回数据库更新错误。
+// 失败场景：仓储未初始化、item 为空或数据库更新失败时返回 error。
+// 副作用：会清空上次失败原因、下载器 hash 和推送时间，使后续流程重新抓详情并推送下载器。
+func (r *AutoSeedRepository) ResetItemForRetry(item *AutoSeedItem) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	if item == nil || item.ID <= 0 {
+		return errors.New("item is nil")
+	}
+	return r.store.DB.Table("auto_seed_items").Where("id = ?", item.ID).Updates(map[string]any{
+		"source_site":          item.SourceSite,
+		"torrent_url":          item.TorrentURL,
+		"detail_url":           item.DetailURL,
+		"name":                 item.Name,
+		"size_bytes":           item.SizeBytes,
+		"resource_type":        item.ResourceType,
+		"medium":               item.Medium,
+		"tags_json":            item.TagsJSON,
+		"status":               AutoSeedItemStatusPending,
+		"reject_reason":        "",
+		"publish_results_json": "",
+		"downloader_id":        item.DownloaderID,
+		"downloader_hash":      "",
+		"progress":             0,
+		"downloaded":           false,
+		"torrent_id":           item.TorrentID,
+		"site_name":            item.SiteName,
+		"pushed_at":            nil,
+		"updated_at":           time.Now().Format(PublishQueueTimeLayout),
+	}).Error
+}
+
 // CreateManualItem 写入用户手动添加的种子 URL。
 func (r *AutoSeedRepository) CreateManualItem(item *AutoSeedItem) error {
 	if r == nil || r.store == nil || r.store.DB == nil {
