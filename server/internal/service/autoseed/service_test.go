@@ -88,3 +88,15 @@ func TestShouldRetryAutoSeedItem(t *testing.T) {
 		})
 	}
 }
+
+func TestRejectReasonMatchesNormalizedType(t *testing.T) {
+	rule := &repository.AutoSeedRule{TypesJSON: `["电影"]`}
+	item := &repository.AutoSeedItem{
+		TorrentURL:   "https://example.test/download.php?id=1",
+		ResourceType: "category.movie",
+	}
+
+	if got := rejectReason(rule, item); got != "" {
+		t.Fatalf("rejectReason() = %q, want empty", got)
+	}
+}

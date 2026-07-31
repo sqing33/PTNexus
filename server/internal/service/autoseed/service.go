@@ -873,7 +873,7 @@ func rejectReason(rule *repository.AutoSeedRule, item *repository.AutoSeedItem) 
 	if rule.MaxSizeGB > 0 && item.SizeBytes > 0 && sizeGB > rule.MaxSizeGB {
 		return "因大小限制"
 	}
-	if allowed := parseJSONStrings(rule.TypesJSON); len(allowed) > 0 && !containsFold(allowed, item.ResourceType) {
+	if allowed := parseJSONStrings(rule.TypesJSON); len(allowed) > 0 && !matchesAutoSeedType(allowed, item.ResourceType) {
 		return "类型不符合"
 	}
 	if allowed := parseJSONStrings(rule.MediaJSON); len(allowed) > 0 && !containsFold(allowed, item.Medium) {
@@ -1369,6 +1369,63 @@ func containsFold(items []string, target string) bool {
 	target = strings.TrimSpace(target)
 	for _, item := range items {
 		if strings.EqualFold(strings.TrimSpace(item), target) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesAutoSeedType 对自动发种规则类型和抓取回填类型做同义匹配。
+// 参数/返回：allowed 为规则中选择的类型，target 为 RSS 或详情页识别出的类型；返回 true 表示语义一致。
+// 失败场景：目标类型为空或所有候选均无法匹配时返回 false。
+// 副作用：无。
+func matchesAutoSeedType(allowed []string, target string) bool {
+	targetKeys := autoSeedTypeKeys(target)
+	if len(targetKeys) == 0 {
+		return false
+	}
+	for _, item := range allowed {
+		if intersectsStringSet(autoSeedTypeKeys(item), targetKeys) {
+			return true
+		}
+	}
+	return false
+}
+
+// autoSeedTypeKeys 将界面中文类型和详情页内部类型转换为统一匹配键。
+// 参数/返回：value 为任意类型文本；返回包含原始归一值和语义别名的列表。
+// 失败场景：空文本返回空列表。
+// 副作用：无。
+func autoSeedTypeKeys(value string) []string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return []string{}
+	}
+	key := strings.ToLower(strings.ReplaceAll(trimmed, "-", "_"))
+	aliases := []string{key}
+	switch key {
+	case "电影", "movie", "movies", "category.movie":
+		aliases = append(aliases, "movie")
+	case "电视剧", "剧集", "剧", "tv", "tv_series", "tv series", "category.tv_series":
+		aliases = append(aliases, "tv_series")
+	}
+	return compactStrings(aliases)
+}
+
+// intersectsStringSet 判断两个字符串集合是否存在相同归一值。
+// 参数/返回：left/right 为待比较集合；存在交集时返回 true。
+// 失败场景：任一集合为空时返回 false。
+// 副作用：无。
+func intersectsStringSet(left []string, right []string) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	seen := map[string]struct{}{}
+	for _, item := range left {
+		seen[strings.ToLower(strings.TrimSpace(item))] = struct{}{}
+	}
+	for _, item := range right {
+		if _, ok := seen[strings.ToLower(strings.TrimSpace(item))]; ok {
 			return true
 		}
 	}
