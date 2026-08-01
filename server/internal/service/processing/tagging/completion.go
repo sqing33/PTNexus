@@ -62,14 +62,17 @@ func extractRawTagsFromTitleComponents(components []map[string]any) []string {
 		if strings.Contains(hdrUpper, "HDR10+") {
 			tags = appendUniqueStringLocal(tags, "HDR10+")
 		}
+		if !strings.Contains(hdrUpper, "HDR10+") && strings.Contains(hdrUpper, "HDR10") {
+			tags = appendUniqueStringLocal(tags, "HDR10")
+		}
 		if strings.Contains(hdrUpper, "HLG") {
 			tags = appendUniqueStringLocal(tags, "HLG")
 		}
 		if strings.Contains(hdrUpper, "VIVID") || strings.Contains(hdr, "菁彩HDR") {
 			tags = appendUniqueStringLocal(tags, "菁彩HDR")
 		}
-		// HDR10/HDR：当 HDR10+ 不存在时，再补 HDR，后续会由 deduplicateHDRTags 做去重。
-		if !strings.Contains(hdrUpper, "HDR10+") && strings.Contains(hdrUpper, "HDR") {
+		// HDR：当更具体的 HDR10/HDR10+ 不存在时，再补普通 HDR。
+		if !strings.Contains(hdrUpper, "HDR10+") && !strings.Contains(hdrUpper, "HDR10") && strings.Contains(hdrUpper, "HDR") {
 			tags = appendUniqueStringLocal(tags, "HDR")
 		}
 	}
@@ -270,13 +273,16 @@ func extractRawTagsFromMediaText(mediaText string, isBDInfo bool) []string {
 		if strings.Contains(upper, "HDR10+") {
 			tags = appendUniqueStringLocal(tags, "HDR10+")
 		}
+		if !strings.Contains(upper, "HDR10+") && strings.Contains(upper, "HDR10") {
+			tags = appendUniqueStringLocal(tags, "HDR10")
+		}
 		if strings.Contains(upper, "HLG") {
 			tags = appendUniqueStringLocal(tags, "HLG")
 		}
 		if strings.Contains(upper, "VIVID") {
 			tags = appendUniqueStringLocal(tags, "菁彩HDR")
 		}
-		if !strings.Contains(upper, "HDR10+") && strings.Contains(upper, "HDR") {
+		if !strings.Contains(upper, "HDR10+") && !strings.Contains(upper, "HDR10") && strings.Contains(upper, "HDR") {
 			tags = appendUniqueStringLocal(tags, "HDR")
 		}
 	}

@@ -831,7 +831,7 @@ global_standard_keys:
     "外语": "tag.外语"
 
     # HDR相关标签
-    "HDR10": "tag.HDR"
+    "HDR10": "tag.HDR10"
     "HDR": "tag.HDR"
     "HDR10+": "tag.HDR10+"
     "DoVi+HDR": "tag.杜比"
@@ -1204,6 +1204,8 @@ fallback_chains:
       - "medium.other"
 
   tag:
+    "tag.HDR10":
+      - "tag.HDR"
     "tag.菁彩HDR":
       - "tag.HDR"
     "tag.HDR10+":

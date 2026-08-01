@@ -104,7 +104,7 @@ func determineMediaInfoHDRStandardTag(params mediaInfoVideoParams) string {
 			return "DoVi HDR10+"
 		}
 		if strings.Contains(hdrFormat, "HDR10") {
-			return "DoVi HDR"
+			return "DoVi HDR10"
 		}
 		return "DoVi"
 	}
@@ -118,7 +118,7 @@ func determineMediaInfoHDRStandardTag(params mediaInfoVideoParams) string {
 	}
 	// 4. HDR10
 	if strings.Contains(hdrFormat, "HDR10") || strings.Contains(hdrFormat, "SMPTE ST 2086") {
-		return "HDR"
+		return "HDR10"
 	}
 	// 5. HLG
 	if strings.Contains(transfer, "HLG") || strings.Contains(transfer, "ARIB STD-B67") {
@@ -174,7 +174,7 @@ func determineBDInfoHDRStandardTag(videoLines []string) string {
 			return "DoVi HDR10+"
 		}
 		if hasHDR10 {
-			return "DoVi HDR"
+			return "DoVi HDR10"
 		}
 		return "DoVi"
 	}
@@ -182,7 +182,7 @@ func determineBDInfoHDRStandardTag(videoLines []string) string {
 		return "HDR10+"
 	}
 	if hasHDR10 {
-		return "HDR"
+		return "HDR10"
 	}
 	if hasHLG {
 		return "HLG"

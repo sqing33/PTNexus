@@ -318,31 +318,6 @@
             />
           </div>
         </el-form-item>
-        <el-form-item label="类型">
-          <el-checkbox-group v-model="ruleTypes">
-            <el-checkbox label="电影" />
-            <el-checkbox label="电视剧" />
-          </el-checkbox-group>
-        </el-form-item>
-        <el-form-item label="媒介">
-          <el-select
-            v-model="ruleMediaSelected"
-            multiple
-            filterable
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            placeholder="请选择媒介"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="medium in mediumOptions"
-              :key="medium"
-              :label="medium"
-              :value="medium"
-            />
-          </el-select>
-        </el-form-item>
         <el-form-item label="标签"
           ><el-input v-model="ruleTagsText" placeholder="多个用逗号分隔"
         /></el-form-item>
@@ -593,8 +568,6 @@ const manualDialogVisible = ref(false)
 const organizeDialogVisible = ref(false)
 const publishDialogVisible = ref(false)
 const editingRule = ref<Rule>(emptyRule())
-const ruleTypes = ref<string[]>([])
-const ruleMediaSelected = ref<string[]>([])
 const ruleTagsText = ref('')
 const ruleTargetSites = ref<string[]>([])
 const manualForm = ref({ torrent_url: '', source_site: '', downloader_id: '' })
@@ -776,8 +749,6 @@ const handleSizeChange = () => {
 
 const openRuleDialog = (rule?: Rule) => {
   editingRule.value = rule ? { ...rule } : emptyRule()
-  ruleTypes.value = parseJSON(editingRule.value.types_json)
-  ruleMediaSelected.value = parseJSON(editingRule.value.media_json)
   ruleTagsText.value = parseJSON(editingRule.value.tags_json).join(',')
   ruleTargetSites.value = parseJSON(editingRule.value.target_sites_json)
   ruleDialogVisible.value = true
@@ -789,8 +760,8 @@ const saveRule = async () => {
     save_path: '',
     publish_interval_minutes: 0,
     publish_concurrency: 1,
-    types_json: JSON.stringify(ruleTypes.value),
-    media_json: JSON.stringify(ruleMediaSelected.value),
+    types_json: '[]',
+    media_json: '[]',
     tags_json: JSON.stringify(splitText(ruleTagsText.value)),
     target_sites_json: JSON.stringify(ruleTargetSites.value),
   }

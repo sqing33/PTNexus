@@ -329,16 +329,19 @@ func mappingValueNode(mapping *yaml.Node, key string) *yaml.Node {
 
 func deduplicateHDRTags(tags []string) []string {
 	hasHDR := false
+	hasHDR10 := false
 	hasHDR10Plus := false
 	for _, tag := range tags {
 		switch strings.TrimSpace(tag) {
 		case "tag.HDR":
 			hasHDR = true
+		case "tag.HDR10":
+			hasHDR10 = true
 		case "tag.HDR10+":
 			hasHDR10Plus = true
 		}
 	}
-	if !(hasHDR && hasHDR10Plus) {
+	if !(hasHDR && (hasHDR10 || hasHDR10Plus)) {
 		return tags
 	}
 	result := make([]string, 0, len(tags))

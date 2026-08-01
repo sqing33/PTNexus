@@ -338,5 +338,7 @@ func addFallbackMappings(reverse map[string]map[string]string) {
 		reverse["tags"]["tag.DIY"] = "DIY"
 		reverse["tags"]["tag.中字"] = "中字"
 		reverse["tags"]["tag.HDR"] = "HDR"
+		reverse["tags"]["tag.HDR10"] = "HDR10"
+		reverse["tags"]["tag.HDR10+"] = "HDR10+"
 	}
 }

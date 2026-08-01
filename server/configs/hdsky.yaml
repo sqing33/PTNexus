@@ -136,6 +136,6 @@ source_parsers:
       "特效": "tag.特效"
       "次时代国语": "tag.国语"
       "全景声国语": "tag.国语"
-      "HDR10": "tag.HDR"
+      "HDR10": "tag.HDR10"
       "原生原盘": "tag.原生"
       "default": null

@@ -89,14 +89,33 @@ func TestShouldRetryAutoSeedItem(t *testing.T) {
 	}
 }
 
-func TestRejectReasonMatchesNormalizedType(t *testing.T) {
-	rule := &repository.AutoSeedRule{TypesJSON: `["电影"]`}
+func TestRejectReasonIgnoresLegacyTypeAndMediumFilters(t *testing.T) {
+	rule := &repository.AutoSeedRule{
+		TypesJSON: `["电影"]`,
+		MediaJSON: `["Blu-ray"]`,
+	}
 	item := &repository.AutoSeedItem{
 		TorrentURL:   "https://example.test/download.php?id=1",
-		ResourceType: "category.movie",
+		ResourceType: "category.tv_series",
+		Medium:       "WEB-DL",
 	}
 
 	if got := rejectReason(rule, item); got != "" {
 		t.Fatalf("rejectReason() = %q, want empty", got)
+	}
+}
+
+func TestNormalizeRuleClearsLegacyTypeAndMediumFilters(t *testing.T) {
+	rule := &repository.AutoSeedRule{
+		Name:      "rule",
+		RSSURL:    "https://example.test/rss",
+		TypesJSON: `["电影"]`,
+		MediaJSON: `["Blu-ray"]`,
+	}
+
+	normalizeRule(rule)
+
+	if rule.TypesJSON != "[]" || rule.MediaJSON != "[]" {
+		t.Fatalf("expected legacy filters to be cleared, got types=%q media=%q", rule.TypesJSON, rule.MediaJSON)
 	}
 }
