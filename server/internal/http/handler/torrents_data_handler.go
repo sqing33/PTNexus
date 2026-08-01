@@ -24,6 +24,7 @@ func (h *TorrentDataHandler) Data(c *gin.Context) {
 		PageSize:                  intQuery(c, "pageSize", 50),
 		PathFilters:               stringSliceQuery(c, "path_filters"),
 		StateFilters:              stringSliceQuery(c, "state_filters"),
+		SourceDataStatusFilters:   stringSliceQuery(c, "source_data_status_filters"),
 		DownloaderFilters:         stringSliceQuery(c, "downloader_filters"),
 		SourceAvailabilityFilters: stringSliceQuery(c, "source_availability_filters"),
 		ExistSiteNames:            stringSliceQuery(c, "existSiteNames"),

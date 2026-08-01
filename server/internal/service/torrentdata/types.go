@@ -13,6 +13,7 @@ type TorrentsDataParams struct {
 	PageSize                  int
 	PathFilters               []string
 	StateFilters              []string
+	SourceDataStatusFilters   []string
 	DownloaderFilters         []string
 	SourceAvailabilityFilters []string
 	ExistSiteNames            []string

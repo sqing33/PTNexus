@@ -37,6 +37,15 @@ func (s *TorrentDataService) applyFilters(data []map[string]any, params Torrents
 		})
 	}
 
+	if len(params.SourceDataStatusFilters) > 0 {
+		allowed := toStringSet(params.SourceDataStatusFilters)
+		filtered = filterData(filtered, func(item map[string]any) bool {
+			status := stringValue(item["source_data_status"], "missing")
+			_, ok := allowed[status]
+			return ok
+		})
+	}
+
 	if len(params.DownloaderFilters) > 0 {
 		allowed := toStringSet(params.DownloaderFilters)
 		filtered = filterData(filtered, func(item map[string]any) bool {

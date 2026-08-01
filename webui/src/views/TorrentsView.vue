@@ -20,9 +20,7 @@
       height="100%"
       ref="tableRef"
       row-key="unique_id"
-      :row-class-name="tableRowClassName"
       @row-click="handleRowClick"
-      @expand-change="handleExpandChange"
       @sort-change="handleSortChange"
       @selection-change="handleSelectionChange"
       :default-sort="defaultSortForTable"
@@ -144,7 +142,24 @@
           </div>
         </template>
         <template #default="scope">
-          <span style="white-space: normal">{{ scope.row.name }}</span>
+          <span class="torrent-name-cell" :class="getSourceDataStatusClass(scope.row)">
+            {{ scope.row.name }}
+          </span>
+        </template>
+      </el-table-column>
+
+      <el-table-column
+        v-if="isColumnVisible('source_data_status')"
+        prop="source_data_status"
+        label="源站数据状态"
+        width="120"
+        align="center"
+        header-align="center"
+      >
+        <template #default="scope">
+          <span :class="getSourceDataStatusClass(scope.row)">
+            {{ getSourceDataStatusLabel(scope.row) }}
+          </span>
         </template>
       </el-table-column>
 
@@ -547,6 +562,33 @@
               state
             }}</el-checkbox>
           </el-checkbox-group>
+          <el-divider content-position="left">源站数据状态</el-divider>
+          <div style="margin-bottom: 10px">
+            <div
+              v-if="tempFilters.sourceDataStatuses.length > 0"
+              style="display: flex; align-items: center"
+            >
+              <el-tag type="info" size="default" effect="plain"
+                >源站数据状态: {{ tempFilters.sourceDataStatuses.length }}</el-tag
+              >
+              <el-button
+                type="danger"
+                link
+                style="padding: 0; margin-left: 5px"
+                @click="clearSourceDataStatusFilter"
+                >清除</el-button
+              >
+            </div>
+          </div>
+          <el-checkbox-group v-model="tempFilters.sourceDataStatuses">
+            <el-checkbox
+              v-for="status in sourceDataStatusOptions"
+              :key="status.value"
+              :label="status.value"
+            >
+              {{ status.label }}
+            </el-checkbox>
+          </el-checkbox-group>
         </div>
         <div class="filter-card-footer">
           <el-button @click="clearFilters">清除筛选</el-button>
@@ -889,6 +931,7 @@ interface SiteStatus {
 interface ActiveFilters {
   paths: string[]
   states: string[]
+  sourceDataStatuses: SourceDataStatus[]
   existSiteNames: string[]
   notExistSiteNames: string[]
   downloaderIds: string[]
@@ -977,6 +1020,7 @@ const defaultSortForTable = computed<Sort | undefined>(() => {
 const activeFilters = reactive<ActiveFilters>({
   paths: [],
   states: [],
+  sourceDataStatuses: [],
   existSiteNames: [],
   notExistSiteNames: [],
   downloaderIds: [],
@@ -1009,9 +1053,14 @@ const totalTorrents = ref<number>(0)
 
 const unique_paths = ref<string[]>([])
 const unique_states = ref<string[]>([])
+type SourceDataStatus = NonNullable<Torrent['source_data_status']>
+const sourceDataStatusOptions: Array<{ value: SourceDataStatus; label: string }> = [
+  { value: 'missing', label: '未获取' },
+  { value: 'unreviewed', label: '待整理' },
+  { value: 'reviewed', label: '已整理' },
+]
 const all_sites = ref<string[]>([])
 const site_link_rules = ref<Record<string, { base_url: string }>>({})
-const expandedRows = ref<string[]>([])
 const downloadersList = ref<Downloader[]>([])
 const allDownloadersList = ref<Downloader[]>([])
 
@@ -1243,6 +1292,10 @@ const currentFilterText = computed(() => {
     filterTexts.push(`状态: ${filters.states.length}`)
   }
 
+  if (filters.sourceDataStatuses && filters.sourceDataStatuses.length > 0) {
+    filterTexts.push(`源站数据状态: ${filters.sourceDataStatuses.length}`)
+  }
+
   // 处理站点筛选
   if (filters.existSiteNames && filters.existSiteNames.length > 0) {
     filterTexts.push(`存在于: ${filters.existSiteNames.length}`)
@@ -1265,6 +1318,7 @@ const hasActiveFilters = computed(() => {
   return (
     (filters.paths && filters.paths.length > 0) ||
     (filters.states && filters.states.length > 0) ||
+    (filters.sourceDataStatuses && filters.sourceDataStatuses.length > 0) ||
     (filters.existSiteNames && filters.existSiteNames.length > 0) ||
     (filters.notExistSiteNames && filters.notExistSiteNames.length > 0) ||
     (filters.downloaderIds && filters.downloaderIds.length > 0)
@@ -1291,6 +1345,7 @@ const progressColors = [
 // 列定义与可见性
 const torrentsColumns: ColumnDef[] = [
   { prop: 'name', label: '种子' },
+  { prop: 'source_data_status', label: '源站数据状态' },
   { prop: 'site_count', label: '做种数' },
   { prop: 'save_path', label: '保存路径' },
   { prop: 'downloader', label: '下载器' },
@@ -1314,6 +1369,7 @@ const buildCurrentUiSettings = () => ({
   active_filters: {
     paths: [...activeFilters.paths],
     states: [...activeFilters.states],
+    sourceDataStatuses: [...activeFilters.sourceDataStatuses],
     existSiteNames: [...activeFilters.existSiteNames],
     notExistSiteNames: [...activeFilters.notExistSiteNames],
     downloaderIds: [...activeFilters.downloaderIds],
@@ -1362,6 +1418,9 @@ const loadUiSettings = async (forceRefresh = false) => {
       if (!activeFilters.notExistSiteNames) {
         activeFilters.notExistSiteNames = []
       }
+      if (!activeFilters.sourceDataStatuses) {
+        activeFilters.sourceDataStatuses = []
+      }
       // 兼容旧的数据结构
       // 注意：TypeScript类型检查会报错，因为这些属性已不存在于接口定义中
       // 但在运行时可能仍然存在旧数据，所以需要处理
@@ -1376,7 +1435,10 @@ const loadUiSettings = async (forceRefresh = false) => {
       }
     }
     if (Array.isArray(settings.visible_columns)) {
-      visibleColumns.value = settings.visible_columns
+      const savedColumns = settings.visible_columns
+      visibleColumns.value = savedColumns.includes('source_data_status')
+        ? savedColumns
+        : [...savedColumns, 'source_data_status']
     }
     syncUiSettingsCache()
   } catch (e) {
@@ -1451,6 +1513,7 @@ const fetchDataWithoutLoadingControl = async () => {
       notExistSiteNames: JSON.stringify(activeFilters.notExistSiteNames),
       path_filters: JSON.stringify(activeFilters.paths || []),
       state_filters: JSON.stringify(activeFilters.states),
+      source_data_status_filters: JSON.stringify(activeFilters.sourceDataStatuses),
       downloader_filters: JSON.stringify(activeFilters.downloaderIds),
     })
 
@@ -1898,6 +1961,7 @@ const triggerIYUUQueryForFiltered = async () => {
       notExistSiteNames: JSON.stringify(activeFilters.notExistSiteNames),
       path_filters: JSON.stringify(activeFilters.paths || []),
       state_filters: JSON.stringify(activeFilters.states),
+      source_data_status_filters: JSON.stringify(activeFilters.sourceDataStatuses),
       downloader_filters: JSON.stringify(activeFilters.downloaderIds),
     })
 
@@ -2030,6 +2094,7 @@ const clearFilters = () => {
   // 重置临时筛选条件
   tempFilters.paths = []
   tempFilters.states = []
+  tempFilters.sourceDataStatuses = []
   tempFilters.existSiteNames = []
   tempFilters.notExistSiteNames = []
   tempFilters.downloaderIds = []
@@ -2080,6 +2145,10 @@ const clearStateFilter = () => {
   tempFilters.states = []
 }
 
+const clearSourceDataStatusFilter = () => {
+  tempFilters.sourceDataStatuses = []
+}
+
 // 清除下载器筛选
 const clearDownloaderFilter = () => {
   tempFilters.downloaderIds = []
@@ -2090,6 +2159,7 @@ const clearAllFilters = async () => {
   // 重置所有筛选条件
   activeFilters.paths = []
   activeFilters.states = []
+  activeFilters.sourceDataStatuses = []
   activeFilters.existSiteNames = []
   activeFilters.notExistSiteNames = []
   activeFilters.downloaderIds = []
@@ -2278,23 +2348,19 @@ const getStateTagType = (state: string, row?: Torrent) => {
 }
 
 const handleRowClick = (row: Torrent) => tableRef.value?.toggleRowExpansion(row)
-const handleExpandChange = (row: Torrent, expanded: Torrent[]) => {
-  expandedRows.value = expanded.map((r) => r.unique_id)
-}
-const getSourceDataRowClass = (row: Torrent) => {
-  if (row.source_data_status === 'reviewed') {
-    return 'source-data-reviewed-row'
+const getSourceDataStatus = (row: Torrent): SourceDataStatus => {
+  if (row.source_data_status === 'reviewed' || row.source_data_status === 'unreviewed') {
+    return row.source_data_status
   }
-  if (row.source_data_status === 'unreviewed') {
-    return 'source-data-unreviewed-row'
-  }
-  return 'source-data-missing-row'
+  return 'missing'
 }
 
-const tableRowClassName = ({ row }: { row: Torrent }) => {
-  const classes = [getSourceDataRowClass(row)]
-  if (expandedRows.value.includes(row.unique_id)) classes.push('expanded-row')
-  return classes.join(' ')
+const getSourceDataStatusClass = (row: Torrent) =>
+  `source-data-status-${getSourceDataStatus(row)}`
+
+const getSourceDataStatusLabel = (row: Torrent) => {
+  const status = getSourceDataStatus(row)
+  return sourceDataStatusOptions.find((item) => item.value === status)?.label || '未获取'
 }
 
 onMounted(async () => {
@@ -2611,42 +2677,20 @@ watch(visibleColumns, () => {
   background-color: #ecf5ff !important;
 }
 
-:deep(.el-table__body tr.source-data-missing-row > td.el-table__cell) {
-  background-color: #fff200 !important;
+.torrent-name-cell {
+  white-space: normal;
 }
 
-:deep(.el-table__body tr.source-data-missing-row:hover > td.el-table__cell) {
-  background-color: #fff200 !important;
+.source-data-status-missing {
+  color: #fff200;
 }
 
-:deep(.el-table__body tr.source-data-unreviewed-row > td.el-table__cell) {
-  background-color: #00a2e8 !important;
+.source-data-status-unreviewed {
+  color: #00a2e8;
 }
 
-:deep(.el-table__body tr.source-data-unreviewed-row:hover > td.el-table__cell) {
-  background-color: #00a2e8 !important;
-}
-
-:deep(.el-table__body tr.source-data-reviewed-row > td.el-table__cell) {
-  background-color: #22b14c !important;
-}
-
-:deep(.el-table__body tr.source-data-reviewed-row:hover > td.el-table__cell) {
-  background-color: #22b14c !important;
-}
-
-:deep(.el-table__body tr.expanded-row.source-data-missing-row > td.el-table__cell) {
-  background-color: #fff200 !important;
-}
-
-:deep(.el-table__body tr.expanded-row.source-data-reviewed-row > td.el-table__cell) {
-  background-color: #22b14c !important;
-}
-
-/* Reserved for a future failed source-data state. */
-:deep(.el-table__body tr.source-data-failed-row > td.el-table__cell),
-:deep(.el-table__body tr.source-data-failed-row:hover > td.el-table__cell) {
-  background-color: #ed1c24 !important;
+.source-data-status-reviewed {
+  color: #22b14c;
 }
 
 .filter-overlay {
