@@ -22,9 +22,6 @@ import './assets/styles/typography.scss'
 import './assets/styles/mobile-responsive.scss'
 import './assets/styles/status-toast.scss'
 
-// 如果需要，可以引入 ECharts
-import * as echarts from 'echarts'
-
 const uint8ArrayToBase64 = (bytes: Uint8Array): string => {
   let binary = ''
   const chunkSize = 0x8000
@@ -380,9 +377,6 @@ setupDesktopExternalNavigation()
 const app = createApp(App)
 
 app.use(createPinia())
-
-// 将 echarts 挂载到全局，方便组件中使用
-app.config.globalProperties.$echarts = echarts
 
 app.use(router)
 
