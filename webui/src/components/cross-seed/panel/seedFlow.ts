@@ -1157,9 +1157,15 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
           console.log('成功更新反向映射表:', reverseMappings.value)
         }
 
+        const finalMainTitle =
+          typeof raw_params_for_preview?.final_main_title === 'string'
+            ? raw_params_for_preview.final_main_title.trim()
+            : ''
+
         // 更新本地数据，保留用户修改的内容
         torrentData.value = {
           ...torrentData.value,
+          ...(finalMainTitle ? { original_main_title: finalMainTitle } : {}),
           standardized_params: standardized_params || {},
           final_publish_parameters: final_publish_parameters || {},
           complete_publish_params: complete_publish_params || {},

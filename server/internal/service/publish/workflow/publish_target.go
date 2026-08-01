@@ -101,7 +101,11 @@ func PublishTorrentToTarget(
 // 失败场景：标题组件缺失或重建失败时回退到当前通用标题取值，不返回错误。
 // 副作用：无。
 func resolvePublishMainTitle(siteCode string, uploadData map[string]any, torrentPath string) string {
-	baseTitle := strings.TrimSpace(toStringAny(uploadData["original_main_title"], toStringAny(uploadData["title"], "")))
+	baseTitle := firstNonEmpty(
+		extractPublishFinalMainTitle(uploadData),
+		toStringAny(uploadData["original_main_title"], ""),
+		toStringAny(uploadData["title"], ""),
+	)
 	if baseTitle == "" {
 		baseTitle = strings.TrimSpace(toStringAny(uploadData["name"], filepath.Base(torrentPath)))
 	}
@@ -121,6 +125,23 @@ func resolvePublishMainTitle(siteCode string, uploadData map[string]any, torrent
 		return stripPublishTitleBitDepth(baseTitle)
 	}
 	return rebuilt
+}
+
+func extractPublishFinalMainTitle(uploadData map[string]any) string {
+	if uploadData == nil {
+		return ""
+	}
+	if rawPreview, ok := uploadData["raw_params_for_preview"]; ok {
+		if finalTitle := toStringAny(mapStringAny(rawPreview)["final_main_title"], ""); finalTitle != "" {
+			return finalTitle
+		}
+	}
+	if completeParams, ok := uploadData["complete_publish_params"]; ok {
+		if finalTitle := toStringAny(mapStringAny(completeParams)["final_main_title"], ""); finalTitle != "" {
+			return finalTitle
+		}
+	}
+	return ""
 }
 
 // parsePublishTitleComponents 将发布 payload 中的 title_components 统一转换为 []any。
@@ -201,6 +222,32 @@ func stripPublishTitleBitDepth(title string) string {
 	}
 	stripped := publishTitleBitDepthPattern.ReplaceAllString(trimmed, " ")
 	return strings.Join(strings.Fields(stripped), " ")
+}
+
+func mapStringAny(value any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	case map[string]string:
+		result := make(map[string]any, len(typed))
+		for key, item := range typed {
+			result[key] = item
+		}
+		return result
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return map[string]any{}
+		}
+		decoded := map[string]any{}
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+			return decoded
+		}
+	}
+	return map[string]any{}
 }
 
 func toStringAny(value any, fallback string) string {
