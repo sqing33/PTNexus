@@ -1560,21 +1560,87 @@ const loadReviewStatusFilter = async () => {
   }
 }
 
+const hasArrayLikeContent = (value: unknown): boolean => {
+  if (Array.isArray(value)) {
+    return value.length > 0
+  }
+  if (typeof value !== 'string') {
+    return false
+  }
+
+  const text = value.trim()
+  if (!text || text === '[]' || text === '{}') {
+    return false
+  }
+
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed)) {
+      return parsed.length > 0
+    }
+    if (parsed && typeof parsed === 'object') {
+      return Object.keys(parsed).length > 0
+    }
+  } catch {
+    return true
+  }
+
+  return true
+}
+
+const hasFetchedSourceData = (row: SeedParameter): boolean => {
+  const sourceFields = [
+    row.title,
+    row.subtitle,
+    row.type,
+    row.medium,
+    row.video_codec,
+    row.audio_codec,
+    row.resolution,
+    row.team,
+    row.source,
+    row.poster,
+    row.screenshots,
+    row.statement,
+    row.body,
+    row.mediainfo,
+    row.unrecognized,
+  ]
+
+  if (sourceFields.some((value) => String(value || '').trim() !== '')) {
+    return true
+  }
+
+  return hasArrayLikeContent(row.tags) || hasArrayLikeContent(row.title_components)
+}
+
 // 为表格行设置CSS类名
 const tableRowClassName = ({ row }: { row: SeedParameter }) => {
+  const classes: string[] = []
+
   // 红色背景：已删除、包含禁转标签、或有无法识别的内容
   if (row.is_deleted || hasRestrictedTag(row.tags) || row.unrecognized) {
-    return 'deleted-row'
+    classes.push('deleted-row')
+    if (!checkSelectable(row)) {
+      classes.push('selected-row-disabled')
+    }
+    return classes.join(' ')
   }
-  // 如果未检查，添加unreviewed-row类（蓝色背景）
-  if (!row.is_reviewed) {
-    return 'unreviewed-row'
+
+  if (!hasFetchedSourceData(row)) {
+    classes.push('source-data-missing-row')
+  } else if (!row.is_reviewed) {
+    classes.push('unreviewed-row')
+  } else {
+    classes.push('reviewed-row')
   }
+
   // 如果行不可选择，添加selected-row-disabled类
   if (!checkSelectable(row)) {
-    return 'selected-row-disabled'
+    classes.push('selected-row-disabled')
   }
-  return ''
+
+  return classes.join(' ')
 }
 
 const normalizeTagList = (tags: string[] | string): string[] => {
@@ -2140,13 +2206,68 @@ onUnmounted(() => {
   color: #f56c6c !important;
 }
 
+:deep(.deleted-row > td.el-table__cell) {
+  background-color: #fef0f0 !important;
+  color: #f56c6c !important;
+}
+
 :deep(.deleted-row:hover) {
   background-color: #fde2e2 !important;
 }
 
-/* 未检查行的样式（黄色背景） */
+:deep(.deleted-row:hover > td.el-table__cell) {
+  background-color: #fde2e2 !important;
+}
+
+/* 未从源站获取数据：黄色背景 */
+:deep(.source-data-missing-row) {
+  background-color: #fdf6ec !important;
+}
+
+:deep(.source-data-missing-row > td.el-table__cell) {
+  background-color: #fdf6ec !important;
+}
+
+:deep(.source-data-missing-row:hover) {
+  background-color: #faecd8 !important;
+}
+
+:deep(.source-data-missing-row:hover > td.el-table__cell) {
+  background-color: #faecd8 !important;
+}
+
+/* 已获取数据但未手动整理确认：蓝色背景 */
 :deep(.unreviewed-row) {
-  background-color: #aadbf3 !important;
+  background-color: #ecf5ff !important;
+}
+
+:deep(.unreviewed-row > td.el-table__cell) {
+  background-color: #ecf5ff !important;
+}
+
+:deep(.unreviewed-row:hover) {
+  background-color: #d9ecff !important;
+}
+
+:deep(.unreviewed-row:hover > td.el-table__cell) {
+  background-color: #d9ecff !important;
+}
+
+/* 已手动整理确认：绿色背景 */
+:deep(.reviewed-row) {
+  background-color: #f0f9eb !important;
+}
+
+:deep(.reviewed-row > td.el-table__cell) {
+  background-color: #f0f9eb !important;
+}
+
+:deep(.reviewed-row:hover) {
+  background-color: #e1f3d8 !important;
+}
+
+:deep(.reviewed-row:hover > td.el-table__cell) {
+  background-color: #e1f3d8 !important;
 }
 
 .title-cell {

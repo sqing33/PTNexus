@@ -204,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import axios from 'axios'
@@ -270,9 +270,6 @@ const dialogVisible = ref(false)
 const dialogTitle = ref('日志')
 const dialogContent = ref('')
 
-const POLL_INTERVAL_MS = 3000
-let pollTimer: ReturnType<typeof setInterval> | null = null
-let pollRefreshing = false
 let fetchSeq = 0
 
 const readStringSetting = (value: unknown) => {
@@ -720,31 +717,6 @@ const applyRouteFilters = () => {
   return changed
 }
 
-const runPollRefresh = async () => {
-  if (pollRefreshing || loading.value) return
-  pollRefreshing = true
-  try {
-    await fetchLogs({ silent: true })
-  } finally {
-    pollRefreshing = false
-  }
-}
-
-const startPolling = () => {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-  }
-  pollTimer = setInterval(() => {
-    void runPollRefresh()
-  }, POLL_INTERVAL_MS)
-}
-
-const stopPolling = () => {
-  if (!pollTimer) return
-  clearInterval(pollTimer)
-  pollTimer = null
-}
-
 onMounted(async () => {
   try {
     const result = await torrentsViewState.fetchDownloadersList(false)
@@ -766,11 +738,6 @@ onMounted(async () => {
     void saveUiSettings()
   }
   emits('ready', fetchLogs)
-  startPolling()
-})
-
-onBeforeUnmount(() => {
-  stopPolling()
 })
 
 watch(
