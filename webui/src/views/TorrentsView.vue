@@ -905,7 +905,7 @@ const router = useRouter()
 
 const tableRef = ref<TableInstance | null>(null)
 const loading = ref<boolean>(true)
-const refreshingBackendData = ref<boolean>(false)
+const syncingDownloaderData = ref<boolean>(false)
 const allData = ref<Torrent[]>([])
 const error = ref<string | null>(null)
 
@@ -923,10 +923,11 @@ const emitGlobalRefreshLoading = (refreshing: boolean) => {
   )
 }
 
-const refreshBackendAndReload = async () => {
-  if (refreshingBackendData.value) return
+// 仅供页面顶部刷新按钮调用：先从下载器同步数据，再读取数据库。
+const syncDownloadersAndReload = async () => {
+  if (syncingDownloaderData.value) return
 
-  refreshingBackendData.value = true
+  syncingDownloaderData.value = true
   loading.value = true
   emitGlobalRefreshLoading(true)
 
@@ -944,7 +945,7 @@ const refreshBackendAndReload = async () => {
   } finally {
     loading.value = false
     emitGlobalRefreshLoading(false)
-    refreshingBackendData.value = false
+    syncingDownloaderData.value = false
   }
 }
 
@@ -1436,7 +1437,7 @@ const fetchAllSitesStatus = async (forceRefresh = false) => {
   }
 }
 
-// 内部数据获取函数，不控制 loading 状态（供 refreshBackendAndReload 使用）
+// 内部数据获取函数，不控制 loading 状态（供下载器同步和页面初始化使用）
 const fetchDataWithoutLoadingControl = async () => {
   error.value = null
   try {
@@ -1593,7 +1594,7 @@ const executeBatchPublish = async () => {
 // 处理种子数据刷新
 const handleTorrentRefresh = async () => {
   console.log('触发种子数据刷新')
-  await refreshBackendAndReload()
+  await fetchData()
 }
 
 // 查询缓存站点
@@ -1776,16 +1777,14 @@ const setSiteNotExist = async () => {
 const handleCrossSeedComplete = async () => {
   ElMessage.success('转种操作已完成！')
   crossSeedStore.reset()
-  // 可选：刷新数据以显示最新状态
-  await refreshBackendAndReload()
+  await fetchData()
 }
 
 // 处理带刷新的关闭事件（在步骤3点击关闭按钮时触发）
 const handleCloseWithRefresh = async () => {
   ElMessage.success('转种操作已完成！')
   crossSeedStore.reset()
-  // 刷新数据以显示最新状态
-  await refreshBackendAndReload()
+  await fetchData()
 }
 
 const getSiteDetails = (siteName: string) => {
@@ -2282,46 +2281,45 @@ const handleRowClick = (row: Torrent) => tableRef.value?.toggleRowExpansion(row)
 const handleExpandChange = (row: Torrent, expanded: Torrent[]) => {
   expandedRows.value = expanded.map((r) => r.unique_id)
 }
+const getSourceDataRowClass = (row: Torrent) => {
+  if (row.source_data_status === 'reviewed') {
+    return 'source-data-reviewed-row'
+  }
+  if (row.source_data_status === 'unreviewed') {
+    return 'source-data-unreviewed-row'
+  }
+  return 'source-data-missing-row'
+}
+
 const tableRowClassName = ({ row }: { row: Torrent }) => {
-  return expandedRows.value.includes(row.unique_id) ? 'expanded-row' : ''
+  const classes = [getSourceDataRowClass(row)]
+  if (expandedRows.value.includes(row.unique_id)) classes.push('expanded-row')
+  return classes.join(' ')
 }
 
 onMounted(async () => {
   // 标记正在初始化，防止 watch 触发额外请求
   isInitializing.value = true
-
-  // 1. 立即开始显示 loading 动画，防止在加载设置后、刷新数据前出现短暂的无动画状态
   loading.value = true
-  emitGlobalRefreshLoading(true)
 
-  // 2. 根据是否是首次进入决定刷新方式
-  if (!torrentsViewState.hasInitializedOnce) {
-    // 首次进入页面：强制刷新所有数据（调用后端刷新接口）
-    // 先加载 UI 设置（强制刷新）
-    await loadUiSettings(true)
-    // 然后执行完整刷新
-    await refreshBackendAndReload()
-    torrentsViewState.setInitialized()
-  } else {
-    // 非首次进入：使用缓存数据，不调用 API
-    // 从缓存加载 UI 设置
-    await loadUiSettings(false)
-    // 从缓存加载下载器和站点状态
+  try {
+    const isFirstVisit = !torrentsViewState.hasInitializedOnce
+    await loadUiSettings(isFirstVisit)
     await Promise.all([fetchDownloadersList(false), fetchAllSitesStatus(false)])
-    // 只获取种子数据（这个不缓存，每次都需要获取）
+    // 页面进入和普通查询只读数据库，不触发下载器同步。
     await fetchDataWithoutLoadingControl()
+    if (isFirstVisit) torrentsViewState.setInitialized()
+  } finally {
     loading.value = false
-    emitGlobalRefreshLoading(false)
+    isInitializing.value = false
   }
 
-  // 3. 将刷新方法注册给 App 顶部全局刷新按钮
-  emits('ready', refreshBackendAndReload)
+  // 只将下载器同步方法注册给 App 顶部全局刷新按钮。
+  emits('ready', syncDownloadersAndReload)
 
   // 检查开发环境
   checkDevEnv()
 
-  // 初始化完成，允许 watch 触发
-  isInitializing.value = false
 })
 
 const checkDevEnv = () => {
@@ -2611,6 +2609,44 @@ watch(visibleColumns, () => {
 
 :deep(.expanded-row > td) {
   background-color: #ecf5ff !important;
+}
+
+:deep(.el-table__body tr.source-data-missing-row > td.el-table__cell) {
+  background-color: #fff200 !important;
+}
+
+:deep(.el-table__body tr.source-data-missing-row:hover > td.el-table__cell) {
+  background-color: #fff200 !important;
+}
+
+:deep(.el-table__body tr.source-data-unreviewed-row > td.el-table__cell) {
+  background-color: #00a2e8 !important;
+}
+
+:deep(.el-table__body tr.source-data-unreviewed-row:hover > td.el-table__cell) {
+  background-color: #00a2e8 !important;
+}
+
+:deep(.el-table__body tr.source-data-reviewed-row > td.el-table__cell) {
+  background-color: #22b14c !important;
+}
+
+:deep(.el-table__body tr.source-data-reviewed-row:hover > td.el-table__cell) {
+  background-color: #22b14c !important;
+}
+
+:deep(.el-table__body tr.expanded-row.source-data-missing-row > td.el-table__cell) {
+  background-color: #fff200 !important;
+}
+
+:deep(.el-table__body tr.expanded-row.source-data-reviewed-row > td.el-table__cell) {
+  background-color: #22b14c !important;
+}
+
+/* Reserved for a future failed source-data state. */
+:deep(.el-table__body tr.source-data-failed-row > td.el-table__cell),
+:deep(.el-table__body tr.source-data-failed-row:hover > td.el-table__cell) {
+  background-color: #ed1c24 !important;
 }
 
 .filter-overlay {

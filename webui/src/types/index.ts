@@ -25,6 +25,9 @@ export interface Torrent {
   downloaderIds?: string[]
   target_sites_count?: number
   publish_at?: string | null
+  source_data_status?: 'missing' | 'unreviewed' | 'reviewed'
+  source_data_fetched?: boolean
+  source_data_reviewed?: boolean
 }
 
 export interface ISourceInfo {

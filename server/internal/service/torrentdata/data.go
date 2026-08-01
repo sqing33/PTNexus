@@ -49,6 +49,10 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 	if err != nil {
 		publishAtMap = map[string]string{}
 	}
+	sourceStatusMap, err := s.repo.SeedParameterSourceStatusByNames()
+	if err != nil {
+		sourceStatusMap = map[string]repository.SeedParameterSourceStatus{}
+	}
 
 	aggregated := map[string]*torrentSummary{}
 	for _, row := range torrentRows {
@@ -138,6 +142,17 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 			}
 		}
 
+		sourceStatus := sourceStatusMap[value.Name]
+		sourceDataStatus := "missing"
+		if sourceStatus.IsReviewed {
+			sourceDataStatus = "reviewed"
+		} else if sourceStatus.HasFetchedSourceData {
+			sourceDataStatus = "unreviewed"
+		}
+		if !sourceStatus.HasRecord {
+			sourceDataStatus = "missing"
+		}
+
 		item := map[string]any{
 			"name":                     value.Name,
 			"save_path":                value.SavePath,
@@ -157,6 +172,9 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 			"downloaderId":             s.selectBestDownloader(downloaderIDs),
 			"unique_id":                fmt.Sprintf("%s_%d", value.Name, value.Size),
 			"publish_at":               publishAtMap[value.Name],
+			"source_data_status":       sourceDataStatus,
+			"source_data_fetched":      sourceStatus.HasFetchedSourceData,
+			"source_data_reviewed":     sourceStatus.IsReviewed,
 		}
 		allItems = append(allItems, item)
 	}

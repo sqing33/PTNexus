@@ -193,7 +193,7 @@ func (s *SettingsService) DownloaderConfigs() []map[string]any {
 	return result
 }
 
-func (s *SettingsService) BuildDownloaderInfo(trafficTotals, trafficToday map[string]map[string]int64) []map[string]any {
+func (s *SettingsService) BuildDownloaderInfo(trafficTotals, trafficToday, trafficThisMonth map[string]map[string]int64) []map[string]any {
 	downloaders := s.DownloadersList(false)
 	cfg := s.cfg.Get()
 	rawDownloaders := toSlice(cfg["downloaders"])
@@ -217,8 +217,11 @@ func (s *SettingsService) BuildDownloaderInfo(trafficTotals, trafficToday map[st
 		details := map[string]any{}
 		today := trafficToday[dID]
 		totals := trafficTotals[dID]
+		month := trafficThisMonth[dID]
 		details["今日下载量"] = formatBytes(today["today_dl"])
 		details["今日上传量"] = formatBytes(today["today_ul"])
+		details["本月下载量"] = formatBytes(month["month_dl"])
+		details["本月上传量"] = formatBytes(month["month_ul"])
 		details["累计下载量"] = formatBytes(totals["total_dl"])
 		details["累计上传量"] = formatBytes(totals["total_ul"])
 

@@ -132,6 +132,90 @@ func (r *TorrentRepository) TrafficToday() (map[string]map[string]int64, error) 
 	return result, nil
 }
 
+func (r *TorrentRepository) TrafficThisMonth() (map[string]map[string]int64, error) {
+	sqlDB, err := r.store.DB.DB()
+	if err != nil {
+		return nil, err
+	}
+
+	query := ""
+	switch r.store.DBType {
+	case "postgresql":
+		query = `
+			SELECT downloader_id,
+			       GREATEST(0, (MAX(cumulative_downloaded) - MIN(cumulative_downloaded))::bigint) as month_dl,
+			       GREATEST(0, (MAX(cumulative_uploaded) - MIN(cumulative_uploaded))::bigint) as month_ul
+			FROM (
+				SELECT downloader_id, cumulative_downloaded, cumulative_uploaded
+				FROM traffic_stats
+				WHERE stat_datetime >= DATE_TRUNC('month', CURRENT_DATE)
+				UNION ALL
+				SELECT downloader_id, cumulative_downloaded, cumulative_uploaded
+				FROM traffic_stats_hourly
+				WHERE stat_datetime >= DATE_TRUNC('month', CURRENT_DATE)
+			) combined
+			GROUP BY downloader_id
+		`
+	case "mysql":
+		query = `
+			SELECT downloader_id,
+			       GREATEST(0, MAX(cumulative_downloaded) - MIN(cumulative_downloaded)) as month_dl,
+			       GREATEST(0, MAX(cumulative_uploaded) - MIN(cumulative_uploaded)) as month_ul
+			FROM (
+				SELECT downloader_id, cumulative_downloaded, cumulative_uploaded
+				FROM traffic_stats
+				WHERE stat_datetime >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+				UNION ALL
+				SELECT downloader_id, cumulative_downloaded, cumulative_uploaded
+				FROM traffic_stats_hourly
+				WHERE stat_datetime >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+			) combined
+			GROUP BY downloader_id
+		`
+	default:
+		query = `
+			SELECT downloader_id,
+			       CASE WHEN MAX(cumulative_downloaded) - MIN(cumulative_downloaded) > 0
+			            THEN MAX(cumulative_downloaded) - MIN(cumulative_downloaded)
+			            ELSE 0 END as month_dl,
+			       CASE WHEN MAX(cumulative_uploaded) - MIN(cumulative_uploaded) > 0
+			            THEN MAX(cumulative_uploaded) - MIN(cumulative_uploaded)
+			            ELSE 0 END as month_ul
+			FROM (
+				SELECT downloader_id, cumulative_downloaded, cumulative_uploaded
+				FROM traffic_stats
+				WHERE DATE(stat_datetime) >= DATE('now', 'localtime', 'start of month')
+				UNION ALL
+				SELECT downloader_id, cumulative_downloaded, cumulative_uploaded
+				FROM traffic_stats_hourly
+				WHERE DATE(stat_datetime) >= DATE('now', 'localtime', 'start of month')
+			) combined
+			GROUP BY downloader_id
+		`
+	}
+
+	rows, err := sqlDB.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("query this month traffic failed: %w", err)
+	}
+	defer rows.Close()
+
+	result := map[string]map[string]int64{}
+	for rows.Next() {
+		var downloaderID string
+		var monthDL any
+		var monthUL any
+		if err := rows.Scan(&downloaderID, &monthDL, &monthUL); err != nil {
+			return nil, err
+		}
+		result[downloaderID] = map[string]int64{
+			"month_dl": normalizeToInt64(monthDL),
+			"month_ul": normalizeToInt64(monthUL),
+		}
+	}
+	return result, nil
+}
+
 func (r *TorrentRepository) DistinctDownloaderIDs() ([]string, error) {
 	ids := make([]string, 0)
 	if err := r.store.DB.Table("torrents").Distinct("downloader_id").Where("downloader_id IS NOT NULL AND downloader_id != '' AND (is_hidden = 0 OR is_hidden IS NULL)").Order("downloader_id ASC").Pluck("downloader_id", &ids).Error; err != nil {

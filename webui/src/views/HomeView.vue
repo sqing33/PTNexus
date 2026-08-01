@@ -88,6 +88,14 @@
                 <span class="detail-value">{{ downloader.details?.['今日下载量'] || '0 B' }}</span>
               </div>
               <div class="detail-row">
+                <span class="detail-label">本月上传:</span>
+                <span class="detail-value">{{ downloader.details?.['本月上传量'] || '0 B' }}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">本月下载:</span>
+                <span class="detail-value">{{ downloader.details?.['本月下载量'] || '0 B' }}</span>
+              </div>
+              <div class="detail-row">
                 <span class="detail-label">累计上传:</span>
                 <span class="detail-value">{{ downloader.details?.['累计上传量'] || '0 B' }}</span>
               </div>

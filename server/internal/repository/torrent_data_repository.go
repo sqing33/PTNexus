@@ -46,6 +46,12 @@ type TorrentDataRepository struct {
 	store *Store
 }
 
+type SeedParameterSourceStatus struct {
+	HasRecord            bool
+	HasFetchedSourceData bool
+	IsReviewed           bool
+}
+
 func NewTorrentDataRepository(store *Store) *TorrentDataRepository {
 	return &TorrentDataRepository{store: store}
 }
@@ -410,6 +416,12 @@ type namePublishAt struct {
 	PublishAt *string `gorm:"column:publish_at"`
 }
 
+type nameSeedParameterSourceStatus struct {
+	Name     string `gorm:"column:name"`
+	Fetched  int    `gorm:"column:fetched"`
+	Reviewed int    `gorm:"column:reviewed"`
+}
+
 func (r *TorrentDataRepository) PublishAtByNames() (map[string]string, error) {
 	rows := make([]namePublishAt, 0)
 	if err := r.store.DB.Raw("SELECT name, MIN(publish_at) AS publish_at FROM seed_parameters WHERE name IS NOT NULL AND name != '' AND publish_at IS NOT NULL GROUP BY name").Scan(&rows).Error; err != nil {
@@ -424,6 +436,45 @@ func (r *TorrentDataRepository) PublishAtByNames() (map[string]string, error) {
 	return result, nil
 }
 
+func (r *TorrentDataRepository) SeedParameterSourceStatusByNames() (map[string]SeedParameterSourceStatus, error) {
+	rows := make([]nameSeedParameterSourceStatus, 0)
+	query := `
+		SELECT name,
+		       MAX(CASE WHEN (
+		         COALESCE(title, '') != '' OR COALESCE(subtitle, '') != '' OR
+		         COALESCE(type, '') != '' OR COALESCE(medium, '') != '' OR
+		         COALESCE(video_codec, '') != '' OR COALESCE(audio_codec, '') != '' OR
+		         COALESCE(resolution, '') != '' OR COALESCE(team, '') != '' OR
+		         COALESCE(source, '') != '' OR COALESCE(tags, '') NOT IN ('', '[]', 'null') OR
+		         COALESCE(title_components, '') NOT IN ('', '[]', 'null') OR
+		         COALESCE(poster, '') != '' OR COALESCE(screenshots, '') != '' OR
+		         COALESCE(statement, '') != '' OR COALESCE(body, '') != '' OR
+		         COALESCE(mediainfo, '') != '' OR COALESCE(imdb_link, '') != '' OR
+		         COALESCE(douban_link, '') != '' OR COALESCE(tmdb_link, '') != ''
+		       ) THEN 1 ELSE 0 END) AS fetched,
+		       MAX(CASE WHEN is_reviewed THEN 1 ELSE 0 END) AS reviewed
+		FROM seed_parameters
+		WHERE name IS NOT NULL AND name != ''
+		GROUP BY name
+	`
+	if err := r.store.DB.Raw(query).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := map[string]SeedParameterSourceStatus{}
+	for _, row := range rows {
+		name := strings.TrimSpace(row.Name)
+		if name == "" {
+			continue
+		}
+		result[name] = SeedParameterSourceStatus{
+			HasRecord:            true,
+			HasFetchedSourceData: row.Fetched > 0 || row.Reviewed > 0,
+			IsReviewed:           row.Reviewed > 0,
+		}
+	}
+	return result, nil
+}
 func (r *TorrentDataRepository) UpdatePublishAtByName(name string, publishAt any) (int64, error) {
 	result := r.store.DB.Exec("UPDATE seed_parameters SET publish_at = ? WHERE name = ?", publishAt, name)
 	if result.Error != nil {

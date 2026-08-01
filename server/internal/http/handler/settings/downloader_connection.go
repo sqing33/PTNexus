@@ -140,8 +140,13 @@ func (h *Handler) DownloaderInfo(c *gin.Context) {
 		today = map[string]map[string]int64{}
 		logx.Warnf(downloaderInfoModule, "读取今日流量失败 err=%v", err)
 	}
+	thisMonth, err := h.torrents.TrafficThisMonth()
+	if err != nil {
+		thisMonth = map[string]map[string]int64{}
+		logx.Warnf(downloaderInfoModule, "读取本月流量失败 err=%v", err)
+	}
 
-	result := h.settings.BuildDownloaderInfo(totals, today)
+	result := h.settings.BuildDownloaderInfo(totals, today, thisMonth)
 	configs := h.settings.DownloaderConfigs()
 	configByID := map[string]map[string]any{}
 	for _, cfg := range configs {
