@@ -2682,7 +2682,7 @@ watch(visibleColumns, () => {
 }
 
 .source-data-status-missing {
-  color: #fff200;
+  color: #8f6436;
 }
 
 .source-data-status-unreviewed {
