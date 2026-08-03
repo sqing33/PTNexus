@@ -103,7 +103,6 @@
       <el-table-column type="selection" width="45" align="center" :selectable="checkSelectable" />
 
       <el-table-column
-        v-if="isColumnVisible('name')"
         prop="name" min-width="450" sortable="custom">
         <template #header>
           <div class="name-header-container">
