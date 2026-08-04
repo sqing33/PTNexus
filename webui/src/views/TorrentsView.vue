@@ -1343,7 +1343,6 @@ const progressColors = [
 
 // 列定义与可见性
 const torrentsColumns: ColumnDef[] = [
-  { prop: 'name', label: '种子' },
   { prop: 'source_data_status', label: '源站数据状态' },
   { prop: 'site_count', label: '做种数' },
   { prop: 'save_path', label: '保存路径' },
