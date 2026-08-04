@@ -23,6 +23,7 @@ type FetchPersistPipelineRepo interface {
 // FetchPersistPipelineInput 定义抓取流水线输入。
 type FetchPersistPipelineInput struct {
 	TaskID               string
+	SourceSite           string
 	Hash                 string
 	TorrentID            string
 	SiteIdentifier       string
@@ -70,6 +71,7 @@ func RunFetchPersistPipeline(input FetchPersistPipelineInput, deps FetchPersistP
 	repairFinalizeResult, finalizeErr := RunFetchRepairAndFinalize(
 		FetchRepairFinalizeInput{
 			TaskID:               input.TaskID,
+			SourceSite:           firstNonEmpty(input.SourceSite, input.SiteIdentifier),
 			SavePath:             input.SavePath,
 			DownloaderID:         input.DownloaderID,
 			TorrentNameForPath:   input.TorrentNameForPath,

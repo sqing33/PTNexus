@@ -44,6 +44,7 @@ type FetchRepairDeps struct {
 // ParallelFetchRepairInput 表示并发修复输入。
 type ParallelFetchRepairInput struct {
 	TaskID               string
+	SourceSite           string
 	SavePath             string
 	DownloaderID         string
 	TorrentNameForPath   string
@@ -324,6 +325,17 @@ func runIntroRepairTask(input ParallelFetchRepairInput, deps FetchRepairDeps) in
 	localDouban := strings.TrimSpace(input.DoubanLink)
 	localTMDb := strings.TrimSpace(input.TMDbLink)
 
+	if isNovaHDSourceSite(input.SourceSite) {
+		logx.Infof(fetchRepairIntroLogModule, "NovaHD 简介沿用源站提取结果 task_id=%s title=%s body=%t", input.TaskID, input.TorrentName, strings.TrimSpace(localReview.Body) != "")
+		emitLog(deps, input.TaskID, "修复简介", "NovaHD 简介直接使用源站内容，已跳过二次补全", "info")
+		return introRepairResult{
+			Body:       localReview.Body,
+			IMDbLink:   localIMDb,
+			DoubanLink: localDouban,
+			TMDbLink:   localTMDb,
+		}
+	}
+
 	repairIntroBodyDuringFetch(input.TaskID, input.TorrentName, input.Subtitle, &localReview, &localIMDb, &localDouban, &localTMDb, deps)
 
 	return introRepairResult{
@@ -332,6 +344,15 @@ func runIntroRepairTask(input ParallelFetchRepairInput, deps FetchRepairDeps) in
 		DoubanLink: localDouban,
 		TMDbLink:   localTMDb,
 	}
+}
+
+func isNovaHDSourceSite(siteName string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(siteName))
+	if normalized == "" {
+		return false
+	}
+	compact := strings.NewReplacer(" ", "", "-", "", "_", "", ".", "").Replace(normalized)
+	return strings.Contains(compact, "novahd")
 }
 
 func runScreenshotsRepairTask(input ParallelFetchRepairInput, deps FetchRepairDeps) screenshotsRepairResult {

@@ -65,6 +65,7 @@ func RunFetchFinalizeFlow(input FetchFinalizeFlowInput, deps FetchFinalizeFlowDe
 	pipelineResult, pipelineErr := RunFetchPersistPipeline(
 		FetchPersistPipelineInput{
 			TaskID:               input.TaskID,
+			SourceSite:           input.SourceSite,
 			Hash:                 input.Hash,
 			TorrentID:            input.TorrentID,
 			SiteIdentifier:       input.SiteIdentifier,
