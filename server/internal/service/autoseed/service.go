@@ -20,6 +20,7 @@ import (
 	"github.com/pt-nexus/server/internal/platform/logx"
 	"github.com/pt-nexus/server/internal/repository"
 	"github.com/pt-nexus/server/internal/service/downloaderclient"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 )
 
 const (
@@ -351,8 +352,76 @@ func (s *Service) autoOrganizeAndPublish(item repository.AutoSeedItem) {
 		logx.Warnf(moduleAutoSeed, "%s item_id=%d", reason, item.ID)
 		return
 	}
+	siteName := firstNonEmpty(item.SiteName, item.SourceSite, rule.SourceSite)
+	if isNovaHDSource(siteName) {
+		if err := s.refreshNovaHDScreenshots(item, siteName); err != nil {
+			logx.Warnf(moduleAutoSeed, "NovaHD 随机截图刷新失败 item_id=%d rule_id=%d site=%s err=%v", item.ID, rule.ID, siteName, err)
+			return
+		}
+	}
 	if _, err := s.PublishItems([]int64{item.ID}, targetSites); err != nil {
 		logx.Warnf(moduleAutoSeed, "自动发种入队失败 item_id=%d rule_id=%d err=%v", item.ID, rule.ID, err)
+	}
+}
+
+// refreshNovaHDScreenshots 为 NovaHD 自动发种记录重新生成 3 张随机截图，并写回种子参数。
+// 参数/返回：item 为已下载完成的自动发种记录；siteName 为实际源站名称；失败时返回错误并阻止继续发种。
+// 副作用：会读取当前下载器保存路径、调用截图生成流程、写回 seed_parameters.screenshots。
+func (s *Service) refreshNovaHDScreenshots(item repository.AutoSeedItem, siteName string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("自动发种仓储未初始化")
+	}
+	if strings.TrimSpace(siteName) == "" {
+		return errors.New("源站名称不能为空")
+	}
+	savePath := strings.TrimSpace(s.resolveItemCurrentSavePath(item))
+	if savePath == "" {
+		return errors.New("未找到已下载完成的视频路径")
+	}
+	torrentID := strings.TrimSpace(item.TorrentID)
+	if torrentID == "" {
+		torrentID = inferTorrentID(item)
+	}
+	if torrentID == "" {
+		return errors.New("未找到种子 ID")
+	}
+	contentName := firstNonEmpty(item.Name, item.Subtitle)
+	input := processingrepair.ScreenshotGenerateInput{
+		Payload: map[string]any{
+			"downloader_id": item.DownloaderID,
+			"save_path":     savePath,
+			"torrent_name":  contentName,
+			"name":          contentName,
+		},
+		SourceInfo: map[string]any{
+			"save_path":  savePath,
+			"main_title": contentName,
+		},
+		ContentName: contentName,
+		RootConfig:  s.rootConfig(),
+	}
+	urls, err := processingrepair.GenerateAndUploadRandomScreenshots(input, 3)
+	if err != nil {
+		return err
+	}
+	screenshots := strings.TrimSpace(processingrepair.ToBBCodeImages(urls))
+	if screenshots == "" {
+		return errors.New("未生成有效截图")
+	}
+	if err := s.repo.UpdateSeedParameterScreenshotsByTorrentIDAndSiteName(torrentID, siteName, screenshots); err != nil {
+		return err
+	}
+	logx.Infof(moduleAutoSeed, "NovaHD 随机截图刷新成功 item_id=%d torrent_id=%s site=%s count=%d", item.ID, torrentID, siteName, len(urls))
+	return nil
+}
+
+func isNovaHDSource(siteName string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(siteName))
+	switch normalized {
+	case "novahd", "nova hd", "nova-hd", "nova_hd", "novahd.top":
+		return true
+	default:
+		return strings.Contains(normalized, "novahd")
 	}
 }
 

@@ -3,6 +3,7 @@ package repair
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	pathpkg "path"
@@ -333,6 +334,100 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 		return nil, fmt.Errorf("未生成可用截图")
 	}
 	return finalList, nil
+}
+
+// GenerateAndUploadRandomScreenshots 按随机时间点生成指定数量的正式截图并上传图床。
+// 参数/返回：screenshotCount 为需要生成的截图数量；返回去重后的截图 URL 列表。
+// 失败场景：目标媒体无法定位、无法读取时长、截图/上传失败时返回错误。
+// 副作用：会读取本地媒体文件、执行外部命令，并向图床或盒子代理发起请求。
+func GenerateAndUploadRandomScreenshots(input ScreenshotGenerateInput, screenshotCount int) ([]string, error) {
+	points, err := buildRandomScreenshotPoints(input, screenshotCount)
+	if err != nil {
+		return nil, err
+	}
+	return generateAndUploadScreenshotsWithPoints(input, points, true)
+}
+
+func buildRandomScreenshotPoints(input ScreenshotGenerateInput, screenshotCount int) ([]float64, error) {
+	screenshotCount = normalizeRandomScreenshotCount(screenshotCount)
+	payload := input.Payload
+	sourceInfo := input.SourceInfo
+	savePath := strings.TrimSpace(toStringAny(payload["savePath"], toStringAny(payload["save_path"], "")))
+	if savePath == "" {
+		savePath = strings.TrimSpace(toStringAny(sourceInfo["save_path"], ""))
+	}
+	downloaderID := strings.TrimSpace(toStringAny(payload["downloaderId"], toStringAny(payload["downloader_id"], "")))
+	torrentName := strings.TrimSpace(toStringAny(payload["torrentName"], toStringAny(payload["torrent_name"], "")))
+	if torrentName == "" {
+		torrentName = strings.TrimSpace(toStringAny(payload["name"], ""))
+	}
+	if torrentName == "" {
+		torrentName = strings.TrimSpace(toStringAny(sourceInfo["main_title"], ""))
+	}
+	contentName := strings.TrimSpace(input.ContentName)
+	savePath, torrentName, _ = enrichScreenshotSourceFromDownloader(input.RootConfig, payload, downloaderID, savePath, torrentName, contentName)
+
+	targetResult, err := resolveLocalMediaTargetResult(input.RootConfig, downloaderID, savePath, torrentName, contentName, "随机截图生成")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = targetResult.Close()
+	}()
+
+	duration, err := probeDurationSeconds(targetResult.TargetFile)
+	if err != nil || duration <= 0 {
+		return nil, fmt.Errorf("读取视频时长失败: %w", err)
+	}
+	points := buildRandomScreenshotPointsByDuration(duration, screenshotCount)
+	if len(points) < screenshotCount {
+		return nil, fmt.Errorf("未能生成足够的随机截图时间点")
+	}
+	return points, nil
+}
+
+func buildRandomScreenshotPointsByDuration(duration float64, screenshotCount int) []float64 {
+	screenshotCount = normalizeRandomScreenshotCount(screenshotCount)
+	if duration <= 0 || screenshotCount <= 0 {
+		return []float64{}
+	}
+
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	bucketDuration := duration / float64(screenshotCount)
+	points := make([]float64, 0, screenshotCount)
+	for i := 0; i < screenshotCount; i++ {
+		start := bucketDuration * float64(i)
+		end := bucketDuration * float64(i+1)
+		margin := bucketDuration * 0.2
+		if margin < 1 {
+			margin = bucketDuration * 0.1
+		}
+		lower := start + margin
+		upper := end - margin
+		point := (start + end) / 2
+		if upper > lower {
+			point = lower + rng.Float64()*(upper-lower)
+		}
+		if point < 0.5 {
+			point = 0.5
+		}
+		if point > duration-0.5 {
+			point = duration - 0.5
+		}
+		points = append(points, point)
+	}
+	sort.Float64s(points)
+	return points
+}
+
+func normalizeRandomScreenshotCount(value int) int {
+	if value <= 0 {
+		return 3
+	}
+	if value > 10 {
+		return 10
+	}
+	return value
 }
 
 func buildRemotePathCandidatesForProxy(savePath, torrentName, contentName string, preferExactPath bool) []string {

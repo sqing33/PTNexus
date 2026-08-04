@@ -2,7 +2,7 @@
 
 # PT Nexus Proxy 安装脚本
 # 用法:
-#   wget -O - https://github.com/weishouxian/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash
+#   wget -O - https://github.com/sqing33/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash
 # 或者:
 #   curl -sL https://github.com/weishouxian/PTNexus/releases/latest/download/install-pt-nexus-box-proxy.sh | sudo bash
 

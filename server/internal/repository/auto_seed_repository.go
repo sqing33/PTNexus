@@ -472,6 +472,27 @@ func (r *AutoSeedRepository) UpdateItemProgress(id int64, progress float64, down
 	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(updates).Error
 }
 
+// UpdateSeedParameterScreenshotsByTorrentIDAndSiteName 更新自动发种对应种子参数中的截图内容。
+func (r *AutoSeedRepository) UpdateSeedParameterScreenshotsByTorrentIDAndSiteName(torrentID, siteName, screenshots string) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("auto seed repo is nil")
+	}
+	torrentID = strings.TrimSpace(torrentID)
+	siteName = strings.TrimSpace(siteName)
+	screenshots = strings.TrimSpace(screenshots)
+	if torrentID == "" || siteName == "" {
+		return errors.New("torrentID or siteName is empty")
+	}
+	lowered := strings.ToLower(siteName)
+	return r.store.DB.Table("seed_parameters").
+		Where("torrent_id = ? AND (LOWER(site_name) = ? OR LOWER(nickname) = ?)", torrentID, lowered, lowered).
+		Updates(map[string]any{
+			"screenshots":              screenshots,
+			"screenshot_review_status": "none",
+			"updated_at":               time.Now().Format(PublishQueueTimeLayout),
+		}).Error
+}
+
 // MarkItemPublished 写入发布结果并标记为已发布。
 func (r *AutoSeedRepository) MarkItemPublished(id int64, resultsJSON string) error {
 	if r == nil || r.store == nil || r.store.DB == nil {

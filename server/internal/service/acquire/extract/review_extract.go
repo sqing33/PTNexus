@@ -621,10 +621,37 @@ func isReleaseInfoStyleQuote(text string) bool {
 	return strings.Contains(upper, ".RELEASE.INFO") && strings.Contains(upper, "ENCODER")
 }
 
+func isNHDWEBDeclarationText(text string) bool {
+	plain := strings.TrimSpace(reBBCodeTag.ReplaceAllString(text, ""))
+	if plain == "" {
+		return false
+	}
+	patterns := []string{
+		"NovaHD · 资源声明",
+		"本站提供的所有资源",
+		"不得下载用于商业盈利",
+		"本站用户发布的资源链接",
+		"本站列出的资源本身并没有保存在本站的服务器上",
+		"所有内容仅作宽带测试使用",
+		"下载后24小时内删除",
+		"联系管理员",
+		"pt.NovaHD.top/contactstaff.php",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(plain, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 func isUnwantedPatternQuote(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
+	}
+	if isNHDWEBDeclarationText(trimmed) {
+		return true
 	}
 	unwantedPatterns := []string{
 		"ARDTU工具自动发布",
@@ -2041,6 +2068,9 @@ func looksLikeDeclarationText(text string) bool {
 	plain := strings.TrimSpace(reBBCodeTag.ReplaceAllString(text, ""))
 	if plain == "" {
 		return false
+	}
+	if isNHDWEBDeclarationText(plain) {
+		return true
 	}
 	keywords := []string{
 		"禁转", "限转", "谢绝转载", "严禁转载", "禁止转载", "官组", "官方发布", "本站首发",

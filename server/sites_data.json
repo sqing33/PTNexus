@@ -1165,7 +1165,7 @@
     "special_tracker_domain": null,
     "group": "-NHDWeb",
     "description": "NovaHD",
-    "migration": 2,
+    "migration": 3,
     "speed_limit": 20
   },
   {
