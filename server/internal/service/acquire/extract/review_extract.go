@@ -783,6 +783,7 @@ func buildBodyFromQuoteFlow(bbcode string, quotesForBody []string) string {
 	}
 
 	body = filterStandaloneKeywordLines(body)
+	body = stripDeclarationLines(body)
 	return sanitizeBBCodeText(body)
 }
 
@@ -2051,8 +2052,20 @@ func stripDeclarationBlocks(text, statement string) string {
 func stripDeclarationLines(text string) string {
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	kept := make([]string, 0, len(lines))
+	inNHDWEBDeclaration := false
 	for _, line := range lines {
 		plain := strings.TrimSpace(reBBCodeTag.ReplaceAllString(line, ""))
+		plain = strings.ReplaceAll(plain, "\u00a0", " ")
+		if inNHDWEBDeclaration {
+			if plain == "" || isNHDWEBDeclarationContinuationLine(plain) {
+				continue
+			}
+			inNHDWEBDeclaration = false
+		}
+		if isNHDWEBDeclarationStartLine(plain) {
+			inNHDWEBDeclaration = true
+			continue
+		}
 		if isQuoteMarkerLine(plain) {
 			continue
 		}
@@ -2062,6 +2075,37 @@ func stripDeclarationLines(text string) string {
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
+}
+
+func isNHDWEBDeclarationStartLine(plain string) bool {
+	compact := strings.Join(strings.Fields(strings.TrimSpace(plain)), "")
+	return strings.Contains(compact, "NovaHD") && strings.Contains(compact, "资源声明")
+}
+
+func isNHDWEBDeclarationContinuationLine(plain string) bool {
+	trimmed := strings.TrimSpace(plain)
+	if trimmed == "" {
+		return true
+	}
+	if isNHDWEBDeclarationText(trimmed) {
+		return true
+	}
+	patterns := []string{
+		"否则产生的一切后果",
+		"不负任何法律责任",
+		"对用户的提交内容",
+		"若喜欢请联系正版厂商",
+		"侵犯了您的合法权益",
+		"提供相关证明",
+		"将立即删除",
+		"删除相关资源",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(trimmed, pattern) {
+			return true
+		}
+	}
+	return strings.HasPrefix(trimmed, "-")
 }
 
 func looksLikeDeclarationText(text string) bool {
