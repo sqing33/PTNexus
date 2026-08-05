@@ -21,6 +21,8 @@ import (
 	"github.com/pt-nexus/server/internal/repository"
 	"github.com/pt-nexus/server/internal/service/downloaderclient"
 	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
+	"gorm.io/gorm"
 )
 
 const (
@@ -353,30 +355,81 @@ func (s *Service) autoOrganizeAndPublish(item repository.AutoSeedItem) {
 		return
 	}
 	siteName := firstNonEmpty(item.SiteName, item.SourceSite, rule.SourceSite)
-	if isNovaHDSource(siteName) {
-		if err := s.refreshNovaHDScreenshots(item, siteName); err != nil {
-			logx.Warnf(moduleAutoSeed, "NovaHD 随机截图刷新失败 item_id=%d rule_id=%d site=%s err=%v", item.ID, rule.ID, siteName, err)
+	if s.shouldRefreshAutoSeedScreenshots(item, siteName) {
+		if err := s.refreshAutoSeedScreenshots(item, siteName); err != nil {
+			reason := "自动发种未执行：截图自动生成失败: " + err.Error()
+			_ = s.repo.UpdateItemPublishFeedback(item.ID, item.PublishResultsJSON, reason)
+			logx.Warnf(moduleAutoSeed, "自动发种随机截图刷新失败 item_id=%d rule_id=%d site=%s err=%v", item.ID, rule.ID, siteName, err)
 			return
 		}
 	}
 	if _, err := s.PublishItems([]int64{item.ID}, targetSites); err != nil {
+		reason := "自动发种未执行：发布入队失败: " + err.Error()
+		_ = s.repo.UpdateItemPublishFeedback(item.ID, item.PublishResultsJSON, reason)
 		logx.Warnf(moduleAutoSeed, "自动发种入队失败 item_id=%d rule_id=%d err=%v", item.ID, rule.ID, err)
 	}
 }
 
-// refreshNovaHDScreenshots 为 NovaHD 自动发种记录重新生成 3 张随机截图，并写回种子参数。
+// shouldRefreshAutoSeedScreenshots 判断自动发种入队前是否需要强制重建正式截图。
+// 参数/返回：item 为自动发种记录，siteName 为源站；返回 true 表示需要随机生成 3 张正式截图。
+// 失败场景：种子参数读取失败时仅记录日志并跳过强制刷新，由后续发布流程继续处理。
+// 副作用：会读取 seed_parameters 中的截图与人工确认状态。
+func (s *Service) shouldRefreshAutoSeedScreenshots(item repository.AutoSeedItem, siteName string) bool {
+	if isNovaHDSource(siteName) {
+		return true
+	}
+	if s == nil || s.repo == nil {
+		return false
+	}
+	torrentID := strings.TrimSpace(item.TorrentID)
+	if torrentID == "" {
+		torrentID = inferTorrentID(item)
+	}
+	if torrentID == "" || strings.TrimSpace(siteName) == "" {
+		return false
+	}
+	row, err := s.repo.GetSeedParameter(torrentID, siteName)
+	if err != nil {
+		logx.Warnf(moduleAutoSeed, "读取自动发种截图状态失败 item_id=%d torrent_id=%s site=%s err=%v", item.ID, torrentID, siteName, err)
+		return false
+	}
+	return needsRefreshAutoSeedScreenshotsFromSeedRow(siteName, row)
+}
+
+func needsRefreshAutoSeedScreenshotsFromSeedRow(siteName string, row map[string]any) bool {
+	if isNovaHDSource(siteName) {
+		return true
+	}
+	screenshots := strings.TrimSpace(toString(row["screenshots"], ""))
+	status := processingshared.NormalizeScreenshotReviewStatus(
+		toString(row["screenshot_review_status"], processingshared.ScreenshotReviewStatusNone),
+	)
+	return screenshots == "" || processingshared.NeedsScreenshotManualReview(status)
+}
+
+// refreshAutoSeedScreenshots 为自动发种记录重新生成 3 张随机正式截图，并写回种子参数。
 // 参数/返回：item 为已下载完成的自动发种记录；siteName 为实际源站名称；失败时返回错误并阻止继续发种。
 // 副作用：会读取当前下载器保存路径、调用截图生成流程、写回 seed_parameters.screenshots。
-func (s *Service) refreshNovaHDScreenshots(item repository.AutoSeedItem, siteName string) error {
+func (s *Service) refreshAutoSeedScreenshots(item repository.AutoSeedItem, siteName string) error {
 	if s == nil || s.repo == nil {
 		return errors.New("自动发种仓储未初始化")
 	}
 	if strings.TrimSpace(siteName) == "" {
 		return errors.New("源站名称不能为空")
 	}
-	savePath := strings.TrimSpace(s.resolveItemCurrentSavePath(item))
+	record, ok, err := s.resolveItemCurrentTorrentRecord(item)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("下载器中未找到已完成任务，无法生成截图")
+	}
+	if record.Progress > 0 && record.Progress < 99.9 {
+		return fmt.Errorf("下载器任务尚未完成，当前进度 %.1f%%", record.Progress)
+	}
+	savePath := strings.TrimSpace(record.SavePath)
 	if savePath == "" {
-		return errors.New("未找到已下载完成的视频路径")
+		return errors.New("下载器任务缺少可用于截图的路径")
 	}
 	torrentID := strings.TrimSpace(item.TorrentID)
 	if torrentID == "" {
@@ -385,13 +438,18 @@ func (s *Service) refreshNovaHDScreenshots(item repository.AutoSeedItem, siteNam
 	if torrentID == "" {
 		return errors.New("未找到种子 ID")
 	}
-	contentName := firstNonEmpty(item.Name, item.Subtitle)
+	contentName := firstNonEmpty(record.Name, item.Name, item.Subtitle)
+	downloaderHash := firstNonEmpty(item.DownloaderHash, record.Hash)
+	if downloaderHash == "" {
+		return errors.New("下载器任务缺少可用于截图的 hash")
+	}
 	input := processingrepair.ScreenshotGenerateInput{
 		Payload: map[string]any{
-			"downloader_id": item.DownloaderID,
-			"save_path":     savePath,
-			"torrent_name":  contentName,
-			"name":          contentName,
+			"downloader_id":   item.DownloaderID,
+			"downloader_hash": downloaderHash,
+			"save_path":       savePath,
+			"torrent_name":    contentName,
+			"name":            contentName,
 		},
 		SourceInfo: map[string]any{
 			"save_path":  savePath,
@@ -411,7 +469,7 @@ func (s *Service) refreshNovaHDScreenshots(item repository.AutoSeedItem, siteNam
 	if err := s.repo.UpdateSeedParameterScreenshotsByTorrentIDAndSiteName(torrentID, siteName, screenshots); err != nil {
 		return err
 	}
-	logx.Infof(moduleAutoSeed, "NovaHD 随机截图刷新成功 item_id=%d torrent_id=%s site=%s count=%d", item.ID, torrentID, siteName, len(urls))
+	logx.Infof(moduleAutoSeed, "自动发种随机截图刷新成功 item_id=%d torrent_id=%s site=%s count=%d", item.ID, torrentID, siteName, len(urls))
 	return nil
 }
 
@@ -734,27 +792,51 @@ func (s *Service) findDownloaderHash(d downloaderclient.Downloader, title string
 }
 
 func (s *Service) resolveItemCurrentSavePath(item repository.AutoSeedItem) string {
-	if path := strings.TrimSpace(item.SavePath); path != "" {
-		return path
-	}
-	downloaderID := strings.TrimSpace(item.DownloaderID)
-	if s == nil || downloaderID == "" {
+	record, ok, err := s.resolveItemCurrentTorrentRecord(item)
+	if err != nil || !ok {
 		return ""
+	}
+	return strings.TrimSpace(record.SavePath)
+}
+
+func (s *Service) resolveItemCurrentTorrentRecord(item repository.AutoSeedItem) (repository.AutoSeedTorrentRecord, bool, error) {
+	downloaderID := strings.TrimSpace(item.DownloaderID)
+	downloaderHash := strings.TrimSpace(item.DownloaderHash)
+	if s == nil || downloaderID == "" || downloaderHash == "" {
+		return repository.AutoSeedTorrentRecord{}, false, nil
+	}
+	if s.repo != nil {
+		record, err := s.repo.FindTorrentByDownloaderHash(downloaderID, downloaderHash)
+		if err == nil {
+			record.Hash = firstNonEmpty(record.Hash, downloaderHash)
+			return record, true, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			logx.Warnf(moduleAutoSeed, "发布前按 hash 查询 torrents 路径失败 downloader_id=%s hash=%s err=%v", downloaderID, downloaderHash, err)
+			return repository.AutoSeedTorrentRecord{}, false, err
+		}
 	}
 	downloader, err := downloaderclient.FromConfig(s.rootConfig(), downloaderID)
 	if err != nil {
-		logx.Warnf(moduleAutoSeed, "发布前回填下载器路径失败 downloader_id=%s err=%v", downloaderID, err)
-		return ""
+		logx.Warnf(moduleAutoSeed, "发布前回填下载器任务失败 downloader_id=%s hash=%s err=%v", downloaderID, downloaderHash, err)
+		return repository.AutoSeedTorrentRecord{}, false, err
 	}
 	snapshots, err := downloader.FetchTorrents()
 	if err != nil {
-		logx.Warnf(moduleAutoSeed, "发布前拉取下载器任务失败 downloader_id=%s err=%v", downloaderID, err)
-		return ""
+		logx.Warnf(moduleAutoSeed, "发布前拉取下载器任务失败 downloader_id=%s hash=%s err=%v", downloaderID, downloaderHash, err)
+		return repository.AutoSeedTorrentRecord{}, false, err
 	}
-	if snapshot, ok := matchSnapshot(item, snapshots); ok {
-		return bestSnapshotMediaPath(snapshot)
+	snapshot, ok := matchSnapshotByHash(downloaderHash, snapshots)
+	if !ok {
+		return repository.AutoSeedTorrentRecord{}, false, nil
 	}
-	return ""
+	return repository.AutoSeedTorrentRecord{
+		Hash:         strings.TrimSpace(snapshot.Hash),
+		Name:         strings.TrimSpace(snapshot.Name),
+		SavePath:     bestSnapshotMediaPath(snapshot),
+		Progress:     snapshot.Progress,
+		DownloaderID: downloaderID,
+	}, true, nil
 }
 
 func (s *Service) applyFetchedDetails(item *repository.AutoSeedItem, fetchResult map[string]any) {
@@ -1052,6 +1134,19 @@ func matchSnapshot(item repository.AutoSeedItem, snapshots []downloaderclient.To
 	return downloaderclient.TorrentSnapshot{}, false
 }
 
+func matchSnapshotByHash(hash string, snapshots []downloaderclient.TorrentSnapshot) (downloaderclient.TorrentSnapshot, bool) {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return downloaderclient.TorrentSnapshot{}, false
+	}
+	for _, snapshot := range snapshots {
+		if strings.EqualFold(strings.TrimSpace(snapshot.Hash), hash) {
+			return snapshot, true
+		}
+	}
+	return downloaderclient.TorrentSnapshot{}, false
+}
+
 func normalizeTorrentName(value string) string {
 	value = strings.TrimSuffix(strings.TrimSpace(value), ".torrent")
 	for strings.HasPrefix(value, "[") {
@@ -1097,6 +1192,18 @@ func (s *Service) enrichItemSavePaths(items []repository.AutoSeedItem) {
 	if s == nil || len(items) == 0 {
 		return
 	}
+	if s.repo != nil {
+		for idx := range items {
+			record, ok, err := s.resolveItemCurrentTorrentRecord(items[idx])
+			if err != nil {
+				continue
+			}
+			if ok {
+				items[idx].SavePath = strings.TrimSpace(record.SavePath)
+			}
+		}
+		return
+	}
 	root := s.rootConfig()
 	byDownloader := map[string][]int{}
 	for idx := range items {
@@ -1117,7 +1224,7 @@ func (s *Service) enrichItemSavePaths(items []repository.AutoSeedItem) {
 			continue
 		}
 		for _, idx := range indexes {
-			if snapshot, ok := matchSnapshot(items[idx], snapshots); ok {
+			if snapshot, ok := matchSnapshotByHash(items[idx].DownloaderHash, snapshots); ok {
 				items[idx].SavePath = bestSnapshotMediaPath(snapshot)
 			}
 		}

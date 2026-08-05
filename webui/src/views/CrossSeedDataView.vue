@@ -429,6 +429,20 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column
+          v-if="isColumnVisible('last_publish_at')"
+          prop="last_publish_at"
+          label="最后发种时间"
+          width="150"
+          align="center"
+          sortable
+        >
+          <template #default="scope">
+            <div class="mapped-cell datetime-cell">
+              {{ scope.row.last_publish_at ? formatDateTime(scope.row.last_publish_at) : '-' }}
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column v-if="isColumnVisible('updated_at')" prop="updated_at" label="更新时间" width="140" align="center" sortable>
           <template #default="scope">
             <div class="mapped-cell datetime-cell">
@@ -611,6 +625,7 @@ interface SeedParameter {
   is_deleted: boolean
   is_reviewed: boolean // 新增：是否已检查
   publish_at: string | null // 可发种时间
+  last_publish_at?: string | null
 }
 
 const isAnimationRelatedType = (typeValue: string | undefined | null) => {
@@ -796,6 +811,7 @@ const crossSeedColumns: ColumnDef[] = [
   { prop: 'tags', label: '标签' },
   { prop: 'unrecognized', label: '无法识别' },
   { prop: 'publish_at', label: '可发种时间' },
+  { prop: 'last_publish_at', label: '最后发种时间' },
   { prop: 'updated_at', label: '更新时间' },
 ]
 
@@ -1472,30 +1488,55 @@ const handleEdit = async (row: SeedParameter) => {
 }
 
 // 处理删除按钮点击
-const handleDelete = async (row: SeedParameter) => {
+const askDeleteFilesOption = async (title: string, count?: number): Promise<boolean | null> => {
+  const subject = count && count > 1 ? `选中的 ${count} 条种子数据` : `种子数据 "${title}"`
   try {
-    // 确认是否删除
     await ElMessageBox.confirm(
-      `确定要永久删除种子数据 "${row.title}" 吗？此操作无法恢复！`,
-      '确认永久删除',
+      `确定要删除${subject}吗？请选择是否同时删除下载器里的任务和文件。`,
+      '确认删除',
       {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
+        confirmButtonText: '删除记录和文件',
+        cancelButtonText: '只删除记录',
+        distinguishCancelAndClose: true,
         type: 'warning',
       },
     )
+    return true
+  } catch (action) {
+    if (action === 'cancel') return false
+    return null
+  }
+}
+
+const showDeleteResultMessage = (result: Record<string, unknown>, fallback: string) => {
+  const failedCount = Number(result.file_delete_failed_count || 0)
+  const message = String(result.message || fallback)
+  if (failedCount > 0) {
+    ElMessage.warning(message)
+    return
+  }
+  ElMessage.success(message)
+}
+
+const handleDelete = async (row: SeedParameter) => {
+  try {
+    const deleteFiles = await askDeleteFilesOption(row.title)
+    if (deleteFiles === null) return
 
     // 向后端发送删除请求 - 使用统一的 delete API
     const deleteData = {
       torrent_id: row.torrent_id,
       site_name: row.site_name,
+      hash: row.hash,
+      downloader_id: row.downloader_id,
+      delete_files: deleteFiles,
     }
     const response = await axios.post('/api/cross-seed-data/delete', deleteData)
 
     const result = response.data
 
     if (result.success) {
-      ElMessage.success(result.message || `删除成功`)
+      showDeleteResultMessage(result, '删除成功')
       // 重新获取数据，以更新表格
       fetchData()
     } else {
@@ -1857,21 +1898,17 @@ const executeBatchDelete = async () => {
   }
 
   try {
-    await ElMessageBox.confirm(
-      `确定要删除选中的 ${selectedRows.value.length} 条种子数据吗？此操作无法恢复！`,
-      '确认批量删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    )
+    const deleteFiles = await askDeleteFilesOption('', selectedRows.value.length)
+    if (deleteFiles === null) return
 
     const deleteData = {
       items: selectedRows.value.map((row) => ({
         torrent_id: row.torrent_id,
         site_name: row.site_name,
+        hash: row.hash,
+        downloader_id: row.downloader_id,
       })),
+      delete_files: deleteFiles,
     }
 
     const response = await axios.post('/api/cross-seed-data/delete', deleteData)
@@ -1879,7 +1916,7 @@ const executeBatchDelete = async () => {
     const result = response.data
 
     if (result.success) {
-      ElMessage.success(result.message || `成功删除 ${result.deleted_count} 条数据`)
+      showDeleteResultMessage(result, `成功删除 ${result.deleted_count} 条数据`)
       // 清空选中行并退出删除模式
       selectedRows.value = []
       isDeleteMode.value = false

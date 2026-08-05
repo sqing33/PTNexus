@@ -98,6 +98,15 @@ type AutoSeedItem struct {
 
 func (AutoSeedItem) TableName() string { return "auto_seed_items" }
 
+// AutoSeedTorrentRecord 表示自动发种记录按 downloader_hash 匹配到的当前种子路径信息。
+type AutoSeedTorrentRecord struct {
+	Hash         string  `gorm:"column:hash"`
+	Name         string  `gorm:"column:name"`
+	SavePath     string  `gorm:"column:save_path"`
+	Progress     float64 `gorm:"column:progress"`
+	DownloaderID string  `gorm:"column:downloader_id"`
+}
+
 // AutoSeedListQuery 定义自动发种列表的分页、筛选与搜索条件。
 type AutoSeedListQuery struct {
 	Page         int
@@ -470,6 +479,31 @@ func (r *AutoSeedRepository) UpdateItemProgress(id int64, progress float64, down
 		updates["downloader_hash"] = strings.TrimSpace(hash)
 	}
 	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(updates).Error
+}
+
+// FindTorrentByDownloaderHash 按自动发种记录中的下载器 ID 和 hash 匹配 torrents 表路径。
+func (r *AutoSeedRepository) FindTorrentByDownloaderHash(downloaderID, hash string) (AutoSeedTorrentRecord, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return AutoSeedTorrentRecord{}, errors.New("auto seed repo is nil")
+	}
+	downloaderID = strings.TrimSpace(downloaderID)
+	hash = strings.TrimSpace(hash)
+	if downloaderID == "" || hash == "" {
+		return AutoSeedTorrentRecord{}, gorm.ErrRecordNotFound
+	}
+	row := AutoSeedTorrentRecord{}
+	err := r.store.DB.Table("torrents").
+		Select("hash, name, save_path, progress, downloader_id").
+		Where("downloader_id = ? AND LOWER(hash) = ? AND (is_hidden = 0 OR is_hidden IS NULL)", downloaderID, strings.ToLower(hash)).
+		Limit(1).
+		Scan(&row).Error
+	if err != nil {
+		return AutoSeedTorrentRecord{}, err
+	}
+	if strings.TrimSpace(row.Hash) == "" {
+		return AutoSeedTorrentRecord{}, gorm.ErrRecordNotFound
+	}
+	return row, nil
 }
 
 // UpdateSeedParameterScreenshotsByTorrentIDAndSiteName 更新自动发种对应种子参数中的截图内容。

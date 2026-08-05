@@ -133,6 +133,17 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 				response = ScreenshotResponse{Success: false, Message: "selected_times must contain at least one valid timestamp"}
 				return fmt.Errorf("selected_times cannot be empty")
 			}
+		} else if mode == "random_final" {
+			randomCount := reqData.PreviewCount
+			if randomCount <= 0 {
+				randomCount = 3
+			}
+			screenshotPoints = buildRandomScreenshotPointsForDuration(duration, randomCount)
+			if len(screenshotPoints) == 0 {
+				statusCode = http.StatusInternalServerError
+				response = ScreenshotResponse{Success: false, Message: "failed to generate random screenshot timestamps"}
+				return fmt.Errorf("random screenshot timestamps cannot be empty")
+			}
 		} else {
 			screenshotPoints = buildSmartScreenshotPointsForPreview(videoPath, duration, numScreenshots, subtitleSID, selectedCandidate, hasSelectedCandidate)
 			if len(screenshotPoints) < numScreenshots {

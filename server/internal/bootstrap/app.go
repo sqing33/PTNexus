@@ -69,7 +69,7 @@ func NewApp() (*App, error) {
 		settingsService.AppendIYUULog(level, message)
 	})
 	localQueryService := service.NewLocalQueryService(repository.NewLocalQueryRepository(store), cfgManager, paths.DataDir)
-	crossSeedService := service.NewCrossSeedService(repository.NewCrossSeedRepository(store))
+	crossSeedService := service.NewCrossSeedService(repository.NewCrossSeedRepository(store), cfgManager)
 
 	siteRepo := repository.NewSiteRepository(store)
 	torrentRepo := repository.NewTorrentRepository(store)

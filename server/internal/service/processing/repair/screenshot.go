@@ -341,11 +341,80 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 // 失败场景：目标媒体无法定位、无法读取时长、截图/上传失败时返回错误。
 // 副作用：会读取本地媒体文件、执行外部命令，并向图床或盒子代理发起请求。
 func GenerateAndUploadRandomScreenshots(input ScreenshotGenerateInput, screenshotCount int) ([]string, error) {
+	if urls, handled, err := generateRandomScreenshotsByProxy(input, screenshotCount); handled {
+		return urls, err
+	}
 	points, err := buildRandomScreenshotPoints(input, screenshotCount)
 	if err != nil {
 		return nil, err
 	}
 	return generateAndUploadScreenshotsWithPoints(input, points, true)
+}
+
+// generateRandomScreenshotsByProxy 优先通过盒子代理生成随机正式截图。
+// 参数/返回：input 为截图上下文，screenshotCount 为截图数量；handled 表示代理链路已决定结果。
+// 失败场景：代理失败且不允许本地兜底时返回错误；未启用代理时 handled=false。
+// 副作用：可能请求下载器补齐保存路径，并向盒子代理发起截图上传请求。
+func generateRandomScreenshotsByProxy(input ScreenshotGenerateInput, screenshotCount int) ([]string, bool, error) {
+	screenshotCount = normalizeRandomScreenshotCount(screenshotCount)
+	payload := input.Payload
+	sourceInfo := input.SourceInfo
+	selectedSubtitleSID, selectedSubtitleProvided := parseSelectedSubtitleSIDAny(payload["selected_subtitle_sid"])
+	savePath, downloaderID, torrentName, contentName, preferExactRemotePath := parseScreenshotSourceParams(input.RootConfig, payload, sourceInfo, input.ContentName)
+
+	downloader, decision, dErr := downloaderclient.DecideProxy(input.RootConfig, downloaderID)
+	logx.Infof(screenshotValidateLogModule, "随机正式截图代理判定 downloader_id=%s enabled=%t reason=%s proxy_host=%s proxy_port=%d err=%v", downloaderID, decision.Enabled, decision.Reason, downloader.Host, downloader.ProxyPort, dErr)
+	if !decision.Enabled {
+		if dErr != nil && strings.TrimSpace(decision.Reason) == "config_error" {
+			logx.PlainWarnf("随机正式截图代理跳过：读取下载器配置失败 downloader_id=%s err=%v", downloaderID, dErr)
+		}
+		return nil, false, nil
+	}
+
+	remoteCandidates := buildRemotePathCandidatesForProxy(savePath, torrentName, contentName, preferExactRemotePath)
+	var lastErr error
+	for candidateIndex, remoteCandidate := range remoteCandidates {
+		logx.Infof(screenshotValidateLogModule, "随机正式截图代理尝试 candidate=%d/%d remote_path=%s count=%d", candidateIndex+1, len(remoteCandidates), remoteCandidate, screenshotCount)
+		bbcode, err := downloader.FetchRandomScreenshotsByProxy(
+			remoteCandidate,
+			contentName,
+			screenshotCount,
+			buildSelectedSubtitleSIDPointer(selectedSubtitleSID, selectedSubtitleProvided),
+		)
+		if err == nil && strings.TrimSpace(bbcode) != "" {
+			urls := ExtractImageURLsFromText(bbcode)
+			logx.Infof(screenshotValidateLogModule, "随机正式截图代理响应 remote_path=%s bbcode_len=%d image_urls=%d", remoteCandidate, len([]rune(strings.TrimSpace(bbcode))), len(urls))
+			if len(urls) > 0 {
+				logx.PlainInfof("已通过盒子代理生成随机正式截图 remote_path=%s count=%d", remoteCandidate, len(urls))
+				return urls, true, nil
+			}
+			lastErr = fmt.Errorf("代理返回的截图 BBCode 未包含可用图片链接")
+			break
+		}
+		if apiErr, ok := err.(*downloaderclient.ProxyAPIError); ok && apiErr != nil {
+			lastErr = err
+			if apiErr.StatusCode == 400 {
+				continue
+			}
+			break
+		}
+		lastErr = err
+		break
+	}
+
+	translatedSavePath := TranslateDownloaderPath(input.RootConfig, downloaderID, savePath)
+	if shouldSkipLocalScreenshotFallback(input.RootConfig, downloaderID, savePath, translatedSavePath, decision) {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("盒子代理随机正式截图未命中有效路径: %v", remoteCandidates)
+		}
+		return nil, true, fmt.Errorf("盒子代理随机正式截图失败: %w", lastErr)
+	}
+	if lastErr != nil {
+		logx.PlainWarnf("盒子代理随机正式截图失败，回退本地截图 err=%v", lastErr)
+	} else {
+		logx.PlainWarnf("盒子代理随机正式截图未命中有效路径，回退本地截图 remote_candidates=%v", remoteCandidates)
+	}
+	return nil, false, nil
 }
 
 func buildRandomScreenshotPoints(input ScreenshotGenerateInput, screenshotCount int) ([]float64, error) {

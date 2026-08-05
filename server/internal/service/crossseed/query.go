@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pt-nexus/server/internal/platform/logx"
+	"github.com/pt-nexus/server/internal/service/downloaderclient"
 	"github.com/pt-nexus/server/internal/service/reversemapping"
 )
 
 var inactiveTorrentStates = []string{"未做种", "已暂停", "已停止", "错误", "等待", "队列"}
+
+const crossSeedLogModule = "一种多站"
 
 func stateRankExpr(alias string) string {
 	quoted := make([]string, 0, len(inactiveTorrentStates))
@@ -232,7 +236,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 	}
 
 	dataQuery := fmt.Sprintf(`
-		SELECT sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
+		SELECT sp.id, sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
 		       COALESCE(ct.save_path, '') AS save_path,
 		       ct.downloader_id AS downloader_id,
 		       COALESCE(ct.size, 0) AS size,
@@ -242,7 +246,15 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		       sp.audio_codec, sp.resolution, sp.team, sp.source, sp.tags,
 		       sp.title_components, sp.screenshot_review_status,
 		       %s,
-		       sp.is_reviewed, sp.publish_at, sp.updated_at
+		       sp.is_reviewed, sp.publish_at,
+		       COALESCE((
+		           SELECT MAX(COALESCE(NULLIF(pl.updated_at, ''), pl.created_at))
+		           FROM publish_logs pl
+		           WHERE pl.torrent_id = sp.torrent_id
+		             AND (pl.source_site = sp.site_name OR pl.source_site = sp.nickname)
+		             AND pl.status IN ('success', 'edited', 'exists')
+		       ), '') AS last_publish_at,
+		       sp.updated_at
 		%s
 		%s
 		ORDER BY sp.created_at DESC
@@ -310,6 +322,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 }
 
 func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[string]any, int) {
+	deleteFiles := boolFromAny(payload["delete_files"])
 	if rawItems, ok := payload["items"]; ok {
 		items, ok := rawItems.([]any)
 		if !ok {
@@ -319,6 +332,8 @@ func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[stri
 			return map[string]any{"success": false, "error": "项目列表不能为空"}, 400
 		}
 		deletedCount := int64(0)
+		fileDeletedCount := int64(0)
+		fileDeleteErrors := make([]string, 0)
 		for _, raw := range items {
 			item, ok := raw.(map[string]any)
 			if !ok {
@@ -329,11 +344,34 @@ func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[stri
 			if torrentID == "" || siteName == "" {
 				continue
 			}
+			if deleteFiles {
+				if deleted, err := s.deleteDownloaderTorrentForCrossSeed(item); err != nil {
+					message := fmt.Sprintf("%s/%s: %v", torrentID, siteName, err)
+					fileDeleteErrors = append(fileDeleteErrors, message)
+					logx.Warnf(crossSeedLogModule, "删除下载器任务失败 torrent_id=%s site=%s err=%v", torrentID, siteName, err)
+				} else if deleted {
+					fileDeletedCount++
+				}
+			}
 			// Python baseline increments deleted_count per valid item, regardless of DB rows affected.
 			_, _ = s.repo.Exec("DELETE FROM seed_parameters WHERE torrent_id = ? AND site_name = ?", torrentID, siteName)
 			deletedCount++
 		}
-		return map[string]any{"success": true, "message": fmt.Sprintf("成功删除 %d 条数据", deletedCount), "deleted_count": deletedCount}, 200
+		message := fmt.Sprintf("成功删除 %d 条数据", deletedCount)
+		if deleteFiles {
+			message = fmt.Sprintf("%s，已请求删除 %d 个下载器任务和文件", message, fileDeletedCount)
+			if len(fileDeleteErrors) > 0 {
+				message = fmt.Sprintf("%s，%d 个文件删除失败", message, len(fileDeleteErrors))
+			}
+		}
+		return map[string]any{
+			"success":                  true,
+			"message":                  message,
+			"deleted_count":            deletedCount,
+			"file_deleted_count":       fileDeletedCount,
+			"file_delete_failed_count": len(fileDeleteErrors),
+			"file_delete_errors":       fileDeleteErrors,
+		}, 200
 	}
 
 	torrentID := toString(payload["torrent_id"], "")
@@ -341,11 +379,117 @@ func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[stri
 	if torrentID == "" || siteName == "" {
 		return map[string]any{"success": false, "error": "缺少必需参数: 单个删除需要 torrent_id 和 site_name，批量删除需要 items 数组"}, 400
 	}
+	fileDeleted := false
+	fileDeleteErrors := []string{}
+	if deleteFiles {
+		if deleted, deleteErr := s.deleteDownloaderTorrentForCrossSeed(payload); deleteErr != nil {
+			fileDeleteErrors = append(fileDeleteErrors, deleteErr.Error())
+			logx.Warnf(crossSeedLogModule, "删除下载器任务失败 torrent_id=%s site=%s err=%v", torrentID, siteName, deleteErr)
+		} else {
+			fileDeleted = deleted
+		}
+	}
 	_, err := s.repo.Exec("DELETE FROM seed_parameters WHERE torrent_id = ? AND site_name = ?", torrentID, siteName)
 	if err != nil {
 		return map[string]any{"success": false, "error": err.Error()}, 500
 	}
-	return map[string]any{"success": true, "message": fmt.Sprintf("种子数据 %s from %s 已删除", torrentID, siteName)}, 200
+	message := fmt.Sprintf("种子数据 %s from %s 已删除", torrentID, siteName)
+	if deleteFiles {
+		if len(fileDeleteErrors) > 0 {
+			message += "，但文件删除失败"
+		} else if fileDeleted {
+			message += "，已请求删除下载器任务和文件"
+		} else {
+			message += "，未找到可删除的下载器任务"
+		}
+	}
+	return map[string]any{
+		"success":                  true,
+		"message":                  message,
+		"file_deleted_count":       boolCount(fileDeleted),
+		"file_delete_failed_count": len(fileDeleteErrors),
+		"file_delete_errors":       fileDeleteErrors,
+	}, 200
+}
+
+// deleteDownloaderTorrentForCrossSeed 删除一种多站记录对应的下载器任务和文件。
+// 参数/返回：item 包含 torrent_id、site_name，可选 hash/downloader_id；返回 true 表示已向下载器发起删除。
+// 失败场景：下载器配置读取失败、下载器接口删除失败时返回 error；找不到下载器任务时返回 false。
+// 副作用：deleteFiles 固定为 true，会请求下载器同步删除任务文件。
+func (s *CrossSeedService) deleteDownloaderTorrentForCrossSeed(item map[string]any) (bool, error) {
+	if s == nil || s.repo == nil {
+		return false, fmt.Errorf("一种多站服务未初始化")
+	}
+	hash := strings.TrimSpace(toString(item["hash"], ""))
+	downloaderID := strings.TrimSpace(toString(item["downloader_id"], ""))
+	if hash == "" || downloaderID == "" {
+		resolvedHash, resolvedDownloaderID, err := s.resolveCrossSeedDownloaderTarget(
+			toString(item["torrent_id"], ""),
+			toString(item["site_name"], ""),
+		)
+		if err != nil {
+			return false, err
+		}
+		if hash == "" {
+			hash = resolvedHash
+		}
+		if downloaderID == "" {
+			downloaderID = resolvedDownloaderID
+		}
+	}
+	if hash == "" || downloaderID == "" {
+		return false, nil
+	}
+	downloader, err := downloaderclient.FromConfig(s.rootConfig(), downloaderID)
+	if err != nil {
+		return false, err
+	}
+	if err := downloader.DeleteTorrents([]string{hash}, true); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// resolveCrossSeedDownloaderTarget 从数据库补齐一种多站删除文件所需的 hash 与下载器 ID。
+// 参数/返回：torrentID/siteName 定位 seed_parameters 记录；返回当前下载器任务的 hash/downloader_id。
+// 失败场景：数据库查询失败时返回 error；记录不存在时返回空值。
+// 副作用：无，只读取 seed_parameters 与 torrents。
+func (s *CrossSeedService) resolveCrossSeedDownloaderTarget(torrentID, siteName string) (string, string, error) {
+	torrentID = strings.TrimSpace(torrentID)
+	siteName = strings.TrimSpace(siteName)
+	if torrentID == "" || siteName == "" {
+		return "", "", nil
+	}
+	currentTorrentsSubquery := buildCurrentTorrentsSubquery(s.repo.DBType())
+	query := fmt.Sprintf(`
+		SELECT sp.hash AS hash, COALESCE(ct.downloader_id, '') AS downloader_id
+		FROM seed_parameters sp
+		LEFT JOIN (%s) ct ON sp.hash = ct.hash
+		WHERE sp.torrent_id = ? AND sp.site_name = ?
+		LIMIT 1
+	`, currentTorrentsSubquery)
+	rows, err := s.repo.RawMaps(query, torrentID, siteName)
+	if err != nil {
+		return "", "", err
+	}
+	if len(rows) == 0 {
+		return "", "", nil
+	}
+	return strings.TrimSpace(toString(rows[0]["hash"], "")), strings.TrimSpace(toString(rows[0]["downloader_id"], "")), nil
+}
+
+func (s *CrossSeedService) rootConfig() map[string]any {
+	if s == nil || s.cfg == nil {
+		return map[string]any{}
+	}
+	return s.cfg.Get()
+}
+
+func boolCount(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func (s *CrossSeedService) GetSeedSites(torrentName string) (map[string]any, error) {
