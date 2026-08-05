@@ -365,12 +365,16 @@ func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[stri
 					message := fmt.Sprintf("%s/%s: %v", torrentID, siteName, err)
 					fileDeleteErrors = append(fileDeleteErrors, message)
 					logx.Warnf(crossSeedLogModule, "删除下载器任务失败 torrent_id=%s site=%s err=%v", torrentID, siteName, err)
+					continue
 				} else if deleted {
 					fileDeletedCount++
 				}
 			}
 			// Python baseline increments deleted_count per valid item, regardless of DB rows affected.
-			_, _ = s.repo.Exec("DELETE FROM seed_parameters WHERE torrent_id = ? AND site_name = ?", torrentID, siteName)
+			if _, err := s.repo.Exec("DELETE FROM seed_parameters WHERE torrent_id = ? AND site_name = ?", torrentID, siteName); err != nil {
+				fileDeleteErrors = append(fileDeleteErrors, fmt.Sprintf("%s/%s: 删除数据库记录失败: %v", torrentID, siteName, err))
+				continue
+			}
 			deletedCount++
 		}
 		message := fmt.Sprintf("成功删除 %d 条数据", deletedCount)
@@ -401,6 +405,12 @@ func (s *CrossSeedService) DeleteCrossSeedData(payload map[string]any) (map[stri
 		if deleted, deleteErr := s.deleteDownloaderTorrentForCrossSeed(payload); deleteErr != nil {
 			fileDeleteErrors = append(fileDeleteErrors, deleteErr.Error())
 			logx.Warnf(crossSeedLogModule, "删除下载器任务失败 torrent_id=%s site=%s err=%v", torrentID, siteName, deleteErr)
+			return map[string]any{
+				"success":                  false,
+				"error":                    deleteErr.Error(),
+				"file_delete_failed_count": 1,
+				"file_delete_errors":       fileDeleteErrors,
+			}, 502
 		} else {
 			fileDeleted = deleted
 		}
@@ -456,6 +466,7 @@ func (s *CrossSeedService) deleteDownloaderTorrentForCrossSeed(item map[string]a
 	if hash == "" || downloaderID == "" {
 		return false, nil
 	}
+	logx.Infof(crossSeedLogModule, "请求删除下载器任务 torrent_id=%s site=%s downloader_id=%s hash=%s", toString(item["torrent_id"], ""), toString(item["site_name"], ""), downloaderID, hash)
 	downloader, err := downloaderclient.FromConfig(s.rootConfig(), downloaderID)
 	if err != nil {
 		return false, err
@@ -463,6 +474,7 @@ func (s *CrossSeedService) deleteDownloaderTorrentForCrossSeed(item map[string]a
 	if err := downloader.DeleteTorrents([]string{hash}, true); err != nil {
 		return false, err
 	}
+	logx.Infof(crossSeedLogModule, "下载器任务删除请求已完成 downloader_id=%s hash=%s", downloaderID, hash)
 	return true, nil
 }
 
@@ -476,14 +488,15 @@ func (s *CrossSeedService) resolveCrossSeedDownloaderTarget(torrentID, siteName 
 	if torrentID == "" || siteName == "" {
 		return "", "", nil
 	}
-	currentTorrentsSubquery := buildCurrentTorrentsSubquery(s.repo.DBType())
-	query := fmt.Sprintf(`
-		SELECT sp.hash AS hash, COALESCE(ct.downloader_id, '') AS downloader_id
+	query := `
+		SELECT COALESCE(ct.hash, sp.hash) AS hash, COALESCE(ct.downloader_id, '') AS downloader_id
 		FROM seed_parameters sp
-		LEFT JOIN (%s) ct ON sp.hash = ct.hash
+		LEFT JOIN torrents ct ON LOWER(TRIM(sp.hash)) = LOWER(TRIM(ct.hash))
 		WHERE sp.torrent_id = ? AND sp.site_name = ?
+		ORDER BY CASE WHEN ct.is_hidden = 0 OR ct.is_hidden IS NULL THEN 0 ELSE 1 END,
+		         ct.last_seen DESC
 		LIMIT 1
-	`, currentTorrentsSubquery)
+	`
 	rows, err := s.repo.RawMaps(query, torrentID, siteName)
 	if err != nil {
 		return "", "", err

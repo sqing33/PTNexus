@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -320,6 +321,53 @@ func allTorrentsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONResponse(w, r, http.StatusOK, items)
+}
+
+func deleteTorrentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONResponse(w, r, http.StatusMethodNotAllowed, map[string]any{"success": false, "message": "only POST is supported"})
+		return
+	}
+
+	var req DeleteTorrentsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONResponse(w, r, http.StatusBadRequest, map[string]any{"success": false, "message": "invalid JSON: " + err.Error()})
+		return
+	}
+	if strings.ToLower(strings.TrimSpace(req.Downloader.Type)) != "qbittorrent" {
+		writeJSONResponse(w, r, http.StatusBadRequest, map[string]any{"success": false, "message": "only qbittorrent is supported"})
+		return
+	}
+
+	hashes := make([]string, 0, len(req.Hashes))
+	for _, hash := range req.Hashes {
+		if trimmed := strings.TrimSpace(hash); trimmed != "" {
+			hashes = append(hashes, trimmed)
+		}
+	}
+	if len(hashes) == 0 {
+		writeJSONResponse(w, r, http.StatusBadRequest, map[string]any{"success": false, "message": "hashes cannot be empty"})
+		return
+	}
+
+	client, err := newQBHTTPClient(req.Downloader.Host)
+	if err != nil {
+		writeJSONResponse(w, r, http.StatusBadRequest, map[string]any{"success": false, "message": err.Error()})
+		return
+	}
+	if err := client.Login(req.Downloader.Username, req.Downloader.Password); err != nil {
+		writeJSONResponse(w, r, http.StatusBadGateway, map[string]any{"success": false, "message": err.Error()})
+		return
+	}
+
+	form := url.Values{}
+	form.Set("hashes", strings.Join(hashes, "|"))
+	form.Set("deleteFiles", strconv.FormatBool(req.DeleteFiles))
+	if _, err := client.PostForm("torrents/delete", form); err != nil {
+		writeJSONResponse(w, r, http.StatusBadGateway, map[string]any{"success": false, "message": err.Error()})
+		return
+	}
+	writeJSONResponse(w, r, http.StatusOK, map[string]any{"success": true, "message": "torrent deleted"})
 }
 
 func statsHandler(w http.ResponseWriter, r *http.Request) {
