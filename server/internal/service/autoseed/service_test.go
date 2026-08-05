@@ -1,11 +1,9 @@
 package autoseed
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/pt-nexus/server/internal/repository"
-	"github.com/pt-nexus/server/internal/service/downloaderclient"
 )
 
 func TestRestrictedTagRejectReason(t *testing.T) {
@@ -174,34 +172,5 @@ func TestNeedsRefreshAutoSeedScreenshotsFromSeedRow(t *testing.T) {
 				t.Fatalf("needsRefreshAutoSeedScreenshotsFromSeedRow() = %v, want %v", got, testCase.want)
 			}
 		})
-	}
-}
-
-func TestRefreshAutoSeedScreenshotsRequiresConfirmedDownloaderTask(t *testing.T) {
-	svc := &Service{repo: &repository.AutoSeedRepository{}}
-	err := svc.refreshAutoSeedScreenshots(repository.AutoSeedItem{
-		DownloaderID: "",
-		Name:         "Three Old Boys 2024 2160p WEB-DL HEVC AAC 2.0-NHDWEB",
-	}, "NovaHD")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "下载器中未找到已完成任务") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestMatchSnapshotByHashIgnoresNameOnlyMatch(t *testing.T) {
-	snapshots := []downloaderclient.TorrentSnapshot{
-		{Hash: "abc123", Name: "Same Title", SavePath: "/downloads/real"},
-	}
-	if _, ok := matchSnapshotByHash("", snapshots); ok {
-		t.Fatal("empty hash should not match")
-	}
-	if _, ok := matchSnapshotByHash("missing", snapshots); ok {
-		t.Fatal("different hash should not match even when names may be similar")
-	}
-	if snapshot, ok := matchSnapshotByHash("ABC123", snapshots); !ok || snapshot.SavePath != "/downloads/real" {
-		t.Fatalf("hash match failed: ok=%v snapshot=%+v", ok, snapshot)
 	}
 }

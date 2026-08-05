@@ -26,6 +26,13 @@ func stateRankExpr(alias string) string {
 	return fmt.Sprintf("CASE WHEN %s.state NOT IN (%s) THEN 0 ELSE 1 END", alias, statesSQL)
 }
 
+func seedParameterRowIDExpr(dbType string) string {
+	if strings.EqualFold(dbType, "mysql") {
+		return "CONCAT(sp.hash, ':', sp.torrent_id, ':', sp.site_name) AS id"
+	}
+	return "(sp.hash || ':' || sp.torrent_id || ':' || sp.site_name) AS id"
+}
+
 func buildReviewStatusCondition(dbType string, reviewStatus string) (string, []any) {
 	normalized := strings.ToLower(strings.TrimSpace(reviewStatus))
 	if normalized == "" {
@@ -234,9 +241,10 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 	if strings.EqualFold(dbType, "postgresql") {
 		isDeletedExpr = "CASE WHEN ct.hash IS NULL THEN true ELSE false END AS is_deleted"
 	}
+	rowIDExpr := seedParameterRowIDExpr(dbType)
 
 	dataQuery := fmt.Sprintf(`
-		SELECT sp.id, sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
+		SELECT %s, sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
 		       COALESCE(ct.save_path, '') AS save_path,
 		       ct.downloader_id AS downloader_id,
 		       COALESCE(ct.size, 0) AS size,
@@ -259,7 +267,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		%s
 		ORDER BY sp.created_at DESC
 		LIMIT ? OFFSET ?
-	`, isDeletedExpr, fromClause, whereClause)
+	`, rowIDExpr, isDeletedExpr, fromClause, whereClause)
 
 	dataArgs := make([]any, 0, len(args)+2)
 	dataArgs = append(dataArgs, args...)
