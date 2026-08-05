@@ -33,6 +33,13 @@ func seedParameterRowIDExpr(dbType string) string {
 	return "(sp.hash || ':' || sp.torrent_id || ':' || sp.site_name) AS id"
 }
 
+func lastPublishAtExpr(dbType string) string {
+	if strings.EqualFold(dbType, "mysql") || strings.EqualFold(dbType, "postgresql") {
+		return "MAX(COALESCE(pl.updated_at, pl.created_at))"
+	}
+	return "MAX(COALESCE(NULLIF(pl.updated_at, ''), pl.created_at))"
+}
+
 func buildReviewStatusCondition(dbType string, reviewStatus string) (string, []any) {
 	normalized := strings.ToLower(strings.TrimSpace(reviewStatus))
 	if normalized == "" {
@@ -242,6 +249,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		isDeletedExpr = "CASE WHEN ct.hash IS NULL THEN true ELSE false END AS is_deleted"
 	}
 	rowIDExpr := seedParameterRowIDExpr(dbType)
+	lastPublishAt := lastPublishAtExpr(dbType)
 
 	dataQuery := fmt.Sprintf(`
 		SELECT %s, sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
@@ -256,7 +264,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		       %s,
 		       sp.is_reviewed, sp.publish_at,
 		       COALESCE((
-		           SELECT MAX(COALESCE(NULLIF(pl.updated_at, ''), pl.created_at))
+		           SELECT %s
 		           FROM publish_logs pl
 		           WHERE pl.torrent_id = sp.torrent_id
 		             AND (pl.source_site = sp.site_name OR pl.source_site = sp.nickname)
@@ -267,7 +275,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		%s
 		ORDER BY sp.created_at DESC
 		LIMIT ? OFFSET ?
-	`, rowIDExpr, isDeletedExpr, fromClause, whereClause)
+	`, rowIDExpr, isDeletedExpr, lastPublishAt, fromClause, whereClause)
 
 	dataArgs := make([]any, 0, len(args)+2)
 	dataArgs = append(dataArgs, args...)
