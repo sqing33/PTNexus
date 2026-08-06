@@ -3,6 +3,7 @@ package repository
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -500,6 +501,11 @@ type namePublishAt struct {
 	PublishAt *string `gorm:"column:publish_at"`
 }
 
+type nameLastPublishAt struct {
+	Name          string  `gorm:"column:name"`
+	LastPublishAt *string `gorm:"column:last_publish_at"`
+}
+
 type nameSeedParameterSourceStatus struct {
 	Name     string `gorm:"column:name"`
 	Fetched  int    `gorm:"column:fetched"`
@@ -515,6 +521,45 @@ func (r *TorrentDataRepository) PublishAtByNames() (map[string]string, error) {
 	for _, row := range rows {
 		if row.PublishAt != nil && *row.PublishAt != "" {
 			result[row.Name] = *row.PublishAt
+		}
+	}
+	return result, nil
+}
+
+// LastPublishAtByNames 查询每个种子名称最近一次成功发种时间。
+// 参数/返回：无输入参数；返回种子名称到最近发种时间的映射。
+// 失败场景：数据库查询失败时返回 error。
+// 副作用：仅读取 seed_parameters 与 publish_logs，不修改数据。
+func (r *TorrentDataRepository) LastPublishAtByNames() (map[string]string, error) {
+	lastPublishAtExpr := "MAX(COALESCE(NULLIF(pl.updated_at, ''), pl.created_at))"
+	if r.store.DBType == "mysql" || r.store.DBType == "postgresql" {
+		lastPublishAtExpr = "MAX(COALESCE(pl.updated_at, pl.created_at))"
+	}
+
+	rows := make([]nameLastPublishAt, 0)
+	query := fmt.Sprintf(`
+		SELECT sp.name, %s AS last_publish_at
+		FROM seed_parameters sp
+		INNER JOIN publish_logs pl
+		  ON pl.torrent_id = sp.torrent_id
+		 AND (pl.source_site = sp.site_name OR pl.source_site = sp.nickname)
+		WHERE sp.name IS NOT NULL
+		  AND sp.name != ''
+		  AND pl.status IN ('success', 'edited', 'exists')
+		GROUP BY sp.name
+	`, lastPublishAtExpr)
+	if err := r.store.DB.Raw(query).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := map[string]string{}
+	for _, row := range rows {
+		name := strings.TrimSpace(row.Name)
+		if name == "" || row.LastPublishAt == nil {
+			continue
+		}
+		if value := strings.TrimSpace(*row.LastPublishAt); value != "" {
+			result[name] = value
 		}
 	}
 	return result, nil

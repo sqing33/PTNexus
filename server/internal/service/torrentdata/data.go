@@ -49,6 +49,10 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 	if err != nil {
 		publishAtMap = map[string]string{}
 	}
+	lastPublishAtMap, err := s.repo.LastPublishAtByNames()
+	if err != nil {
+		lastPublishAtMap = map[string]string{}
+	}
 	sourceStatusMap, err := s.repo.SeedParameterSourceStatusByNames()
 	if err != nil {
 		sourceStatusMap = map[string]repository.SeedParameterSourceStatus{}
@@ -182,6 +186,7 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 			"downloaderId":             s.selectBestDownloader(downloaderIDs),
 			"unique_id":                fmt.Sprintf("%s_%d", value.Name, value.Size),
 			"publish_at":               publishAtMap[value.Name],
+			"last_publish_at":          lastPublishAtMap[value.Name],
 			"source_data_status":       sourceDataStatus,
 			"source_data_fetched":      sourceStatus.HasFetchedSourceData,
 			"source_data_reviewed":     sourceStatus.IsReviewed,

@@ -318,6 +318,27 @@
       </el-table-column>
 
       <el-table-column
+        v-if="isColumnVisible('last_publish_at')"
+        prop="last_publish_at"
+        label="最后发种时间"
+        width="125"
+        align="center"
+        header-align="center"
+      >
+        <template #default="scope">
+          <span
+            :title="scope.row.last_publish_at ? formatPublishAt(scope.row.last_publish_at) : '未发种'"
+          >
+            {{
+              scope.row.last_publish_at
+                ? formatElapsedPublishTime(scope.row.last_publish_at)
+                : '未发种'
+            }}
+          </span>
+        </template>
+      </el-table-column>
+
+      <el-table-column
         v-if="isColumnVisible('target_sites_count')"
         label="可转种"
         width="100"
@@ -1126,6 +1147,8 @@ const cachedSitesLoading = ref<boolean>(false) // 查询缓存站点的加载状
 const editingPublishAtId = ref<string | null>(null)
 const editingPublishAtHours = ref<number>(24)
 const publishAtInputRef = ref<InstanceType<any> | null>(null)
+const relativeTimeNow = ref(Date.now())
+let relativeTimeTimer: ReturnType<typeof setInterval> | null = null
 
 const formatPublishAt = (dateString: string) => {
   if (!dateString) return ''
@@ -1142,6 +1165,16 @@ const formatPublishAt = (dateString: string) => {
   } catch {
     return dateString
   }
+}
+
+const formatElapsedPublishTime = (dateString: string) => {
+  const timestamp = new Date(dateString).getTime()
+  if (Number.isNaN(timestamp)) return dateString
+
+  const elapsedHours = Math.max(0, Math.floor((relativeTimeNow.value - timestamp) / 3_600_000))
+  const days = Math.floor(elapsedHours / 24)
+  const hours = elapsedHours % 24
+  return days > 0 ? `${days}天${hours}小时` : `${hours}小时`
 }
 
 const startPublishAtEdit = (row: Torrent) => {
@@ -1361,6 +1394,7 @@ const torrentsColumns: ColumnDef[] = [
   { prop: 'progress', label: '进度' },
   { prop: 'state', label: '状态' },
   { prop: 'publish_at', label: '可发种时间' },
+  { prop: 'last_publish_at', label: '最后发种时间' },
   { prop: 'target_sites_count', label: '可转种' },
 ]
 
@@ -1443,9 +1477,11 @@ const loadUiSettings = async (forceRefresh = false) => {
     }
     if (Array.isArray(settings.visible_columns)) {
       const savedColumns = settings.visible_columns
-      visibleColumns.value = savedColumns.includes('source_data_status')
-        ? savedColumns
-        : [...savedColumns, 'source_data_status']
+      const requiredColumns = ['source_data_status', 'last_publish_at']
+      visibleColumns.value = [
+        ...savedColumns,
+        ...requiredColumns.filter((column) => !savedColumns.includes(column)),
+      ]
     }
     syncUiSettingsCache()
   } catch (e) {
@@ -2103,6 +2139,10 @@ const triggerIYUUQueryForFiltered = async () => {
 
 onUnmounted(() => {
   stopIyuuBatchPolling()
+  if (relativeTimeTimer) {
+    clearInterval(relativeTimeTimer)
+    relativeTimeTimer = null
+  }
   emitGlobalRefreshLoading(false)
 })
 
@@ -2426,6 +2466,10 @@ const getSourceDataStatusLabel = (row: Torrent) => {
 }
 
 onMounted(async () => {
+  relativeTimeTimer = setInterval(() => {
+    relativeTimeNow.value = Date.now()
+  }, 60_000)
+
   // 标记正在初始化，防止 watch 触发额外请求
   isInitializing.value = true
   loading.value = true
