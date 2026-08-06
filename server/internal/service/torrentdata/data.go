@@ -60,6 +60,8 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		item, exists := aggregated[key]
 		if !exists {
 			item = &torrentSummary{
+				Hash:          row.Hash,
+				Hashes:        []string{},
 				Name:          row.Name,
 				SavePath:      row.SavePath,
 				Size:          row.Size,
@@ -71,6 +73,12 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 				DownloaderIDs: []string{},
 			}
 			aggregated[key] = item
+		}
+		if row.Hash != "" && !containsString(item.Hashes, row.Hash) {
+			item.Hashes = append(item.Hashes, row.Hash)
+			if item.Hash == "" {
+				item.Hash = row.Hash
+			}
 		}
 		if item.SavePath == "" && row.SavePath != "" {
 			item.SavePath = row.SavePath
@@ -154,6 +162,8 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		}
 
 		item := map[string]any{
+			"hash":                     value.Hash,
+			"hashes":                   append([]string{}, value.Hashes...),
 			"name":                     value.Name,
 			"save_path":                value.SavePath,
 			"size":                     value.Size,

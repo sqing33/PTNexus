@@ -11,6 +11,8 @@ export interface SiteData {
 
 export interface Torrent {
   unique_id: string
+  hash?: string
+  hashes?: string[]
   name: string
   save_path: string
   size: number

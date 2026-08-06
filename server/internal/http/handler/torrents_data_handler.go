@@ -64,6 +64,20 @@ func (h *TorrentDataHandler) UpdatePublishAt(c *gin.Context) {
 	c.JSON(status, result)
 }
 
+// DeleteData 按 hash 删除一种多站中的当前种子记录，并可选同步删除下载器任务和文件。
+// 参数/返回：从 JSON 请求体读取 hash/delete_files，返回删除结果 JSON。
+// 失败场景：请求体格式错误、缺少 hash、下载器删除失败或数据库删除失败时返回错误状态。
+// 副作用：可能请求下载器删除任务文件，并删除数据库中的当前种子记录。
+func (h *TorrentDataHandler) DeleteData(c *gin.Context) {
+	payload := map[string]any{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "请求体格式错误"})
+		return
+	}
+	result, status := h.service.DeleteTorrentByHash(payload)
+	c.JSON(status, result)
+}
+
 func (h *TorrentDataHandler) IYUUQuery(c *gin.Context) {
 	payload := map[string]any{}
 	_ = c.ShouldBindJSON(&payload)

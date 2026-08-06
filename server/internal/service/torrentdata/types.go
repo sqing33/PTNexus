@@ -34,6 +34,8 @@ type siteSummary struct {
 }
 
 type torrentSummary struct {
+	Hash          string
+	Hashes        []string
 	Name          string
 	SavePath      string
 	Size          int64

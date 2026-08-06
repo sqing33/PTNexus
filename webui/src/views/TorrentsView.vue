@@ -344,13 +344,14 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="100" align="center" header-align="center">
+      <el-table-column label="操作" width="150" align="center" header-align="center">
         <template #default="scope">
           <div
             style="
               display: flex;
               justify-content: center;
               align-items: center;
+              gap: 8px;
               width: 100%;
               height: 100%;
             "
@@ -362,6 +363,14 @@
               :disabled="!isDevEnv && scope.row.progress < 100"
             >
               转种
+            </el-button>
+            <el-button
+              type="danger"
+              size="small"
+              @click.stop="deleteTorrentRow(scope.row)"
+              :disabled="!scope.row.hash"
+            >
+              删除
             </el-button>
           </div>
         </template>
@@ -1568,6 +1577,59 @@ const startCrossSeed = async (row: Torrent) => {
   }
 
   sourceSelectionDialogVisible.value = true
+}
+
+const deleteTorrentRow = async (row: Torrent) => {
+  const hash = (row.hash || '').trim()
+  if (!hash) {
+    ElMessage.warning('当前种子缺少 hash，无法删除')
+    return
+  }
+
+  let deleteFiles = false
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除种子「${row.name}」吗？选择“删除记录和文件”会同时删除下载器里的种子任务和已下载文件。`,
+      '删除种子',
+      {
+        confirmButtonText: '删除记录和文件',
+        cancelButtonText: '只删除记录',
+        distinguishCancelAndClose: true,
+        type: 'warning',
+        closeOnClickModal: false,
+      },
+    )
+    deleteFiles = true
+  } catch (error: unknown) {
+    if (error === 'cancel') {
+      deleteFiles = false
+    } else {
+      return
+    }
+  }
+
+  try {
+    const response = await axios.post('/api/data/delete', {
+      hash,
+      delete_files: deleteFiles,
+    })
+    const result = response.data
+    if (result.success) {
+      ElMessage.success(result.message || '删除成功')
+      await fetchData()
+    } else {
+      ElMessage.error(result.error || '删除失败')
+    }
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (error.response?.data as { error?: string } | undefined)?.error ||
+        error.message)
+      : error instanceof Error
+        ? error.message
+        : '网络错误'
+    ElMessage.error(message)
+  }
 }
 
 // 打开站点数据查看器
