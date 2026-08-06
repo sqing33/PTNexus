@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -84,16 +85,21 @@ func (d Downloader) deleteQBTorrentsByProxy(hashes []string, deleteFiles bool) e
 	}
 	defer response.Body.Close()
 
-	responseBody := proxyDeleteTorrentsResponse{}
-	if err := json.NewDecoder(response.Body).Decode(&responseBody); err != nil {
-		return fmt.Errorf("解析代理删除响应失败: %w", err)
-	}
+	bodyBytes, _ := io.ReadAll(response.Body)
+	bodyText := strings.TrimSpace(string(bodyBytes))
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		message := strings.TrimSpace(responseBody.Message)
+		message := compactProxyBody(bodyText)
 		if message == "" {
 			message = response.Status
 		}
 		return fmt.Errorf("代理删除失败: HTTP %d %s", response.StatusCode, message)
+	}
+	if bodyText == "" || bodyText == "0" || strings.EqualFold(bodyText, "ok") || strings.EqualFold(bodyText, "true") {
+		return nil
+	}
+	responseBody := proxyDeleteTorrentsResponse{}
+	if err := json.Unmarshal(bodyBytes, &responseBody); err != nil {
+		return fmt.Errorf("代理删除响应格式异常，请更新并重启盒子代理: %s", compactProxyBody(bodyText))
 	}
 	if !responseBody.Success {
 		message := strings.TrimSpace(responseBody.Message)

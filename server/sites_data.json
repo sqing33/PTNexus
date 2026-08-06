@@ -1284,5 +1284,14 @@
     "group": null,
     "migration": 2,
     "speed_limit": 10
+  },
+  {
+    "site": "DS",
+    "nickname": "屌丝",
+    "base_url": "dstudio.me",
+    "special_tracker_domain": null,
+    "group": null,
+    "migration": 1,
+    "speed_limit": 10
   }
 ]
