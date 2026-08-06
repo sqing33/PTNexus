@@ -370,13 +370,8 @@ func (r *TorrentDataRepository) ListTorrents(onlyCompleted bool) ([]TorrentRecor
 // 失败场景：数据库查询失败时返回 error；hash 为空或记录不存在时返回 found=false。
 // 副作用：只读取数据库，不修改下载器或文件。
 func (r *TorrentDataRepository) FindTorrentByHash(hash string) (TorrentRecord, bool, error) {
-	hash = strings.TrimSpace(hash)
-	if hash == "" {
-		return TorrentRecord{}, false, nil
-	}
-	rows := make([]TorrentRecord, 0, 1)
-	query := "SELECT hash, name, save_path, size, progress, state, sites, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders FROM torrents WHERE LOWER(TRIM(hash)) = LOWER(?) AND (is_hidden = 0 OR is_hidden IS NULL) ORDER BY last_seen DESC LIMIT 1"
-	if err := r.store.DB.Raw(query, hash).Scan(&rows).Error; err != nil {
+	rows, err := r.ListTorrentsByHashes([]string{hash})
+	if err != nil {
 		return TorrentRecord{}, false, err
 	}
 	if len(rows) == 0 {
@@ -385,21 +380,46 @@ func (r *TorrentDataRepository) FindTorrentByHash(hash string) (TorrentRecord, b
 	return rows[0], true, nil
 }
 
+// ListTorrentsByHashes 按 hash 列表读取一种多站列表对应的当前种子记录。
+// 参数/返回：hashes 为下载器种子 hash 列表；返回所有未隐藏 torrents 记录及查询错误。
+// 失败场景：数据库查询失败时返回 error；hashes 为空时返回空列表。
+// 副作用：只读取数据库，不修改下载器或文件。
+func (r *TorrentDataRepository) ListTorrentsByHashes(hashes []string) ([]TorrentRecord, error) {
+	cleaned := compactLowerStrings(hashes)
+	if len(cleaned) == 0 {
+		return []TorrentRecord{}, nil
+	}
+	rows := make([]TorrentRecord, 0, 1)
+	query := "SELECT hash, name, save_path, size, progress, state, sites, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders FROM torrents WHERE LOWER(TRIM(hash)) IN ? AND (is_hidden = 0 OR is_hidden IS NULL) ORDER BY last_seen DESC"
+	if err := r.store.DB.Raw(query, cleaned).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // DeleteTorrentByHash 删除 hash 对应的一种多站当前记录和上传统计。
 // 参数/返回：hash 为 torrents.hash；返回删除的 torrents 记录数与错误。
 // 失败场景：数据库删除失败时返回 error。
 // 副作用：从 torrents 和 torrent_upload_stats 表中物理删除指定 hash 的数据。
 func (r *TorrentDataRepository) DeleteTorrentByHash(hash string) (int64, error) {
-	hash = strings.TrimSpace(hash)
-	if hash == "" {
+	return r.DeleteTorrentsByHashes([]string{hash})
+}
+
+// DeleteTorrentsByHashes 删除 hash 列表对应的一种多站当前记录和上传统计。
+// 参数/返回：hashes 为 torrents.hash 列表；返回删除的 torrents 记录数与错误。
+// 失败场景：数据库删除失败时返回 error。
+// 副作用：从 torrents 和 torrent_upload_stats 表中物理删除指定 hash 列表的数据。
+func (r *TorrentDataRepository) DeleteTorrentsByHashes(hashes []string) (int64, error) {
+	cleaned := compactLowerStrings(hashes)
+	if len(cleaned) == 0 {
 		return 0, nil
 	}
 	var deleted int64
 	err := r.store.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec("DELETE FROM torrent_upload_stats WHERE LOWER(TRIM(hash)) = LOWER(?)", hash).Error; err != nil {
+		if err := tx.Exec("DELETE FROM torrent_upload_stats WHERE LOWER(TRIM(hash)) IN ?", cleaned).Error; err != nil {
 			return err
 		}
-		result := tx.Exec("DELETE FROM torrents WHERE LOWER(TRIM(hash)) = LOWER(?)", hash)
+		result := tx.Exec("DELETE FROM torrents WHERE LOWER(TRIM(hash)) IN ?", cleaned)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -410,6 +430,23 @@ func (r *TorrentDataRepository) DeleteTorrentByHash(hash string) (int64, error) 
 		return 0, err
 	}
 	return deleted, nil
+}
+
+func compactLowerStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.ToLower(strings.TrimSpace(value))
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
 }
 
 func (r *TorrentDataRepository) UploadTotalsByHash() (map[string]int64, error) {

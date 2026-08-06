@@ -1580,11 +1580,12 @@ const startCrossSeed = async (row: Torrent) => {
 }
 
 const deleteTorrentRow = async (row: Torrent) => {
-  const hash = (row.hash || '').trim()
-  if (!hash) {
-    ElMessage.warning('当前种子缺少 hash，无法删除')
-    return
-  }
+	const hash = (row.hash || '').trim()
+	const hashes = Array.from(new Set([...(row.hashes || []), hash].map((item) => item.trim()).filter(Boolean)))
+	if (hashes.length === 0) {
+		ElMessage.warning('当前种子缺少 hash，无法删除')
+		return
+	}
 
   let deleteFiles = false
   try {
@@ -1608,11 +1609,12 @@ const deleteTorrentRow = async (row: Torrent) => {
     }
   }
 
-  try {
-    const response = await axios.post('/api/data/delete', {
-      hash,
-      delete_files: deleteFiles,
-    })
+	try {
+		const response = await axios.post('/api/data/delete', {
+			hash,
+			hashes,
+			delete_files: deleteFiles,
+		})
     const result = response.data
     if (result.success) {
       ElMessage.success(result.message || '删除成功')

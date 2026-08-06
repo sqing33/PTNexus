@@ -77,6 +77,27 @@ const router = createRouter({
   ],
 })
 
+const dynamicImportErrorPattern =
+  /loading dynamically imported module|failed to fetch dynamically imported module|importing a module script failed/i
+
+router.onError((error, to) => {
+  const message = error instanceof Error ? error.message : String(error || '')
+  if (!dynamicImportErrorPattern.test(message)) {
+    return
+  }
+
+  const reloadKey = `ptnexus:route-reload:${to.fullPath}`
+  if (sessionStorage.getItem(reloadKey) === '1') {
+    sessionStorage.removeItem(reloadKey)
+    return
+  }
+
+  sessionStorage.setItem(reloadKey, '1')
+  const url = new URL(window.location.href)
+  url.searchParams.set('_reload', Date.now().toString())
+  window.location.replace(url.toString())
+})
+
 // 简单路由守卫：当开启后端认证时，未携带 token 的请求会被 401 拦截
 router.beforeEach(async (to, _from, next) => {
   const token = localStorage.getItem('token')
