@@ -418,6 +418,7 @@ func registerRoutes(
 		autoSeedAPI.GET("/items", autoSeedHandler.ListItems)
 		autoSeedAPI.POST("/items/manual", autoSeedHandler.AddManualURL)
 		autoSeedAPI.PUT("/items/:id/organize", autoSeedHandler.OrganizeItem)
+		autoSeedAPI.POST("/items/push", autoSeedHandler.PushItems)
 		autoSeedAPI.POST("/items/publish", autoSeedHandler.PublishItems)
 		autoSeedAPI.POST("/items/delete", autoSeedHandler.DeleteItems)
 		autoSeedAPI.GET("/progress", autoSeedHandler.Progress)

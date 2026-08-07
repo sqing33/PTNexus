@@ -11,7 +11,7 @@ import (
 	"github.com/pt-nexus/server/internal/service/autoseed"
 )
 
-// AutoSeedHandler 处理自动发种规则、RSS 列表、整理、发布和进度查询接口。
+// AutoSeedHandler 处理自动发种规则、RSS 列表、整理、推送、发布和进度查询接口。
 type AutoSeedHandler struct {
 	service *autoseed.Service
 }
@@ -156,6 +156,27 @@ func (h *AutoSeedHandler) PublishItems(c *gin.Context) {
 	result, err := h.service.PublishItems(ids, targetSites)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// PushItems 灏嗕竴涓垨澶氫釜鏈帹閫佺殑鑷姩鍙戠璁板綍鎶撳彇璇︽儏骞舵帹閫佸埌涓嬭浇鍣ㄣ€?
+func (h *AutoSeedHandler) PushItems(c *gin.Context) {
+	payload := map[string]any{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "璇锋眰鍙傛暟鏃犳晥: " + err.Error()})
+		return
+	}
+	ids := autoSeedInt64Slice(payload["ids"])
+	if len(ids) == 0 {
+		if id := autoSeedInt64(payload["id"]); id > 0 {
+			ids = []int64{id}
+		}
+	}
+	result, err := h.service.PushItems(ids)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error(), "data": result})
 		return
 	}
 	c.JSON(http.StatusOK, result)

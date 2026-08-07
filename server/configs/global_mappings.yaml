@@ -772,9 +772,9 @@ global_standard_keys:
     "blucook": "team.blucook"
     "JKCT": "team.jkct"
     "Destiny": "team.destiny"
-    "DStudio": "team.DStudio"
-    "DepWeb": "team.DepWeb"
-    "DS": "team.DS"
+    "DStudio": "team.dstudio"
+    "DepWeb": "team.depweb"
+    "DS": "team.ds"
 
   # 标签映射
   tag:

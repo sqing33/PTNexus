@@ -439,18 +439,22 @@ func (r *AutoSeedRepository) UpdateItemFetchedDetails(item *AutoSeedItem) error 
 }
 
 // MarkItemPushed 更新种子推送下载器后的状态。
-func (r *AutoSeedRepository) MarkItemPushed(id int64, downloaderHash string, rejectReason string) error {
+func (r *AutoSeedRepository) MarkItemPushed(id int64, downloaderID, downloaderHash, rejectReason string) error {
 	if r == nil || r.store == nil || r.store.DB == nil {
 		return errors.New("auto seed repo is nil")
 	}
 	nowText := time.Now().Format(PublishQueueTimeLayout)
-	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(map[string]any{
+	updates := map[string]any{
 		"status":          AutoSeedItemStatusPushed,
 		"downloader_hash": strings.TrimSpace(downloaderHash),
 		"reject_reason":   strings.TrimSpace(rejectReason),
 		"pushed_at":       nowText,
 		"updated_at":      nowText,
-	}).Error
+	}
+	if value := strings.TrimSpace(downloaderID); value != "" {
+		updates["downloader_id"] = value
+	}
+	return r.store.DB.Table("auto_seed_items").Where("id = ?", id).Updates(updates).Error
 }
 
 // MarkItemRejected 标记种子未通过规则或推送失败。

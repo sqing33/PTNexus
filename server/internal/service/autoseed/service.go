@@ -249,7 +249,7 @@ func (s *Service) processRule(rule *repository.AutoSeedRule) {
 			continue
 		}
 		hash := firstNonEmpty(toString(fetchResult["hash"], ""), s.findDownloaderHash(downloader, created.Name))
-		_ = s.repo.MarkItemPushed(created.ID, hash, "")
+		_ = s.repo.MarkItemPushed(created.ID, firstNonEmpty(created.DownloaderID, item.DownloaderID), hash, "")
 	}
 
 	_ = s.repo.MarkRulePulled(rule.ID, next, "", rule.Enabled)
@@ -574,11 +574,162 @@ func (s *Service) AddManualURL(torrentURL, downloaderID, sourceSite string) erro
 		return nil
 	}
 	downloaderHash := firstNonEmpty(toString(fetchResult["hash"], ""), s.findDownloaderHash(d, item.Name))
-	_ = s.repo.MarkItemPushed(item.ID, downloaderHash, "")
+	_ = s.repo.MarkItemPushed(item.ID, item.DownloaderID, downloaderHash, "")
 	return nil
 }
 
 // OrganizeItem 保存人工整理后的基础种子信息。
+
+// PushItems 将未推送的自动发种记录补抓详情并推送到下载器，进入后续自动整理和发布流程。
+// 参数/返回：ids 为待推送记录主键集合；返回每条记录的推送结果与总体成功状态。
+// 失败场景：仓储未初始化、未选择记录、下载器配置缺失、详情抓取失败或推送下载器失败。
+// 副作用：会写回自动发种记录状态、推送时间与下载器 hash，并可能更新详情页抓取结果。
+func (s *Service) PushItems(ids []int64) (map[string]any, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("自动发种仓储未初始化")
+	}
+	if len(ids) == 0 {
+		return nil, errors.New("请选择要推送的种子")
+	}
+
+	results := make([]map[string]any, 0, len(ids))
+	pushedCount := 0
+	for _, id := range ids {
+		item, err := s.repo.GetItem(id)
+		if err != nil {
+			results = append(results, map[string]any{"id": id, "success": false, "message": err.Error()})
+			continue
+		}
+		if item == nil {
+			results = append(results, map[string]any{"id": id, "success": false, "message": "种子记录为空"})
+			continue
+		}
+		switch item.Status {
+		case repository.AutoSeedItemStatusPushed, repository.AutoSeedItemStatusOrganized, repository.AutoSeedItemStatusPublished:
+			results = append(results, map[string]any{"id": id, "success": false, "message": "已推送或已进入后续流程"})
+			continue
+		}
+
+		downloaderID, options, err := s.resolveAutoSeedPushSettings(item)
+		if err != nil {
+			_ = s.repo.MarkItemRejected(item.ID, "推送下载器失败: "+err.Error())
+			results = append(results, map[string]any{"id": id, "success": false, "message": err.Error()})
+			continue
+		}
+		item.DownloaderID = downloaderID
+
+		fetchResult, fetchReason := s.fetchItemDetails(item)
+		if fetchReason != "" {
+			_ = s.repo.MarkItemRejected(item.ID, fetchReason)
+			results = append(results, map[string]any{"id": id, "success": false, "message": fetchReason})
+			continue
+		}
+		if reason := restrictedTagRejectReason(item); reason != "" {
+			_ = s.repo.MarkItemRejected(item.ID, reason)
+			results = append(results, map[string]any{"id": id, "success": false, "message": reason})
+			continue
+		}
+
+		downloader, err := downloaderclient.FromConfig(s.rootConfig(), downloaderID)
+		if err != nil {
+			reason := "推送下载器失败: " + err.Error()
+			_ = s.repo.MarkItemRejected(item.ID, reason)
+			results = append(results, map[string]any{"id": id, "success": false, "message": reason})
+			continue
+		}
+		if err := s.pushFetchedItemToDownloader(item, fetchResult, downloader, options); err != nil {
+			reason := "推送下载器失败: " + err.Error()
+			_ = s.repo.MarkItemRejected(item.ID, reason)
+			results = append(results, map[string]any{"id": id, "success": false, "message": reason})
+			continue
+		}
+
+		pushedCount++
+		results = append(results, map[string]any{
+			"id":      id,
+			"success": true,
+			"message": "已推送到下载器",
+		})
+	}
+
+	if pushedCount == 0 {
+		return map[string]any{"success": false, "results": results}, errors.New("没有可推送的种子")
+	}
+	return map[string]any{
+		"success":      true,
+		"pushed_count": pushedCount,
+		"results":      results,
+	}, nil
+}
+
+// resolveAutoSeedPushSettings 为自动发种推送按钮准备下载器与附加参数。
+// 参数/返回：item 为待推送记录；返回下载器 ID 与 AddTorrentOptions。
+// 失败场景：记录未配置下载器且无法从规则回填时返回错误。
+// 副作用：必要时读取对应自动发种规则，但不会写库。
+func (s *Service) resolveAutoSeedPushSettings(item *repository.AutoSeedItem) (string, downloaderclient.AddTorrentOptions, error) {
+	options := newAutoSeedAddTorrentOptions(false, []string{"PT Nexus", "自动发种"})
+	if item == nil {
+		return "", options, errors.New("种子记录为空")
+	}
+
+	downloaderID := strings.TrimSpace(item.DownloaderID)
+	paused := false
+	tags := []string{"PT Nexus", "自动发种"}
+
+	if item.RuleID > 0 && s != nil && s.repo != nil {
+		if rule, err := s.repo.GetRule(item.RuleID); err == nil && rule != nil {
+			if downloaderID == "" {
+				downloaderID = strings.TrimSpace(rule.DownloaderID)
+			}
+			paused = rule.AutoPause
+			if ruleTags := parseJSONStrings(rule.TagsJSON); len(ruleTags) > 0 {
+				tags = ruleTags
+			}
+		} else if err != nil {
+			logx.Warnf(moduleAutoSeed, "读取自动发种规则失败 item_id=%d rule_id=%d err=%v", item.ID, item.RuleID, err)
+		}
+	}
+
+	if strings.TrimSpace(downloaderID) == "" {
+		return "", options, errors.New("未获取到下载器")
+	}
+	return downloaderID, newAutoSeedAddTorrentOptions(paused, tags), nil
+}
+
+// pushFetchedItemToDownloader 将已经抓取到详情页信息的自动发种记录推送到下载器。
+// 参数/返回：item 为待推送记录，fetchResult 为详情抓取结果，downloader 为目标下载器。
+// 失败场景：种子路径/URL 无法添加、下载器调用失败、写回推送状态失败。
+// 副作用：会向下载器添加任务，并将记录标记为已推送。
+func (s *Service) pushFetchedItemToDownloader(item *repository.AutoSeedItem, fetchResult map[string]any, downloader downloaderclient.Downloader, options downloaderclient.AddTorrentOptions) error {
+	if s == nil || s.repo == nil || item == nil {
+		return errors.New("自动发种仓储未初始化")
+	}
+	torrentPath := strings.TrimSpace(toString(fetchResult["torrent_path"], ""))
+	var addErr error
+	if torrentPath != "" {
+		addErr = downloader.AddTorrentFileWithOptions(torrentPath, "", options)
+	} else {
+		addErr = downloader.AddTorrentURLWithOptions(item.TorrentURL, "", options)
+	}
+	if addErr != nil {
+		return addErr
+	}
+	downloaderHash := firstNonEmpty(toString(fetchResult["hash"], ""), s.findDownloaderHash(downloader, item.Name))
+	return s.repo.MarkItemPushed(item.ID, item.DownloaderID, downloaderHash, "")
+}
+
+// newAutoSeedAddTorrentOptions 构造自动发种推送到下载器时使用的附加参数。
+// 参数/返回：paused 控制是否暂停加入，tags 为下载器标签；返回可直接用于 AddTorrent 调用的参数。
+// 失败场景：无。
+// 副作用：无。
+func newAutoSeedAddTorrentOptions(paused bool, tags []string) downloaderclient.AddTorrentOptions {
+	skipChecking := false
+	return downloaderclient.AddTorrentOptions{
+		Paused:       paused,
+		Tags:         compactStrings(tags),
+		SkipChecking: &skipChecking,
+	}
+}
 func (s *Service) OrganizeItem(id int64, patch map[string]any) error {
 	item, err := s.repo.GetItem(id)
 	if err != nil {
@@ -1194,11 +1345,19 @@ func (s *Service) enrichItemSavePaths(items []repository.AutoSeedItem) {
 	}
 	if s.repo != nil {
 		for idx := range items {
-			record, ok, err := s.resolveItemCurrentTorrentRecord(items[idx])
-			if err != nil {
+			downloaderID := strings.TrimSpace(items[idx].DownloaderID)
+			downloaderHash := strings.TrimSpace(items[idx].DownloaderHash)
+			if downloaderID == "" || downloaderHash == "" {
 				continue
 			}
-			if ok {
+			record, err := s.repo.FindTorrentByDownloaderHash(downloaderID, downloaderHash)
+			if err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					logx.Warnf(moduleAutoSeed, "回填自动发种列表保存路径失败 downloader_id=%s hash=%s err=%v", downloaderID, downloaderHash, err)
+				}
+				continue
+			}
+			if strings.TrimSpace(record.SavePath) != "" {
 				items[idx].SavePath = strings.TrimSpace(record.SavePath)
 			}
 		}
