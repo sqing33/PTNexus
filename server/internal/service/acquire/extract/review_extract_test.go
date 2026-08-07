@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestExtractTopTitleCleansNexusPHPPageTitle(t *testing.T) {
+	pageHTML := `<html><head><title>Depth Studio :: 种子详情 "Demon Slayer Kimetsu no Yaiba The Movie Infinity Castle 2025 JPN 1080p Blu-ray AVC TrueHD 5.1-DStudio" - Powered by NexusPHP</title></head><body></body></html>`
+	want := "Demon Slayer Kimetsu no Yaiba The Movie Infinity Castle 2025 JPN 1080p Blu-ray AVC TrueHD 5.1-DStudio"
+
+	if got := extractTopTitle(pageHTML); got != want {
+		t.Fatalf("expected NexusPHP wrapped title to be cleaned, got=%q want=%q", got, want)
+	}
+}
+
 func TestExtractDescriptionSectionsStripsNHDWEBDeclaration(t *testing.T) {
 	descrBBCode := `[quote][b]NovaHD · 资源声明[/b]
 - 本站提供的所有资源，不得下载用于商业盈利，否则产生的一切后果由您自行承担！

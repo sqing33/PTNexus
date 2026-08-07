@@ -16,6 +16,10 @@ import (
 var (
 	reTopTitle               = regexp.MustCompile(`(?is)<h1[^>]*id=["']top["'][^>]*>(.*?)</h1>`)
 	rePageTitle              = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	reNexusPageTitleQuoted   = regexp.MustCompile(`(?is)^[^:]+::\s*(?:种子详情|種子詳情|torrent\s*details?)\s*["“](.+?)["”]\s*(?:-|—|–)\s*powered\s+by\s+nexusphp.*$`)
+	reNexusPageTitlePlain    = regexp.MustCompile(`(?is)^[^:]+::\s*(?:种子详情|種子詳情|torrent\s*details?)\s*(.+?)\s*(?:-|—|–)\s*powered\s+by\s+nexusphp.*$`)
+	reNexusPageTitlePrefix   = regexp.MustCompile(`(?is)^[^:]+::\s*(?:种子详情|種子詳情|torrent\s*details?)\s*`)
+	reNexusPageTitleSuffix   = regexp.MustCompile(`(?is)\s*(?:-|—|–)\s*powered\s+by\s+nexusphp.*$`)
 	reSubTitleRow            = regexp.MustCompile(`(?is)(?:副标题|副標題|subtitle)\s*[:：]\s*([^\n<]{2,200})`)
 	reSubtitleByAby          = regexp.MustCompile(`(?i)\s*\|\s*aby\s+[^|]+$`)
 	reSubtitleByBy           = regexp.MustCompile(`(?i)\s*\|\s*by\s+[^|]+$`)
@@ -879,12 +883,40 @@ func extractTopTitle(page string) string {
 	if match := rePageTitle.FindStringSubmatch(page); len(match) >= 2 {
 		clean := cleanTopTitleText(match[1])
 		if clean != "" {
+			if normalized := cleanNexusPHPPageTitle(clean); normalized != "" {
+				return normalized
+			}
 			clean = strings.TrimSuffix(clean, " - PT Nexus")
 			clean = strings.TrimSuffix(clean, " - PTNexus")
 			return strings.TrimSpace(clean)
 		}
 	}
 	return ""
+}
+
+func cleanNexusPHPPageTitle(raw string) string {
+	title := strings.TrimSpace(raw)
+	if title == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(title)
+	if !strings.Contains(lower, "nexusphp") &&
+		!strings.Contains(lower, "torrent detail") &&
+		!strings.Contains(title, "种子详情") &&
+		!strings.Contains(title, "種子詳情") {
+		return title
+	}
+	if match := reNexusPageTitleQuoted.FindStringSubmatch(title); len(match) >= 2 {
+		return strings.TrimSpace(strings.Trim(match[1], `"'“”`))
+	}
+	if match := reNexusPageTitlePlain.FindStringSubmatch(title); len(match) >= 2 {
+		return strings.TrimSpace(strings.Trim(match[1], `"'“”`))
+	}
+
+	title = strings.TrimSpace(reNexusPageTitlePrefix.ReplaceAllString(title, ""))
+	title = strings.TrimSpace(reNexusPageTitleSuffix.ReplaceAllString(title, ""))
+	return strings.TrimSpace(strings.Trim(title, `"'“”`))
 }
 
 func cleanTopTitleText(rawHTML string) string {
