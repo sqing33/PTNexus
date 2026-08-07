@@ -90,6 +90,10 @@ func NewHDDolbySpecialExtractor(public Extractor, runtimeFactory RuntimeFactory)
 	return newDelegatedSiteExtractor("hddolby_special", public, runtimeFactory, sites.ExtractHDDolby)
 }
 
+func NewDStudioSpecialExtractor(public Extractor, runtimeFactory RuntimeFactory) Extractor {
+	return newDelegatedSiteExtractor("dstudio_special", public, runtimeFactory, sites.ExtractDStudio)
+}
+
 func toSiteInput(input Input) sites.Input {
 	return sites.Input{
 		SiteCode:      input.SiteCode,
