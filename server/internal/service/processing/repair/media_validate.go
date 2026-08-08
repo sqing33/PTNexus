@@ -129,8 +129,9 @@ func ValidateMediaPayload(payload map[string]any, rootConfig map[string]any, csp
 		if errMsg != "" {
 			return map[string]any{"success": false, "error": errMsg}, 400
 		}
-		// 从新获取的简介文本中提取“类别”字段对应的标准化标签，仅随响应返回，不落库。
+		// 从新获取的简介文本中提取“类别/评分”字段对应的标准化标签，仅随响应返回，不落库。
 		categoryTags := processingtagging.ExtractTagsFromDescriptionCategory(result.Intro)
+		categoryTags = append(categoryTags, processingtagging.ExtractTagsFromDescriptionScore(result.Intro)...)
 		typeOverride := ""
 		if processingtagging.CheckAnimationTypeFromDescription(result.Intro) {
 			typeOverride = "category.animation"

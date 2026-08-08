@@ -77,7 +77,7 @@ func DetectEpisodeTag(input EpisodeTagInput) EpisodeTagResult {
 		total := *input.Completion.TotalEpisodes
 		local := *input.Completion.LocalEpisodes
 		if total > 0 && local > 0 && local < total {
-			if titleSignal || subtitleSignal || fileStats.UniqueEpisodes > 0 {
+			if titleSignal || subtitleSignal {
 				return EpisodeTagResult{Matched: true, Reason: "本地集数少于简介总集数，且存在集号证据"}
 			}
 		}

@@ -375,7 +375,7 @@ func (s *Service) autoOrganizeAndPublish(item repository.AutoSeedItem) {
 // 失败场景：种子参数读取失败时仅记录日志并跳过强制刷新，由后续发布流程继续处理。
 // 副作用：会读取 seed_parameters 中的截图与人工确认状态。
 func (s *Service) shouldRefreshAutoSeedScreenshots(item repository.AutoSeedItem, siteName string) bool {
-	if isNovaHDSource(siteName) {
+	if isAutoSeedAlwaysRefreshScreenshotSource(siteName) {
 		return true
 	}
 	if s == nil || s.repo == nil {
@@ -397,7 +397,7 @@ func (s *Service) shouldRefreshAutoSeedScreenshots(item repository.AutoSeedItem,
 }
 
 func needsRefreshAutoSeedScreenshotsFromSeedRow(siteName string, row map[string]any) bool {
-	if isNovaHDSource(siteName) {
+	if isAutoSeedAlwaysRefreshScreenshotSource(siteName) {
 		return true
 	}
 	screenshots := strings.TrimSpace(toString(row["screenshots"], ""))
@@ -481,6 +481,20 @@ func isNovaHDSource(siteName string) bool {
 	default:
 		return strings.Contains(normalized, "novahd")
 	}
+}
+
+func isDStudioSource(siteName string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(siteName))
+	switch normalized {
+	case "ds", "dstudio", "depth studio", "dstudio.me", "屌丝":
+		return true
+	default:
+		return strings.Contains(normalized, "dstudio") || strings.Contains(normalized, "depth studio") || strings.Contains(normalized, "屌丝")
+	}
+}
+
+func isAutoSeedAlwaysRefreshScreenshotSource(siteName string) bool {
+	return isNovaHDSource(siteName) || isDStudioSource(siteName)
 }
 
 // ListRules 返回自动发种规则列表。

@@ -91,6 +91,7 @@ const tagDescriptionLogModule = "迁移-标签补全"
 var (
 	reSubtitleDelimiter       = regexp.MustCompile(`[\[\]【】\|\*\/]`)
 	reDescriptionCategoryLine = regexp.MustCompile(`(?im)[◎❁]\s*类\s*别\s*(.+?)(?:\r?\n|$)`)
+	reDescriptionDoubanScore  = regexp.MustCompile(`(?i)(?:豆瓣(?:评分|評分|分)?|douban\s*(?:rating|score)?)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:/ ?10|分)?`)
 	reAtmosFromAudio          = regexp.MustCompile(`(?i)(\bAtmos\b|Atmos\d)`)
 )
 
@@ -210,6 +211,34 @@ func extractTagsFromDescriptionCategory(description string) []string {
 		logx.Infof(tagDescriptionLogModule, "简介类别未提取到可映射标签 category=%s", categoryText)
 	}
 	return tags
+}
+
+// extractTagsFromDescriptionScore 从简介文本中的豆瓣评分提取高分标签。
+// 参数/返回：description 为声明与正文拼接文本；豆瓣评分大于等于 8.0 时返回 tag.高分。
+// 失败场景：简介为空、未命中豆瓣评分或评分超出 0-10 范围时返回空切片。
+// 副作用：命中高分时记录信息日志，便于追踪标签补全来源。
+func extractTagsFromDescriptionScore(description string) []string {
+	text := strings.TrimSpace(description)
+	if text == "" {
+		return []string{}
+	}
+	text = strings.ReplaceAll(text, "\u3000", " ")
+
+	matches := reDescriptionDoubanScore.FindAllStringSubmatch(text, -1)
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		score, err := strconv.ParseFloat(strings.TrimSpace(match[1]), 64)
+		if err != nil || score < 0 || score > 10 {
+			continue
+		}
+		if score >= 8 {
+			logx.Infof(tagDescriptionLogModule, "简介豆瓣评分命中高分标签 score=%.1f", score)
+			return []string{"tag.高分"}
+		}
+	}
+	return []string{}
 }
 
 // checkAnimationTypeFromDescription 判断简介类别字段是否包含 “动画/Animation”，用于修正类型为动漫。
@@ -550,6 +579,11 @@ func ExtractRawTagsFromSubtitle(subtitle string) []string {
 // ExtractTagsFromDescriptionCategory 从简介类别提取标准 tag.* 标签。
 func ExtractTagsFromDescriptionCategory(description string) []string {
 	return extractTagsFromDescriptionCategory(description)
+}
+
+// ExtractTagsFromDescriptionScore 从简介豆瓣评分提取标准 tag.* 标签。
+func ExtractTagsFromDescriptionScore(description string) []string {
+	return extractTagsFromDescriptionScore(description)
 }
 
 // CheckAnimationTypeFromDescription 判断简介是否命中动画类型。

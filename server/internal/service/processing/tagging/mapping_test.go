@@ -16,6 +16,16 @@ func TestMapTagsToStandardKeepsHDR10(t *testing.T) {
 	}
 }
 
+func TestMapTagsToStandardMapsHighScore(t *testing.T) {
+	mapped, unmapped := MapTagsToStandard([]string{"高分"}, "")
+	if len(unmapped) > 0 {
+		t.Fatalf("expected high score tag to map, got unmapped=%v", unmapped)
+	}
+	if !containsString(mapped, "tag.高分") {
+		t.Fatalf("expected tag.高分 in mapped tags, got %v", mapped)
+	}
+}
+
 func containsString(items []string, target string) bool {
 	for _, item := range items {
 		if item == target {

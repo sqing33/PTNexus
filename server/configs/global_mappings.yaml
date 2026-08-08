@@ -848,6 +848,7 @@ global_standard_keys:
     # 视频质量标签
     "高码率": "tag.高码率"
     "高帧率": "tag.高帧率"
+    "高分": "tag.高分"
     "零魔": "tag.零魔"
     "DV": "tag.DV"
     "Blu-ray": "tag.Blu-ray"
