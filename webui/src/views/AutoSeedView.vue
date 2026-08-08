@@ -9,11 +9,11 @@
             <el-option v-for="site in sourceSiteNames" :key="site" :label="site" :value="site" />
           </el-select>
           <el-select v-model="filters.status" placeholder="状态" clearable class="filter">
-            <el-option label="未推送" value="pending" />
+            <el-option label="未推送" value="not_pushed" />
             <el-option label="已推送" value="pushed" />
             <el-option label="已整理" value="organized" />
             <el-option label="已发布" value="published" />
-            <el-option label="未推送原因" value="rejected" />
+            <el-option label="有未推送原因" value="rejected" />
           </el-select>
           <el-select v-model="filters.downloader_id" placeholder="下载器" clearable class="filter">
             <el-option

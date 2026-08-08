@@ -60,21 +60,33 @@ func ExtractDStudio(input Input, runtime Runtime) (SeedData, error) {
 	}
 
 	data, _ := runtime.ExtractWithPublic(input)
-	combined := strings.TrimSpace(strings.Join([]string{
-		strings.TrimSpace(data.Intro.Statement),
-		strings.TrimSpace(data.Intro.Body),
-	}, "\n"))
+	statement := strings.TrimSpace(data.Intro.Statement)
+	body := strings.TrimSpace(data.Intro.Body)
+	converted := false
 
-	if looksLikeDStudioIntro(combined) {
-		translated := normalizeDStudioIntroBody(combined)
+	if looksLikeDStudioIntro(body) {
+		prefix, introText := splitDStudioIntroText(body)
+		translated := normalizeDStudioIntroBody(introText)
 		if strings.TrimSpace(translated) != "" {
-			data.Intro.Statement = ""
+			data.Intro.Statement = mergeDStudioStatement(statement, prefix)
 			data.Intro.Body = translated
+			converted = true
 		}
 	}
 
-	if strings.TrimSpace(data.Intro.Body) == "" && combined != "" {
-		data.Intro.Body = combined
+	if !converted && body == "" && looksLikeDStudioIntro(statement) {
+		prefix, introText := splitDStudioIntroText(statement)
+		translated := normalizeDStudioIntroBody(introText)
+		if strings.TrimSpace(translated) != "" {
+			data.Intro.Statement = prefix
+			data.Intro.Body = translated
+			converted = true
+		}
+	}
+
+	if !converted {
+		data.Intro.Statement = statement
+		data.Intro.Body = body
 	}
 	if strings.TrimSpace(data.Intro.Body) == "" {
 		data.Intro.Body = "◎简　　介　暂无简介"
@@ -100,6 +112,36 @@ func looksLikeDStudioIntro(text string) bool {
 		}
 	}
 	return false
+}
+
+func splitDStudioIntroText(raw string) (string, string) {
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	start := -1
+	for idx, rawLine := range lines {
+		key, _, ok := parseDStudioLabelLine(rawLine)
+		if !ok || normalizeDStudioFieldLabel(key) == "" {
+			continue
+		}
+		start = idx
+		break
+	}
+	if start < 0 {
+		return "", strings.TrimSpace(raw)
+	}
+	prefix := strings.TrimSpace(strings.Join(lines[:start], "\n"))
+	intro := strings.TrimSpace(strings.Join(lines[start:], "\n"))
+	return prefix, intro
+}
+
+func mergeDStudioStatement(parts ...string) string {
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+	return strings.TrimSpace(strings.Join(cleaned, "\n\n"))
 }
 
 func normalizeDStudioIntroBody(raw string) string {

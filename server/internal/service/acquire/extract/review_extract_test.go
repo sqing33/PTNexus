@@ -175,3 +175,80 @@ func TestExtractDStudioSpecialIntroNormalization(t *testing.T) {
 		t.Fatalf("expected english field labels to be rewritten, got=%q", body)
 	}
 }
+
+func TestExtractDStudioKeepsStatementSeparateFromIntro(t *testing.T) {
+	rawStatement := "[quote]DStudio declaration[/quote]"
+	rawIntro := "\u2741 Title:\u3000Test Title\n" +
+		"\u2741 Original Title:\u3000Original Test\n" +
+		"\u2741 Production Countries:\u3000South Korea\n"
+
+	public := NewPublicExtractor(func(input Input) (SeedData, error) {
+		return SeedData{
+			Intro: IntroData{
+				Statement: rawStatement,
+				Body:      rawIntro,
+			},
+		}, nil
+	})
+	toSiteSeedData := func(data SeedData) sites.SeedData {
+		return sites.SeedData{
+			Title:        data.Title,
+			Subtitle:     data.Subtitle,
+			Intro:        sites.IntroData{Statement: data.Intro.Statement, Poster: data.Intro.Poster, Body: data.Intro.Body, Screenshots: data.Intro.Screenshots, RemovedARDTUDeclarations: append([]string{}, data.Intro.RemovedARDTUDeclarations...)},
+			MediaInfo:    data.MediaInfo,
+			SourceParams: cloneAnyMap(data.SourceParams),
+			Type:         data.Type,
+			Medium:       data.Medium,
+			VideoCodec:   data.VideoCodec,
+			AudioCodec:   data.AudioCodec,
+			Resolution:   data.Resolution,
+			Team:         data.Team,
+			Source:       data.Source,
+			Tags:         append([]string{}, data.Tags...),
+			IMDbLink:     data.IMDbLink,
+			DoubanLink:   data.DoubanLink,
+			TMDbLink:     data.TMDbLink,
+		}
+	}
+	engine := NewDefaultEngine(public, func(public Extractor) sites.Runtime {
+		return sites.Runtime{
+			ExtractWithPublic: func(input sites.Input) (sites.SeedData, error) {
+				data, err := public.Extract(Input{
+					SiteCode:      input.SiteCode,
+					SiteNickname:  input.SiteNickname,
+					BaseURL:       input.BaseURL,
+					Cookie:        input.Cookie,
+					TorrentID:     input.TorrentID,
+					PageHTML:      input.PageHTML,
+					FallbackTitle: input.FallbackTitle,
+				})
+				return toSiteSeedData(data), err
+			},
+			BuildSourceParams: func(data sites.SeedData) map[string]any {
+				return BuildSourceParamsFromExtractedData(fromSiteData(data))
+			},
+		}
+	})
+
+	data, _ := engine.Extract(Input{
+		SiteCode:      "DS",
+		SiteNickname:  "\u5c0c\u4e1d",
+		FallbackTitle: "Test Title",
+	})
+
+	if data.Intro.Statement != rawStatement {
+		t.Fatalf("expected statement to stay separate, got=%q", data.Intro.Statement)
+	}
+	if strings.Contains(data.Intro.Body, "DStudio declaration") {
+		t.Fatalf("expected declaration to be excluded from intro body, got=%q", data.Intro.Body)
+	}
+	for _, want := range []string{
+		"\u25ce\u7247\u3000\u3000\u540d\u3000Test Title",
+		"\u25ce\u539f\u3000\u3000\u540d\u3000Original Test",
+		"\u25ce\u4ea7\u3000\u3000\u5730\u3000\u97e9\u56fd",
+	} {
+		if !strings.Contains(data.Intro.Body, want) {
+			t.Fatalf("expected intro body to contain %q, got=%q", want, data.Intro.Body)
+		}
+	}
+}

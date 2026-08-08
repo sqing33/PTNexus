@@ -13,6 +13,7 @@ const (
 	AutoSeedRuleStatusEnabled   = "enabled"
 	AutoSeedRuleStatusPaused    = "paused"
 	AutoSeedItemStatusPending   = "pending"
+	AutoSeedItemStatusNotPushed = "not_pushed"
 	AutoSeedItemStatusPushed    = "pushed"
 	AutoSeedItemStatusOrganized = "organized"
 	AutoSeedItemStatusPublished = "published"
@@ -358,8 +359,10 @@ func (r *AutoSeedRepository) ListItems(query AutoSeedListQuery) ([]AutoSeedItem,
 	if value := strings.TrimSpace(query.SourceSite); value != "" {
 		db = db.Where("source_site = ?", value)
 	}
-	if value := strings.TrimSpace(query.Status); value != "" {
-		db = db.Where("status = ?", value)
+	if values := autoSeedStatusFilterValues(query.Status); len(values) > 1 {
+		db = db.Where("status IN ?", values)
+	} else if len(values) == 1 {
+		db = db.Where("status = ?", values[0])
 	}
 	if value := strings.TrimSpace(query.ResourceType); value != "" {
 		db = db.Where("resource_type = ?", value)
@@ -381,6 +384,17 @@ func (r *AutoSeedRepository) ListItems(query AutoSeedListQuery) ([]AutoSeedItem,
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+func autoSeedStatusFilterValues(status string) []string {
+	value := strings.TrimSpace(status)
+	if value == "" {
+		return nil
+	}
+	if value == AutoSeedItemStatusNotPushed {
+		return []string{AutoSeedItemStatusPending, AutoSeedItemStatusRejected}
+	}
+	return []string{value}
 }
 
 // GetItem 按 ID 查询自动发种种子记录。
