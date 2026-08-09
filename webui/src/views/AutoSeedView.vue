@@ -187,6 +187,11 @@
           <el-table-column label="拉取频率" width="110">
             <template #default="{ row }">{{ row.pull_interval_minutes }} 分钟</template>
           </el-table-column>
+          <el-table-column label="保种时间" width="110">
+            <template #default="{ row }">
+              {{ row.seed_retention_minutes > 0 ? `${row.seed_retention_minutes} 分钟` : '不清理' }}
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="130">
             <template #default="{ row }">
               <el-tag :type="row.enabled ? 'success' : 'warning'" size="small">
@@ -359,6 +364,10 @@
           <el-input-number v-model="editingRule.pull_interval_minutes" :min="1" :max="1440" />
           <span class="unit">分钟</span>
         </el-form-item>
+        <el-form-item label="保种时间">
+          <el-input-number v-model="editingRule.seed_retention_minutes" :min="0" :max="525600" />
+          <span class="unit">分钟，0 表示不自动清理</span>
+        </el-form-item>
         <el-form-item label="开关">
           <el-switch v-model="editingRule.enabled" active-text="开启" inactive-text="暂停" />
           <el-switch
@@ -528,6 +537,7 @@ type Rule = {
   pull_interval_minutes: number
   publish_interval_minutes: number
   publish_concurrency: number
+  seed_retention_minutes: number
 }
 type Item = {
   id: number
@@ -651,6 +661,7 @@ function emptyRule(): Rule {
     pull_interval_minutes: 30,
     publish_interval_minutes: 0,
     publish_concurrency: 1,
+    seed_retention_minutes: 0,
   }
 }
 
@@ -973,7 +984,8 @@ const publishResults = (row: Item): { label: string; url?: string }[] => {
       if (typeof item === 'string') return { label: item }
       const target = item?.target_site || item?.targetSite || item?.result?.target_site || '站点'
       const result = item?.result || {}
-      const status = item?.status_text || result?.message || (result?.success ? '发布成功' : '已入队')
+      const status =
+        item?.status_text || result?.message || (result?.success ? '发布成功' : '已入队')
       const seedingTime = item?.seeding_time || elapsedSince(item?.updated_at)
       return {
         label: [target, status, seedingTime].filter(Boolean).join(' · '),

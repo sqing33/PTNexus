@@ -57,6 +57,9 @@ func (m *SchemaManager) EnsureSchema() error {
 		if err := m.createAutoSeedMySQLTables(); err != nil {
 			return err
 		}
+		if err := m.ensureTableColumns("auto_seed_rules", m.columnSpecs()["auto_seed_rules"]); err != nil {
+			return err
+		}
 		if err := m.ensureTableColumns("auto_seed_items", m.columnSpecs()["auto_seed_items"]); err != nil {
 			return err
 		}
@@ -719,6 +722,9 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "cumulative_uploaded", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
 			{name: "cumulative_downloaded", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
 		},
+		"auto_seed_rules": {
+			{name: "seed_retention_minutes", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
+		},
 		"auto_seed_items": {
 			{name: "rule_id", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
 			{name: "source_site", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
@@ -1084,6 +1090,7 @@ func (m *SchemaManager) createAutoSeedMySQLTables() error {
 			pull_interval_minutes INT NOT NULL DEFAULT 30,
 			publish_interval_minutes INT NOT NULL DEFAULT 0,
 			publish_concurrency INT NOT NULL DEFAULT 1,
+			seed_retention_minutes INT NOT NULL DEFAULT 0,
 			last_run_at DATETIME NULL,
 			next_run_at DATETIME NOT NULL,
 			created_at DATETIME NOT NULL,
@@ -1150,6 +1157,7 @@ func (m *SchemaManager) fixAutoSeedMySQLColumnTypes() error {
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `source_site` VARCHAR(255)",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `downloader_id` VARCHAR(64)",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `save_path` VARCHAR(1024)",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `seed_retention_minutes` INT NOT NULL DEFAULT 0",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `last_run_at` DATETIME NULL",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `next_run_at` DATETIME NOT NULL",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `created_at` DATETIME NOT NULL",

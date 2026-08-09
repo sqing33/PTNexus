@@ -49,6 +49,7 @@ type AutoSeedRule struct {
 	PullIntervalMinutes    int     `json:"pull_interval_minutes" gorm:"column:pull_interval_minutes"`
 	PublishIntervalMinutes int     `json:"publish_interval_minutes" gorm:"column:publish_interval_minutes"`
 	PublishConcurrency     int     `json:"publish_concurrency" gorm:"column:publish_concurrency"`
+	SeedRetentionMinutes   int     `json:"seed_retention_minutes" gorm:"column:seed_retention_minutes"`
 	LastRunAt              *string `json:"last_run_at,omitempty" gorm:"column:last_run_at"`
 	NextRunAt              string  `json:"next_run_at" gorm:"column:next_run_at"`
 
@@ -108,6 +109,12 @@ type AutoSeedTorrentRecord struct {
 	DownloaderID string  `gorm:"column:downloader_id"`
 }
 
+// AutoSeedRetentionCandidate 表示需要检查保种到期清理的自动发种记录。
+type AutoSeedRetentionCandidate struct {
+	AutoSeedItem
+	SeedRetentionMinutes int `gorm:"column:seed_retention_minutes"`
+}
+
 // AutoSeedListQuery 定义自动发种列表的分页、筛选与搜索条件。
 type AutoSeedListQuery struct {
 	Page         int
@@ -152,6 +159,9 @@ func (r *AutoSeedRepository) CreateRule(rule *AutoSeedRule) error {
 	if rule.PublishConcurrency <= 0 {
 		rule.PublishConcurrency = 1
 	}
+	if rule.SeedRetentionMinutes < 0 {
+		rule.SeedRetentionMinutes = 0
+	}
 	if strings.TrimSpace(rule.NextRunAt) == "" {
 		rule.NextRunAt = now
 	}
@@ -183,6 +193,7 @@ func (r *AutoSeedRepository) UpdateRule(rule *AutoSeedRule) error {
 		"pull_interval_minutes":    rule.PullIntervalMinutes,
 		"publish_interval_minutes": rule.PublishIntervalMinutes,
 		"publish_concurrency":      rule.PublishConcurrency,
+		"seed_retention_minutes":   rule.SeedRetentionMinutes,
 		"next_run_at":              rule.NextRunAt,
 		"updated_at":               rule.UpdatedAt,
 	}).Error
@@ -621,6 +632,29 @@ func (r *AutoSeedRepository) DeleteItems(ids []int64) (int64, error) {
 		return 0, result.Error
 	}
 	return result.RowsAffected, nil
+}
+
+// ListRetentionCandidates 查询已发布且配置了保种时间的自动发种记录，用于后台到期清理。
+func (r *AutoSeedRepository) ListRetentionCandidates(limit int) ([]AutoSeedRetentionCandidate, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("auto seed repo is nil")
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	rows := make([]AutoSeedRetentionCandidate, 0)
+	err := r.store.DB.Table("auto_seed_items AS i").
+		Select("i.*, r.seed_retention_minutes").
+		Joins("JOIN auto_seed_rules AS r ON r.id = i.rule_id").
+		Where("i.status = ? AND r.seed_retention_minutes > 0", AutoSeedItemStatusPublished).
+		Where("i.downloader_id <> '' AND i.downloader_hash <> ''").
+		Order("i.published_at ASC, i.id ASC").
+		Limit(limit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // ListProgressItems 查询下载器进度页所需的全部自动发种记录。

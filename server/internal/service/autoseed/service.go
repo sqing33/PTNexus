@@ -147,6 +147,7 @@ func (s *Service) processTick() {
 		s.processRule(&rules[idx])
 	}
 	s.SyncProgressAndAutoPublish("")
+	s.cleanupExpiredRetainedSeeds()
 }
 
 func (s *Service) processRuleByID(ruleID int64) {
@@ -873,6 +874,71 @@ func (s *Service) DeleteItems(ids []int64, deleteFiles bool) (int64, error) {
 	return s.repo.DeleteItems(ids)
 }
 
+// cleanupExpiredRetainedSeeds 清理超过规则保种时间的已发布种子，并同步删除下载器任务和文件。
+// 参数/返回：无入参；失败仅记录日志，避免阻断自动发种主轮询。
+// 失败场景：数据库查询失败、下载器连接失败或删除接口失败时记录告警并继续处理其他记录。
+// 副作用：会请求下载器删除种子和文件，并删除对应 auto_seed_items 记录。
+func (s *Service) cleanupExpiredRetainedSeeds() {
+	if s == nil || s.repo == nil {
+		return
+	}
+	candidates, err := s.repo.ListRetentionCandidates(500)
+	if err != nil {
+		logx.Warnf(moduleAutoSeed, "查询保种到期记录失败 err=%v", err)
+		return
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	items := make([]repository.AutoSeedItem, 0, len(candidates))
+	for _, candidate := range candidates {
+		items = append(items, candidate.AutoSeedItem)
+	}
+	latestByTorrent := map[string]time.Time{}
+	logs, err := s.repo.FindPublishLogsForItems(items)
+	if err != nil {
+		logx.Warnf(moduleAutoSeed, "查询保种发布时间失败 err=%v", err)
+	} else {
+		for _, entry := range logs {
+			torrentID := strings.TrimSpace(entry.TorrentID)
+			if torrentID == "" {
+				continue
+			}
+			if value, ok := parseAutoSeedStoredTime(firstNonEmpty(entry.UpdatedAt, entry.CreatedAt)); ok {
+				if current, exists := latestByTorrent[torrentID]; !exists || value.After(current) {
+					latestByTorrent[torrentID] = value
+				}
+			}
+		}
+	}
+
+	now := time.Now()
+	cleaned := 0
+	for _, candidate := range candidates {
+		retention := candidate.SeedRetentionMinutes
+		if retention <= 0 {
+			continue
+		}
+		lastPublishedAt, ok := latestAutoSeedPublishTime(candidate.AutoSeedItem, latestByTorrent)
+		if !ok || now.Sub(lastPublishedAt) < time.Duration(retention)*time.Minute {
+			continue
+		}
+		deleted, err := s.DeleteItems([]int64{candidate.ID}, true)
+		if err != nil {
+			logx.Warnf(moduleAutoSeed, "保种到期清理失败 item_id=%d rule_id=%d retention_minutes=%d err=%v", candidate.ID, candidate.RuleID, retention, err)
+			continue
+		}
+		if deleted > 0 {
+			cleaned += int(deleted)
+			logx.Infof(moduleAutoSeed, "保种到期已删除种子和文件 item_id=%d rule_id=%d retention_minutes=%d last_publish_at=%s", candidate.ID, candidate.RuleID, retention, lastPublishedAt.Format(repository.PublishQueueTimeLayout))
+		}
+	}
+	if cleaned > 0 {
+		logx.Infof(moduleAutoSeed, "保种到期清理完成 count=%d", cleaned)
+	}
+}
+
 // Progress 返回下载器进度页数据。
 func (s *Service) Progress(downloaderID string) ([]repository.AutoSeedItem, error) {
 	s.SyncProgressAndAutoPublish(downloaderID)
@@ -1588,8 +1654,8 @@ func autoSeedPublishStatusText(status string) string {
 }
 
 func autoSeedElapsedText(value string) string {
-	start, err := time.ParseInLocation(repository.PublishQueueTimeLayout, strings.TrimSpace(value), time.Local)
-	if err != nil || start.IsZero() {
+	start, ok := parseAutoSeedStoredTime(value)
+	if !ok || start.IsZero() {
 		return ""
 	}
 	elapsed := time.Since(start)
@@ -1617,6 +1683,54 @@ func autoSeedElapsedText(value string) string {
 	return "刚刚"
 }
 
+func latestAutoSeedPublishTime(item repository.AutoSeedItem, latestByTorrent map[string]time.Time) (time.Time, bool) {
+	torrentID := strings.TrimSpace(item.TorrentID)
+	latest, ok := latestByTorrent[torrentID]
+	if value, exists := latestAutoSeedPublishResultTime(item.PublishResultsJSON); exists && (!ok || value.After(latest)) {
+		latest = value
+		ok = true
+	}
+	if item.PublishedAt != nil {
+		if value, exists := parseAutoSeedStoredTime(*item.PublishedAt); exists && (!ok || value.After(latest)) {
+			latest = value
+			ok = true
+		}
+	}
+	return latest, ok
+}
+
+func latestAutoSeedPublishResultTime(resultsJSON string) (time.Time, bool) {
+	var latest time.Time
+	found := false
+	for _, entry := range parseAutoSeedPublishResults(resultsJSON) {
+		for _, key := range []string{"updated_at", "created_at", "published_at"} {
+			value, ok := parseAutoSeedStoredTime(toString(entry[key], ""))
+			if !ok {
+				continue
+			}
+			if !found || value.After(latest) {
+				latest = value
+				found = true
+			}
+		}
+	}
+	return latest, found
+}
+
+func parseAutoSeedStoredTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	if parsed, err := time.ParseInLocation(repository.PublishQueueTimeLayout, value, time.Local); err == nil {
+		return parsed, true
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed.Local(), true
+	}
+	return time.Time{}, false
+}
+
 func normalizeRule(rule *repository.AutoSeedRule) {
 	if rule == nil {
 		return
@@ -1632,6 +1746,9 @@ func normalizeRule(rule *repository.AutoSeedRule) {
 	}
 	if rule.PublishConcurrency <= 0 {
 		rule.PublishConcurrency = 1
+	}
+	if rule.SeedRetentionMinutes < 0 {
+		rule.SeedRetentionMinutes = 0
 	}
 	if strings.TrimSpace(rule.NextRunAt) == "" {
 		rule.NextRunAt = time.Now().Format(repository.PublishQueueTimeLayout)
