@@ -24,7 +24,11 @@ func (hdvideoPublisher) LogModule() string {
 }
 
 func (hdvideoPublisher) AttemptPrefix(input publisher.PublishInput) string {
-	return "检测到 HDvideo 站点：补齐豆瓣字段、地区与默认风格"
+	return "检测到 HDvideo 站点：补齐豆瓣字段、地区、默认风格与 MediaInfo code 包裹"
+}
+
+func (hdvideoPublisher) BuildDescription(input publisher.PublishInput) string {
+	return buildHDVideoDescription(input)
 }
 
 func (hdvideoPublisher) AdjustFormFields(input publisher.PublishInput, formFields map[string]string) {
@@ -38,6 +42,7 @@ func (hdvideoPublisher) AdjustFormFields(input publisher.PublishInput, formField
 	}
 	delete(formFields, "dburl")
 	delete(formFields, "title")
+	delete(formFields, "technical_info")
 
 	if !hasHDVideoRegionField(formFields) {
 		formFields["region_sel[4]"] = "28"
@@ -46,6 +51,56 @@ func (hdvideoPublisher) AdjustFormFields(input publisher.PublishInput, formField
 		return
 	}
 	formFields["style_sel[4][0]"] = resolveHDVideoDefaultStyle(input.UploadData)
+}
+
+func buildHDVideoDescription(input publisher.PublishInput) string {
+	uploadData := input.UploadData
+	if uploadData == nil {
+		uploadData = map[string]any{}
+	}
+
+	parts := make([]string, 0, 5)
+	for _, key := range []string{"statement", "poster", "body"} {
+		if section := strings.TrimSpace(resolveUploadSection(uploadData, key)); section != "" {
+			parts = append(parts, section)
+		}
+	}
+	if mediainfo := resolveHDVideoMediaInfo(input); mediainfo != "" {
+		parts = append(parts, wrapHDVideoCodeBlock(mediainfo))
+	}
+	if screenshots := strings.TrimSpace(resolveUploadSection(uploadData, "screenshots")); screenshots != "" {
+		parts = append(parts, screenshots)
+	}
+
+	if len(parts) == 0 {
+		return strings.TrimSpace(input.Description)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func resolveHDVideoMediaInfo(input publisher.PublishInput) string {
+	uploadData := input.UploadData
+	if uploadData == nil {
+		uploadData = map[string]any{}
+	}
+	return strings.TrimSpace(firstNonEmpty(
+		toStringAny(uploadData["mediainfo"], ""),
+		toStringAny(uploadData["media_info"], ""),
+		toStringAny(uploadData["mediainfo_text"], ""),
+		strings.TrimSpace(input.MediaInfo),
+	))
+}
+
+func wrapHDVideoCodeBlock(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "[code]") && strings.HasSuffix(lower, "[/code]") {
+		return trimmed
+	}
+	return "[code]" + trimmed + "[/code]"
 }
 
 func hasHDVideoRegionField(formFields map[string]string) bool {
