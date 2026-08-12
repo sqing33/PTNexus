@@ -43,6 +43,8 @@ var (
 	reQuotePrefix            = regexp.MustCompile(`(?im)^\s*(?:\[?(?:引用|quote)\]?\s*[:：]?\s*)`)
 	reQuoteOpen              = regexp.MustCompile(`(?is)^\s*\[quote\]\s*`)
 	reQuoteClose             = regexp.MustCompile(`(?is)\s*\[/quote\]\s*$`)
+	reBoldOpen               = regexp.MustCompile(`(?is)^\s*\[b\]\s*`)
+	reBoldClose              = regexp.MustCompile(`(?is)\s*\[/b\]\s*$`)
 	reNestedQuoteIn          = regexp.MustCompile(`(?is)\[quote\]\s*\[quote\]`)
 	reNestedQuoteOut         = regexp.MustCompile(`(?is)\[/quote\]\s*\[/quote\]`)
 	reQuoteOrImage           = regexp.MustCompile(`(?is)\[quote\].*?\[/quote\]|\[img\].*?\[/img\]`)
@@ -252,8 +254,8 @@ type quoteBlock struct {
 }
 
 func extractDescriptionSections(descrHTML, descrBBCode, extraStatementBBCode string) (string, string, string, string, string, []string, []string) {
-	normalizedBBCode := normalizeNestedQuoteBlocks(strings.TrimSpace(descrBBCode))
-	extraStatementBBCode = normalizeNestedQuoteBlocks(strings.TrimSpace(normalizeExtraTextBBCode(extraStatementBBCode)))
+	normalizedBBCode := normalizeNestedQuoteBlocks(stripOuterBoldBlocks(strings.TrimSpace(descrBBCode)))
+	extraStatementBBCode = normalizeNestedQuoteBlocks(stripOuterBoldBlocks(strings.TrimSpace(normalizeExtraTextBBCode(extraStatementBBCode))))
 	statementTags := detectStatementTags(strings.TrimSpace(normalizedBBCode + "\n" + extraStatementBBCode))
 	useDescrStatement := strings.TrimSpace(extraStatementBBCode) == ""
 
@@ -502,6 +504,58 @@ func normalizeNestedQuoteBlocks(bbcode string) string {
 		}
 		normalized = next
 	}
+}
+
+func stripOuterBoldBlocks(bbcode string) string {
+	trimmed := strings.TrimSpace(bbcode)
+	if trimmed == "" {
+		return ""
+	}
+
+	for hasWholeOuterBBCodePair(trimmed, "[b]", "[/b]") {
+		inner := reBoldOpen.ReplaceAllString(trimmed, "")
+		inner = reBoldClose.ReplaceAllString(inner, "")
+		inner = strings.TrimSpace(inner)
+		if inner == "" || inner == trimmed {
+			break
+		}
+		trimmed = inner
+	}
+	return trimmed
+}
+
+func hasWholeOuterBBCodePair(text string, openTag string, closeTag string) bool {
+	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
+	open := strings.ToLower(openTag)
+	close := strings.ToLower(closeTag)
+	if !strings.HasPrefix(lower, open) || !strings.HasSuffix(lower, close) {
+		return false
+	}
+
+	depth := 0
+	for pos := 0; pos < len(trimmed); {
+		remaining := strings.ToLower(trimmed[pos:])
+		switch {
+		case strings.HasPrefix(remaining, open):
+			depth++
+			pos += len(open)
+			continue
+		case strings.HasPrefix(remaining, close):
+			depth--
+			pos += len(close)
+			if depth < 0 {
+				return false
+			}
+			if depth == 0 && strings.TrimSpace(trimmed[pos:]) != "" {
+				return false
+			}
+			continue
+		default:
+			pos++
+		}
+	}
+	return depth == 0
 }
 
 func detectStatementTags(_ string) []string {
