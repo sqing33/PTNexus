@@ -54,6 +54,7 @@ func NewDefaultEngine(publicExtractor Extractor, runtimeFactory RuntimeFactory) 
 	hdskyExtractor := NewHDSkySpecialExtractor(publicExtractor, runtimeFactory)
 	pterclubExtractor := NewPTerClubSpecialExtractor(publicExtractor, runtimeFactory)
 	hddolbyExtractor := NewHDDolbySpecialExtractor(publicExtractor, runtimeFactory)
+	hdvideoExtractor := NewHDVideoSpecialExtractor(publicExtractor, runtimeFactory)
 	dstudioExtractor := NewDStudioSpecialExtractor(publicExtractor, runtimeFactory)
 
 	return NewEngine(
@@ -67,6 +68,7 @@ func NewDefaultEngine(publicExtractor Extractor, runtimeFactory RuntimeFactory) 
 			"hdsky":     hdskyExtractor,
 			"pterclub":  pterclubExtractor,
 			"hddolby":   hddolbyExtractor,
+			"hdvideo":   hdvideoExtractor,
 			"ds":        dstudioExtractor,
 			"dstudio":   dstudioExtractor,
 		},
@@ -79,6 +81,8 @@ func NewDefaultEngine(publicExtractor Extractor, runtimeFactory RuntimeFactory) 
 			"天空":           hdskyExtractor,
 			"猫站":           pterclubExtractor,
 			"杜比":           hddolbyExtractor,
+			"HDvideo":      hdvideoExtractor,
+			"HDVideo":      hdvideoExtractor,
 			"屌丝":           dstudioExtractor,
 			"dstudio":      dstudioExtractor,
 			"Depth Studio": dstudioExtractor,

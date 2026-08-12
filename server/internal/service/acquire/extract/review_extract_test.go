@@ -252,3 +252,74 @@ func TestExtractDStudioKeepsStatementSeparateFromIntro(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractHDVideoSpecialExtractor(t *testing.T) {
+	pageHTML := `<html>
+<head><title>HDvideo :: Torrent Details "Test.Movie.2026.2160p.WEB-DL.H265.AAC-HDVWEB" - Powered by NexusPHP</title></head>
+<body>
+<h1 id="top">Test.Movie.2026.2160p.WEB-DL.H265.AAC-HDVWEB</h1>
+<table>
+<tr><td>` + "\u98ce\u683c" + `</td><td>` + "\u559c\u5267 / \u52a8\u4f5c" + `</td></tr>
+</table>
+<div id="kdescr">
+[quote]` + "\u25ce\u7247\u3000\u3000\u540d\u3000\u6d4b\u8bd5\u7535\u5f71" + `[/quote]
+<img src="https://img.example.test/poster.jpg">
+https://movie.douban.com/subject/1234567/
+https://www.imdb.com/title/tt1234567/
+https://www.themoviedb.org/movie/7654321/
+</div>
+<div class="codemain"><pre>General
+Unique ID                                : 123
+Complete name                            : Test.Movie.2026.mkv
+Overall bit rate                         : 23.0 Mb/s
+
+Video
+Format                                   : HEVC
+Width                                    : 3 840 pixels
+Height                                   : 2 160 pixels
+
+Audio
+Format                                   : AAC
+</pre></div>
+<div id="kscreenshots">
+<img src="https://img.example.test/screen1.jpg">
+<img src="https://img.example.test/screen2.png">
+</div>
+</body></html>`
+
+	data, meta := NewPageExtractorEngine().Extract(Input{
+		SiteCode:      "hdvideo",
+		SiteNickname:  "HDvideo",
+		PageHTML:      pageHTML,
+		FallbackTitle: "fallback",
+	})
+
+	if meta.ExtractorName != "hdvideo_special" {
+		t.Fatalf("expected HDvideo special extractor, got=%q meta=%+v", meta.ExtractorName, meta)
+	}
+	if !strings.Contains(data.MediaInfo, "Complete name") || strings.Contains(strings.ToLower(data.MediaInfo), "[code]") {
+		t.Fatalf("expected raw mediainfo without code wrapper, got=%q", data.MediaInfo)
+	}
+	for _, want := range []string{"[img]https://img.example.test/screen1.jpg[/img]", "[img]https://img.example.test/screen2.png[/img]"} {
+		if !strings.Contains(data.Intro.Screenshots, want) {
+			t.Fatalf("expected screenshots to contain %q, got=%q", want, data.Intro.Screenshots)
+		}
+	}
+	if data.DoubanLink != "https://movie.douban.com/subject/1234567" {
+		t.Fatalf("expected douban link normalized, got=%q", data.DoubanLink)
+	}
+	if data.IMDbLink != "https://www.imdb.com/title/tt1234567" {
+		t.Fatalf("expected imdb link normalized, got=%q", data.IMDbLink)
+	}
+	if data.TMDbLink != "https://www.themoviedb.org/movie/7654321" {
+		t.Fatalf("expected tmdb link normalized, got=%q", data.TMDbLink)
+	}
+	for _, want := range []string{"tag.\u559c\u5267", "tag.\u52a8\u4f5c"} {
+		if !containsString(data.Tags, want) {
+			t.Fatalf("expected tags to contain %q, got=%v", want, data.Tags)
+		}
+	}
+	if data.SourceParams == nil || data.SourceParams["\u6807\u7b7e"] == nil {
+		t.Fatalf("expected source params to be rebuilt with tags, got=%v", data.SourceParams)
+	}
+}

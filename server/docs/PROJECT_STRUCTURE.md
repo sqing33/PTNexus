@@ -213,6 +213,7 @@
 | `internal/service/acquire/extract/sites/hdsky.go` | hdsky 专用提取规则 |
 | `internal/service/acquire/extract/sites/pterclub.go` | pterclub 专用提取规则 |
 | `internal/service/acquire/extract/sites/hddolby.go` | hddolby 专用提取规则 |
+| `internal/service/acquire/extract/sites/hdvideo.go` | hdvideo 专用提取规则 |
 | `internal/service/acquire/extract/sites/dstudio.go` | dstudio 专用提取规则 |
 
 ### `acquire/fetch`
