@@ -112,7 +112,8 @@ type AutoSeedTorrentRecord struct {
 // AutoSeedRetentionCandidate 表示需要检查保种到期清理的自动发种记录。
 type AutoSeedRetentionCandidate struct {
 	AutoSeedItem
-	SeedRetentionMinutes int `gorm:"column:seed_retention_minutes"`
+	SeedRetentionMinutes int    `gorm:"column:seed_retention_minutes"`
+	LastPublishAt        string `gorm:"column:last_publish_at"`
 }
 
 // AutoSeedListQuery 定义自动发种列表的分页、筛选与搜索条件。
@@ -644,11 +645,12 @@ func (r *AutoSeedRepository) ListRetentionCandidates(limit int) ([]AutoSeedReten
 	}
 	rows := make([]AutoSeedRetentionCandidate, 0)
 	err := r.store.DB.Table("auto_seed_items AS i").
-		Select("i.*, r.seed_retention_minutes").
+		Select("i.*, r.seed_retention_minutes, COALESCE(t.last_publish_at, '') AS last_publish_at").
 		Joins("JOIN auto_seed_rules AS r ON r.id = i.rule_id").
+		Joins("LEFT JOIN torrents AS t ON LOWER(TRIM(t.hash)) = LOWER(TRIM(i.downloader_hash)) AND t.downloader_id = i.downloader_id AND (t.is_hidden = 0 OR t.is_hidden IS NULL)").
 		Where("i.status = ? AND r.seed_retention_minutes > 0", AutoSeedItemStatusPublished).
 		Where("i.downloader_id <> '' AND i.downloader_hash <> ''").
-		Order("i.published_at ASC, i.id ASC").
+		Order("COALESCE(t.last_publish_at, i.published_at) ASC, i.id ASC").
 		Limit(limit).
 		Scan(&rows).Error
 	if err != nil {

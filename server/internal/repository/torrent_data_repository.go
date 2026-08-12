@@ -3,7 +3,6 @@ package repository
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -529,25 +528,19 @@ func (r *TorrentDataRepository) PublishAtByNames() (map[string]string, error) {
 // LastPublishAtByNames 查询每个种子名称最近一次成功发种时间。
 // 参数/返回：无输入参数；返回种子名称到最近发种时间的映射。
 // 失败场景：数据库查询失败时返回 error。
-// 副作用：仅读取 seed_parameters 与 publish_logs，不修改数据。
+// 副作用：仅读取 torrents.last_publish_at，不修改数据。
 func (r *TorrentDataRepository) LastPublishAtByNames() (map[string]string, error) {
-	lastPublishAtExpr := "MAX(COALESCE(NULLIF(pl.updated_at, ''), pl.created_at))"
-	if r.store.DBType == "mysql" || r.store.DBType == "postgresql" {
-		lastPublishAtExpr = "MAX(COALESCE(pl.updated_at, pl.created_at))"
-	}
-
 	rows := make([]nameLastPublishAt, 0)
-	query := fmt.Sprintf(`
-		SELECT sp.name, %s AS last_publish_at
-		FROM seed_parameters sp
-		INNER JOIN publish_logs pl
-		  ON pl.torrent_id = sp.torrent_id
-		 AND (pl.source_site = sp.site_name OR pl.source_site = sp.nickname)
-		WHERE sp.name IS NOT NULL
-		  AND sp.name != ''
-		  AND pl.status IN ('success', 'edited', 'exists')
-		GROUP BY sp.name
-	`, lastPublishAtExpr)
+	query := `
+		SELECT name, MAX(last_publish_at) AS last_publish_at
+		FROM torrents
+		WHERE name IS NOT NULL
+		  AND name != ''
+		  AND last_publish_at IS NOT NULL
+		  AND last_publish_at != ''
+		  AND (is_hidden = 0 OR is_hidden IS NULL)
+		GROUP BY name
+	`
 	if err := r.store.DB.Raw(query).Scan(&rows).Error; err != nil {
 		return nil, err
 	}

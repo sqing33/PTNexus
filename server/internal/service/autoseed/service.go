@@ -920,7 +920,7 @@ func (s *Service) cleanupExpiredRetainedSeeds() {
 		if retention <= 0 {
 			continue
 		}
-		lastPublishedAt, ok := latestAutoSeedPublishTime(candidate.AutoSeedItem, latestByTorrent)
+		lastPublishedAt, ok := latestAutoSeedPublishTime(candidate, latestByTorrent)
 		if !ok || now.Sub(lastPublishedAt) < time.Duration(retention)*time.Minute {
 			continue
 		}
@@ -1683,7 +1683,11 @@ func autoSeedElapsedText(value string) string {
 	return "刚刚"
 }
 
-func latestAutoSeedPublishTime(item repository.AutoSeedItem, latestByTorrent map[string]time.Time) (time.Time, bool) {
+func latestAutoSeedPublishTime(candidate repository.AutoSeedRetentionCandidate, latestByTorrent map[string]time.Time) (time.Time, bool) {
+	item := candidate.AutoSeedItem
+	if value, exists := parseAutoSeedStoredTime(candidate.LastPublishAt); exists {
+		return value, true
+	}
 	torrentID := strings.TrimSpace(item.TorrentID)
 	latest, ok := latestByTorrent[torrentID]
 	if value, exists := latestAutoSeedPublishResultTime(item.PublishResultsJSON); exists && (!ok || value.After(latest)) {

@@ -33,13 +33,6 @@ func seedParameterRowIDExpr(dbType string) string {
 	return "(sp.hash || ':' || sp.torrent_id || ':' || sp.site_name) AS id"
 }
 
-func lastPublishAtExpr(dbType string) string {
-	if strings.EqualFold(dbType, "mysql") || strings.EqualFold(dbType, "postgresql") {
-		return "MAX(COALESCE(pl.updated_at, pl.created_at))"
-	}
-	return "MAX(COALESCE(NULLIF(pl.updated_at, ''), pl.created_at))"
-}
-
 func buildReviewStatusCondition(dbType string, reviewStatus string) (string, []any) {
 	normalized := strings.ToLower(strings.TrimSpace(reviewStatus))
 	if normalized == "" {
@@ -116,14 +109,14 @@ func buildCurrentTorrentsSubquery(dbType string) string {
 	// Match Python build_current_torrents_subquery().
 	if strings.EqualFold(dbType, "postgresql") {
 		return fmt.Sprintf(`
-			SELECT DISTINCT ON (t.hash) t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.size, t.seeders
+			SELECT DISTINCT ON (t.hash) t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.last_publish_at, t.size, t.seeders
 			FROM torrents t
 			WHERE (t.is_hidden = 0 OR t.is_hidden IS NULL)
 			ORDER BY t.hash, %s, t.last_seen DESC
 		`, stateRankExpr("t"))
 	}
 	return fmt.Sprintf(`
-		SELECT t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.size, t.seeders
+		SELECT t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.last_publish_at, t.size, t.seeders
 		FROM torrents t
 		JOIN (
 			SELECT hash,
@@ -249,8 +242,6 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		isDeletedExpr = "CASE WHEN ct.hash IS NULL THEN true ELSE false END AS is_deleted"
 	}
 	rowIDExpr := seedParameterRowIDExpr(dbType)
-	lastPublishAt := lastPublishAtExpr(dbType)
-
 	dataQuery := fmt.Sprintf(`
 		SELECT %s, sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
 		       COALESCE(ct.save_path, '') AS save_path,
@@ -263,19 +254,13 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		       sp.title_components, sp.screenshot_review_status,
 		       %s,
 		       sp.is_reviewed, sp.publish_at,
-		       COALESCE((
-		           SELECT %s
-		           FROM publish_logs pl
-		           WHERE pl.torrent_id = sp.torrent_id
-		             AND (pl.source_site = sp.site_name OR pl.source_site = sp.nickname)
-		             AND pl.status IN ('success', 'edited', 'exists')
-		       ), '') AS last_publish_at,
+		       COALESCE(ct.last_publish_at, '') AS last_publish_at,
 		       sp.updated_at
 		%s
 		%s
 		ORDER BY sp.created_at DESC
 		LIMIT ? OFFSET ?
-	`, rowIDExpr, isDeletedExpr, lastPublishAt, fromClause, whereClause)
+	`, rowIDExpr, isDeletedExpr, fromClause, whereClause)
 
 	dataArgs := make([]any, 0, len(args)+2)
 	dataArgs = append(dataArgs, args...)

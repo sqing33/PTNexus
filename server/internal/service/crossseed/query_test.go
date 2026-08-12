@@ -46,6 +46,7 @@ func newTestCrossSeedService(t *testing.T) *CrossSeedService {
 			downloader_id TEXT,
 			state TEXT,
 			last_seen TEXT,
+			last_publish_at TEXT,
 			size INTEGER,
 			seeders INTEGER,
 			sites TEXT,
@@ -81,8 +82,8 @@ func TestQueryDataIncludesLastPublishAt(t *testing.T) {
 		t.Fatalf("insert seed: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO torrents
-		(hash, save_path, downloader_id, state, last_seen, size, seeders, sites, is_hidden)
-		VALUES ('hash-1', '/downloads/Movie.Name', 'qb', '做种', '2026-08-01 00:00:00', 1024, 3, 'Source Site', 0)`).Error; err != nil {
+		(hash, save_path, downloader_id, state, last_seen, last_publish_at, size, seeders, sites, is_hidden)
+		VALUES ('hash-1', '/downloads/Movie.Name', 'qb', '做种', '2026-08-01 00:00:00', '2026-08-02 10:00:00', 1024, 3, 'Source Site', 0)`).Error; err != nil {
 		t.Fatalf("insert torrent: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO publish_logs

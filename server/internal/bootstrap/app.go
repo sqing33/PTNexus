@@ -80,6 +80,7 @@ func NewApp() (*App, error) {
 	migrateService := migrationflow.NewMigrateService(migrateRepo, cfgManager)
 	migrateService.InitPublishQueue(queueRepo, statsRepo)
 	migrateService.InitPublishLogs(publishLogRepo)
+	migrateService.InitTorrentData(torrentDataRepo)
 	torrentTransferService := service.NewTorrentTransferService(migrateRepo, cfgManager)
 
 	scheduledSeedRepo := repository.NewScheduledSeedRepository(store)
