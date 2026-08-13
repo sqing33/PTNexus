@@ -70,7 +70,7 @@ func (s *MigrateService) NextBatchCrossSeedTrigger() (string, int, error) {
 // InsertExternalPublishLog 直接插入一条发种日志记录（不经过 Publish 工作流）。
 // 参数/返回：input 为日志内容；返回 error 表示写入失败原因。
 // 失败场景：发种日志仓储未初始化、写库失败返回 error。
-// 副作用：写入 publish_logs。
+// 副作用：写入 publish_logs，成功状态且带 hash 时回写 seed_parameters.last_publish_at。
 func (s *MigrateService) InsertExternalPublishLog(input ExternalPublishLogInput) error {
 	if s == nil || s.publishLogRepo == nil {
 		return errors.New("发种日志未初始化")
@@ -103,9 +103,9 @@ func (s *MigrateService) InsertExternalPublishLog(input ExternalPublishLogInput)
 	if insertErr != nil {
 		return insertErr
 	}
-	if isSuccessfulPublishLogStatus(entry.Status) && strings.TrimSpace(input.Hash) != "" && s.torrentDataRepo != nil {
-		if _, err := s.torrentDataRepo.UpdateTorrentLastPublishAtByHash(input.Hash, entry.UpdatedAt); err != nil {
-			logx.Warnf(publishLogModule, "外部日志回写最后发种时间失败 hash=%s status=%s err=%v", strings.TrimSpace(input.Hash), entry.Status, err)
+	if isSuccessfulPublishLogStatus(entry.Status) && strings.TrimSpace(input.Hash) != "" && s.repo != nil {
+		if _, err := s.repo.UpdateSeedParameterLastPublishAtByHash(input.Hash, entry.UpdatedAt); err != nil {
+			logx.Warnf(publishLogModule, "外部日志回写最后发布时间失败 hash=%s status=%s err=%v", strings.TrimSpace(input.Hash), entry.Status, err)
 		}
 	}
 	return nil
@@ -124,21 +124,6 @@ func (s *MigrateService) InitPublishLogs(repo *repository.PublishLogRepository) 
 		return
 	}
 	s.publishLogRepo = repo
-}
-
-// InitTorrentData 初始化发种后种子状态回写依赖。
-// 参数/返回：repo 用于更新 torrents.last_publish_at；无返回值。
-// 失败场景：repo 为空时仅记录日志并跳过回写能力。
-// 副作用：保存仓储引用，供发布成功后按 hash 更新最后发种时间。
-func (s *MigrateService) InitTorrentData(repo *repository.TorrentDataRepository) {
-	if s == nil {
-		return
-	}
-	if repo == nil {
-		logx.Warnf(publishLogModule, "初始化种子发种时间回写失败：repo 为空")
-		return
-	}
-	s.torrentDataRepo = repo
 }
 
 // ListPublishLogs 分页查询发种日志（供 UI “发种日志”页面使用）。
@@ -340,7 +325,7 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 			logx.Warnf(publishLogModule, "更新发种日志失败 queue_task_id=%d trigger=%s scene=%s target=%s err=%v", *queueTaskID, trigger, scene, targetSite, err)
 		}
 		if upsertOK {
-			s.updateTorrentLastPublishAtFromEntry(&entry, payload, uploadData, result)
+			s.updateSeedParameterLastPublishAtFromEntry(&entry, payload, uploadData, result)
 		}
 		return
 	}
@@ -350,7 +335,7 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 		logx.Warnf(publishLogModule, "写入发种日志失败 trigger=%s scene=%s target=%s err=%v", trigger, scene, targetSite, err)
 	}
 	if insertedID > 0 {
-		s.updateTorrentLastPublishAtFromEntry(&entry, payload, uploadData, result)
+		s.updateSeedParameterLastPublishAtFromEntry(&entry, payload, uploadData, result)
 	}
 }
 
@@ -382,8 +367,8 @@ func resolvePublishLogTitleFromUploadData(uploadData map[string]any, fallbackTit
 	return strings.TrimSpace(title), subtitle
 }
 
-func (s *MigrateService) updateTorrentLastPublishAtFromEntry(entry *repository.PublishLogEntry, payload map[string]any, uploadData map[string]any, result map[string]any) {
-	if s == nil || s.torrentDataRepo == nil || entry == nil || !isSuccessfulPublishLogStatus(entry.Status) {
+func (s *MigrateService) updateSeedParameterLastPublishAtFromEntry(entry *repository.PublishLogEntry, payload map[string]any, uploadData map[string]any, result map[string]any) {
+	if s == nil || s.repo == nil || entry == nil || !isSuccessfulPublishLogStatus(entry.Status) {
 		return
 	}
 	hash := resolvePublishedTorrentHash(payload, uploadData, result)
@@ -399,13 +384,13 @@ func (s *MigrateService) updateTorrentLastPublishAtFromEntry(entry *repository.P
 	if publishAt == "" {
 		publishAt = time.Now().Format(repository.PublishQueueTimeLayout)
 	}
-	affected, err := s.torrentDataRepo.UpdateTorrentLastPublishAtByHash(hash, publishAt)
+	affected, err := s.repo.UpdateSeedParameterLastPublishAtByHash(hash, publishAt)
 	if err != nil {
-		logx.Warnf(publishLogModule, "回写最后发种时间失败 hash=%s status=%s err=%v", hash, entry.Status, err)
+		logx.Warnf(publishLogModule, "回写最后发布时间失败 hash=%s status=%s err=%v", hash, entry.Status, err)
 		return
 	}
 	if affected == 0 {
-		logx.Warnf(publishLogModule, "回写最后发种时间未命中 torrents hash=%s status=%s", hash, entry.Status)
+		logx.Warnf(publishLogModule, "回写最后发布时间未命中 seed_parameters hash=%s status=%s", hash, entry.Status)
 	}
 }
 

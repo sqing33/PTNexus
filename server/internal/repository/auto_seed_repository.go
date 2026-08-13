@@ -645,12 +645,20 @@ func (r *AutoSeedRepository) ListRetentionCandidates(limit int) ([]AutoSeedReten
 	}
 	rows := make([]AutoSeedRetentionCandidate, 0)
 	err := r.store.DB.Table("auto_seed_items AS i").
-		Select("i.*, r.seed_retention_minutes, COALESCE(t.last_publish_at, '') AS last_publish_at").
+		Select("i.*, r.seed_retention_minutes, COALESCE(sp.last_publish_at, '') AS last_publish_at").
 		Joins("JOIN auto_seed_rules AS r ON r.id = i.rule_id").
-		Joins("LEFT JOIN torrents AS t ON LOWER(TRIM(t.hash)) = LOWER(TRIM(i.downloader_hash)) AND t.downloader_id = i.downloader_id AND (t.is_hidden = 0 OR t.is_hidden IS NULL)").
+		Joins(`LEFT JOIN (
+			SELECT hash, MAX(last_publish_at) AS last_publish_at
+			FROM seed_parameters
+			WHERE hash IS NOT NULL
+			  AND hash <> ''
+			  AND last_publish_at IS NOT NULL
+			  AND last_publish_at <> ''
+			GROUP BY hash
+		) AS sp ON LOWER(TRIM(sp.hash)) = LOWER(TRIM(i.downloader_hash))`).
 		Where("i.status = ? AND r.seed_retention_minutes > 0", AutoSeedItemStatusPublished).
 		Where("i.downloader_id <> '' AND i.downloader_hash <> ''").
-		Order("COALESCE(t.last_publish_at, i.published_at) ASC, i.id ASC").
+		Order("COALESCE(sp.last_publish_at, i.published_at) ASC, i.id ASC").
 		Limit(limit).
 		Scan(&rows).Error
 	if err != nil {

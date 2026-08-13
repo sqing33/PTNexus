@@ -374,28 +374,6 @@ func (r *TorrentDataRepository) HideDisabledDownloaderData(enabledDownloaderIDs 
 	return r.hideDownloaderData(disabledIDs, torrentHideReasonDisabledDownloader)
 }
 
-// UpdateTorrentLastPublishAtByHash 按 infohash 回写当前种子的最后发种时间。
-// 参数/返回：hash 为 torrents.hash，publishAt 为标准时间字符串；返回命中的 torrents 行数与错误。
-// 失败场景：仓储未初始化、hash 或时间为空、数据库更新失败。
-// 副作用：更新所有同 hash 的当前 torrents 记录，不区分下载器。
-func (r *TorrentDataRepository) UpdateTorrentLastPublishAtByHash(hash string, publishAt string) (int64, error) {
-	if r == nil || r.store == nil || r.store.DB == nil {
-		return 0, fmt.Errorf("torrent data repo is nil")
-	}
-	hash = strings.TrimSpace(hash)
-	publishAt = strings.TrimSpace(publishAt)
-	if hash == "" || publishAt == "" {
-		return 0, nil
-	}
-	result := r.store.DB.Table("torrents").
-		Where("LOWER(TRIM(hash)) = LOWER(TRIM(?))", hash).
-		Updates(map[string]any{"last_publish_at": publishAt})
-	if result.Error != nil {
-		return 0, result.Error
-	}
-	return result.RowsAffected, nil
-}
-
 // HideRemovedDownloaderData 将已从配置移除的下载器数据标记为隐藏。
 // 参数/返回：configuredDownloaderIDs 为当前配置内仍存在的下载器 ID 列表，返回本次隐藏的 torrents 行数。
 // 失败场景：读取现存 downloader_id 或更新 SQL 失败时返回错误。

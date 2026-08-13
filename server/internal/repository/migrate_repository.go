@@ -377,6 +377,28 @@ func (r *MigrateRepository) UpdateSeedParameterByKey(hash, torrentID, siteName s
 	return r.store.DB.Table("seed_parameters").Where("hash = ? AND torrent_id = ? AND site_name = ?", hash, torrentID, siteName).Updates(updates).Error
 }
 
+// UpdateSeedParameterLastPublishAtByHash 按 infohash 回写种子参数的最后发布时间。
+// 参数/返回：hash 为 seed_parameters.hash，publishAt 为标准时间字符串；返回命中的 seed_parameters 行数与错误。
+// 失败场景：仓储未初始化、hash 或时间为空、数据库更新失败。
+// 副作用：更新所有同 hash 的 seed_parameters.last_publish_at。
+func (r *MigrateRepository) UpdateSeedParameterLastPublishAtByHash(hash string, publishAt string) (int64, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return 0, errors.New("migrate repo is nil")
+	}
+	hash = strings.TrimSpace(hash)
+	publishAt = strings.TrimSpace(publishAt)
+	if hash == "" || publishAt == "" {
+		return 0, nil
+	}
+	result := r.store.DB.Table("seed_parameters").
+		Where("LOWER(TRIM(hash)) = LOWER(TRIM(?))", hash).
+		Updates(map[string]any{"last_publish_at": publishAt})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
 func (r *MigrateRepository) ListTorrentsByNames(names []string) ([]map[string]any, error) {
 	rows := make([]map[string]any, 0)
 	if len(names) == 0 {

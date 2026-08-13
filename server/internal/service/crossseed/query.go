@@ -109,14 +109,14 @@ func buildCurrentTorrentsSubquery(dbType string) string {
 	// Match Python build_current_torrents_subquery().
 	if strings.EqualFold(dbType, "postgresql") {
 		return fmt.Sprintf(`
-			SELECT DISTINCT ON (t.hash) t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.last_publish_at, t.size, t.seeders
+			SELECT DISTINCT ON (t.hash) t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.size, t.seeders
 			FROM torrents t
 			WHERE (t.is_hidden = 0 OR t.is_hidden IS NULL)
 			ORDER BY t.hash, %s, t.last_seen DESC
 		`, stateRankExpr("t"))
 	}
 	return fmt.Sprintf(`
-		SELECT t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.last_publish_at, t.size, t.seeders
+		SELECT t.hash, t.save_path, t.downloader_id, t.state, t.last_seen, t.size, t.seeders
 		FROM torrents t
 		JOIN (
 			SELECT hash,
@@ -254,7 +254,7 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		       sp.title_components, sp.screenshot_review_status,
 		       %s,
 		       sp.is_reviewed, sp.publish_at,
-		       COALESCE(ct.last_publish_at, '') AS last_publish_at,
+		       COALESCE(sp.last_publish_at, '') AS last_publish_at,
 		       sp.updated_at
 		%s
 		%s

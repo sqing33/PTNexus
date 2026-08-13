@@ -525,20 +525,19 @@ func (r *TorrentDataRepository) PublishAtByNames() (map[string]string, error) {
 	return result, nil
 }
 
-// LastPublishAtByNames 查询每个种子名称最近一次成功发种时间。
-// 参数/返回：无输入参数；返回种子名称到最近发种时间的映射。
+// LastPublishAtByNames 查询每个种子名称最近一次成功发布时间。
+// 参数/返回：无输入参数；返回种子名称到最近发布时间的映射。
 // 失败场景：数据库查询失败时返回 error。
-// 副作用：仅读取 torrents.last_publish_at，不修改数据。
+// 副作用：仅读取 seed_parameters.last_publish_at，不修改数据。
 func (r *TorrentDataRepository) LastPublishAtByNames() (map[string]string, error) {
 	rows := make([]nameLastPublishAt, 0)
 	query := `
 		SELECT name, MAX(last_publish_at) AS last_publish_at
-		FROM torrents
+		FROM seed_parameters
 		WHERE name IS NOT NULL
 		  AND name != ''
 		  AND last_publish_at IS NOT NULL
 		  AND last_publish_at != ''
-		  AND (is_hidden = 0 OR is_hidden IS NULL)
 		GROUP BY name
 	`
 	if err := r.store.DB.Raw(query).Scan(&rows).Error; err != nil {

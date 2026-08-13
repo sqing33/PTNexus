@@ -26,10 +26,9 @@ type MigrateService struct {
 	publishState    *publishworkflow.BatchState
 	bdinfoState     *processingbdflow.BDInfoState
 
-	queueRepo       *repository.PublishQueueRepository
-	publishLogRepo  *repository.PublishLogRepository
-	torrentDataRepo *repository.TorrentDataRepository
-	statsRepo       *repository.StatsRepository
+	queueRepo      *repository.PublishQueueRepository
+	publishLogRepo *repository.PublishLogRepository
+	statsRepo      *repository.StatsRepository
 
 	publishQueueExistingTorrentHook func(trigger string)
 
