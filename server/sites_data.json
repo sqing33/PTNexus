@@ -1263,7 +1263,8 @@
     "nickname": "HDvideo",
     "base_url": "hdvideo.top",
     "special_tracker_domain": null,
-    "group": null,
+    "group": "-HDVWEB,-HDV,-HDVTV",
+    "description": "HDvideo",
     "migration": 3,
     "speed_limit": 10
   },
