@@ -377,14 +377,15 @@ func (r *MigrateRepository) UpdateSeedParameterByKey(hash, torrentID, siteName s
 	return r.store.DB.Table("seed_parameters").Where("hash = ? AND torrent_id = ? AND site_name = ?", hash, torrentID, siteName).Updates(updates).Error
 }
 
-// UpdateSeedParameterLastPublishAt 回写 seed_parameters 的最后发布时间，优先按源站参数记录定位。
-// 参数/返回：hash 用作兜底匹配，torrentID/siteName 用于匹配源站记录，publishAt 为发布时间；返回命中行数。
+// UpdateSeedParameterLastPublishAt 回写 seed_parameters 的最后发布时间，优先按资源名称更新同名记录。
+// 参数/返回：name 表示同一资源名称；hash/torrentID/siteName 作为兜底定位；publishAt 为发布时间；返回命中行数。
 // 失败场景：仓储未初始化或数据库更新失败时返回错误。
 // 副作用：写入 seed_parameters.last_publish_at。
-func (r *MigrateRepository) UpdateSeedParameterLastPublishAt(hash, torrentID, siteName string, publishAt string) (int64, error) {
+func (r *MigrateRepository) UpdateSeedParameterLastPublishAt(name, hash, torrentID, siteName string, publishAt string) (int64, error) {
 	if r == nil || r.store == nil || r.store.DB == nil {
 		return 0, errors.New("migrate repo is nil")
 	}
+	name = strings.TrimSpace(name)
 	hash = strings.TrimSpace(hash)
 	torrentID = strings.TrimSpace(torrentID)
 	siteName = strings.TrimSpace(siteName)
@@ -394,6 +395,18 @@ func (r *MigrateRepository) UpdateSeedParameterLastPublishAt(hash, torrentID, si
 	}
 
 	updates := map[string]any{"last_publish_at": publishAt}
+	if name != "" {
+		result := r.store.DB.Table("seed_parameters").
+			Where("name = ?", name).
+			Updates(updates)
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected > 0 {
+			return result.RowsAffected, nil
+		}
+	}
+
 	if torrentID != "" && siteName != "" {
 		result := r.store.DB.Table("seed_parameters").
 			Where(
@@ -430,9 +443,8 @@ func (r *MigrateRepository) UpdateSeedParameterLastPublishAt(hash, torrentID, si
 // 失败场景：仓储未初始化或数据库更新失败时返回错误。
 // 副作用：写入同 hash 记录的 seed_parameters.last_publish_at。
 func (r *MigrateRepository) UpdateSeedParameterLastPublishAtByHash(hash string, publishAt string) (int64, error) {
-	return r.UpdateSeedParameterLastPublishAt(hash, "", "", publishAt)
+	return r.UpdateSeedParameterLastPublishAt("", hash, "", "", publishAt)
 }
-
 func (r *MigrateRepository) ListTorrentsByNames(names []string) ([]map[string]any, error) {
 	rows := make([]map[string]any, 0)
 	if len(names) == 0 {
