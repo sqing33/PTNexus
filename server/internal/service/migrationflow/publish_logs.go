@@ -103,8 +103,8 @@ func (s *MigrateService) InsertExternalPublishLog(input ExternalPublishLogInput)
 	if insertErr != nil {
 		return insertErr
 	}
-	if isSuccessfulPublishLogStatus(entry.Status) && strings.TrimSpace(input.Hash) != "" && s.repo != nil {
-		if _, err := s.repo.UpdateSeedParameterLastPublishAtByHash(input.Hash, entry.UpdatedAt); err != nil {
+	if isSuccessfulPublishLogStatus(entry.Status) && s.repo != nil {
+		if _, err := s.repo.UpdateSeedParameterLastPublishAt(input.Hash, entry.TorrentID, entry.SourceSite, entry.UpdatedAt); err != nil {
 			logx.Warnf(publishLogModule, "外部日志回写最后发布时间失败 hash=%s status=%s err=%v", strings.TrimSpace(input.Hash), entry.Status, err)
 		}
 	}
@@ -372,19 +372,29 @@ func (s *MigrateService) updateSeedParameterLastPublishAtFromEntry(entry *reposi
 		return
 	}
 	hash := resolvePublishedTorrentHash(payload, uploadData, result)
-	if hash == "" && entry.TaskID != "" && s.contextState != nil {
+	torrentID := strings.TrimSpace(entry.TorrentID)
+	sourceSite := strings.TrimSpace(entry.SourceSite)
+	if entry.TaskID != "" && s.contextState != nil {
 		if ctx, ok := s.contextState.Get(entry.TaskID); ok {
-			hash = strings.TrimSpace(ctx.Hash)
+			if hash == "" {
+				hash = strings.TrimSpace(ctx.Hash)
+			}
+			if torrentID == "" {
+				torrentID = strings.TrimSpace(ctx.TorrentID)
+			}
+			if sourceSite == "" {
+				sourceSite = strings.TrimSpace(firstNonEmptyString(ctx.SourceNickname, ctx.SiteName))
+			}
 		}
 	}
-	if hash == "" {
+	if hash == "" && (torrentID == "" || sourceSite == "") {
 		return
 	}
 	publishAt := strings.TrimSpace(entry.UpdatedAt)
 	if publishAt == "" {
 		publishAt = time.Now().Format(repository.PublishQueueTimeLayout)
 	}
-	affected, err := s.repo.UpdateSeedParameterLastPublishAtByHash(hash, publishAt)
+	affected, err := s.repo.UpdateSeedParameterLastPublishAt(hash, torrentID, sourceSite, publishAt)
 	if err != nil {
 		logx.Warnf(publishLogModule, "回写最后发布时间失败 hash=%s status=%s err=%v", hash, entry.Status, err)
 		return

@@ -93,8 +93,68 @@ func (m *SchemaManager) EnsureSchema() error {
 	if err := m.fixSeedParametersColumnTypes(); err != nil {
 		return err
 	}
+	if err := m.backfillSeedParameterLastPublishAtFromPublishLogs(); err != nil {
+		logx.Warnf(schemaLogModule, "回填 seed_parameters.last_publish_at 失败 err=%v", err)
+	}
 
 	logx.Infof(schemaLogModule, "数据库结构校验完成 db_type=%s", m.store.DBType)
+	return nil
+}
+
+// backfillSeedParameterLastPublishAtFromPublishLogs 使用成功发布日志补齐空的最后发布时间。
+// 参数/返回：无入参，返回数据库查询或更新错误。
+// 失败场景：publish_logs 查询失败或 seed_parameters 更新失败时返回错误。
+// 副作用：仅更新 last_publish_at 为空的 seed_parameters 记录。
+func (m *SchemaManager) backfillSeedParameterLastPublishAtFromPublishLogs() error {
+	if m == nil || m.store == nil || m.store.DB == nil {
+		return nil
+	}
+
+	rows := make([]PublishLogEntry, 0)
+	if err := m.store.DB.Model(&PublishLogEntry{}).
+		Select("torrent_id, source_site, created_at, updated_at").
+		Where("status IN ?", []string{"success", "edited", "exists"}).
+		Where("torrent_id IS NOT NULL AND torrent_id <> ''").
+		Where("source_site IS NOT NULL AND source_site <> ''").
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	type latestRow struct {
+		torrentID string
+		source    string
+		publishAt string
+	}
+	latestByKey := make(map[string]latestRow)
+	for _, row := range rows {
+		torrentID := strings.TrimSpace(row.TorrentID)
+		source := strings.TrimSpace(row.SourceSite)
+		publishAt := strings.TrimSpace(row.UpdatedAt)
+		if publishAt == "" {
+			publishAt = strings.TrimSpace(row.CreatedAt)
+		}
+		if torrentID == "" || source == "" || publishAt == "" {
+			continue
+		}
+		key := strings.ToLower(torrentID) + "\x00" + strings.ToLower(source)
+		if current, ok := latestByKey[key]; !ok || publishAt > current.publishAt {
+			latestByKey[key] = latestRow{torrentID: torrentID, source: source, publishAt: publishAt}
+		}
+	}
+
+	for _, row := range latestByKey {
+		loweredSource := strings.ToLower(row.source)
+		result := m.store.DB.Table("seed_parameters").
+			Where("torrent_id = ? AND (site_name = ? OR nickname = ? OR LOWER(TRIM(site_name)) = ? OR LOWER(TRIM(nickname)) = ?)", row.torrentID, row.source, row.source, loweredSource, loweredSource).
+			Where("(last_publish_at IS NULL OR last_publish_at = '')").
+			Updates(map[string]any{"last_publish_at": row.publishAt})
+		if result.Error != nil {
+			return result.Error
+		}
+	}
 	return nil
 }
 
