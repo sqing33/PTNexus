@@ -397,7 +397,7 @@ func (r *MigrateRepository) UpdateSeedParameterLastPublishAt(name, hash, torrent
 	updates := map[string]any{"last_publish_at": publishAt}
 	if name != "" {
 		result := r.store.DB.Table("seed_parameters").
-			Where("name = ?", name).
+			Where("LOWER(TRIM(name)) = LOWER(TRIM(?))", name).
 			Updates(updates)
 		if result.Error != nil {
 			return 0, result.Error
@@ -445,6 +445,42 @@ func (r *MigrateRepository) UpdateSeedParameterLastPublishAt(name, hash, torrent
 func (r *MigrateRepository) UpdateSeedParameterLastPublishAtByHash(hash string, publishAt string) (int64, error) {
 	return r.UpdateSeedParameterLastPublishAt("", hash, "", "", publishAt)
 }
+
+// FindSeedParameterNameByTorrentID 按 torrent_id 查找唯一的 seed_parameters.name，用于发种日志缺少 name 时兜底关联。
+// 参数/返回：torrentID 为源种子 ID；仅当同一 torrent_id 对应唯一非空 name 时返回该名称与 true。
+// 失败场景：仓储未初始化或数据库查询失败时返回 error。
+// 副作用：仅读取 seed_parameters，不修改数据。
+func (r *MigrateRepository) FindSeedParameterNameByTorrentID(torrentID string) (string, bool, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return "", false, errors.New("migrate repo is nil")
+	}
+	torrentID = strings.TrimSpace(torrentID)
+	if torrentID == "" {
+		return "", false, nil
+	}
+
+	type nameRow struct {
+		Name string `gorm:"column:name"`
+	}
+	rows := make([]nameRow, 0)
+	if err := r.store.DB.Table("seed_parameters").
+		Select("name").
+		Where("torrent_id = ? AND name IS NOT NULL AND TRIM(name) <> ''", torrentID).
+		Group("name").
+		Limit(2).
+		Scan(&rows).Error; err != nil {
+		return "", false, err
+	}
+	if len(rows) != 1 {
+		return "", false, nil
+	}
+	name := strings.TrimSpace(rows[0].Name)
+	if name == "" {
+		return "", false, nil
+	}
+	return name, true, nil
+}
+
 func (r *MigrateRepository) ListTorrentsByNames(names []string) ([]map[string]any, error) {
 	rows := make([]map[string]any, 0)
 	if len(names) == 0 {

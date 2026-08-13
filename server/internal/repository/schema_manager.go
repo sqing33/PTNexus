@@ -112,10 +112,8 @@ func (m *SchemaManager) backfillSeedParameterLastPublishAtFromPublishLogs() erro
 
 	rows := make([]PublishLogEntry, 0)
 	if err := m.store.DB.Model(&PublishLogEntry{}).
-		Select("torrent_id, source_site, created_at, updated_at").
+		Select("torrent_id, source_site, title, created_at, updated_at").
 		Where("status IN ?", []string{"success", "edited", "exists"}).
-		Where("torrent_id IS NOT NULL AND torrent_id <> ''").
-		Where("source_site IS NOT NULL AND source_site <> ''").
 		Find(&rows).Error; err != nil {
 		return err
 	}
@@ -126,22 +124,33 @@ func (m *SchemaManager) backfillSeedParameterLastPublishAtFromPublishLogs() erro
 	type latestRow struct {
 		torrentID string
 		source    string
+		title     string
 		publishAt string
 	}
 	latestByKey := make(map[string]latestRow)
+	latestByTitle := make(map[string]latestRow)
 	for _, row := range rows {
 		torrentID := strings.TrimSpace(row.TorrentID)
 		source := strings.TrimSpace(row.SourceSite)
+		title := strings.TrimSpace(row.Title)
 		publishAt := strings.TrimSpace(row.UpdatedAt)
 		if publishAt == "" {
 			publishAt = strings.TrimSpace(row.CreatedAt)
 		}
-		if torrentID == "" || source == "" || publishAt == "" {
+		if publishAt == "" {
 			continue
 		}
-		key := strings.ToLower(torrentID) + "\x00" + strings.ToLower(source)
-		if current, ok := latestByKey[key]; !ok || publishAt > current.publishAt {
-			latestByKey[key] = latestRow{torrentID: torrentID, source: source, publishAt: publishAt}
+		if torrentID != "" && source != "" {
+			key := strings.ToLower(torrentID) + "\x00" + strings.ToLower(source)
+			if current, ok := latestByKey[key]; !ok || publishAt > current.publishAt {
+				latestByKey[key] = latestRow{torrentID: torrentID, source: source, title: title, publishAt: publishAt}
+			}
+		}
+		if title != "" {
+			key := strings.ToLower(title)
+			if current, ok := latestByTitle[key]; !ok || publishAt > current.publishAt {
+				latestByTitle[key] = latestRow{torrentID: torrentID, source: source, title: title, publishAt: publishAt}
+			}
 		}
 	}
 
@@ -149,6 +158,15 @@ func (m *SchemaManager) backfillSeedParameterLastPublishAtFromPublishLogs() erro
 		loweredSource := strings.ToLower(row.source)
 		result := m.store.DB.Table("seed_parameters").
 			Where("torrent_id = ? AND (site_name = ? OR nickname = ? OR LOWER(TRIM(site_name)) = ? OR LOWER(TRIM(nickname)) = ?)", row.torrentID, row.source, row.source, loweredSource, loweredSource).
+			Where("(last_publish_at IS NULL OR last_publish_at = '')").
+			Updates(map[string]any{"last_publish_at": row.publishAt})
+		if result.Error != nil {
+			return result.Error
+		}
+	}
+	for _, row := range latestByTitle {
+		result := m.store.DB.Table("seed_parameters").
+			Where("LOWER(TRIM(name)) = LOWER(TRIM(?))", row.title).
 			Where("(last_publish_at IS NULL OR last_publish_at = '')").
 			Updates(map[string]any{"last_publish_at": row.publishAt})
 		if result.Error != nil {

@@ -105,8 +105,13 @@ func (s *MigrateService) InsertExternalPublishLog(input ExternalPublishLogInput)
 		return insertErr
 	}
 	if isSuccessfulPublishLogStatus(entry.Status) && s.repo != nil {
-		if _, err := s.repo.UpdateSeedParameterLastPublishAt(input.Name, input.Hash, entry.TorrentID, entry.SourceSite, entry.UpdatedAt); err != nil {
+		name := strings.TrimSpace(firstNonEmptyString(input.Name, entry.Title))
+		affected, err := s.repo.UpdateSeedParameterLastPublishAt(name, input.Hash, entry.TorrentID, entry.SourceSite, entry.UpdatedAt)
+		if err != nil {
 			logx.Warnf(publishLogModule, "外部日志回写最后发布时间失败 hash=%s status=%s err=%v", strings.TrimSpace(input.Hash), entry.Status, err)
+		}
+		if err == nil && affected == 0 {
+			s.updateSeedParameterLastPublishAtByTorrentID(name, input.Hash, entry.TorrentID, entry.SourceSite, entry.Status, entry.UpdatedAt)
 		}
 	}
 	return nil
@@ -425,6 +430,9 @@ func (s *MigrateService) updateSeedParameterLastPublishAtFromEntry(entry *reposi
 		logx.Warnf(publishLogModule, "回写最后发布时间失败 hash=%s status=%s err=%v", hash, entry.Status, err)
 		return
 	}
+	if affected == 0 && s.updateSeedParameterLastPublishAtByTorrentID(name, hash, torrentID, sourceSite, entry.Status, publishAt) > 0 {
+		return
+	}
 	if affected == 0 {
 		logx.Warnf(publishLogModule, "回写最后发布时间未命中 seed_parameters hash=%s status=%s", hash, entry.Status)
 	}
@@ -437,6 +445,36 @@ func isSuccessfulPublishLogStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *MigrateService) updateSeedParameterLastPublishAtByTorrentID(name, hash, torrentID, sourceSite, status, publishAt string) int64 {
+	if s == nil || s.repo == nil {
+		return 0
+	}
+	torrentID = strings.TrimSpace(torrentID)
+	if torrentID == "" {
+		return 0
+	}
+	seedName, ok, err := s.repo.FindSeedParameterNameByTorrentID(torrentID)
+	if err != nil {
+		logx.Warnf(publishLogModule, "last_publish_at fallback lookup name failed torrent_id=%s status=%s err=%v", torrentID, status, err)
+		return 0
+	}
+	if !ok {
+		return 0
+	}
+	affected, err := s.repo.UpdateSeedParameterLastPublishAt(seedName, hash, torrentID, sourceSite, publishAt)
+	if err != nil {
+		logx.Warnf(publishLogModule, "last_publish_at fallback update failed name=%s torrent_id=%s status=%s err=%v", seedName, torrentID, status, err)
+		return 0
+	}
+	if affected > 0 {
+		return affected
+	}
+	if strings.TrimSpace(name) != "" && strings.TrimSpace(name) != seedName {
+		logx.Warnf(publishLogModule, "last_publish_at fallback missed log_name=%s seed_name=%s torrent_id=%s source_site=%s status=%s", name, seedName, torrentID, sourceSite, status)
+	}
+	return 0
 }
 
 func resolvePublishedTorrentHash(payload map[string]any, uploadData map[string]any, result map[string]any) string {
