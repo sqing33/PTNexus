@@ -90,6 +90,15 @@ func NewHDDolbySpecialExtractor(public Extractor, runtimeFactory RuntimeFactory)
 	return newDelegatedSiteExtractor("hddolby_special", public, runtimeFactory, sites.ExtractHDDolby)
 }
 
+// NewHDVideoSpecialExtractor 创建 HDvideo 站点专用提取器适配器。
+func NewHDVideoSpecialExtractor(public Extractor, runtimeFactory RuntimeFactory) Extractor {
+	return newDelegatedSiteExtractor("hdvideo_special", public, runtimeFactory, sites.ExtractHDVideo)
+}
+
+func NewDStudioSpecialExtractor(public Extractor, runtimeFactory RuntimeFactory) Extractor {
+	return newDelegatedSiteExtractor("dstudio_special", public, runtimeFactory, sites.ExtractDStudio)
+}
+
 func toSiteInput(input Input) sites.Input {
 	return sites.Input{
 		SiteCode:      input.SiteCode,

@@ -54,6 +54,8 @@ func NewDefaultEngine(publicExtractor Extractor, runtimeFactory RuntimeFactory) 
 	hdskyExtractor := NewHDSkySpecialExtractor(publicExtractor, runtimeFactory)
 	pterclubExtractor := NewPTerClubSpecialExtractor(publicExtractor, runtimeFactory)
 	hddolbyExtractor := NewHDDolbySpecialExtractor(publicExtractor, runtimeFactory)
+	hdvideoExtractor := NewHDVideoSpecialExtractor(publicExtractor, runtimeFactory)
+	dstudioExtractor := NewDStudioSpecialExtractor(publicExtractor, runtimeFactory)
 
 	return NewEngine(
 		publicExtractor,
@@ -66,16 +68,24 @@ func NewDefaultEngine(publicExtractor Extractor, runtimeFactory RuntimeFactory) 
 			"hdsky":     hdskyExtractor,
 			"pterclub":  pterclubExtractor,
 			"hddolby":   hddolbyExtractor,
+			"hdvideo":   hdvideoExtractor,
+			"ds":        dstudioExtractor,
+			"dstudio":   dstudioExtractor,
 		},
 		map[string]Extractor{
-			"不可说": ssdExtractor,
-			"人人":  audiencesExtractor,
-			"憨憨":  hhclubExtractor,
-			"月月":  keepfrdsExtractor,
-			"彩虹岛": chdbitsExtractor,
-			"天空":  hdskyExtractor,
-			"猫站":  pterclubExtractor,
-			"杜比":  hddolbyExtractor,
+			"不可说":          ssdExtractor,
+			"人人":           audiencesExtractor,
+			"憨憨":           hhclubExtractor,
+			"月月":           keepfrdsExtractor,
+			"彩虹岛":          chdbitsExtractor,
+			"天空":           hdskyExtractor,
+			"猫站":           pterclubExtractor,
+			"杜比":           hddolbyExtractor,
+			"HDvideo":      hdvideoExtractor,
+			"HDVideo":      hdvideoExtractor,
+			"屌丝":           dstudioExtractor,
+			"dstudio":      dstudioExtractor,
+			"Depth Studio": dstudioExtractor,
 		},
 	)
 }
@@ -147,9 +157,7 @@ func (e *Engine) pickSpecialExtractor(siteCode string, siteNickname string) Extr
 	return nil
 }
 
-// SpecialExtractorName 返回命中的特殊提取器名称（例如 ssd_special）。
-// 参数：siteCode 站点代码（如 ssd），siteNickname 站点昵称（如 不可说）。
-// 返回：name 为提取器名称；ok 表示是否命中。
+// SpecialExtractorName 返回命中的特殊提取器名称。
 func (e *Engine) SpecialExtractorName(siteCode string, siteNickname string) (name string, ok bool) {
 	if e == nil {
 		return "", false

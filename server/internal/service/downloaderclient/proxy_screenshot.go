@@ -123,6 +123,34 @@ func (d Downloader) FetchSelectedScreenshotsByProxy(
 	return bbcode, nil
 }
 
+// FetchRandomScreenshotsByProxy 通过盒子代理按随机时间点生成正式截图并上传。
+// 参数/返回：screenshotCount 为期望截图数量；返回正式截图 BBCode。
+// 失败场景：代理不可达、代理未返回有效截图或截图数量配置无效时返回错误。
+// 副作用：会向盒子代理服务发起 HTTP 请求。
+func (d Downloader) FetchRandomScreenshotsByProxy(
+	remotePath string,
+	contentName string,
+	screenshotCount int,
+	selectedSubtitleSID *int,
+) (string, error) {
+	if screenshotCount <= 0 {
+		screenshotCount = 3
+	}
+	resp, err := d.requestProxyScreenshots(remotePath, contentName, "random_final", screenshotCount, nil, selectedSubtitleSID)
+	if err != nil {
+		return "", err
+	}
+	bbcode := strings.TrimSpace(resp.BBCode)
+	if bbcode == "" {
+		msg := strings.TrimSpace(resp.Message)
+		if msg == "" {
+			msg = "代理未返回有效 bbcode"
+		}
+		return "", &ProxyAPIError{StatusCode: 500, Message: msg}
+	}
+	return bbcode, nil
+}
+
 // InspectScreenshotByProxy 通过盒子代理探测目标视频的字幕状态与可切换字幕流。
 // 失败场景：代理不可达、路径不存在、响应解析失败时返回错误。
 // 副作用：会向盒子代理服务发起 HTTP 请求。

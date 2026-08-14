@@ -49,6 +49,10 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 	if err != nil {
 		publishAtMap = map[string]string{}
 	}
+	lastPublishAtMap, err := s.repo.LastPublishAtByNames()
+	if err != nil {
+		lastPublishAtMap = map[string]string{}
+	}
 	sourceStatusMap, err := s.repo.SeedParameterSourceStatusByNames()
 	if err != nil {
 		sourceStatusMap = map[string]repository.SeedParameterSourceStatus{}
@@ -60,6 +64,8 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		item, exists := aggregated[key]
 		if !exists {
 			item = &torrentSummary{
+				Hash:          row.Hash,
+				Hashes:        []string{},
 				Name:          row.Name,
 				SavePath:      row.SavePath,
 				Size:          row.Size,
@@ -71,6 +77,12 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 				DownloaderIDs: []string{},
 			}
 			aggregated[key] = item
+		}
+		if row.Hash != "" && !containsString(item.Hashes, row.Hash) {
+			item.Hashes = append(item.Hashes, row.Hash)
+			if item.Hash == "" {
+				item.Hash = row.Hash
+			}
 		}
 		if item.SavePath == "" && row.SavePath != "" {
 			item.SavePath = row.SavePath
@@ -154,6 +166,8 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 		}
 
 		item := map[string]any{
+			"hash":                     value.Hash,
+			"hashes":                   append([]string{}, value.Hashes...),
 			"name":                     value.Name,
 			"save_path":                value.SavePath,
 			"size":                     value.Size,
@@ -172,6 +186,7 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 			"downloaderId":             s.selectBestDownloader(downloaderIDs),
 			"unique_id":                fmt.Sprintf("%s_%d", value.Name, value.Size),
 			"publish_at":               publishAtMap[value.Name],
+			"last_publish_at":          lastPublishAtMap[value.Name],
 			"source_data_status":       sourceDataStatus,
 			"source_data_fetched":      sourceStatus.HasFetchedSourceData,
 			"source_data_reviewed":     sourceStatus.IsReviewed,

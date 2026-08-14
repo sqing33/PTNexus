@@ -152,6 +152,7 @@ func (d *SeedDraft) CorrectMediumAndTitleByMediaType(isMediainfo, isBDInfo bool)
 	mediumBefore := strings.TrimSpace(d.Medium)
 	titleBefore := strings.TrimSpace(d.Title)
 
+	d.Medium = processingtitle.PreferExplicitTitleMedium(d.Medium, d.Title, d.Mediainfo)
 	d.Medium = processingmedia.NormalizeMediumByMediaType(d.Medium, isMediainfo, isBDInfo)
 	d.Title = processingmedia.NormalizeBlurayTokenByMediaType(d.Title, isMediainfo, isBDInfo)
 
@@ -184,6 +185,7 @@ func (d *SeedDraft) CompleteAndMapTags(siteIdentifier string, formatIsBDInfo boo
 	rawTagCandidates = append(rawTagCandidates, processingtagging.ExtractRawTagsFromTitleComponents(d.TitleComponents)...)
 	rawTagCandidates = append(rawTagCandidates, processingtagging.ExtractRawTagsFromSubtitle(d.Subtitle)...)
 	rawTagCandidates = append(rawTagCandidates, processingtagging.ExtractTagsFromDescriptionCategory(descriptionForTags)...)
+	rawTagCandidates = append(rawTagCandidates, processingtagging.ExtractTagsFromDescriptionScore(descriptionForTags)...)
 	rawTagCandidates = append(rawTagCandidates, processingtagging.ExtractRawTagsFromMediaText(d.Mediainfo, formatIsBDInfo)...)
 
 	if processingtagging.CheckAnimationTypeFromDescription(descriptionForTags) {

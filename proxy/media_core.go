@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -696,6 +697,44 @@ func buildSmartScreenshotPointsForPreview(videoPath string, duration float64, co
 	_ = candidate
 	_ = hasCandidate
 	return buildUniformPreviewPoints(duration, count)
+}
+
+func buildRandomScreenshotPointsForDuration(duration float64, count int) []float64 {
+	if count <= 0 {
+		count = 3
+	}
+	if count > 10 {
+		count = 10
+	}
+	if duration <= 1 || count <= 0 {
+		return []float64{}
+	}
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	bucketDuration := duration / float64(count)
+	points := make([]float64, 0, count)
+	for i := 0; i < count; i++ {
+		start := bucketDuration * float64(i)
+		end := bucketDuration * float64(i+1)
+		margin := bucketDuration * 0.2
+		if margin < 1 {
+			margin = bucketDuration * 0.1
+		}
+		lower := start + margin
+		upper := end - margin
+		point := (start + end) / 2
+		if upper > lower {
+			point = lower + rng.Float64()*(upper-lower)
+		}
+		if point < 0.5 {
+			point = 0.5
+		}
+		if point > duration-0.5 {
+			point = duration - 0.5
+		}
+		points = append(points, point)
+	}
+	sort.Float64s(points)
+	return points
 }
 
 func sanitizeSelectedScreenshotTimes(values []float64, duration float64) []float64 {

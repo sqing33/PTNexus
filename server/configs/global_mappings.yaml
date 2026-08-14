@@ -716,6 +716,7 @@ global_standard_keys:
     "LHD": "team.lhd"
     "LittleBakas!": "team.littlebakas"
     "LongWeb": "team.longweb"
+    "NHDWEB": "team.nhdweb"
     "MARK": "team.mark"
     "M-team": "team.mteam"
     "MTeam": "team.mteam"
@@ -771,6 +772,9 @@ global_standard_keys:
     "blucook": "team.blucook"
     "JKCT": "team.jkct"
     "Destiny": "team.destiny"
+    "DStudio": "team.dstudio"
+    "DepWeb": "team.depweb"
+    "DS": "team.ds"
 
   # 标签映射
   tag:
@@ -844,6 +848,7 @@ global_standard_keys:
     # 视频质量标签
     "高码率": "tag.高码率"
     "高帧率": "tag.高帧率"
+    "高分": "tag.高分"
     "零魔": "tag.零魔"
     "DV": "tag.DV"
     "Blu-ray": "tag.Blu-ray"

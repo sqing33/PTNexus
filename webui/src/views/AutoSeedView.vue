@@ -9,15 +9,11 @@
             <el-option v-for="site in sourceSiteNames" :key="site" :label="site" :value="site" />
           </el-select>
           <el-select v-model="filters.status" placeholder="状态" clearable class="filter">
-            <el-option label="未推送" value="pending" />
+            <el-option label="未推送" value="not_pushed" />
             <el-option label="已推送" value="pushed" />
             <el-option label="已整理" value="organized" />
             <el-option label="已发布" value="published" />
-            <el-option label="未推送原因" value="rejected" />
-          </el-select>
-          <el-select v-model="filters.resource_type" placeholder="类型" clearable class="filter">
-            <el-option label="电影" value="电影" />
-            <el-option label="电视剧" value="电视剧" />
+            <el-option label="有未推送原因" value="rejected" />
           </el-select>
           <el-select v-model="filters.downloader_id" placeholder="下载器" clearable class="filter">
             <el-option
@@ -35,6 +31,14 @@
           />
           <el-button @click="fetchItems">筛选</el-button>
           <div class="spacer" />
+          <el-button
+            :disabled="selectedRows.length === 0"
+            type="primary"
+            :icon="Upload"
+            @click="pushItems(selectedRows)"
+          >
+            批量推送
+          </el-button>
           <el-button
             :disabled="selectedRows.length === 0"
             type="success"
@@ -86,8 +90,8 @@
           <el-table-column label="大小" width="90" align="right">
             <template #default="{ row }">{{ formatGB(row.size_bytes) }}</template>
           </el-table-column>
-          <el-table-column label="下载时间" width="170">
-            <template #default="{ row }">{{ formatDownloadTime(row.pushed_at) }}</template>
+          <el-table-column label="推送时间" width="170">
+            <template #default="{ row }">{{ formatElapsedTime(row.pushed_at) }}</template>
           </el-table-column>
           <el-table-column label="类型" width="90">
             <template #default="{ row }">{{ displayType(row.resource_type) }}</template>
@@ -135,6 +139,15 @@
           <el-table-column label="操作" width="290" fixed="right">
             <template #default="{ row }">
               <el-button size="small" @click="openOrganizeDialog(row)">整理</el-button>
+              <el-button
+                size="small"
+                type="primary"
+                :icon="Upload"
+                :disabled="isWorkflowStarted(row.status)"
+                @click="pushItems([row])"
+              >
+                推送
+              </el-button>
               <el-button size="small" type="success" @click="openPublishDialog([row])"
                 >发布</el-button
               >
@@ -173,6 +186,11 @@
           </el-table-column>
           <el-table-column label="拉取频率" width="110">
             <template #default="{ row }">{{ row.pull_interval_minutes }} 分钟</template>
+          </el-table-column>
+          <el-table-column label="保种时间" width="110">
+            <template #default="{ row }">
+              {{ row.seed_retention_minutes > 0 ? `${row.seed_retention_minutes} 分钟` : '不清理' }}
+            </template>
           </el-table-column>
           <el-table-column label="状态" width="130">
             <template #default="{ row }">
@@ -229,8 +247,8 @@
           <el-table-column label="进度" width="120">
             <template #default="{ row }">{{ Number(row.progress || 0).toFixed(1) }}%</template>
           </el-table-column>
-          <el-table-column label="下载时间" width="170">
-            <template #default="{ row }">{{ formatDownloadTime(row.pushed_at) }}</template>
+          <el-table-column label="推送时间" width="170">
+            <template #default="{ row }">{{ formatElapsedTime(row.pushed_at) }}</template>
           </el-table-column>
           <el-table-column label="分组" width="100">
             <template #default="{ row }">{{ progressGroup(row) }}</template>
@@ -345,6 +363,10 @@
         <el-form-item label="拉取频率">
           <el-input-number v-model="editingRule.pull_interval_minutes" :min="1" :max="1440" />
           <span class="unit">分钟</span>
+        </el-form-item>
+        <el-form-item label="保种时间">
+          <el-input-number v-model="editingRule.seed_retention_minutes" :min="0" :max="525600" />
+          <span class="unit">分钟，0 表示不自动清理</span>
         </el-form-item>
         <el-form-item label="开关">
           <el-switch v-model="editingRule.enabled" active-text="开启" inactive-text="暂停" />
@@ -488,6 +510,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Upload } from '@element-plus/icons-vue'
 import CrossSeedPanel from '@/components/CrossSeedPanel.vue'
 import { useCrossSeedStore } from '@/stores/crossSeed'
 import type { WorkingTorrent } from '@/components/cross-seed/panel/types'
@@ -514,6 +537,7 @@ type Rule = {
   pull_interval_minutes: number
   publish_interval_minutes: number
   publish_concurrency: number
+  seed_retention_minutes: number
 }
 type Item = {
   id: number
@@ -557,7 +581,6 @@ const total = ref(0)
 const filters = ref({
   source_site: '',
   status: '',
-  resource_type: '',
   downloader_id: '',
   search: '',
 })
@@ -638,6 +661,7 @@ function emptyRule(): Rule {
     pull_interval_minutes: 30,
     publish_interval_minutes: 0,
     publish_concurrency: 1,
+    seed_retention_minutes: 0,
   }
 }
 
@@ -870,6 +894,24 @@ const openPublishDialog = (rows: Item[]) => {
   publishDialogVisible.value = true
 }
 
+const pushItems = async (rows: Item[]) => {
+  const candidates = rows.filter((row) => !isWorkflowStarted(row.status))
+  if (!candidates.length) {
+    ElMessage.warning('选中的记录都已经进入后续流程了')
+    return
+  }
+  await ElMessageBox.confirm(
+    `确定将 ${candidates.length} 条记录推送到下载器并进入后续流程吗？`,
+    '推送种子',
+  )
+  await axios.post('/api/auto-seed/items/push', {
+    ids: candidates.map((row) => row.id),
+  })
+  ElMessage.success(`已推送 ${candidates.length} 条`)
+  await fetchItems()
+  await fetchProgress()
+}
+
 const publishSelected = async () => {
   await axios.post('/api/auto-seed/items/publish', {
     ids: publishRows.value.map((row) => row.id),
@@ -903,6 +945,8 @@ const formatGB = (bytes: number) =>
   bytes > 0 ? `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB` : '-'
 const displayType = (value: string) => typeDisplayMap[(value || '').trim()] || value || '-'
 const displayMedium = (value: string) => mediumDisplayMap[(value || '').trim()] || value || '-'
+const isWorkflowStarted = (status: string) =>
+  ['pushed', 'organized', 'published'].includes((status || '').trim())
 const subtitlePreview = (value: string) => {
   const text = (value || '').trim()
   if (!text) return '-'
@@ -940,7 +984,8 @@ const publishResults = (row: Item): { label: string; url?: string }[] => {
       if (typeof item === 'string') return { label: item }
       const target = item?.target_site || item?.targetSite || item?.result?.target_site || '站点'
       const result = item?.result || {}
-      const status = item?.status_text || result?.message || (result?.success ? '发布成功' : '已入队')
+      const status =
+        item?.status_text || result?.message || (result?.success ? '发布成功' : '已入队')
       const seedingTime = item?.seeding_time || elapsedSince(item?.updated_at)
       return {
         label: [target, status, seedingTime].filter(Boolean).join(' · '),
@@ -966,10 +1011,7 @@ const elapsedSince = (value?: string): string => {
   return `${days}天${hours % 24 ? `${hours % 24}小时` : ''}`
 }
 
-const formatDownloadTime = (value?: string): string => {
-  if (!value) return '-'
-  return value.replace('T', ' ').slice(0, 16) || '-'
-}
+const formatElapsedTime = (value?: string): string => elapsedSince(value) || '-'
 
 watch(activeTab, (tab) => {
   if (tab === 'rules') fetchRules()

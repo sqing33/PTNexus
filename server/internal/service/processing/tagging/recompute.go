@@ -31,6 +31,7 @@ func RecomputeStandardTags(
 	rawTagCandidates = append(rawTagCandidates, ExtractRawTagsFromTitleComponents(AnyTitleComponentsToMaps(titleComponents))...)
 	rawTagCandidates = append(rawTagCandidates, ExtractRawTagsFromSubtitle(subtitle)...)
 	rawTagCandidates = append(rawTagCandidates, ExtractTagsFromDescriptionCategory(description)...)
+	rawTagCandidates = append(rawTagCandidates, ExtractTagsFromDescriptionScore(description)...)
 
 	_, isBDInfo, _ := processingmedia.ValidateMediaInfoFormat(strings.TrimSpace(mediainfo))
 	rawTagCandidates = append(rawTagCandidates, ExtractRawTagsFromMediaText(mediainfo, isBDInfo)...)

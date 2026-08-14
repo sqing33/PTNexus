@@ -1165,7 +1165,7 @@
     "special_tracker_domain": null,
     "group": "-NHDWeb",
     "description": "NovaHD",
-    "migration": 2,
+    "migration": 3,
     "speed_limit": 20
   },
   {
@@ -1263,8 +1263,9 @@
     "nickname": "HDvideo",
     "base_url": "hdvideo.top",
     "special_tracker_domain": null,
-    "group": null,
-    "migration": 0,
+    "group": "-HDVWEB,-HDV,-HDVTV",
+    "description": "HDvideo",
+    "migration": 3,
     "speed_limit": 10
   },
   {
@@ -1283,6 +1284,16 @@
     "special_tracker_domain": null,
     "group": null,
     "migration": 2,
+    "speed_limit": 10
+  },
+  {
+    "site": "DS",
+    "nickname": "屌丝",
+    "base_url": "dstudio.me",
+    "special_tracker_domain": null,
+    "group": "-DStudio,-DS,-DepWeb",
+    "description": "DStudio",
+    "migration": 1,
     "speed_limit": 10
   }
 ]

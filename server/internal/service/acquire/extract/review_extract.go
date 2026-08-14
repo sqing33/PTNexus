@@ -16,6 +16,10 @@ import (
 var (
 	reTopTitle               = regexp.MustCompile(`(?is)<h1[^>]*id=["']top["'][^>]*>(.*?)</h1>`)
 	rePageTitle              = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	reNexusPageTitleQuoted   = regexp.MustCompile(`(?is)^[^:]+::\s*(?:种子详情|種子詳情|torrent\s*details?)\s*["“](.+?)["”]\s*(?:-|—|–)\s*powered\s+by\s+nexusphp.*$`)
+	reNexusPageTitlePlain    = regexp.MustCompile(`(?is)^[^:]+::\s*(?:种子详情|種子詳情|torrent\s*details?)\s*(.+?)\s*(?:-|—|–)\s*powered\s+by\s+nexusphp.*$`)
+	reNexusPageTitlePrefix   = regexp.MustCompile(`(?is)^[^:]+::\s*(?:种子详情|種子詳情|torrent\s*details?)\s*`)
+	reNexusPageTitleSuffix   = regexp.MustCompile(`(?is)\s*(?:-|—|–)\s*powered\s+by\s+nexusphp.*$`)
 	reSubTitleRow            = regexp.MustCompile(`(?is)(?:副标题|副標題|subtitle)\s*[:：]\s*([^\n<]{2,200})`)
 	reSubtitleByAby          = regexp.MustCompile(`(?i)\s*\|\s*aby\s+[^|]+$`)
 	reSubtitleByBy           = regexp.MustCompile(`(?i)\s*\|\s*by\s+[^|]+$`)
@@ -39,6 +43,8 @@ var (
 	reQuotePrefix            = regexp.MustCompile(`(?im)^\s*(?:\[?(?:引用|quote)\]?\s*[:：]?\s*)`)
 	reQuoteOpen              = regexp.MustCompile(`(?is)^\s*\[quote\]\s*`)
 	reQuoteClose             = regexp.MustCompile(`(?is)\s*\[/quote\]\s*$`)
+	reBoldOpen               = regexp.MustCompile(`(?is)^\s*\[b\]\s*`)
+	reBoldClose              = regexp.MustCompile(`(?is)\s*\[/b\]\s*$`)
 	reNestedQuoteIn          = regexp.MustCompile(`(?is)\[quote\]\s*\[quote\]`)
 	reNestedQuoteOut         = regexp.MustCompile(`(?is)\[/quote\]\s*\[/quote\]`)
 	reQuoteOrImage           = regexp.MustCompile(`(?is)\[quote\].*?\[/quote\]|\[img\].*?\[/img\]`)
@@ -248,8 +254,8 @@ type quoteBlock struct {
 }
 
 func extractDescriptionSections(descrHTML, descrBBCode, extraStatementBBCode string) (string, string, string, string, string, []string, []string) {
-	normalizedBBCode := normalizeNestedQuoteBlocks(strings.TrimSpace(descrBBCode))
-	extraStatementBBCode = normalizeNestedQuoteBlocks(strings.TrimSpace(normalizeExtraTextBBCode(extraStatementBBCode)))
+	normalizedBBCode := normalizeNestedQuoteBlocks(stripOuterBoldBlocks(strings.TrimSpace(descrBBCode)))
+	extraStatementBBCode = normalizeNestedQuoteBlocks(stripOuterBoldBlocks(strings.TrimSpace(normalizeExtraTextBBCode(extraStatementBBCode))))
 	statementTags := detectStatementTags(strings.TrimSpace(normalizedBBCode + "\n" + extraStatementBBCode))
 	useDescrStatement := strings.TrimSpace(extraStatementBBCode) == ""
 
@@ -500,6 +506,58 @@ func normalizeNestedQuoteBlocks(bbcode string) string {
 	}
 }
 
+func stripOuterBoldBlocks(bbcode string) string {
+	trimmed := strings.TrimSpace(bbcode)
+	if trimmed == "" {
+		return ""
+	}
+
+	for hasWholeOuterBBCodePair(trimmed, "[b]", "[/b]") {
+		inner := reBoldOpen.ReplaceAllString(trimmed, "")
+		inner = reBoldClose.ReplaceAllString(inner, "")
+		inner = strings.TrimSpace(inner)
+		if inner == "" || inner == trimmed {
+			break
+		}
+		trimmed = inner
+	}
+	return trimmed
+}
+
+func hasWholeOuterBBCodePair(text string, openTag string, closeTag string) bool {
+	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
+	open := strings.ToLower(openTag)
+	close := strings.ToLower(closeTag)
+	if !strings.HasPrefix(lower, open) || !strings.HasSuffix(lower, close) {
+		return false
+	}
+
+	depth := 0
+	for pos := 0; pos < len(trimmed); {
+		remaining := strings.ToLower(trimmed[pos:])
+		switch {
+		case strings.HasPrefix(remaining, open):
+			depth++
+			pos += len(open)
+			continue
+		case strings.HasPrefix(remaining, close):
+			depth--
+			pos += len(close)
+			if depth < 0 {
+				return false
+			}
+			if depth == 0 && strings.TrimSpace(trimmed[pos:]) != "" {
+				return false
+			}
+			continue
+		default:
+			pos++
+		}
+	}
+	return depth == 0
+}
+
 func detectStatementTags(_ string) []string {
 	// 对齐 Python：不再从声明文本推断“禁转/限转/分集”标签。
 	// 受限标签仅允许来自页面标签字段或站点特殊提取器（如种子列表显式标签）。
@@ -621,10 +679,37 @@ func isReleaseInfoStyleQuote(text string) bool {
 	return strings.Contains(upper, ".RELEASE.INFO") && strings.Contains(upper, "ENCODER")
 }
 
+func isNHDWEBDeclarationText(text string) bool {
+	plain := strings.TrimSpace(reBBCodeTag.ReplaceAllString(text, ""))
+	if plain == "" {
+		return false
+	}
+	patterns := []string{
+		"NovaHD · 资源声明",
+		"本站提供的所有资源",
+		"不得下载用于商业盈利",
+		"本站用户发布的资源链接",
+		"本站列出的资源本身并没有保存在本站的服务器上",
+		"所有内容仅作宽带测试使用",
+		"下载后24小时内删除",
+		"联系管理员",
+		"pt.NovaHD.top/contactstaff.php",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(plain, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 func isUnwantedPatternQuote(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
+	}
+	if isNHDWEBDeclarationText(trimmed) {
+		return true
 	}
 	unwantedPatterns := []string{
 		"ARDTU工具自动发布",
@@ -756,6 +841,7 @@ func buildBodyFromQuoteFlow(bbcode string, quotesForBody []string) string {
 	}
 
 	body = filterStandaloneKeywordLines(body)
+	body = stripDeclarationLines(body)
 	return sanitizeBBCodeText(body)
 }
 
@@ -851,12 +937,40 @@ func extractTopTitle(page string) string {
 	if match := rePageTitle.FindStringSubmatch(page); len(match) >= 2 {
 		clean := cleanTopTitleText(match[1])
 		if clean != "" {
+			if normalized := cleanNexusPHPPageTitle(clean); normalized != "" {
+				return normalized
+			}
 			clean = strings.TrimSuffix(clean, " - PT Nexus")
 			clean = strings.TrimSuffix(clean, " - PTNexus")
 			return strings.TrimSpace(clean)
 		}
 	}
 	return ""
+}
+
+func cleanNexusPHPPageTitle(raw string) string {
+	title := strings.TrimSpace(raw)
+	if title == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(title)
+	if !strings.Contains(lower, "nexusphp") &&
+		!strings.Contains(lower, "torrent detail") &&
+		!strings.Contains(title, "种子详情") &&
+		!strings.Contains(title, "種子詳情") {
+		return title
+	}
+	if match := reNexusPageTitleQuoted.FindStringSubmatch(title); len(match) >= 2 {
+		return strings.TrimSpace(strings.Trim(match[1], `"'“”`))
+	}
+	if match := reNexusPageTitlePlain.FindStringSubmatch(title); len(match) >= 2 {
+		return strings.TrimSpace(strings.Trim(match[1], `"'“”`))
+	}
+
+	title = strings.TrimSpace(reNexusPageTitlePrefix.ReplaceAllString(title, ""))
+	title = strings.TrimSpace(reNexusPageTitleSuffix.ReplaceAllString(title, ""))
+	return strings.TrimSpace(strings.Trim(title, `"'“”`))
 }
 
 func cleanTopTitleText(rawHTML string) string {
@@ -2024,8 +2138,20 @@ func stripDeclarationBlocks(text, statement string) string {
 func stripDeclarationLines(text string) string {
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	kept := make([]string, 0, len(lines))
+	inNHDWEBDeclaration := false
 	for _, line := range lines {
 		plain := strings.TrimSpace(reBBCodeTag.ReplaceAllString(line, ""))
+		plain = strings.ReplaceAll(plain, "\u00a0", " ")
+		if inNHDWEBDeclaration {
+			if plain == "" || isNHDWEBDeclarationContinuationLine(plain) {
+				continue
+			}
+			inNHDWEBDeclaration = false
+		}
+		if isNHDWEBDeclarationStartLine(plain) {
+			inNHDWEBDeclaration = true
+			continue
+		}
 		if isQuoteMarkerLine(plain) {
 			continue
 		}
@@ -2037,10 +2163,44 @@ func stripDeclarationLines(text string) string {
 	return strings.Join(kept, "\n")
 }
 
+func isNHDWEBDeclarationStartLine(plain string) bool {
+	compact := strings.Join(strings.Fields(strings.TrimSpace(plain)), "")
+	return strings.Contains(compact, "NovaHD") && strings.Contains(compact, "资源声明")
+}
+
+func isNHDWEBDeclarationContinuationLine(plain string) bool {
+	trimmed := strings.TrimSpace(plain)
+	if trimmed == "" {
+		return true
+	}
+	if isNHDWEBDeclarationText(trimmed) {
+		return true
+	}
+	patterns := []string{
+		"否则产生的一切后果",
+		"不负任何法律责任",
+		"对用户的提交内容",
+		"若喜欢请联系正版厂商",
+		"侵犯了您的合法权益",
+		"提供相关证明",
+		"将立即删除",
+		"删除相关资源",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(trimmed, pattern) {
+			return true
+		}
+	}
+	return strings.HasPrefix(trimmed, "-")
+}
+
 func looksLikeDeclarationText(text string) bool {
 	plain := strings.TrimSpace(reBBCodeTag.ReplaceAllString(text, ""))
 	if plain == "" {
 		return false
+	}
+	if isNHDWEBDeclarationText(plain) {
+		return true
 	}
 	keywords := []string{
 		"禁转", "限转", "谢绝转载", "严禁转载", "禁止转载", "官组", "官方发布", "本站首发",

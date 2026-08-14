@@ -11,6 +11,8 @@ export interface SiteData {
 
 export interface Torrent {
   unique_id: string
+  hash?: string
+  hashes?: string[]
   name: string
   save_path: string
   size: number
@@ -25,6 +27,7 @@ export interface Torrent {
   downloaderIds?: string[]
   target_sites_count?: number
   publish_at?: string | null
+  last_publish_at?: string | null
   source_data_status?: 'missing' | 'unreviewed' | 'reviewed'
   source_data_fetched?: boolean
   source_data_reviewed?: boolean

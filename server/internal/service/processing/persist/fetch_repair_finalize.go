@@ -12,6 +12,7 @@ import (
 // FetchRepairFinalizeInput 定义“抓取修复 + 草稿收敛”组合流程输入。
 type FetchRepairFinalizeInput struct {
 	TaskID               string
+	SourceSite           string
 	SavePath             string
 	DownloaderID         string
 	TorrentNameForPath   string
@@ -85,6 +86,7 @@ func RunFetchRepairAndFinalize(input FetchRepairFinalizeInput, deps FetchRepairF
 		repairResult = processingrepair.RunParallelFetchRepairs(
 			processingrepair.ParallelFetchRepairInput{
 				TaskID:               input.TaskID,
+				SourceSite:           firstNonEmpty(input.SourceSite, input.SiteIdentifier),
 				SavePath:             input.SavePath,
 				DownloaderID:         input.DownloaderID,
 				TorrentNameForPath:   input.TorrentNameForPath,

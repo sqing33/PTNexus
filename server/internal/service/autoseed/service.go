@@ -20,6 +20,9 @@ import (
 	"github.com/pt-nexus/server/internal/platform/logx"
 	"github.com/pt-nexus/server/internal/repository"
 	"github.com/pt-nexus/server/internal/service/downloaderclient"
+	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
+	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
+	"gorm.io/gorm"
 )
 
 const (
@@ -144,6 +147,7 @@ func (s *Service) processTick() {
 		s.processRule(&rules[idx])
 	}
 	s.SyncProgressAndAutoPublish("")
+	s.cleanupExpiredRetainedSeeds()
 }
 
 func (s *Service) processRuleByID(ruleID int64) {
@@ -246,7 +250,7 @@ func (s *Service) processRule(rule *repository.AutoSeedRule) {
 			continue
 		}
 		hash := firstNonEmpty(toString(fetchResult["hash"], ""), s.findDownloaderHash(downloader, created.Name))
-		_ = s.repo.MarkItemPushed(created.ID, hash, "")
+		_ = s.repo.MarkItemPushed(created.ID, firstNonEmpty(created.DownloaderID, item.DownloaderID), hash, "")
 	}
 
 	_ = s.repo.MarkRulePulled(rule.ID, next, "", rule.Enabled)
@@ -351,9 +355,147 @@ func (s *Service) autoOrganizeAndPublish(item repository.AutoSeedItem) {
 		logx.Warnf(moduleAutoSeed, "%s item_id=%d", reason, item.ID)
 		return
 	}
+	siteName := firstNonEmpty(item.SiteName, item.SourceSite, rule.SourceSite)
+	if s.shouldRefreshAutoSeedScreenshots(item, siteName) {
+		if err := s.refreshAutoSeedScreenshots(item, siteName); err != nil {
+			reason := "自动发种未执行：截图自动生成失败: " + err.Error()
+			_ = s.repo.UpdateItemPublishFeedback(item.ID, item.PublishResultsJSON, reason)
+			logx.Warnf(moduleAutoSeed, "自动发种随机截图刷新失败 item_id=%d rule_id=%d site=%s err=%v", item.ID, rule.ID, siteName, err)
+			return
+		}
+	}
 	if _, err := s.PublishItems([]int64{item.ID}, targetSites); err != nil {
+		reason := "自动发种未执行：发布入队失败: " + err.Error()
+		_ = s.repo.UpdateItemPublishFeedback(item.ID, item.PublishResultsJSON, reason)
 		logx.Warnf(moduleAutoSeed, "自动发种入队失败 item_id=%d rule_id=%d err=%v", item.ID, rule.ID, err)
 	}
+}
+
+// shouldRefreshAutoSeedScreenshots 判断自动发种入队前是否需要强制重建正式截图。
+// 参数/返回：item 为自动发种记录，siteName 为源站；返回 true 表示需要随机生成 3 张正式截图。
+// 失败场景：种子参数读取失败时仅记录日志并跳过强制刷新，由后续发布流程继续处理。
+// 副作用：会读取 seed_parameters 中的截图与人工确认状态。
+func (s *Service) shouldRefreshAutoSeedScreenshots(item repository.AutoSeedItem, siteName string) bool {
+	if isAutoSeedAlwaysRefreshScreenshotSource(siteName) {
+		return true
+	}
+	if s == nil || s.repo == nil {
+		return false
+	}
+	torrentID := strings.TrimSpace(item.TorrentID)
+	if torrentID == "" {
+		torrentID = inferTorrentID(item)
+	}
+	if torrentID == "" || strings.TrimSpace(siteName) == "" {
+		return false
+	}
+	row, err := s.repo.GetSeedParameter(torrentID, siteName)
+	if err != nil {
+		logx.Warnf(moduleAutoSeed, "读取自动发种截图状态失败 item_id=%d torrent_id=%s site=%s err=%v", item.ID, torrentID, siteName, err)
+		return false
+	}
+	return needsRefreshAutoSeedScreenshotsFromSeedRow(siteName, row)
+}
+
+func needsRefreshAutoSeedScreenshotsFromSeedRow(siteName string, row map[string]any) bool {
+	if isAutoSeedAlwaysRefreshScreenshotSource(siteName) {
+		return true
+	}
+	screenshots := strings.TrimSpace(toString(row["screenshots"], ""))
+	status := processingshared.NormalizeScreenshotReviewStatus(
+		toString(row["screenshot_review_status"], processingshared.ScreenshotReviewStatusNone),
+	)
+	return screenshots == "" || processingshared.NeedsScreenshotManualReview(status)
+}
+
+// refreshAutoSeedScreenshots 为自动发种记录重新生成 3 张随机正式截图，并写回种子参数。
+// 参数/返回：item 为已下载完成的自动发种记录；siteName 为实际源站名称；失败时返回错误并阻止继续发种。
+// 副作用：会读取当前下载器保存路径、调用截图生成流程、写回 seed_parameters.screenshots。
+func (s *Service) refreshAutoSeedScreenshots(item repository.AutoSeedItem, siteName string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("自动发种仓储未初始化")
+	}
+	if strings.TrimSpace(siteName) == "" {
+		return errors.New("源站名称不能为空")
+	}
+	record, ok, err := s.resolveItemCurrentTorrentRecord(item)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("下载器中未找到已完成任务，无法生成截图")
+	}
+	if record.Progress > 0 && record.Progress < 99.9 {
+		return fmt.Errorf("下载器任务尚未完成，当前进度 %.1f%%", record.Progress)
+	}
+	savePath := strings.TrimSpace(record.SavePath)
+	if savePath == "" {
+		return errors.New("下载器任务缺少可用于截图的路径")
+	}
+	torrentID := strings.TrimSpace(item.TorrentID)
+	if torrentID == "" {
+		torrentID = inferTorrentID(item)
+	}
+	if torrentID == "" {
+		return errors.New("未找到种子 ID")
+	}
+	contentName := firstNonEmpty(record.Name, item.Name, item.Subtitle)
+	downloaderHash := firstNonEmpty(item.DownloaderHash, record.Hash)
+	if downloaderHash == "" {
+		return errors.New("下载器任务缺少可用于截图的 hash")
+	}
+	input := processingrepair.ScreenshotGenerateInput{
+		Payload: map[string]any{
+			"downloader_id":   item.DownloaderID,
+			"downloader_hash": downloaderHash,
+			"save_path":       savePath,
+			"torrent_name":    contentName,
+			"name":            contentName,
+		},
+		SourceInfo: map[string]any{
+			"save_path":  savePath,
+			"main_title": contentName,
+		},
+		ContentName: contentName,
+		RootConfig:  s.rootConfig(),
+	}
+	urls, err := processingrepair.GenerateAndUploadRandomScreenshots(input, 3)
+	if err != nil {
+		return err
+	}
+	screenshots := strings.TrimSpace(processingrepair.ToBBCodeImages(urls))
+	if screenshots == "" {
+		return errors.New("未生成有效截图")
+	}
+	if err := s.repo.UpdateSeedParameterScreenshotsByTorrentIDAndSiteName(torrentID, siteName, screenshots); err != nil {
+		return err
+	}
+	logx.Infof(moduleAutoSeed, "自动发种随机截图刷新成功 item_id=%d torrent_id=%s site=%s count=%d", item.ID, torrentID, siteName, len(urls))
+	return nil
+}
+
+func isNovaHDSource(siteName string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(siteName))
+	switch normalized {
+	case "novahd", "nova hd", "nova-hd", "nova_hd", "novahd.top":
+		return true
+	default:
+		return strings.Contains(normalized, "novahd")
+	}
+}
+
+func isDStudioSource(siteName string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(siteName))
+	switch normalized {
+	case "ds", "dstudio", "depth studio", "dstudio.me", "屌丝":
+		return true
+	default:
+		return strings.Contains(normalized, "dstudio") || strings.Contains(normalized, "depth studio") || strings.Contains(normalized, "屌丝")
+	}
+}
+
+func isAutoSeedAlwaysRefreshScreenshotSource(siteName string) bool {
+	return isNovaHDSource(siteName) || isDStudioSource(siteName)
 }
 
 // ListRules 返回自动发种规则列表。
@@ -447,11 +589,162 @@ func (s *Service) AddManualURL(torrentURL, downloaderID, sourceSite string) erro
 		return nil
 	}
 	downloaderHash := firstNonEmpty(toString(fetchResult["hash"], ""), s.findDownloaderHash(d, item.Name))
-	_ = s.repo.MarkItemPushed(item.ID, downloaderHash, "")
+	_ = s.repo.MarkItemPushed(item.ID, item.DownloaderID, downloaderHash, "")
 	return nil
 }
 
 // OrganizeItem 保存人工整理后的基础种子信息。
+
+// PushItems 将未推送的自动发种记录补抓详情并推送到下载器，进入后续自动整理和发布流程。
+// 参数/返回：ids 为待推送记录主键集合；返回每条记录的推送结果与总体成功状态。
+// 失败场景：仓储未初始化、未选择记录、下载器配置缺失、详情抓取失败或推送下载器失败。
+// 副作用：会写回自动发种记录状态、推送时间与下载器 hash，并可能更新详情页抓取结果。
+func (s *Service) PushItems(ids []int64) (map[string]any, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("自动发种仓储未初始化")
+	}
+	if len(ids) == 0 {
+		return nil, errors.New("请选择要推送的种子")
+	}
+
+	results := make([]map[string]any, 0, len(ids))
+	pushedCount := 0
+	for _, id := range ids {
+		item, err := s.repo.GetItem(id)
+		if err != nil {
+			results = append(results, map[string]any{"id": id, "success": false, "message": err.Error()})
+			continue
+		}
+		if item == nil {
+			results = append(results, map[string]any{"id": id, "success": false, "message": "种子记录为空"})
+			continue
+		}
+		switch item.Status {
+		case repository.AutoSeedItemStatusPushed, repository.AutoSeedItemStatusOrganized, repository.AutoSeedItemStatusPublished:
+			results = append(results, map[string]any{"id": id, "success": false, "message": "已推送或已进入后续流程"})
+			continue
+		}
+
+		downloaderID, options, err := s.resolveAutoSeedPushSettings(item)
+		if err != nil {
+			_ = s.repo.MarkItemRejected(item.ID, "推送下载器失败: "+err.Error())
+			results = append(results, map[string]any{"id": id, "success": false, "message": err.Error()})
+			continue
+		}
+		item.DownloaderID = downloaderID
+
+		fetchResult, fetchReason := s.fetchItemDetails(item)
+		if fetchReason != "" {
+			_ = s.repo.MarkItemRejected(item.ID, fetchReason)
+			results = append(results, map[string]any{"id": id, "success": false, "message": fetchReason})
+			continue
+		}
+		if reason := restrictedTagRejectReason(item); reason != "" {
+			_ = s.repo.MarkItemRejected(item.ID, reason)
+			results = append(results, map[string]any{"id": id, "success": false, "message": reason})
+			continue
+		}
+
+		downloader, err := downloaderclient.FromConfig(s.rootConfig(), downloaderID)
+		if err != nil {
+			reason := "推送下载器失败: " + err.Error()
+			_ = s.repo.MarkItemRejected(item.ID, reason)
+			results = append(results, map[string]any{"id": id, "success": false, "message": reason})
+			continue
+		}
+		if err := s.pushFetchedItemToDownloader(item, fetchResult, downloader, options); err != nil {
+			reason := "推送下载器失败: " + err.Error()
+			_ = s.repo.MarkItemRejected(item.ID, reason)
+			results = append(results, map[string]any{"id": id, "success": false, "message": reason})
+			continue
+		}
+
+		pushedCount++
+		results = append(results, map[string]any{
+			"id":      id,
+			"success": true,
+			"message": "已推送到下载器",
+		})
+	}
+
+	if pushedCount == 0 {
+		return map[string]any{"success": false, "results": results}, errors.New("没有可推送的种子")
+	}
+	return map[string]any{
+		"success":      true,
+		"pushed_count": pushedCount,
+		"results":      results,
+	}, nil
+}
+
+// resolveAutoSeedPushSettings 为自动发种推送按钮准备下载器与附加参数。
+// 参数/返回：item 为待推送记录；返回下载器 ID 与 AddTorrentOptions。
+// 失败场景：记录未配置下载器且无法从规则回填时返回错误。
+// 副作用：必要时读取对应自动发种规则，但不会写库。
+func (s *Service) resolveAutoSeedPushSettings(item *repository.AutoSeedItem) (string, downloaderclient.AddTorrentOptions, error) {
+	options := newAutoSeedAddTorrentOptions(false, []string{"PT Nexus", "自动发种"})
+	if item == nil {
+		return "", options, errors.New("种子记录为空")
+	}
+
+	downloaderID := strings.TrimSpace(item.DownloaderID)
+	paused := false
+	tags := []string{"PT Nexus", "自动发种"}
+
+	if item.RuleID > 0 && s != nil && s.repo != nil {
+		if rule, err := s.repo.GetRule(item.RuleID); err == nil && rule != nil {
+			if downloaderID == "" {
+				downloaderID = strings.TrimSpace(rule.DownloaderID)
+			}
+			paused = rule.AutoPause
+			if ruleTags := parseJSONStrings(rule.TagsJSON); len(ruleTags) > 0 {
+				tags = ruleTags
+			}
+		} else if err != nil {
+			logx.Warnf(moduleAutoSeed, "读取自动发种规则失败 item_id=%d rule_id=%d err=%v", item.ID, item.RuleID, err)
+		}
+	}
+
+	if strings.TrimSpace(downloaderID) == "" {
+		return "", options, errors.New("未获取到下载器")
+	}
+	return downloaderID, newAutoSeedAddTorrentOptions(paused, tags), nil
+}
+
+// pushFetchedItemToDownloader 将已经抓取到详情页信息的自动发种记录推送到下载器。
+// 参数/返回：item 为待推送记录，fetchResult 为详情抓取结果，downloader 为目标下载器。
+// 失败场景：种子路径/URL 无法添加、下载器调用失败、写回推送状态失败。
+// 副作用：会向下载器添加任务，并将记录标记为已推送。
+func (s *Service) pushFetchedItemToDownloader(item *repository.AutoSeedItem, fetchResult map[string]any, downloader downloaderclient.Downloader, options downloaderclient.AddTorrentOptions) error {
+	if s == nil || s.repo == nil || item == nil {
+		return errors.New("自动发种仓储未初始化")
+	}
+	torrentPath := strings.TrimSpace(toString(fetchResult["torrent_path"], ""))
+	var addErr error
+	if torrentPath != "" {
+		addErr = downloader.AddTorrentFileWithOptions(torrentPath, "", options)
+	} else {
+		addErr = downloader.AddTorrentURLWithOptions(item.TorrentURL, "", options)
+	}
+	if addErr != nil {
+		return addErr
+	}
+	downloaderHash := firstNonEmpty(toString(fetchResult["hash"], ""), s.findDownloaderHash(downloader, item.Name))
+	return s.repo.MarkItemPushed(item.ID, item.DownloaderID, downloaderHash, "")
+}
+
+// newAutoSeedAddTorrentOptions 构造自动发种推送到下载器时使用的附加参数。
+// 参数/返回：paused 控制是否暂停加入，tags 为下载器标签；返回可直接用于 AddTorrent 调用的参数。
+// 失败场景：无。
+// 副作用：无。
+func newAutoSeedAddTorrentOptions(paused bool, tags []string) downloaderclient.AddTorrentOptions {
+	skipChecking := false
+	return downloaderclient.AddTorrentOptions{
+		Paused:       paused,
+		Tags:         compactStrings(tags),
+		SkipChecking: &skipChecking,
+	}
+}
 func (s *Service) OrganizeItem(id int64, patch map[string]any) error {
 	item, err := s.repo.GetItem(id)
 	if err != nil {
@@ -581,6 +874,71 @@ func (s *Service) DeleteItems(ids []int64, deleteFiles bool) (int64, error) {
 	return s.repo.DeleteItems(ids)
 }
 
+// cleanupExpiredRetainedSeeds 清理超过规则保种时间的已发布种子，并同步删除下载器任务和文件。
+// 参数/返回：无入参；失败仅记录日志，避免阻断自动发种主轮询。
+// 失败场景：数据库查询失败、下载器连接失败或删除接口失败时记录告警并继续处理其他记录。
+// 副作用：会请求下载器删除种子和文件，并删除对应 auto_seed_items 记录。
+func (s *Service) cleanupExpiredRetainedSeeds() {
+	if s == nil || s.repo == nil {
+		return
+	}
+	candidates, err := s.repo.ListRetentionCandidates(500)
+	if err != nil {
+		logx.Warnf(moduleAutoSeed, "查询保种到期记录失败 err=%v", err)
+		return
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	items := make([]repository.AutoSeedItem, 0, len(candidates))
+	for _, candidate := range candidates {
+		items = append(items, candidate.AutoSeedItem)
+	}
+	latestByTorrent := map[string]time.Time{}
+	logs, err := s.repo.FindPublishLogsForItems(items)
+	if err != nil {
+		logx.Warnf(moduleAutoSeed, "查询保种发布时间失败 err=%v", err)
+	} else {
+		for _, entry := range logs {
+			torrentID := strings.TrimSpace(entry.TorrentID)
+			if torrentID == "" {
+				continue
+			}
+			if value, ok := parseAutoSeedStoredTime(firstNonEmpty(entry.UpdatedAt, entry.CreatedAt)); ok {
+				if current, exists := latestByTorrent[torrentID]; !exists || value.After(current) {
+					latestByTorrent[torrentID] = value
+				}
+			}
+		}
+	}
+
+	now := time.Now()
+	cleaned := 0
+	for _, candidate := range candidates {
+		retention := candidate.SeedRetentionMinutes
+		if retention <= 0 {
+			continue
+		}
+		lastPublishedAt, ok := latestAutoSeedPublishTime(candidate, latestByTorrent)
+		if !ok || now.Sub(lastPublishedAt) < time.Duration(retention)*time.Minute {
+			continue
+		}
+		deleted, err := s.DeleteItems([]int64{candidate.ID}, true)
+		if err != nil {
+			logx.Warnf(moduleAutoSeed, "保种到期清理失败 item_id=%d rule_id=%d retention_minutes=%d err=%v", candidate.ID, candidate.RuleID, retention, err)
+			continue
+		}
+		if deleted > 0 {
+			cleaned += int(deleted)
+			logx.Infof(moduleAutoSeed, "保种到期已删除种子和文件 item_id=%d rule_id=%d retention_minutes=%d last_publish_at=%s", candidate.ID, candidate.RuleID, retention, lastPublishedAt.Format(repository.PublishQueueTimeLayout))
+		}
+	}
+	if cleaned > 0 {
+		logx.Infof(moduleAutoSeed, "保种到期清理完成 count=%d", cleaned)
+	}
+}
+
 // Progress 返回下载器进度页数据。
 func (s *Service) Progress(downloaderID string) ([]repository.AutoSeedItem, error) {
 	s.SyncProgressAndAutoPublish(downloaderID)
@@ -665,27 +1023,51 @@ func (s *Service) findDownloaderHash(d downloaderclient.Downloader, title string
 }
 
 func (s *Service) resolveItemCurrentSavePath(item repository.AutoSeedItem) string {
-	if path := strings.TrimSpace(item.SavePath); path != "" {
-		return path
-	}
-	downloaderID := strings.TrimSpace(item.DownloaderID)
-	if s == nil || downloaderID == "" {
+	record, ok, err := s.resolveItemCurrentTorrentRecord(item)
+	if err != nil || !ok {
 		return ""
+	}
+	return strings.TrimSpace(record.SavePath)
+}
+
+func (s *Service) resolveItemCurrentTorrentRecord(item repository.AutoSeedItem) (repository.AutoSeedTorrentRecord, bool, error) {
+	downloaderID := strings.TrimSpace(item.DownloaderID)
+	downloaderHash := strings.TrimSpace(item.DownloaderHash)
+	if s == nil || downloaderID == "" || downloaderHash == "" {
+		return repository.AutoSeedTorrentRecord{}, false, nil
+	}
+	if s.repo != nil {
+		record, err := s.repo.FindTorrentByDownloaderHash(downloaderID, downloaderHash)
+		if err == nil {
+			record.Hash = firstNonEmpty(record.Hash, downloaderHash)
+			return record, true, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			logx.Warnf(moduleAutoSeed, "发布前按 hash 查询 torrents 路径失败 downloader_id=%s hash=%s err=%v", downloaderID, downloaderHash, err)
+			return repository.AutoSeedTorrentRecord{}, false, err
+		}
 	}
 	downloader, err := downloaderclient.FromConfig(s.rootConfig(), downloaderID)
 	if err != nil {
-		logx.Warnf(moduleAutoSeed, "发布前回填下载器路径失败 downloader_id=%s err=%v", downloaderID, err)
-		return ""
+		logx.Warnf(moduleAutoSeed, "发布前回填下载器任务失败 downloader_id=%s hash=%s err=%v", downloaderID, downloaderHash, err)
+		return repository.AutoSeedTorrentRecord{}, false, err
 	}
 	snapshots, err := downloader.FetchTorrents()
 	if err != nil {
-		logx.Warnf(moduleAutoSeed, "发布前拉取下载器任务失败 downloader_id=%s err=%v", downloaderID, err)
-		return ""
+		logx.Warnf(moduleAutoSeed, "发布前拉取下载器任务失败 downloader_id=%s hash=%s err=%v", downloaderID, downloaderHash, err)
+		return repository.AutoSeedTorrentRecord{}, false, err
 	}
-	if snapshot, ok := matchSnapshot(item, snapshots); ok {
-		return bestSnapshotMediaPath(snapshot)
+	snapshot, ok := matchSnapshotByHash(downloaderHash, snapshots)
+	if !ok {
+		return repository.AutoSeedTorrentRecord{}, false, nil
 	}
-	return ""
+	return repository.AutoSeedTorrentRecord{
+		Hash:         strings.TrimSpace(snapshot.Hash),
+		Name:         strings.TrimSpace(snapshot.Name),
+		SavePath:     bestSnapshotMediaPath(snapshot),
+		Progress:     snapshot.Progress,
+		DownloaderID: downloaderID,
+	}, true, nil
 }
 
 func (s *Service) applyFetchedDetails(item *repository.AutoSeedItem, fetchResult map[string]any) {
@@ -983,6 +1365,19 @@ func matchSnapshot(item repository.AutoSeedItem, snapshots []downloaderclient.To
 	return downloaderclient.TorrentSnapshot{}, false
 }
 
+func matchSnapshotByHash(hash string, snapshots []downloaderclient.TorrentSnapshot) (downloaderclient.TorrentSnapshot, bool) {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return downloaderclient.TorrentSnapshot{}, false
+	}
+	for _, snapshot := range snapshots {
+		if strings.EqualFold(strings.TrimSpace(snapshot.Hash), hash) {
+			return snapshot, true
+		}
+	}
+	return downloaderclient.TorrentSnapshot{}, false
+}
+
 func normalizeTorrentName(value string) string {
 	value = strings.TrimSuffix(strings.TrimSpace(value), ".torrent")
 	for strings.HasPrefix(value, "[") {
@@ -1028,6 +1423,26 @@ func (s *Service) enrichItemSavePaths(items []repository.AutoSeedItem) {
 	if s == nil || len(items) == 0 {
 		return
 	}
+	if s.repo != nil {
+		for idx := range items {
+			downloaderID := strings.TrimSpace(items[idx].DownloaderID)
+			downloaderHash := strings.TrimSpace(items[idx].DownloaderHash)
+			if downloaderID == "" || downloaderHash == "" {
+				continue
+			}
+			record, err := s.repo.FindTorrentByDownloaderHash(downloaderID, downloaderHash)
+			if err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					logx.Warnf(moduleAutoSeed, "回填自动发种列表保存路径失败 downloader_id=%s hash=%s err=%v", downloaderID, downloaderHash, err)
+				}
+				continue
+			}
+			if strings.TrimSpace(record.SavePath) != "" {
+				items[idx].SavePath = strings.TrimSpace(record.SavePath)
+			}
+		}
+		return
+	}
 	root := s.rootConfig()
 	byDownloader := map[string][]int{}
 	for idx := range items {
@@ -1048,7 +1463,7 @@ func (s *Service) enrichItemSavePaths(items []repository.AutoSeedItem) {
 			continue
 		}
 		for _, idx := range indexes {
-			if snapshot, ok := matchSnapshot(items[idx], snapshots); ok {
+			if snapshot, ok := matchSnapshotByHash(items[idx].DownloaderHash, snapshots); ok {
 				items[idx].SavePath = bestSnapshotMediaPath(snapshot)
 			}
 		}
@@ -1239,8 +1654,8 @@ func autoSeedPublishStatusText(status string) string {
 }
 
 func autoSeedElapsedText(value string) string {
-	start, err := time.ParseInLocation(repository.PublishQueueTimeLayout, strings.TrimSpace(value), time.Local)
-	if err != nil || start.IsZero() {
+	start, ok := parseAutoSeedStoredTime(value)
+	if !ok || start.IsZero() {
 		return ""
 	}
 	elapsed := time.Since(start)
@@ -1268,6 +1683,58 @@ func autoSeedElapsedText(value string) string {
 	return "刚刚"
 }
 
+func latestAutoSeedPublishTime(candidate repository.AutoSeedRetentionCandidate, latestByTorrent map[string]time.Time) (time.Time, bool) {
+	item := candidate.AutoSeedItem
+	if value, exists := parseAutoSeedStoredTime(candidate.LastPublishAt); exists {
+		return value, true
+	}
+	torrentID := strings.TrimSpace(item.TorrentID)
+	latest, ok := latestByTorrent[torrentID]
+	if value, exists := latestAutoSeedPublishResultTime(item.PublishResultsJSON); exists && (!ok || value.After(latest)) {
+		latest = value
+		ok = true
+	}
+	if item.PublishedAt != nil {
+		if value, exists := parseAutoSeedStoredTime(*item.PublishedAt); exists && (!ok || value.After(latest)) {
+			latest = value
+			ok = true
+		}
+	}
+	return latest, ok
+}
+
+func latestAutoSeedPublishResultTime(resultsJSON string) (time.Time, bool) {
+	var latest time.Time
+	found := false
+	for _, entry := range parseAutoSeedPublishResults(resultsJSON) {
+		for _, key := range []string{"updated_at", "created_at", "published_at"} {
+			value, ok := parseAutoSeedStoredTime(toString(entry[key], ""))
+			if !ok {
+				continue
+			}
+			if !found || value.After(latest) {
+				latest = value
+				found = true
+			}
+		}
+	}
+	return latest, found
+}
+
+func parseAutoSeedStoredTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	if parsed, err := time.ParseInLocation(repository.PublishQueueTimeLayout, value, time.Local); err == nil {
+		return parsed, true
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed.Local(), true
+	}
+	return time.Time{}, false
+}
+
 func normalizeRule(rule *repository.AutoSeedRule) {
 	if rule == nil {
 		return
@@ -1283,6 +1750,9 @@ func normalizeRule(rule *repository.AutoSeedRule) {
 	}
 	if rule.PublishConcurrency <= 0 {
 		rule.PublishConcurrency = 1
+	}
+	if rule.SeedRetentionMinutes < 0 {
+		rule.SeedRetentionMinutes = 0
 	}
 	if strings.TrimSpace(rule.NextRunAt) == "" {
 		rule.NextRunAt = time.Now().Format(repository.PublishQueueTimeLayout)

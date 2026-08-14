@@ -69,7 +69,7 @@ func NewApp() (*App, error) {
 		settingsService.AppendIYUULog(level, message)
 	})
 	localQueryService := service.NewLocalQueryService(repository.NewLocalQueryRepository(store), cfgManager, paths.DataDir)
-	crossSeedService := service.NewCrossSeedService(repository.NewCrossSeedRepository(store))
+	crossSeedService := service.NewCrossSeedService(repository.NewCrossSeedRepository(store), cfgManager)
 
 	siteRepo := repository.NewSiteRepository(store)
 	torrentRepo := repository.NewTorrentRepository(store)
@@ -290,6 +290,7 @@ func registerRoutes(
 		api.POST("/refresh_data", torrentDataHandler.RefreshData)
 		api.GET("/cached_sites", torrentDataHandler.CachedSites)
 		api.POST("/data/update_publish_at", torrentDataHandler.UpdatePublishAt)
+		api.POST("/data/delete", torrentDataHandler.DeleteData)
 		api.POST("/iyuu_query", torrentDataHandler.IYUUQuery)
 		api.POST("/iyuu_query_batch", torrentDataHandler.IYUUQueryBatch)
 		api.GET("/iyuu_query_batch_progress", torrentDataHandler.IYUUQueryBatchProgress)
@@ -417,6 +418,7 @@ func registerRoutes(
 		autoSeedAPI.GET("/items", autoSeedHandler.ListItems)
 		autoSeedAPI.POST("/items/manual", autoSeedHandler.AddManualURL)
 		autoSeedAPI.PUT("/items/:id/organize", autoSeedHandler.OrganizeItem)
+		autoSeedAPI.POST("/items/push", autoSeedHandler.PushItems)
 		autoSeedAPI.POST("/items/publish", autoSeedHandler.PublishItems)
 		autoSeedAPI.POST("/items/delete", autoSeedHandler.DeleteItems)
 		autoSeedAPI.GET("/progress", autoSeedHandler.Progress)
@@ -443,18 +445,53 @@ func registerRoutes(
 			rel := strings.TrimPrefix(cleaned, "/")
 			candidate := filepath.Join(staticDir, rel)
 			if stat, err := os.Stat(candidate); err == nil && stat.Mode().IsRegular() {
+				setStaticFileCacheHeaders(c, cleaned)
 				c.File(candidate)
+				return
+			}
+			if isStaticAssetRequest(cleaned) {
+				setNoCacheHeaders(c)
+				c.String(http.StatusNotFound, "static asset not found")
 				return
 			}
 		}
 
 		indexPath := filepath.Join(staticDir, "index.html")
 		if _, err := os.Stat(indexPath); err == nil {
+			setNoCacheHeaders(c)
 			c.File(indexPath)
 			return
 		}
 		c.String(http.StatusNotFound, "PT Nexus Go 接口服务")
 	})
+}
+
+// setStaticFileCacheHeaders 根据前端构建产物类型设置缓存头，避免入口页缓存旧 chunk 清单。
+func setStaticFileCacheHeaders(c *gin.Context, requestPath string) {
+	if strings.EqualFold(path.Base(requestPath), "index.html") || strings.EqualFold(filepath.Ext(requestPath), ".html") {
+		setNoCacheHeaders(c)
+		return
+	}
+	if strings.HasPrefix(requestPath, "/assets/") {
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	c.Header("Cache-Control", "no-cache")
+}
+
+// setNoCacheHeaders 禁止浏览器缓存 SPA 入口，确保版本更新后重新获取最新资源引用。
+func setNoCacheHeaders(c *gin.Context) {
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+}
+
+// isStaticAssetRequest 判断请求是否指向构建产物文件，缺失时应返回 404 而不是回退到 SPA 入口。
+func isStaticAssetRequest(requestPath string) bool {
+	if strings.HasPrefix(requestPath, "/assets/") {
+		return true
+	}
+	return filepath.Ext(requestPath) != ""
 }
 
 // resolveGinMode 读取 GIN_MODE，默认使用 release 降低无关调试输出。

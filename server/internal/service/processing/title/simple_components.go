@@ -800,6 +800,32 @@ func normalizeVideoCodecByMedium(values map[string]string, mediaInfo string) {
 	}
 }
 
+// PreferExplicitTitleMedium 在当前媒介为空、其他或压制时，优先采用标题中明确识别出的媒介。
+// 参数/返回：currentMedium 为已有标准媒介键；title 与 mediaInfo 用于提取标题中的明确媒介；返回修正后的媒介键。
+// 失败场景：标题无法识别出明确媒介时保留 currentMedium。
+// 副作用：无。
+func PreferExplicitTitleMedium(currentMedium, title, mediaInfo string) string {
+	current := strings.TrimSpace(currentMedium)
+	if !isWeakMediumValue(current) {
+		return current
+	}
+
+	inferred := parser.InferStandardizedValues(strings.TrimSpace(title), strings.TrimSpace(mediaInfo), "")
+	if medium := strings.TrimSpace(inferred["medium"]); medium != "" {
+		return medium
+	}
+	return current
+}
+
+func isWeakMediumValue(medium string) bool {
+	switch strings.ToLower(strings.TrimSpace(medium)) {
+	case "", "medium.other", "medium.encode", "encode", "other":
+		return true
+	default:
+		return false
+	}
+}
+
 func detectVideoCodecFamily(candidates ...string) string {
 	combined := strings.Join(candidates, " ")
 	combined = strings.TrimSpace(combined)

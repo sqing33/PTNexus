@@ -318,6 +318,27 @@
       </el-table-column>
 
       <el-table-column
+        v-if="isColumnVisible('last_publish_at')"
+        prop="last_publish_at"
+        label="最后发种时间"
+        width="125"
+        align="center"
+        header-align="center"
+      >
+        <template #default="scope">
+          <span
+            :title="scope.row.last_publish_at ? formatPublishAt(scope.row.last_publish_at) : '未发种'"
+          >
+            {{
+              scope.row.last_publish_at
+                ? formatElapsedPublishTime(scope.row.last_publish_at)
+                : '未发种'
+            }}
+          </span>
+        </template>
+      </el-table-column>
+
+      <el-table-column
         v-if="isColumnVisible('target_sites_count')"
         label="可转种"
         width="100"
@@ -344,13 +365,14 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="100" align="center" header-align="center">
+      <el-table-column label="操作" width="150" align="center" header-align="center">
         <template #default="scope">
           <div
             style="
               display: flex;
               justify-content: center;
               align-items: center;
+              gap: 8px;
               width: 100%;
               height: 100%;
             "
@@ -362,6 +384,14 @@
               :disabled="!isDevEnv && scope.row.progress < 100"
             >
               转种
+            </el-button>
+            <el-button
+              type="danger"
+              size="small"
+              @click.stop="deleteTorrentRow(scope.row)"
+              :disabled="!scope.row.hash"
+            >
+              删除
             </el-button>
           </div>
         </template>
@@ -1117,6 +1147,8 @@ const cachedSitesLoading = ref<boolean>(false) // 查询缓存站点的加载状
 const editingPublishAtId = ref<string | null>(null)
 const editingPublishAtHours = ref<number>(24)
 const publishAtInputRef = ref<InstanceType<any> | null>(null)
+const relativeTimeNow = ref(Date.now())
+let relativeTimeTimer: ReturnType<typeof setInterval> | null = null
 
 const formatPublishAt = (dateString: string) => {
   if (!dateString) return ''
@@ -1133,6 +1165,16 @@ const formatPublishAt = (dateString: string) => {
   } catch {
     return dateString
   }
+}
+
+const formatElapsedPublishTime = (dateString: string) => {
+  const timestamp = new Date(dateString).getTime()
+  if (Number.isNaN(timestamp)) return dateString
+
+  const elapsedHours = Math.max(0, Math.floor((relativeTimeNow.value - timestamp) / 3_600_000))
+  const days = Math.floor(elapsedHours / 24)
+  const hours = elapsedHours % 24
+  return days > 0 ? `${days}天${hours}小时` : `${hours}小时`
 }
 
 const startPublishAtEdit = (row: Torrent) => {
@@ -1343,7 +1385,6 @@ const progressColors = [
 
 // 列定义与可见性
 const torrentsColumns: ColumnDef[] = [
-  { prop: 'name', label: '种子' },
   { prop: 'source_data_status', label: '源站数据状态' },
   { prop: 'site_count', label: '做种数' },
   { prop: 'save_path', label: '保存路径' },
@@ -1353,6 +1394,7 @@ const torrentsColumns: ColumnDef[] = [
   { prop: 'progress', label: '进度' },
   { prop: 'state', label: '状态' },
   { prop: 'publish_at', label: '可发种时间' },
+  { prop: 'last_publish_at', label: '最后发种时间' },
   { prop: 'target_sites_count', label: '可转种' },
 ]
 
@@ -1435,9 +1477,11 @@ const loadUiSettings = async (forceRefresh = false) => {
     }
     if (Array.isArray(settings.visible_columns)) {
       const savedColumns = settings.visible_columns
-      visibleColumns.value = savedColumns.includes('source_data_status')
-        ? savedColumns
-        : [...savedColumns, 'source_data_status']
+      const requiredColumns = ['source_data_status', 'last_publish_at']
+      visibleColumns.value = [
+        ...savedColumns,
+        ...requiredColumns.filter((column) => !savedColumns.includes(column)),
+      ]
     }
     syncUiSettingsCache()
   } catch (e) {
@@ -1569,6 +1613,61 @@ const startCrossSeed = async (row: Torrent) => {
   }
 
   sourceSelectionDialogVisible.value = true
+}
+
+const deleteTorrentRow = async (row: Torrent) => {
+	const hash = (row.hash || '').trim()
+	const hashes = Array.from(new Set([...(row.hashes || []), hash].map((item) => item.trim()).filter(Boolean)))
+	if (hashes.length === 0) {
+		ElMessage.warning('当前种子缺少 hash，无法删除')
+		return
+	}
+
+  let deleteFiles = false
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除种子「${row.name}」吗？选择“删除记录和文件”会同时删除下载器里的种子任务和已下载文件。`,
+      '删除种子',
+      {
+        confirmButtonText: '删除记录和文件',
+        cancelButtonText: '只删除记录',
+        distinguishCancelAndClose: true,
+        type: 'warning',
+        closeOnClickModal: false,
+      },
+    )
+    deleteFiles = true
+  } catch (error: unknown) {
+    if (error === 'cancel') {
+      deleteFiles = false
+    } else {
+      return
+    }
+  }
+
+	try {
+		const response = await axios.post('/api/data/delete', {
+			hash,
+			hashes,
+			delete_files: deleteFiles,
+		})
+    const result = response.data
+    if (result.success) {
+      ElMessage.success(result.message || '删除成功')
+      await fetchData()
+    } else {
+      ElMessage.error(result.error || '删除失败')
+    }
+  } catch (error: unknown) {
+    const message = axios.isAxiosError(error)
+      ? ((error.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (error.response?.data as { error?: string } | undefined)?.error ||
+        error.message)
+      : error instanceof Error
+        ? error.message
+        : '网络错误'
+    ElMessage.error(message)
+  }
 }
 
 // 打开站点数据查看器
@@ -2040,6 +2139,10 @@ const triggerIYUUQueryForFiltered = async () => {
 
 onUnmounted(() => {
   stopIyuuBatchPolling()
+  if (relativeTimeTimer) {
+    clearInterval(relativeTimeTimer)
+    relativeTimeTimer = null
+  }
   emitGlobalRefreshLoading(false)
 })
 
@@ -2363,6 +2466,10 @@ const getSourceDataStatusLabel = (row: Torrent) => {
 }
 
 onMounted(async () => {
+  relativeTimeTimer = setInterval(() => {
+    relativeTimeNow.value = Date.now()
+  }, 60_000)
+
   // 标记正在初始化，防止 watch 触发额外请求
   isInitializing.value = true
   loading.value = true

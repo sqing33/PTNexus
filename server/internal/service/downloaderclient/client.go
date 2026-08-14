@@ -107,6 +107,9 @@ func (d Downloader) DeleteTorrents(hashes []string, deleteFiles bool) error {
 	}
 	switch d.Type {
 	case "qbittorrent":
+		if d.UseProxy {
+			return d.deleteQBTorrentsByProxy(hashes, deleteFiles)
+		}
 		client, err := newQBClient(d)
 		if err != nil {
 			return err

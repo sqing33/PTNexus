@@ -168,6 +168,7 @@ func AddToDownloader(payload map[string]any, rootConfig map[string]any, repo Add
 		"message":          resultMessage,
 		"downloader_id":    downloader.ID,
 		"downloader_name":  downloader.Name,
+		"hash":             addedTorrentHash,
 		"queued_torrent":   queuedTorrent,
 		"site_nickname":    resolvedSiteNickname,
 		"applied_tags":     addOptions.Tags,

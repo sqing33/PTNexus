@@ -155,6 +155,7 @@ mappings:
   type:
     "category.movie": "401"
     "category.tv_series": "402"
+    "category.playlet": "402"
     "category.documentaries": "403"
     "category.tv_shows": "404"
     "category.animation": "405"

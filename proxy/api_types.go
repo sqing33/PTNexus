@@ -52,6 +52,12 @@ type TorrentsRequest struct {
 	IncludeTrackers bool               `json:"include_trackers,omitempty"`
 }
 
+type DeleteTorrentsRequest struct {
+	Downloader  DownloaderConfig `json:"downloader"`
+	Hashes      []string         `json:"hashes"`
+	DeleteFiles bool             `json:"delete_files"`
+}
+
 type ServerStats struct {
 	DownloaderID  string `json:"downloader_id"`
 	DownloadSpeed int64  `json:"download_speed"`

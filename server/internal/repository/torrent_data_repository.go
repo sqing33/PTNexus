@@ -365,6 +365,90 @@ func (r *TorrentDataRepository) ListTorrents(onlyCompleted bool) ([]TorrentRecor
 	return rows, nil
 }
 
+// FindTorrentByHash 按 hash 读取一种多站列表对应的当前种子记录。
+// 参数/返回：hash 为下载器种子 hash；返回首条未隐藏 torrents 记录、是否命中以及查询错误。
+// 失败场景：数据库查询失败时返回 error；hash 为空或记录不存在时返回 found=false。
+// 副作用：只读取数据库，不修改下载器或文件。
+func (r *TorrentDataRepository) FindTorrentByHash(hash string) (TorrentRecord, bool, error) {
+	rows, err := r.ListTorrentsByHashes([]string{hash})
+	if err != nil {
+		return TorrentRecord{}, false, err
+	}
+	if len(rows) == 0 {
+		return TorrentRecord{}, false, nil
+	}
+	return rows[0], true, nil
+}
+
+// ListTorrentsByHashes 按 hash 列表读取一种多站列表对应的当前种子记录。
+// 参数/返回：hashes 为下载器种子 hash 列表；返回所有未隐藏 torrents 记录及查询错误。
+// 失败场景：数据库查询失败时返回 error；hashes 为空时返回空列表。
+// 副作用：只读取数据库，不修改下载器或文件。
+func (r *TorrentDataRepository) ListTorrentsByHashes(hashes []string) ([]TorrentRecord, error) {
+	cleaned := compactLowerStrings(hashes)
+	if len(cleaned) == 0 {
+		return []TorrentRecord{}, nil
+	}
+	rows := make([]TorrentRecord, 0, 1)
+	query := "SELECT hash, name, save_path, size, progress, state, sites, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders FROM torrents WHERE LOWER(TRIM(hash)) IN ? AND (is_hidden = 0 OR is_hidden IS NULL) ORDER BY last_seen DESC"
+	if err := r.store.DB.Raw(query, cleaned).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// DeleteTorrentByHash 删除 hash 对应的一种多站当前记录和上传统计。
+// 参数/返回：hash 为 torrents.hash；返回删除的 torrents 记录数与错误。
+// 失败场景：数据库删除失败时返回 error。
+// 副作用：从 torrents 和 torrent_upload_stats 表中物理删除指定 hash 的数据。
+func (r *TorrentDataRepository) DeleteTorrentByHash(hash string) (int64, error) {
+	return r.DeleteTorrentsByHashes([]string{hash})
+}
+
+// DeleteTorrentsByHashes 删除 hash 列表对应的一种多站当前记录和上传统计。
+// 参数/返回：hashes 为 torrents.hash 列表；返回删除的 torrents 记录数与错误。
+// 失败场景：数据库删除失败时返回 error。
+// 副作用：从 torrents 和 torrent_upload_stats 表中物理删除指定 hash 列表的数据。
+func (r *TorrentDataRepository) DeleteTorrentsByHashes(hashes []string) (int64, error) {
+	cleaned := compactLowerStrings(hashes)
+	if len(cleaned) == 0 {
+		return 0, nil
+	}
+	var deleted int64
+	err := r.store.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DELETE FROM torrent_upload_stats WHERE LOWER(TRIM(hash)) IN ?", cleaned).Error; err != nil {
+			return err
+		}
+		result := tx.Exec("DELETE FROM torrents WHERE LOWER(TRIM(hash)) IN ?", cleaned)
+		if result.Error != nil {
+			return result.Error
+		}
+		deleted = result.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
+func compactLowerStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.ToLower(strings.TrimSpace(value))
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
 func (r *TorrentDataRepository) UploadTotalsByHash() (map[string]int64, error) {
 	rows := make([]TorrentUploadTotal, 0)
 	if err := r.store.DB.Raw("SELECT hash, SUM(uploaded) AS total_uploaded FROM torrent_upload_stats WHERE (is_hidden = 0 OR is_hidden IS NULL) GROUP BY hash").Scan(&rows).Error; err != nil {
@@ -416,6 +500,11 @@ type namePublishAt struct {
 	PublishAt *string `gorm:"column:publish_at"`
 }
 
+type nameLastPublishAt struct {
+	Name          string  `gorm:"column:name"`
+	LastPublishAt *string `gorm:"column:last_publish_at"`
+}
+
 type nameSeedParameterSourceStatus struct {
 	Name     string `gorm:"column:name"`
 	Fetched  int    `gorm:"column:fetched"`
@@ -431,6 +520,38 @@ func (r *TorrentDataRepository) PublishAtByNames() (map[string]string, error) {
 	for _, row := range rows {
 		if row.PublishAt != nil && *row.PublishAt != "" {
 			result[row.Name] = *row.PublishAt
+		}
+	}
+	return result, nil
+}
+
+// LastPublishAtByNames 查询每个种子名称最近一次成功发布时间。
+// 参数/返回：无输入参数；返回种子名称到最近发布时间的映射。
+// 失败场景：数据库查询失败时返回 error。
+// 副作用：仅读取 seed_parameters.last_publish_at，不修改数据。
+func (r *TorrentDataRepository) LastPublishAtByNames() (map[string]string, error) {
+	rows := make([]nameLastPublishAt, 0)
+	query := `
+		SELECT name, MAX(last_publish_at) AS last_publish_at
+		FROM seed_parameters
+		WHERE name IS NOT NULL
+		  AND name != ''
+		  AND last_publish_at IS NOT NULL
+		  AND last_publish_at != ''
+		GROUP BY name
+	`
+	if err := r.store.DB.Raw(query).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := map[string]string{}
+	for _, row := range rows {
+		name := strings.TrimSpace(row.Name)
+		if name == "" || row.LastPublishAt == nil {
+			continue
+		}
+		if value := strings.TrimSpace(*row.LastPublishAt); value != "" {
+			result[name] = value
 		}
 	}
 	return result, nil

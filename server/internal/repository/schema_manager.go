@@ -57,6 +57,9 @@ func (m *SchemaManager) EnsureSchema() error {
 		if err := m.createAutoSeedMySQLTables(); err != nil {
 			return err
 		}
+		if err := m.ensureTableColumns("auto_seed_rules", m.columnSpecs()["auto_seed_rules"]); err != nil {
+			return err
+		}
 		if err := m.ensureTableColumns("auto_seed_items", m.columnSpecs()["auto_seed_items"]); err != nil {
 			return err
 		}
@@ -90,8 +93,86 @@ func (m *SchemaManager) EnsureSchema() error {
 	if err := m.fixSeedParametersColumnTypes(); err != nil {
 		return err
 	}
+	if err := m.backfillSeedParameterLastPublishAtFromPublishLogs(); err != nil {
+		logx.Warnf(schemaLogModule, "回填 seed_parameters.last_publish_at 失败 err=%v", err)
+	}
 
 	logx.Infof(schemaLogModule, "数据库结构校验完成 db_type=%s", m.store.DBType)
+	return nil
+}
+
+// backfillSeedParameterLastPublishAtFromPublishLogs 使用成功发布日志补齐空的最后发布时间。
+// 参数/返回：无入参，返回数据库查询或更新错误。
+// 失败场景：publish_logs 查询失败或 seed_parameters 更新失败时返回错误。
+// 副作用：仅更新 last_publish_at 为空的 seed_parameters 记录。
+func (m *SchemaManager) backfillSeedParameterLastPublishAtFromPublishLogs() error {
+	if m == nil || m.store == nil || m.store.DB == nil {
+		return nil
+	}
+
+	rows := make([]PublishLogEntry, 0)
+	if err := m.store.DB.Model(&PublishLogEntry{}).
+		Select("torrent_id, source_site, title, created_at, updated_at").
+		Where("status IN ?", []string{"success", "edited", "exists"}).
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	type latestRow struct {
+		torrentID string
+		source    string
+		title     string
+		publishAt string
+	}
+	latestByKey := make(map[string]latestRow)
+	latestByTitle := make(map[string]latestRow)
+	for _, row := range rows {
+		torrentID := strings.TrimSpace(row.TorrentID)
+		source := strings.TrimSpace(row.SourceSite)
+		title := strings.TrimSpace(row.Title)
+		publishAt := strings.TrimSpace(row.UpdatedAt)
+		if publishAt == "" {
+			publishAt = strings.TrimSpace(row.CreatedAt)
+		}
+		if publishAt == "" {
+			continue
+		}
+		if torrentID != "" && source != "" {
+			key := strings.ToLower(torrentID) + "\x00" + strings.ToLower(source)
+			if current, ok := latestByKey[key]; !ok || publishAt > current.publishAt {
+				latestByKey[key] = latestRow{torrentID: torrentID, source: source, title: title, publishAt: publishAt}
+			}
+		}
+		if title != "" {
+			key := strings.ToLower(title)
+			if current, ok := latestByTitle[key]; !ok || publishAt > current.publishAt {
+				latestByTitle[key] = latestRow{torrentID: torrentID, source: source, title: title, publishAt: publishAt}
+			}
+		}
+	}
+
+	for _, row := range latestByKey {
+		loweredSource := strings.ToLower(row.source)
+		result := m.store.DB.Table("seed_parameters").
+			Where("torrent_id = ? AND (site_name = ? OR nickname = ? OR LOWER(TRIM(site_name)) = ? OR LOWER(TRIM(nickname)) = ?)", row.torrentID, row.source, row.source, loweredSource, loweredSource).
+			Where("(last_publish_at IS NULL OR last_publish_at = '')").
+			Updates(map[string]any{"last_publish_at": row.publishAt})
+		if result.Error != nil {
+			return result.Error
+		}
+	}
+	for _, row := range latestByTitle {
+		result := m.store.DB.Table("seed_parameters").
+			Where("LOWER(TRIM(name)) = LOWER(TRIM(?))", row.title).
+			Where("(last_publish_at IS NULL OR last_publish_at = '')").
+			Updates(map[string]any{"last_publish_at": row.publishAt})
+		if result.Error != nil {
+			return result.Error
+		}
+	}
 	return nil
 }
 
@@ -263,6 +344,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				bdinfo_completed_at DATETIME,
 				bdinfo_error TEXT,
 				publish_at DATETIME NULL,
+				last_publish_at DATETIME NULL,
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL,
 				PRIMARY KEY (hash, torrent_id, site_name)
@@ -443,6 +525,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				bdinfo_completed_at TIMESTAMP,
 				bdinfo_error TEXT,
 				publish_at TIMESTAMP NULL,
+				last_publish_at TIMESTAMP NULL,
 				created_at TIMESTAMP NOT NULL,
 				updated_at TIMESTAMP NOT NULL,
 				PRIMARY KEY (hash, torrent_id, site_name)
@@ -623,6 +706,7 @@ func (m *SchemaManager) createTableSQLs() []string {
 				bdinfo_completed_at TEXT,
 				bdinfo_error TEXT,
 				publish_at TEXT NULL,
+				last_publish_at TEXT NULL,
 				created_at TEXT NOT NULL,
 				updated_at TEXT NOT NULL,
 				PRIMARY KEY (hash, torrent_id, site_name)
@@ -718,6 +802,9 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "samples", definition: map[string]string{"sqlite": "INTEGER DEFAULT 0", "mysql": "INTEGER DEFAULT 0", "postgresql": "INTEGER DEFAULT 0"}},
 			{name: "cumulative_uploaded", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
 			{name: "cumulative_downloaded", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
+		},
+		"auto_seed_rules": {
+			{name: "seed_retention_minutes", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "INT NOT NULL DEFAULT 0", "postgresql": "INTEGER NOT NULL DEFAULT 0"}},
 		},
 		"auto_seed_items": {
 			{name: "rule_id", definition: map[string]string{"sqlite": "INTEGER NOT NULL DEFAULT 0", "mysql": "BIGINT NOT NULL DEFAULT 0", "postgresql": "BIGINT NOT NULL DEFAULT 0"}},
@@ -828,6 +915,7 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "bdinfo_completed_at", definition: map[string]string{"sqlite": "TEXT", "mysql": "DATETIME", "postgresql": "TIMESTAMP"}},
 			{name: "bdinfo_error", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
 			{name: "publish_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
+			{name: "last_publish_at", definition: map[string]string{"sqlite": "TEXT NULL", "mysql": "DATETIME NULL", "postgresql": "TIMESTAMP NULL"}},
 			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 		},
@@ -1084,6 +1172,7 @@ func (m *SchemaManager) createAutoSeedMySQLTables() error {
 			pull_interval_minutes INT NOT NULL DEFAULT 30,
 			publish_interval_minutes INT NOT NULL DEFAULT 0,
 			publish_concurrency INT NOT NULL DEFAULT 1,
+			seed_retention_minutes INT NOT NULL DEFAULT 0,
 			last_run_at DATETIME NULL,
 			next_run_at DATETIME NOT NULL,
 			created_at DATETIME NOT NULL,
@@ -1150,6 +1239,7 @@ func (m *SchemaManager) fixAutoSeedMySQLColumnTypes() error {
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `source_site` VARCHAR(255)",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `downloader_id` VARCHAR(64)",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `save_path` VARCHAR(1024)",
+		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `seed_retention_minutes` INT NOT NULL DEFAULT 0",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `last_run_at` DATETIME NULL",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `next_run_at` DATETIME NOT NULL",
 		"ALTER TABLE `auto_seed_rules` MODIFY COLUMN `created_at` DATETIME NOT NULL",

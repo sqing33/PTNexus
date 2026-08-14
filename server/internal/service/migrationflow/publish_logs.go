@@ -29,6 +29,8 @@ type ExternalPublishLogInput struct {
 
 	TaskID    string
 	TorrentID string
+	Hash      string
+	Name      string
 
 	SourceSite   string
 	TargetSite   string
@@ -69,7 +71,7 @@ func (s *MigrateService) NextBatchCrossSeedTrigger() (string, int, error) {
 // InsertExternalPublishLog 直接插入一条发种日志记录（不经过 Publish 工作流）。
 // 参数/返回：input 为日志内容；返回 error 表示写入失败原因。
 // 失败场景：发种日志仓储未初始化、写库失败返回 error。
-// 副作用：写入 publish_logs。
+// 副作用：写入 publish_logs，成功状态且带 hash 时回写 seed_parameters.last_publish_at。
 func (s *MigrateService) InsertExternalPublishLog(input ExternalPublishLogInput) error {
 	if s == nil || s.publishLogRepo == nil {
 		return errors.New("发种日志未初始化")
@@ -98,8 +100,21 @@ func (s *MigrateService) InsertExternalPublishLog(input ExternalPublishLogInput)
 		CostMS:        input.CostMS,
 	}
 
-	_, err := s.publishLogRepo.Insert(&entry)
-	return err
+	_, insertErr := s.publishLogRepo.Insert(&entry)
+	if insertErr != nil {
+		return insertErr
+	}
+	if isSuccessfulPublishLogStatus(entry.Status) && s.repo != nil {
+		name := strings.TrimSpace(firstNonEmptyString(input.Name, entry.Title))
+		affected, err := s.repo.UpdateSeedParameterLastPublishAt(name, input.Hash, entry.TorrentID, entry.SourceSite, entry.UpdatedAt)
+		if err != nil {
+			logx.Warnf(publishLogModule, "外部日志回写最后发布时间失败 hash=%s status=%s err=%v", strings.TrimSpace(input.Hash), entry.Status, err)
+		}
+		if err == nil && affected == 0 {
+			s.updateSeedParameterLastPublishAtByTorrentID(name, input.Hash, entry.TorrentID, entry.SourceSite, entry.Status, entry.UpdatedAt)
+		}
+	}
+	return nil
 }
 
 // InitPublishLogs 初始化发种日志依赖。
@@ -270,6 +285,9 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 		logStatus = "success"
 	}
 
+	if result == nil {
+		result = map[string]any{}
+	}
 	resultURL := strings.TrimSpace(processingshared.ToString(result["url"], ""))
 	logsText := strings.TrimSpace(processingshared.ToString(result["logs"], ""))
 
@@ -298,7 +316,6 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 		AutoAddResult: autoAddJSON,
 		CostMS:        cost.Milliseconds(),
 	}
-
 	if queueTaskID != nil && *queueTaskID > 0 {
 		if existing, ok, err := s.publishLogRepo.FindLatestByQueueTaskID(*queueTaskID); err == nil && ok && existing != nil {
 			if strings.TrimSpace(entry.Title) == "" && strings.TrimSpace(existing.Title) != "" {
@@ -308,14 +325,23 @@ func (s *MigrateService) appendPublishLog(payload map[string]any, ctxTaskID stri
 				entry.Subtitle = existing.Subtitle
 			}
 		}
+		upsertOK := true
 		if err := s.publishLogRepo.UpsertByQueueTaskID(&entry); err != nil {
+			upsertOK = false
 			logx.Warnf(publishLogModule, "更新发种日志失败 queue_task_id=%d trigger=%s scene=%s target=%s err=%v", *queueTaskID, trigger, scene, targetSite, err)
+		}
+		if upsertOK {
+			s.updateSeedParameterLastPublishAtFromEntry(&entry, payload, uploadData, result)
 		}
 		return
 	}
 
-	if _, err := s.publishLogRepo.Insert(&entry); err != nil {
+	insertedID, err := s.publishLogRepo.Insert(&entry)
+	if err != nil {
 		logx.Warnf(publishLogModule, "写入发种日志失败 trigger=%s scene=%s target=%s err=%v", trigger, scene, targetSite, err)
+	}
+	if insertedID > 0 {
+		s.updateSeedParameterLastPublishAtFromEntry(&entry, payload, uploadData, result)
 	}
 }
 
@@ -345,6 +371,131 @@ func resolvePublishLogTitleFromUploadData(uploadData map[string]any, fallbackTit
 		title = baseTitle
 	}
 	return strings.TrimSpace(title), subtitle
+}
+
+func resolvePublishLogSeedName(payload map[string]any, uploadData map[string]any) string {
+	for _, source := range []map[string]any{uploadData, payload} {
+		if source == nil {
+			continue
+		}
+		if value := strings.TrimSpace(processingshared.ToString(source["name"], "")); value != "" {
+			return value
+		}
+		if value := strings.TrimSpace(processingshared.ToString(source["torrent_name"], "")); value != "" {
+			return value
+		}
+		if value := strings.TrimSpace(processingshared.ToString(source["torrentName"], "")); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (s *MigrateService) updateSeedParameterLastPublishAtFromEntry(entry *repository.PublishLogEntry, payload map[string]any, uploadData map[string]any, result map[string]any) {
+	if s == nil || s.repo == nil || entry == nil || !isSuccessfulPublishLogStatus(entry.Status) {
+		return
+	}
+	hash := resolvePublishedTorrentHash(payload, uploadData, result)
+	torrentID := strings.TrimSpace(entry.TorrentID)
+	sourceSite := strings.TrimSpace(entry.SourceSite)
+	name := resolvePublishLogSeedName(payload, uploadData)
+	if entry.TaskID != "" && s.contextState != nil {
+		if ctx, ok := s.contextState.Get(entry.TaskID); ok {
+			if hash == "" {
+				hash = strings.TrimSpace(ctx.Hash)
+			}
+			if name == "" {
+				name = strings.TrimSpace(ctx.Name)
+			}
+			if torrentID == "" {
+				torrentID = strings.TrimSpace(ctx.TorrentID)
+			}
+			if sourceSite == "" {
+				sourceSite = strings.TrimSpace(firstNonEmptyString(ctx.SourceNickname, ctx.SiteName))
+			}
+		}
+	}
+	if name == "" {
+		name = strings.TrimSpace(entry.Title)
+	}
+	if name == "" && hash == "" && (torrentID == "" || sourceSite == "") {
+		return
+	}
+	publishAt := strings.TrimSpace(entry.UpdatedAt)
+	if publishAt == "" {
+		publishAt = time.Now().Format(repository.PublishQueueTimeLayout)
+	}
+	affected, err := s.repo.UpdateSeedParameterLastPublishAt(name, hash, torrentID, sourceSite, publishAt)
+	if err != nil {
+		logx.Warnf(publishLogModule, "回写最后发布时间失败 hash=%s status=%s err=%v", hash, entry.Status, err)
+		return
+	}
+	if affected == 0 && s.updateSeedParameterLastPublishAtByTorrentID(name, hash, torrentID, sourceSite, entry.Status, publishAt) > 0 {
+		return
+	}
+	if affected == 0 {
+		logx.Warnf(publishLogModule, "回写最后发布时间未命中 seed_parameters hash=%s status=%s", hash, entry.Status)
+	}
+}
+
+func isSuccessfulPublishLogStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "success", "edited", "exists":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *MigrateService) updateSeedParameterLastPublishAtByTorrentID(name, hash, torrentID, sourceSite, status, publishAt string) int64 {
+	if s == nil || s.repo == nil {
+		return 0
+	}
+	torrentID = strings.TrimSpace(torrentID)
+	if torrentID == "" {
+		return 0
+	}
+	seedName, ok, err := s.repo.FindSeedParameterNameByTorrentID(torrentID)
+	if err != nil {
+		logx.Warnf(publishLogModule, "last_publish_at fallback lookup name failed torrent_id=%s status=%s err=%v", torrentID, status, err)
+		return 0
+	}
+	if !ok {
+		return 0
+	}
+	affected, err := s.repo.UpdateSeedParameterLastPublishAt(seedName, hash, torrentID, sourceSite, publishAt)
+	if err != nil {
+		logx.Warnf(publishLogModule, "last_publish_at fallback update failed name=%s torrent_id=%s status=%s err=%v", seedName, torrentID, status, err)
+		return 0
+	}
+	if affected > 0 {
+		return affected
+	}
+	if strings.TrimSpace(name) != "" && strings.TrimSpace(name) != seedName {
+		logx.Warnf(publishLogModule, "last_publish_at fallback missed log_name=%s seed_name=%s torrent_id=%s source_site=%s status=%s", name, seedName, torrentID, sourceSite, status)
+	}
+	return 0
+}
+
+func resolvePublishedTorrentHash(payload map[string]any, uploadData map[string]any, result map[string]any) string {
+	keys := []string{"hash", "torrent_hash", "info_hash", "infoHash", "downloader_hash", "downloaderHash"}
+	for _, source := range []map[string]any{uploadData, payload, result} {
+		for _, key := range keys {
+			if value := strings.TrimSpace(processingshared.ToString(source[key], "")); value != "" {
+				return value
+			}
+		}
+	}
+	if result != nil {
+		if autoAdd, ok := result["auto_add_result"].(map[string]any); ok {
+			for _, key := range keys {
+				if value := strings.TrimSpace(processingshared.ToString(autoAdd[key], "")); value != "" {
+					return value
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func resolvePreviewTitleFromFinalParams(raw any) string {

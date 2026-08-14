@@ -5,6 +5,13 @@ site_name: "HDVideo"
 
 # 表单字段定义 - 定义站点上传表单中各字段的标识符
 form_fields:
+  name: "name"
+  title: "name"
+  small_descr: "small_descr"
+  description: "descr"
+  imdb_url: "url"
+  douban_url: "douban_url"
+  pt_gen: "pt_gen"
   category: "type"
   medium: "medium_sel[4]"
   video_codec: "codec_sel[4]"
@@ -12,6 +19,7 @@ form_fields:
   resolution: "standard_sel[4]"
   team: "team_sel[4]"
   region: "region_sel[4]"
+  style: "style_sel[4][]"
   tags[]: "tags[4][]"
 
 # 标准化键映射 - 定义源文本到标准化键的映射规则

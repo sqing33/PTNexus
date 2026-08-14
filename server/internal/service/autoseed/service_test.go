@@ -119,3 +119,78 @@ func TestNormalizeRuleClearsLegacyTypeAndMediumFilters(t *testing.T) {
 		t.Fatalf("expected legacy filters to be cleared, got types=%q media=%q", rule.TypesJSON, rule.MediaJSON)
 	}
 }
+
+func TestNeedsRefreshAutoSeedScreenshotsFromSeedRow(t *testing.T) {
+	testCases := []struct {
+		name     string
+		siteName string
+		row      map[string]any
+		want     bool
+	}{
+		{
+			name:     "NovaHD always refreshes",
+			siteName: "NovaHD",
+			row: map[string]any{
+				"screenshots":              "[img]https://example.test/1.jpg[/img]",
+				"screenshot_review_status": "none",
+			},
+			want: true,
+		},
+		{
+			name:     "DStudio always refreshes",
+			siteName: "屌丝",
+			row: map[string]any{
+				"screenshots":              "[img]https://example.test/1.jpg[/img]",
+				"screenshot_review_status": "none",
+			},
+			want: true,
+		},
+		{
+			name:     "pending review refreshes",
+			siteName: "OtherSite",
+			row: map[string]any{
+				"screenshots":              "[img]https://example.test/1.jpg[/img]",
+				"screenshot_review_status": "pending",
+			},
+			want: true,
+		},
+		{
+			name:     "empty screenshots refresh",
+			siteName: "OtherSite",
+			row: map[string]any{
+				"screenshots":              "",
+				"screenshot_review_status": "none",
+			},
+			want: true,
+		},
+		{
+			name:     "normal screenshots do not refresh",
+			siteName: "OtherSite",
+			row: map[string]any{
+				"screenshots":              "[img]https://example.test/1.jpg[/img]",
+				"screenshot_review_status": "none",
+			},
+			want: false,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := needsRefreshAutoSeedScreenshotsFromSeedRow(testCase.siteName, testCase.row)
+			if got != testCase.want {
+				t.Fatalf("needsRefreshAutoSeedScreenshotsFromSeedRow() = %v, want %v", got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestIsDStudioSource(t *testing.T) {
+	testCases := []string{"ds", "dstudio", "Depth Studio", "dstudio.me", "屌丝"}
+	for _, siteName := range testCases {
+		t.Run(siteName, func(t *testing.T) {
+			if !isDStudioSource(siteName) {
+				t.Fatalf("expected %q to be treated as DStudio source", siteName)
+			}
+		})
+	}
+}

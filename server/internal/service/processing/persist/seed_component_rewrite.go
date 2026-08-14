@@ -83,6 +83,7 @@ func RewriteSeedTitleComponentsByMediaInfo(
 	}
 
 	mediumBefore := strings.TrimSpace(toStringSimple(row["medium"]))
+	mediumBefore = processingtitle.PreferExplicitTitleMedium(mediumBefore, title, mediaInfoText)
 	mediumAfter := processingmedia.NormalizeMediumByMediaType(mediumBefore, result.IsMediainfo, result.IsBDInfo)
 	if strings.TrimSpace(mediumAfter) != "" && strings.TrimSpace(mediumAfter) != mediumBefore {
 		logx.Infof(
