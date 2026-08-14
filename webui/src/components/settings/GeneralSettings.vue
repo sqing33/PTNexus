@@ -379,6 +379,18 @@
               </el-select>
             </el-form-item>
 
+            <el-form-item
+              v-if="settingsForm.image_hoster === 'pixhost'"
+              label="Pixhost 域名"
+              class="form-item"
+            >
+              <el-input
+                v-model="settingsForm.pixhost_domain"
+                placeholder="img2.pixhost.cc"
+                @blur="autoSaveCrossSeedSettings"
+              />
+            </el-form-item>
+
             <!-- 当选择末日图床时，显示登录凭据输入框 -->
             <transition name="slide" mode="out-in">
               <div
@@ -994,6 +1006,7 @@ type PublishBatchConcurrencyMode = 'cpu' | 'manual' | 'all'
 
 interface CrossSeedSettings {
   image_hoster: string
+  pixhost_domain?: string
   agsv_email?: string
   agsv_password?: string
   default_downloader?: string
@@ -1006,6 +1019,7 @@ const savingCrossSeed = ref(false)
 
 const settingsForm = reactive<CrossSeedSettings>({
   image_hoster: 'pixhost',
+  pixhost_domain: 'img2.pixhost.cc',
   agsv_email: '',
   agsv_password: '',
   default_downloader: '',
@@ -1248,6 +1262,7 @@ const autoSaveCrossSeedSettings = async () => {
     // 保存转种设置
     const crossSeedSettings = {
       image_hoster: settingsForm.image_hoster,
+      pixhost_domain: settingsForm.pixhost_domain,
       agsv_email: settingsForm.agsv_email,
       agsv_password: settingsForm.agsv_password,
       default_downloader: settingsForm.default_downloader,
@@ -1641,6 +1656,7 @@ const saveUploadSettings = async () => {
     // 需要包含完整的cross_seed配置，因为后端API要求必须有image_hoster字段
     const crossSeedSettings = {
       image_hoster: settingsForm.image_hoster,
+      pixhost_domain: settingsForm.pixhost_domain,
       agsv_email: settingsForm.agsv_email,
       agsv_password: settingsForm.agsv_password,
       default_downloader: settingsForm.default_downloader,

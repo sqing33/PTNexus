@@ -42,19 +42,19 @@ type lskyUploadResponse struct {
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
 	Data    struct {
-		Key        string `json:"key"`
-		Name       string `json:"name"`
-		OriginName string `json:"origin_name"`
+		Key        string  `json:"key"`
+		Name       string  `json:"name"`
+		OriginName string  `json:"origin_name"`
 		Size       float64 `json:"size"`
-		Mimetype   string `json:"mimetype"`
-		Extension  string `json:"extension"`
+		Mimetype   string  `json:"mimetype"`
+		Extension  string  `json:"extension"`
 		Links      struct {
-			URL             string `json:"url"`
-			HTML            string `json:"html"`
-			BBCode          string `json:"bbcode"`
-			Markdown        string `json:"markdown"`
+			URL              string `json:"url"`
+			HTML             string `json:"html"`
+			BBCode           string `json:"bbcode"`
+			Markdown         string `json:"markdown"`
 			MarkdownWithLink string `json:"markdown_with_link"`
-			ThumbnailURL    string `json:"thumbnail_url"`
+			ThumbnailURL     string `json:"thumbnail_url"`
 		} `json:"links"`
 	} `json:"data"`
 }
@@ -386,13 +386,14 @@ func TransferRemoteImageToChevereto(imageURL string, cfg CheveretoUploadConfig, 
 type ScreenshotUploadContext struct {
 	Hoster      string
 	Chevereto   CheveretoUploadConfig
+	Pixhost     PixhostUploadConfig
 	AccessToken string
 }
 
 // PrepareScreenshotUploadContext 从 rootConfig 构建截图上传上下文，按 image_hoster 配置分派。
 func PrepareScreenshotUploadContext(rootConfig map[string]any) ScreenshotUploadContext {
 	hoster := GetImageHosterFromConfig(rootConfig)
-	ctx := ScreenshotUploadContext{Hoster: hoster}
+	ctx := ScreenshotUploadContext{Hoster: hoster, Pixhost: GetPixhostUploadConfigFromRootConfig(rootConfig)}
 	if hoster == "agsv" {
 		cfg := GetCheveretoConfigFromRootConfig(rootConfig)
 		ctx.Chevereto = cfg
@@ -413,7 +414,7 @@ func (ctx ScreenshotUploadContext) UploadScreenshot(filePath string, logLine fun
 	if ctx.Hoster == "agsv" {
 		return UploadImageToCheveretoNarrative(filePath, ctx.Chevereto, ctx.AccessToken, logLine)
 	}
-	return UploadImageToPixhostNarrativeWithLogger(filePath, logLine)
+	return UploadImageToPixhostNarrativeWithConfigAndLogger(filePath, ctx.Pixhost, logLine)
 }
 
 // NormalizeScreenshotURL 将上传返回的 URL 规范化。Pixhost 需要将 show_url 转为直链，末日图床直接返回直链。
@@ -422,8 +423,8 @@ func (ctx ScreenshotUploadContext) NormalizeScreenshotURL(showURL string) string
 		return strings.TrimSpace(showURL)
 	}
 	finalURL := strings.TrimSpace(showURL)
-	if direct := PixhostShowToDirectURL(showURL); strings.TrimSpace(direct) != "" {
-		if normalized := NormalizePixhostDirectHost(direct); strings.TrimSpace(normalized) != "" {
+	if direct := PixhostShowToDirectURLWithConfig(showURL, ctx.Pixhost); strings.TrimSpace(direct) != "" {
+		if normalized := NormalizePixhostDirectHostWithConfig(direct, ctx.Pixhost); strings.TrimSpace(normalized) != "" {
 			finalURL = normalized
 		} else {
 			finalURL = direct

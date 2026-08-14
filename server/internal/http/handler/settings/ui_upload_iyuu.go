@@ -13,9 +13,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pt-nexus/server/internal/service/processing/repair"
 )
-
-const pixhostUploadAPIURL = "https://api.pixhost.cc/images"
 
 func (h *Handler) GetUISettings(c *gin.Context) {
 	c.JSON(http.StatusOK, h.settings.GetTorrentsUIViewSettings())
@@ -115,12 +114,13 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	}
 	defer os.Remove(tmpFile)
 
-	showURL, err := uploadToPixhost(tmpFile)
+	pixhostCfg := pixhostUploadConfigFromSettings(h)
+	showURL, err := uploadToPixhost(tmpFile, pixhostCfg)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload to image host: " + err.Error()})
 		return
 	}
-	directURL := normalizePixhostShowURL(showURL)
+	directURL := normalizePixhostShowURL(showURL, pixhostCfg)
 	c.JSON(http.StatusOK, gin.H{"url": directURL})
 }
 
@@ -175,7 +175,8 @@ func saveMultipartToTemp(fileHeader *multipart.FileHeader) (string, error) {
 	return targetPath, nil
 }
 
-func uploadToPixhost(imagePath string) (string, error) {
+func uploadToPixhost(imagePath string, cfg repair.PixhostUploadConfig) (string, error) {
+	cfg = repair.NewPixhostUploadConfig(cfg.DirectHost)
 	const maxRetries = 3
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -201,7 +202,7 @@ func uploadToPixhost(imagePath string) (string, error) {
 			return "", err
 		}
 
-		req, err := http.NewRequest(http.MethodPost, pixhostUploadAPIURL, body)
+		req, err := http.NewRequest(http.MethodPost, cfg.UploadAPIURL, body)
 		if err != nil {
 			return "", err
 		}
@@ -257,19 +258,19 @@ func uploadToPixhost(imagePath string) (string, error) {
 	return "", lastErr
 }
 
-func normalizePixhostShowURL(showURL string) string {
-	directURL := strings.TrimSpace(showURL)
-	for _, from := range []string{
-		"https://pixhost.to/show/",
-		"https://pixhost.to/th/",
-		"http://pixhost.to/show/",
-		"http://pixhost.to/th/",
-		"https://pixhost.cc/show/",
-		"https://pixhost.cc/th/",
-		"http://pixhost.cc/show/",
-		"http://pixhost.cc/th/",
-	} {
-		directURL = strings.Replace(directURL, from, "https://img2.pixhost.cc/images/", 1)
+func normalizePixhostShowURLWithConfig(showURL string, cfg repair.PixhostUploadConfig) string {
+	return repair.PixhostShowToDirectURLWithConfig(showURL, cfg)
+}
+
+func normalizePixhostShowURL(showURL string, cfg repair.PixhostUploadConfig) string {
+	return normalizePixhostShowURLWithConfig(showURL, cfg)
+}
+
+func pixhostUploadConfigFromSettings(h *Handler) repair.PixhostUploadConfig {
+	if h == nil || h.settings == nil {
+		return repair.DefaultPixhostUploadConfig()
 	}
-	return directURL
+	crossSeed := h.settings.GetCrossSeedSettings()
+	domain, _ := crossSeed["pixhost_domain"].(string)
+	return repair.NewPixhostUploadConfig(domain)
 }

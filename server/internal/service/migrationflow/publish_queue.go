@@ -485,6 +485,10 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 			"upload_data":            uploadData,
 			"targetSite":             targetSite,
 			"sourceSite":             sourceSite,
+			"source_site":            sourceSite,
+			"torrent_id":             torrentID,
+			"hash":                   strings.TrimSpace(lookup.Hash),
+			"name":                   strings.TrimSpace(firstNonEmptyString(lookup.Name, title)),
 			"downloaderId":           downloaderID,
 			"auto_add_to_downloader": true,
 			"publish_scene":          scene,
@@ -863,6 +867,14 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	ctx := publishworkflow.Context{}
 	_ = json.Unmarshal([]byte(taskRecord.ContextJSON), &ctx)
 
+	execTaskID := strings.TrimSpace(taskRecord.TaskID)
+	if execTaskID == "" {
+		execTaskID = fmt.Sprintf("queue-%d", taskID)
+	}
+	if hydratedTaskID := s.hydrateQueuePublishLogContext(taskRecord, payload, uploadData, ctx, execTaskID); hydratedTaskID != "" {
+		execTaskID = hydratedTaskID
+	}
+
 	payload["publish_trigger"] = strings.TrimSpace(firstNonEmptyString(taskRecord.Trigger, "queue"))
 	payload["queue_task_id"] = taskID
 	payload["queue_group_id"] = strings.TrimSpace(taskRecord.GroupID)
@@ -933,11 +945,6 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	torrentID := strings.TrimSpace(processingshared.ToString(payload["torrent_id"], taskRecord.TorrentID))
 	if torrentID == "" {
 		torrentID = strings.TrimSpace(processingshared.ToString(uploadData["torrent_id"], ctx.TorrentID))
-	}
-
-	execTaskID := strings.TrimSpace(taskRecord.TaskID)
-	if execTaskID == "" {
-		execTaskID = fmt.Sprintf("queue-%d", taskID)
 	}
 
 	preCheckPassed, preCheckMessage := s.checkQueueVideoSizePrecondition(taskRecord, payload, ctx)
@@ -1058,6 +1065,85 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 		_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", logText)
 	}
 	logx.Warnf(publishQueueLogModule, "队列任务失败，已重试入队 id=%d attempt=%d next_run_at=%s", taskID, attempt, nextRunAt.Format(time.RFC3339))
+}
+
+func (s *MigrateService) hydrateQueuePublishLogContext(taskRecord repository.PublishQueueTask, payload map[string]any, uploadData map[string]any, ctx publishworkflow.Context, fallbackTaskID string) string {
+	if payload == nil {
+		return strings.TrimSpace(fallbackTaskID)
+	}
+	if uploadData == nil {
+		uploadData = map[string]any{}
+	}
+
+	execTaskID := strings.TrimSpace(firstNonEmptyString(ctx.TaskID, taskRecord.TaskID, fallbackTaskID))
+	if execTaskID != "" {
+		payload["task_id"] = execTaskID
+	}
+
+	torrentID := strings.TrimSpace(firstNonEmptyString(
+		taskRecord.TorrentID,
+		ctx.TorrentID,
+		processingshared.ToString(payload["torrent_id"], ""),
+		processingshared.ToString(uploadData["torrent_id"], ""),
+	))
+	if torrentID != "" {
+		payload["torrent_id"] = torrentID
+		uploadData["torrent_id"] = torrentID
+	}
+
+	sourceSite := strings.TrimSpace(firstNonEmptyString(
+		taskRecord.SourceSite,
+		processingshared.ToString(payload["sourceSite"], ""),
+		processingshared.ToString(payload["source_site"], ""),
+		ctx.SourceNickname,
+		ctx.SiteName,
+	))
+	if sourceSite != "" {
+		payload["sourceSite"] = sourceSite
+		payload["source_site"] = sourceSite
+	}
+
+	name := strings.TrimSpace(firstNonEmptyString(
+		processingshared.ToString(uploadData["name"], ""),
+		processingshared.ToString(payload["name"], ""),
+		ctx.Name,
+		taskRecord.Title,
+	))
+	if name != "" {
+		payload["name"] = name
+		uploadData["name"] = name
+	}
+
+	hash := strings.TrimSpace(firstNonEmptyString(
+		processingshared.ToString(uploadData["hash"], ""),
+		processingshared.ToString(payload["hash"], ""),
+		ctx.Hash,
+	))
+	if hash != "" {
+		payload["hash"] = hash
+		uploadData["hash"] = hash
+	}
+
+	if execTaskID != "" && s != nil && s.contextState != nil {
+		if strings.TrimSpace(ctx.TaskID) == "" {
+			ctx.TaskID = execTaskID
+		}
+		if strings.TrimSpace(ctx.TorrentID) == "" {
+			ctx.TorrentID = torrentID
+		}
+		if strings.TrimSpace(ctx.Name) == "" {
+			ctx.Name = name
+		}
+		if strings.TrimSpace(ctx.Hash) == "" {
+			ctx.Hash = hash
+		}
+		if strings.TrimSpace(ctx.SourceNickname) == "" {
+			ctx.SourceNickname = sourceSite
+		}
+		s.contextState.Set(execTaskID, ctx)
+	}
+
+	return execTaskID
 }
 
 func (s *MigrateService) notifyQueueExistingTorrent(task repository.PublishQueueTask) {

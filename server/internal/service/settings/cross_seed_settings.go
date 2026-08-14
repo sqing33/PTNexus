@@ -3,11 +3,15 @@ package settings
 import (
 	"fmt"
 	"runtime"
+	"strings"
 )
 
 func (s *SettingsService) GetCrossSeedSettings() map[string]any {
 	defaults := map[string]any{
 		"image_hoster":                     "pixhost",
+		"pixhost_domain":                   "img2.pixhost.cc",
+		"agsv_email":                       "",
+		"agsv_password":                    "",
 		"default_downloader":               "",
 		"auto_add_existing_to_downloader":  true,
 		"auto_update_existing_torrent":     false,
@@ -38,9 +42,33 @@ func (s *SettingsService) SaveCrossSeedSettings(newSettings map[string]any) erro
 	if toString(merged["image_hoster"], "") == "" {
 		merged["image_hoster"] = "pixhost"
 	}
+	merged["pixhost_domain"] = normalizePixhostDomainSetting(merged["pixhost_domain"])
 
 	cfg["cross_seed"] = merged
 	return s.cfg.Save(cfg)
+}
+
+func normalizePixhostDomainSetting(value any) string {
+	domain := strings.TrimSpace(toString(value, ""))
+	if domain == "" {
+		return "img2.pixhost.cc"
+	}
+	domain = strings.TrimPrefix(domain, "http://")
+	domain = strings.TrimPrefix(domain, "https://")
+	if i := strings.IndexAny(domain, "/?#"); i >= 0 {
+		domain = domain[:i]
+	}
+	domain = strings.ToLower(strings.Trim(domain, ". "))
+	if domain == "" {
+		return "img2.pixhost.cc"
+	}
+	if strings.HasPrefix(domain, "api.") {
+		domain = "img2." + strings.TrimPrefix(domain, "api.")
+	}
+	if domain == "pixhost.to" || domain == "pixhost.cc" {
+		domain = "img2." + domain
+	}
+	return domain
 }
 
 func (s *SettingsService) PublishConcurrencyInfo() map[string]any {
