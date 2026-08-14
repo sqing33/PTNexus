@@ -643,17 +643,23 @@ func (r *AutoSeedRepository) ListRetentionCandidates(limit int) ([]AutoSeedReten
 	if limit <= 0 || limit > 1000 {
 		limit = 500
 	}
+	// MySQL/PostgreSQL 中 last_publish_at 为日期类型，与空串比较/作为默认值会触发 1525 错误，仅 SQLite(TEXT) 保留空串写法。
+	lastPublishAtSelect := "sp.last_publish_at AS last_publish_at"
+	lastPublishAtNonEmpty := ""
+	if r.store.DBType == "sqlite" {
+		lastPublishAtSelect = "COALESCE(sp.last_publish_at, '') AS last_publish_at"
+		lastPublishAtNonEmpty = "\n\t\t\t  AND last_publish_at <> ''"
+	}
 	rows := make([]AutoSeedRetentionCandidate, 0)
 	err := r.store.DB.Table("auto_seed_items AS i").
-		Select("i.*, r.seed_retention_minutes, COALESCE(sp.last_publish_at, '') AS last_publish_at").
+		Select("i.*, r.seed_retention_minutes, "+lastPublishAtSelect).
 		Joins("JOIN auto_seed_rules AS r ON r.id = i.rule_id").
 		Joins(`LEFT JOIN (
 			SELECT hash, MAX(last_publish_at) AS last_publish_at
 			FROM seed_parameters
 			WHERE hash IS NOT NULL
 			  AND hash <> ''
-			  AND last_publish_at IS NOT NULL
-			  AND last_publish_at <> ''
+			  AND last_publish_at IS NOT NULL` + lastPublishAtNonEmpty + `
 			GROUP BY hash
 		) AS sp ON LOWER(TRIM(sp.hash)) = LOWER(TRIM(i.downloader_hash))`).
 		Where("i.status = ? AND r.seed_retention_minutes > 0", AutoSeedItemStatusPublished).

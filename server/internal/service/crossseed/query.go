@@ -241,6 +241,11 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 	if strings.EqualFold(dbType, "postgresql") {
 		isDeletedExpr = "CASE WHEN ct.hash IS NULL THEN true ELSE false END AS is_deleted"
 	}
+	// MySQL/PostgreSQL 中 last_publish_at 为日期类型，COALESCE 空串默认值会触发 1525 错误，仅 SQLite(TEXT) 保留。
+	lastPublishAtExpr := "sp.last_publish_at"
+	if strings.EqualFold(dbType, "sqlite") {
+		lastPublishAtExpr = "COALESCE(sp.last_publish_at, '')"
+	}
 	rowIDExpr := seedParameterRowIDExpr(dbType)
 	dataQuery := fmt.Sprintf(`
 		SELECT %s, sp.hash, sp.torrent_id, sp.site_name, sp.nickname,
@@ -254,13 +259,13 @@ func (s *CrossSeedService) QueryData(params CrossSeedQueryParams) (map[string]an
 		       sp.title_components, sp.screenshot_review_status,
 		       %s,
 		       sp.is_reviewed, sp.publish_at,
-		       COALESCE(sp.last_publish_at, '') AS last_publish_at,
+		       %s AS last_publish_at,
 		       sp.updated_at
 		%s
 		%s
 		ORDER BY sp.created_at DESC
 		LIMIT ? OFFSET ?
-	`, rowIDExpr, isDeletedExpr, fromClause, whereClause)
+	`, rowIDExpr, isDeletedExpr, lastPublishAtExpr, fromClause, whereClause)
 
 	dataArgs := make([]any, 0, len(args)+2)
 	dataArgs = append(dataArgs, args...)

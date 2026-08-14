@@ -531,13 +531,17 @@ func (r *TorrentDataRepository) PublishAtByNames() (map[string]string, error) {
 // 副作用：仅读取 seed_parameters.last_publish_at，不修改数据。
 func (r *TorrentDataRepository) LastPublishAtByNames() (map[string]string, error) {
 	rows := make([]nameLastPublishAt, 0)
+	// MySQL/PostgreSQL 中 last_publish_at 为日期类型，与空串比较会触发 1525 错误，仅 SQLite(TEXT) 需要判空串。
+	nonEmpty := ""
+	if r.store.DBType == "sqlite" {
+		nonEmpty = "\n\t\t  AND last_publish_at != ''"
+	}
 	query := `
 		SELECT name, MAX(last_publish_at) AS last_publish_at
 		FROM seed_parameters
 		WHERE name IS NOT NULL
 		  AND name != ''
-		  AND last_publish_at IS NOT NULL
-		  AND last_publish_at != ''
+		  AND last_publish_at IS NOT NULL` + nonEmpty + `
 		GROUP BY name
 	`
 	if err := r.store.DB.Raw(query).Scan(&rows).Error; err != nil {

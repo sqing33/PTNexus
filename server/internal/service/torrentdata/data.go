@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/pt-nexus/server/internal/platform/logx"
 	"github.com/pt-nexus/server/internal/repository"
 )
 
@@ -51,6 +52,8 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 	}
 	lastPublishAtMap, err := s.repo.LastPublishAtByNames()
 	if err != nil {
+		// 不能静默降级为空：此处记录日志便于定位（如 MySQL 日期列与空串比较导致的 SQL 错误）。
+		logx.Warnf(torrentDataLogModule, "加载最后发布时间映射失败 err=%v", err)
 		lastPublishAtMap = map[string]string{}
 	}
 	sourceStatusMap, err := s.repo.SeedParameterSourceStatusByNames()

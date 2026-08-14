@@ -101,6 +101,15 @@ func (m *SchemaManager) EnsureSchema() error {
 	return nil
 }
 
+// lastPublishAtEmptyCondition 返回判断 last_publish_at 为空的 WHERE 片段。
+// MySQL/PostgreSQL 中该列为日期类型，与空串比较会触发 1525 错误，仅 SQLite(TEXT) 需要判空串。
+func (m *SchemaManager) lastPublishAtEmptyCondition() string {
+	if m.store.DBType == "sqlite" {
+		return "(last_publish_at IS NULL OR last_publish_at = '')"
+	}
+	return "last_publish_at IS NULL"
+}
+
 // backfillSeedParameterLastPublishAtFromPublishLogs 使用成功发布日志补齐空的最后发布时间。
 // 参数/返回：无入参，返回数据库查询或更新错误。
 // 失败场景：publish_logs 查询失败或 seed_parameters 更新失败时返回错误。
@@ -158,7 +167,7 @@ func (m *SchemaManager) backfillSeedParameterLastPublishAtFromPublishLogs() erro
 		loweredSource := strings.ToLower(row.source)
 		result := m.store.DB.Table("seed_parameters").
 			Where("torrent_id = ? AND (site_name = ? OR nickname = ? OR LOWER(TRIM(site_name)) = ? OR LOWER(TRIM(nickname)) = ?)", row.torrentID, row.source, row.source, loweredSource, loweredSource).
-			Where("(last_publish_at IS NULL OR last_publish_at = '')").
+			Where(m.lastPublishAtEmptyCondition()).
 			Updates(map[string]any{"last_publish_at": row.publishAt})
 		if result.Error != nil {
 			return result.Error
@@ -167,7 +176,7 @@ func (m *SchemaManager) backfillSeedParameterLastPublishAtFromPublishLogs() erro
 	for _, row := range latestByTitle {
 		result := m.store.DB.Table("seed_parameters").
 			Where("LOWER(TRIM(name)) = LOWER(TRIM(?))", row.title).
-			Where("(last_publish_at IS NULL OR last_publish_at = '')").
+			Where(m.lastPublishAtEmptyCondition()).
 			Updates(map[string]any{"last_publish_at": row.publishAt})
 		if result.Error != nil {
 			return result.Error
