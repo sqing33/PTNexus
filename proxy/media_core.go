@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"mime/multipart"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,67 @@ import (
 	"time"
 )
 
-const pixhostUploadAPIURL = "https://api.pixhost.cc/images"
+const defaultPixhostDirectHost = "img2.pixhost.cc"
+const defaultPixhostUploadAPIURL = "https://api.pixhost.cc/images"
+
+type pixhostUploadConfig struct {
+	DirectHost   string
+	UploadAPIURL string
+}
+
+func newPixhostUploadConfig(domain string) pixhostUploadConfig {
+	directHost := normalizePixhostDirectDomain(domain)
+	return pixhostUploadConfig{
+		DirectHost:   directHost,
+		UploadAPIURL: buildPixhostUploadAPIURL(directHost),
+	}
+}
+
+func normalizePixhostDirectDomain(domain string) string {
+	trimmed := strings.TrimSpace(domain)
+	if trimmed == "" {
+		return defaultPixhostDirectHost
+	}
+	if parsed, err := neturl.Parse(trimmed); err == nil && parsed != nil && parsed.Host != "" {
+		trimmed = parsed.Host
+	}
+	if i := strings.IndexAny(trimmed, "/?#"); i >= 0 {
+		trimmed = trimmed[:i]
+	}
+	host := strings.ToLower(strings.TrimSpace(trimmed))
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.Trim(host, ". ")
+	if host == "" {
+		return defaultPixhostDirectHost
+	}
+	if strings.HasPrefix(host, "api.") {
+		host = "img2." + strings.TrimPrefix(host, "api.")
+	}
+	if host == "pixhost.to" || host == "pixhost.cc" {
+		host = "img2." + host
+	}
+	return host
+}
+
+func buildPixhostUploadAPIURL(directHost string) string {
+	host := normalizePixhostDirectDomain(directHost)
+	if strings.HasPrefix(host, "api.") {
+		return "https://" + host + "/images"
+	}
+	if strings.HasPrefix(host, "img") {
+		if dot := strings.Index(host, "."); dot >= 0 && dot+1 < len(host) {
+			root := host[dot+1:]
+			if root == "pixhost.to" || root == "pixhost.cc" {
+				return "https://api." + root + "/images"
+			}
+		}
+	}
+	if host == "pixhost.to" || host == "pixhost.cc" {
+		return "https://api." + host + "/images"
+	}
+	return defaultPixhostUploadAPIURL
+}
 
 func normalizePath(path string) string {
 	trimmed := strings.TrimSpace(path)
@@ -1034,11 +1095,14 @@ func findTargetVideoFile(path string, contentName string) (string, error) {
 	return videoFiles[0].path, nil
 }
 
-func uploadToPixhost(imagePath string) (string, error) {
+func uploadToPixhost(imagePath string, cfg pixhostUploadConfig) (string, error) {
+	if strings.TrimSpace(cfg.DirectHost) == "" {
+		cfg = newPixhostUploadConfig("")
+	}
 	apiURLs := []string{
-		pixhostUploadAPIURL,
-		"http://pt-nexus-proxy.sqing33.dpdns.org/" + pixhostUploadAPIURL,
-		"http://pt-nexus-proxy.1395251710.workers.dev/" + pixhostUploadAPIURL,
+		cfg.UploadAPIURL,
+		"http://pt-nexus-proxy.sqing33.dpdns.org/" + cfg.UploadAPIURL,
+		"http://pt-nexus-proxy.1395251710.workers.dev/" + cfg.UploadAPIURL,
 	}
 
 	var lastErr error

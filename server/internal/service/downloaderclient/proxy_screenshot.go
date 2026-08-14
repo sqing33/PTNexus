@@ -21,6 +21,7 @@ type proxyScreenshotRequest struct {
 	PreviewCount        int       `json:"preview_count,omitempty"`
 	SelectedTimes       []float64 `json:"selected_times,omitempty"`
 	SelectedSubtitleSID *int      `json:"selected_subtitle_sid,omitempty"`
+	PixhostDomain       string    `json:"pixhost_domain,omitempty"`
 }
 
 // ProxyScreenshotPreviewCandidate 描述盒子代理返回的低清截图候选。
@@ -258,6 +259,7 @@ func (d Downloader) requestProxyScreenshots(
 		PreviewCount:        previewCount,
 		SelectedTimes:       selectedTimes,
 		SelectedSubtitleSID: selectedSubtitleSID,
+		PixhostDomain:       strings.TrimSpace(d.PixhostDomain),
 	}
 	payloadBytes, err := json.Marshal(requestPayload)
 	if err != nil {

@@ -90,6 +90,7 @@ type ScreenshotRequest struct {
 	PreviewCount        int       `json:"preview_count,omitempty"`
 	SelectedTimes       []float64 `json:"selected_times,omitempty"`
 	SelectedSubtitleSID *int      `json:"selected_subtitle_sid,omitempty"`
+	PixhostDomain       string    `json:"pixhost_domain,omitempty"`
 }
 
 type ScreenshotPreviewCandidate struct {

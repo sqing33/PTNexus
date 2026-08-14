@@ -38,6 +38,7 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 		selectedSubtitleSID = *reqData.SelectedSubtitleSID
 	}
 	log.Printf("screenshot request received: mode=%s remote_path=%s content_name=%q preview_count=%d selected_times=%d selected_subtitle_sid=%d", mode, initialPath, reqData.ContentName, reqData.PreviewCount, len(reqData.SelectedTimes), selectedSubtitleSID)
+	pixhostCfg := newPixhostUploadConfig(reqData.PixhostDomain)
 
 	err := withMountedISOIfNeeded(initialPath, "screenshot request", func(resolvedPath string) error {
 		videoPath, err := findTargetVideoFile(resolvedPath, reqData.ContentName)
@@ -205,13 +206,13 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			log.Printf("screenshot upload prepared: index=%d path=%s size_mb=%.2f", i+1, uploadPath, fileSizeMB(uploadPath))
-			showURL, err := uploadToPixhost(uploadPath)
+			showURL, err := uploadToPixhost(uploadPath, pixhostCfg)
 			if err != nil {
 				log.Printf("screenshot %d failed during upload: %v", i+1, err)
 				continue
 			}
 
-			directURL := normalizePixhostShowURL(showURL)
+			directURL := normalizePixhostShowURL(showURL, pixhostCfg)
 			log.Printf("screenshot upload succeeded: index=%d source=%s direct_url=%s", i+1, uploadPath, directURL)
 			uploadedURLs = append(uploadedURLs, directURL)
 		}
@@ -251,8 +252,9 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, r, statusCode, response)
 }
 
-func normalizePixhostShowURL(showURL string) string {
+func normalizePixhostShowURL(showURL string, cfg pixhostUploadConfig) string {
 	directURL := strings.TrimSpace(showURL)
+	directPrefix := "https://" + normalizePixhostDirectDomain(cfg.DirectHost) + "/images/"
 	for _, from := range []string{
 		"https://pixhost.to/show/",
 		"https://pixhost.to/th/",
@@ -263,7 +265,7 @@ func normalizePixhostShowURL(showURL string) string {
 		"http://pixhost.cc/show/",
 		"http://pixhost.cc/th/",
 	} {
-		directURL = strings.Replace(directURL, from, "https://img2.pixhost.cc/images/", 1)
+		directURL = strings.Replace(directURL, from, directPrefix, 1)
 	}
 	return directURL
 }

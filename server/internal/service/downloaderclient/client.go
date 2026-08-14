@@ -19,15 +19,16 @@ import (
 )
 
 type Downloader struct {
-	ID        string
-	Name      string
-	Type      string
-	Host      string
-	Username  string
-	Password  string
-	Enabled   bool
-	UseProxy  bool
-	ProxyPort int
+	ID            string
+	Name          string
+	Type          string
+	Host          string
+	Username      string
+	Password      string
+	Enabled       bool
+	UseProxy      bool
+	ProxyPort     int
+	PixhostDomain string
 }
 
 // TrafficStats 统一描述下载器实时速度与累计流量统计。
@@ -178,21 +179,23 @@ func FromConfig(root map[string]any, downloaderID string) (Downloader, error) {
 	}
 
 	list := toSlice(downloadersRaw)
+	crossSeed := toMap(root["cross_seed"])
 	for _, item := range list {
 		downloader := toMap(item)
 		if strings.TrimSpace(toString(downloader["id"], "")) != downloaderID {
 			continue
 		}
 		result := Downloader{
-			ID:        toString(downloader["id"], ""),
-			Name:      toString(downloader["name"], ""),
-			Type:      strings.ToLower(strings.TrimSpace(toString(downloader["type"], ""))),
-			Host:      normalizeHost(toString(downloader["host"], "")),
-			Username:  toString(downloader["username"], ""),
-			Password:  toString(downloader["password"], ""),
-			Enabled:   toBool(downloader["enabled"], true),
-			UseProxy:  toBool(downloader["use_proxy"], false),
-			ProxyPort: toInt(downloader["proxy_port"], 9090),
+			ID:            toString(downloader["id"], ""),
+			Name:          toString(downloader["name"], ""),
+			Type:          strings.ToLower(strings.TrimSpace(toString(downloader["type"], ""))),
+			Host:          normalizeHost(toString(downloader["host"], "")),
+			Username:      toString(downloader["username"], ""),
+			Password:      toString(downloader["password"], ""),
+			Enabled:       toBool(downloader["enabled"], true),
+			UseProxy:      toBool(downloader["use_proxy"], false),
+			ProxyPort:     toInt(downloader["proxy_port"], 9090),
+			PixhostDomain: strings.TrimSpace(toString(crossSeed["pixhost_domain"], "")),
 		}
 		if result.ID == "" || result.Type == "" || result.Host == "" {
 			return Downloader{}, fmt.Errorf("下载器配置不完整: id=%s", downloaderID)
