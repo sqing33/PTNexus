@@ -34,12 +34,7 @@ func TryFetchDetailHTML(detailURL, cookie string) (string, string, error) {
 		req.Header.Set("Cookie", cookie)
 	}
 
-	client := &http.Client{
-		Timeout: 45 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := newUploadHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		detailLines = append(detailLines, fmt.Sprintf("请求失败: %v", err))

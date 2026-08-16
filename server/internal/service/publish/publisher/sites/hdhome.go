@@ -7,6 +7,7 @@ import (
 	"github.com/pt-nexus/server/internal/platform/logx"
 	publishmapping "github.com/pt-nexus/server/internal/service/publish/mapping"
 	"github.com/pt-nexus/server/internal/service/publish/publisher"
+	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
 
 const hdhomePublishLogModule = "发布-家园"
@@ -21,7 +22,21 @@ type hdhomePublisher struct {
 // 失败场景：公共发布器失败时返回 error。
 // 副作用：调用公共发布器，并按家园上传表单修正分类、来源、处理、制作组与编码字段。
 func PublishHDHome(input publisher.PublishInput) (publisher.PublishResult, error) {
-	return publishWithPublicSite(input, hdhomePublisher{})
+	result, err := publishWithPublicSite(input, hdhomePublisher{})
+	if err != nil {
+		return result, err
+	}
+	if strings.TrimSpace(result.DirectDownloadURL) != "" {
+		return result, nil
+	}
+	directDownloadURL, detailLog := resolveHDHomeDirectDownloadURL(input, result.PublishURL)
+	if strings.TrimSpace(detailLog) != "" {
+		result.AttemptDetailLog = appendHDHomeAttemptDetail(result.AttemptDetailLog, detailLog)
+	}
+	if strings.TrimSpace(directDownloadURL) != "" {
+		result.DirectDownloadURL = strings.TrimSpace(directDownloadURL)
+	}
+	return result, nil
 }
 
 func (hdhomePublisher) LogModule() string {
@@ -45,6 +60,63 @@ func (hdhomePublisher) AdjustFormFields(input publisher.PublishInput, formFields
 	adjustHDHomeCategory(input, formFields)
 	adjustHDHomeCodec(input, formFields)
 	adjustHDHomeAudio(input, formFields)
+}
+
+// resolveHDHomeDirectDownloadURL 发布成功后读取详情页，提取家园实际使用的 downhash 下载直链。
+func resolveHDHomeDirectDownloadURL(input publisher.PublishInput, publishURL string) (string, string) {
+	normalizedPublishURL := publishuploader.NormalizePublishURLWithOfferSupport(input.BaseURL, publishURL)
+	logLines := []string{"--- [家园下载链接解析] ---"}
+	appendLog := func(text string) {
+		trimmed := strings.TrimSpace(text)
+		if trimmed != "" {
+			logLines = append(logLines, trimmed)
+		}
+	}
+	buildDetail := func() string {
+		if len(logLines) <= 1 {
+			return ""
+		}
+		return strings.Join(logLines, "\n")
+	}
+
+	if direct := publishuploader.ExtractDownhashDownloadURLFromText(input.BaseURL, publishURL); direct != "" {
+		appendLog("已从发布链接识别家园 downhash 下载地址")
+		return direct, buildDetail()
+	}
+	if strings.TrimSpace(normalizedPublishURL) == "" {
+		appendLog("跳过：缺少详情页链接，无法提取 downhash 下载地址")
+		return "", buildDetail()
+	}
+	if strings.TrimSpace(input.Cookie) == "" {
+		appendLog("跳过：缺少 Cookie，无法读取详情页提取 downhash 下载地址")
+		return "", buildDetail()
+	}
+
+	detailHTML, fetchDetail, fetchErr := publishuploader.TryFetchDetailHTML(normalizedPublishURL, input.Cookie)
+	appendLog(fetchDetail)
+	if fetchErr != nil {
+		appendLog("提取失败：获取详情页失败，无法生成家园真实下载地址")
+		return "", buildDetail()
+	}
+	direct := publishuploader.ExtractDownhashDownloadURLFromText(input.BaseURL, detailHTML)
+	if strings.TrimSpace(direct) == "" {
+		appendLog("提取失败：详情页未找到 downhash 下载地址")
+		return "", buildDetail()
+	}
+	appendLog("已从详情页提取家园 downhash 下载地址")
+	return direct, buildDetail()
+}
+
+func appendHDHomeAttemptDetail(current string, extra string) string {
+	trimmedCurrent := strings.TrimSpace(current)
+	trimmedExtra := strings.TrimSpace(extra)
+	if trimmedCurrent == "" {
+		return trimmedExtra
+	}
+	if trimmedExtra == "" {
+		return trimmedCurrent
+	}
+	return trimmedCurrent + "\n" + trimmedExtra
 }
 
 // buildHDHomeExtraFields 构造家园上传页独立的来源、处理与制作组字段。
