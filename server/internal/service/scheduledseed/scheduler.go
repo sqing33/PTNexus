@@ -1,6 +1,7 @@
 package scheduledseed
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -184,81 +185,96 @@ func (s *Scheduler) processTask(task *repository.ScheduledSeedTask, now time.Tim
 		totalSkipped := 0
 
 		// 一个种子同时向所有目标站点发种
-		for _, site := range targetSites {
-			// 查重
-			isDup, dupErr := s.repo.CheckDuplicate(currentSeed.TorrentID, currentSeed.SiteName, site)
-			if dupErr != nil {
-				logx.Warnf(schedulerLogModule, "任务 %d 查重失败(%s→%s): %v，继续执行", task.ID, currentSeed.TorrentID, site, dupErr)
-			}
-
-			if isDup {
-				totalSkipped++
-				logx.Infof(schedulerLogModule, "任务 %d 种子 %s → %s 已发布过，跳过",
-					task.ID, currentSeed.TorrentID, site)
-
-				// 记录已存在的发布日志
-				if s.publishLogRepo != nil {
-					logEntry := &repository.PublishLogEntry{
-						Trigger:    task.TriggerTag,
-						Scene:      "scheduled_seeding",
-						TorrentID:  currentSeed.TorrentID,
-						SourceSite: currentSeed.SiteName,
-						TargetSite: site,
-						Title:      currentSeed.Title,
-						Status:     "exists",
-						Logs:       "该种子已成功发布过，跳过重复发种",
-					}
-					if _, insertErr := s.publishLogRepo.Insert(logEntry); insertErr != nil {
-						logx.Warnf(schedulerLogModule, "任务 %d 写入跳过日志失败: %v", task.ID, insertErr)
-					}
+		var seedErr error
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					seedErr = fmt.Errorf("处理种子时发生异常: %v", recovered)
 				}
-				continue
-			}
+			}()
 
-			// 入队发布
-			payload := map[string]any{
-				"target_site_name": site,
-				"publish_scene":   "scheduled_seeding",
-				"publish_trigger":  task.TriggerTag,
-				"seeds": []any{
-					map[string]any{
-						"torrent_id": currentSeed.TorrentID,
-						"site_name":  currentSeed.SiteName,
-						"nickname":   currentSeed.SiteName,
+			for _, site := range targetSites {
+				// 查重
+				isDup, dupErr := s.repo.CheckDuplicate(currentSeed.TorrentID, currentSeed.SiteName, site)
+				if dupErr != nil {
+					logx.Warnf(schedulerLogModule, "任务 %d 查重失败(%s→%s): %v，继续执行", task.ID, currentSeed.TorrentID, site, dupErr)
+				}
+
+				if isDup {
+					totalSkipped++
+					logx.Infof(schedulerLogModule, "任务 %d 种子 %s → %s 已发布过，跳过",
+						task.ID, currentSeed.TorrentID, site)
+
+					// 记录已存在的发布日志
+					if s.publishLogRepo != nil {
+						logEntry := &repository.PublishLogEntry{
+							Trigger:    task.TriggerTag,
+							Scene:      "scheduled_seeding",
+							TorrentID:  currentSeed.TorrentID,
+							SourceSite: currentSeed.SiteName,
+							TargetSite: site,
+							Title:      currentSeed.Title,
+							Status:     "exists",
+							Logs:       "该种子已成功发布过，跳过重复发种",
+						}
+						if _, insertErr := s.publishLogRepo.Insert(logEntry); insertErr != nil {
+							logx.Warnf(schedulerLogModule, "任务 %d 写入跳过日志失败: %v", task.ID, insertErr)
+						}
+					}
+					continue
+				}
+
+				// 入队发布
+				payload := map[string]any{
+					"target_site_name": site,
+					"publish_scene":    "scheduled_seeding",
+					"publish_trigger":  task.TriggerTag,
+					"seeds": []any{
+						map[string]any{
+							"torrent_id": currentSeed.TorrentID,
+							"site_name":  currentSeed.SiteName,
+							"nickname":   currentSeed.SiteName,
+						},
 					},
-				},
-			}
-
-			result, code := s.enqueueFn(payload)
-			if code != 200 {
-				msg := "未知错误"
-				if m, ok := result["message"].(string); ok {
-					msg = m
 				}
-				logx.Errorf(schedulerLogModule, "任务 %d 入队失败(%s→%s): %s", task.ID, currentSeed.TorrentID, site, msg)
 
-				// 写入失败记录到 publish_logs
-				if s.publishLogRepo != nil {
-					logEntry := &repository.PublishLogEntry{
-						Trigger:    task.TriggerTag,
-						Scene:      "scheduled_seeding",
-						TorrentID:  currentSeed.TorrentID,
-						SourceSite: currentSeed.SiteName,
-						TargetSite: site,
-						Title:      currentSeed.Title,
-						Status:     "failed",
-						Logs:       "入队失败: " + msg,
+				result, code := s.enqueueFn(payload)
+				if code != 200 {
+					msg := "未知错误"
+					if m, ok := result["message"].(string); ok {
+						msg = m
 					}
-					if _, insertErr := s.publishLogRepo.Insert(logEntry); insertErr != nil {
-						logx.Warnf(schedulerLogModule, "任务 %d 写入失败日志失败: %v", task.ID, insertErr)
+					logx.Errorf(schedulerLogModule, "任务 %d 入队失败(%s→%s): %s", task.ID, currentSeed.TorrentID, site, msg)
+
+					// 写入失败记录到 publish_logs
+					if s.publishLogRepo != nil {
+						logEntry := &repository.PublishLogEntry{
+							Trigger:    task.TriggerTag,
+							Scene:      "scheduled_seeding",
+							TorrentID:  currentSeed.TorrentID,
+							SourceSite: currentSeed.SiteName,
+							TargetSite: site,
+							Title:      currentSeed.Title,
+							Status:     "failed",
+							Logs:       "入队失败: " + msg,
+						}
+						if _, insertErr := s.publishLogRepo.Insert(logEntry); insertErr != nil {
+							logx.Warnf(schedulerLogModule, "任务 %d 写入失败日志失败: %v", task.ID, insertErr)
+						}
 					}
+					totalSkipped++
+				} else {
+					totalPublished++
+					logx.Infof(schedulerLogModule, "任务 %d 已入队: 种子 %s → %s",
+						task.ID, currentSeed.TorrentID, site)
 				}
-				totalSkipped++
-			} else {
-				totalPublished++
-				logx.Infof(schedulerLogModule, "任务 %d 已入队: 种子 %s → %s",
-					task.ID, currentSeed.TorrentID, site)
 			}
+		}()
+
+		if seedErr != nil {
+			totalSkipped++
+			logx.Errorf(schedulerLogModule, "任务 %d 种子 %s 处理异常: %v，将继续处理下一个种子",
+				task.ID, currentSeed.TorrentID, seedErr)
 		}
 
 		// 推进种子索引
@@ -306,9 +322,10 @@ func (s *Scheduler) processTask(task *repository.ScheduledSeedTask, now time.Tim
 		task.Status = newStatus
 		task.UpdatedAt = now.Format(repository.PublishQueueTimeLayout)
 
-		// 如果所有站点都跳过了（全部重复），立即处理下一个种子，不等待下次发种时间
+		// 当前种子没有任何站点成功入队时，立即处理下一个种子，不等待下次发种时间。
+		// 入队失败和处理异常都计入 totalSkipped，避免异常种子阻塞整个任务。
 		if totalPublished == 0 && totalSkipped > 0 && newStatus == repository.ScheduledSeedStatusActive {
-			logx.Infof(schedulerLogModule, "任务 %d 种子[%d] 已存在，立即处理下一个种子", task.ID, seedIdx)
+			logx.Infof(schedulerLogModule, "任务 %d 种子[%d] 未成功发种，立即处理下一个种子", task.ID, seedIdx)
 			continue
 		}
 

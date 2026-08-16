@@ -16,6 +16,7 @@ import (
 // SitePublishConfig 表示站点发布映射配置。
 type SitePublishConfig struct {
 	SourcePath         string
+	UploadFileField    string
 	FormFields         map[string]string
 	Mappings           map[string]map[string]string
 	GenreOptionsByType map[string][]string
@@ -73,6 +74,7 @@ func LoadSitePublishConfig(siteCode string) (*SitePublishConfig, error) {
 	}
 	cfg := &SitePublishConfig{
 		SourcePath:         strings.TrimSpace(candidatePath(candidates, data)),
+		UploadFileField:    strings.TrimSpace(toStringAny(raw["upload_file_field"])),
 		FormFields:         mapStringMap(raw["form_fields"]),
 		Mappings:           mapStringNestedMap(raw["mappings"]),
 		GenreOptionsByType: mapStringSliceNestedMap(raw["genre_options_by_type"]),

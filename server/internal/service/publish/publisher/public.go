@@ -137,7 +137,7 @@ func PublishPublic(input PublishInput) (PublishResult, error) {
 	}
 
 	uploadURL := strings.TrimRight(baseURL, "/") + "/takeupload.php"
-	fileField := "file"
+	fileField := resolveUploadFileField(siteCfg)
 	appendLog(fmt.Sprintf("上传尝试: %s (文件字段: %s)", uploadURL, fileField))
 
 	publishURL, existing, attemptDetail, attemptErr := publishuploader.TryUploadTorrent(
@@ -193,6 +193,23 @@ func buildPublishFieldSummary(siteCode string, siteCfg *publishmapping.SitePubli
 		regionValue,
 		tagCount,
 	)
+}
+
+// resolveUploadFileField 解析公共上传器使用的 torrent 文件表单字段名。
+func resolveUploadFileField(siteCfg *publishmapping.SitePublishConfig) string {
+	if siteCfg == nil {
+		return "file"
+	}
+	for _, value := range []string{
+		siteCfg.UploadFileField,
+		siteCfg.FormFields["torrent_file"],
+		siteCfg.FormFields["file_field"],
+	} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return "file"
 }
 
 func resolveFieldSummary(siteCfg *publishmapping.SitePublishConfig, formFields map[string]string) (string, string) {

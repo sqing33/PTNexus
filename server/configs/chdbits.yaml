@@ -1,5 +1,8 @@
 site_name: "CHDBits"
 
+# 彩虹岛上传页文件字段为 torrentfile，提交目标仍为 takeupload.php。
+upload_file_field: "torrentfile"
+
 form_fields:
   category: "type"
   source: "source_sel"
@@ -109,3 +112,91 @@ source_parsers:
       "中字": "tag.中字"
       "特效": "tag.特效"
       "default": null
+
+mappings:
+  type:
+    "category.movie": "1"
+    "category.documentaries": "2"
+    "category.animation": "3"
+    "category.tv_series": "4"
+    "category.tv_shows": "5"
+    "category.music": "6"
+    "category.mv": "6"
+    "category.stage": "6"
+    "category.sports": "7"
+    "category.game": "8"
+    "category.other": "1"
+    "default": "1"
+
+  medium:
+    "medium.bluray": "1"
+    "medium.bluray_diy": "1"
+    "medium.uhd_bluray": "2"
+    "medium.uhd_diy": "2"
+    "medium.remux": "3"
+    "medium.encode": "4"
+    "medium.encode_2160p": "4"
+    "medium.encode_1080p": "4"
+    "medium.encode_720p": "4"
+    "medium.hdtv": "5"
+    "medium.webdl": "6"
+    "medium.cd": "7"
+    "medium.track": "7"
+    "medium.dvd": "8"
+    "medium.other": "8"
+    "default": "4"
+
+  video_codec:
+    "video.h264": "1"
+    "video.x264": "1"
+    "video.h265": "2"
+    "video.x265": "2"
+    "video.hevc": "2"
+    "video.mpeg2": "4"
+    "video.vc1": "5"
+    "video.mpeg4": "6"
+    "video.av1": "6"
+    "video.other": "6"
+    "default": "6"
+
+  audio_codec:
+    "audio.dts": "1"
+    "audio.ac3": "2"
+    "audio.ddp": "2"
+    "audio.ddp_atmos": "4"
+    "audio.dts_hd_ma": "3"
+    "audio.dtsx": "3"
+    "audio.truehd": "4"
+    "audio.truehd_atmos": "4"
+    "audio.lpcm": "5"
+    "audio.flac": "6"
+    "audio.ape": "7"
+    "audio.wav": "8"
+    "audio.aac": "9"
+    "audio.alac": "10"
+    "audio.mpeg": "10"
+    "audio.mp3": "10"
+    "audio.other": "10"
+    "default": "10"
+
+  resolution:
+    "resolution.r1080p": "1"
+    "resolution.r1080i": "2"
+    "resolution.r720p": "3"
+    "resolution.sd": "4"
+    "resolution.other": "4"
+    "resolution.r4320p": "5"
+    "resolution.r2160p": "6"
+    "default": "4"
+
+  source:
+    "source.western": "7"
+    "source.japan": "7"
+    "source.hongkong": "7"
+    "source.korea": "7"
+    "source.uk": "7"
+    "source.taiwan": "7"
+    "source.china": "7"
+    "source.singapore": "7"
+    "source.malaysia": "7"
+    "default": "7"
