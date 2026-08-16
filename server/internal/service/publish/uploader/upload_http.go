@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"mime/multipart"
 	"net"
@@ -26,6 +27,9 @@ const (
 )
 
 var reHTMLTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+var reUploadFormTag = regexp.MustCompile(`(?is)<form\b[^>]*>.*?</form>`)
+var reHiddenInputTag = regexp.MustCompile(`(?is)<input\b[^>]*>`)
+var reHTMLAttr = regexp.MustCompile(`(?is)\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>` + "`" + `]+))`)
 
 // TryUploadTorrent 执行单次上传尝试，支持重定向 Location 与响应正文解析详情页链接。
 // 参数/返回：uploadURL/baseURL/cookie/fileField 为站点上传所需信息；torrentFile 为种子字节；formFields 为表单字段；
@@ -41,9 +45,12 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 		return strings.Join(detailLines, "\n")
 	}
 
+	client := newUploadHTTPClient()
+	mergedFields := mergeUploadFormHiddenFields(client, baseURL, cookie, formFields, &detailLines)
+
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	for key, value := range formFields {
+	for key, value := range mergedFields {
 		if strings.TrimSpace(value) == "" {
 			continue
 		}
@@ -66,7 +73,6 @@ func TryUploadTorrent(uploadURL, baseURL, cookie, fileField string, torrentFile 
 	contentType := writer.FormDataContentType()
 	payloadBytes := append([]byte(nil), body.Bytes()...)
 
-	client := newUploadHTTPClient()
 	resp := (*http.Response)(nil)
 	var err error
 	for attempt := 1; attempt <= uploadNetworkRetryAttempts; attempt++ {
@@ -200,6 +206,111 @@ func ShouldRetryUploadNetworkError(err error) bool {
 		}
 	}
 	return false
+}
+
+// mergeUploadFormHiddenFields 读取上传页 takeupload 表单中的隐藏字段并与发布字段合并。
+func mergeUploadFormHiddenFields(client *http.Client, baseURL string, cookie string, formFields map[string]string, detailLines *[]string) map[string]string {
+	merged := map[string]string{}
+	appendField := func(key string, value string) {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" {
+			return
+		}
+		merged[trimmedKey] = strings.TrimSpace(value)
+	}
+
+	hidden, err := fetchUploadFormHiddenFields(client, baseURL, cookie)
+	if err != nil {
+		if detailLines != nil {
+			*detailLines = append(*detailLines, fmt.Sprintf("读取上传页隐藏字段失败，继续直接提交: %v", err))
+		}
+	} else if len(hidden) > 0 {
+		for key, value := range hidden {
+			appendField(key, value)
+		}
+		if detailLines != nil {
+			*detailLines = append(*detailLines, fmt.Sprintf("已合并上传页隐藏字段: %d 个", len(hidden)))
+		}
+	}
+
+	for key, value := range formFields {
+		appendField(key, value)
+	}
+	return merged
+}
+
+func fetchUploadFormHiddenFields(client *http.Client, baseURL string, cookie string) (map[string]string, error) {
+	if client == nil {
+		client = newUploadHTTPClient()
+	}
+	uploadPageURL := strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/upload.php"
+	req, err := http.NewRequest(http.MethodGet, uploadPageURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Cookie", cookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("上传页响应状态异常: %d", resp.StatusCode)
+	}
+	content, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	if err != nil {
+		return nil, err
+	}
+	return extractUploadFormHiddenFields(string(content)), nil
+}
+
+// extractUploadFormHiddenFields 从上传页 HTML 中提取 takeupload 表单的隐藏字段。
+func extractUploadFormHiddenFields(pageHTML string) map[string]string {
+	result := map[string]string{}
+	for _, form := range reUploadFormTag.FindAllString(pageHTML, -1) {
+		formLower := strings.ToLower(form)
+		if !strings.Contains(formLower, "takeupload.php") {
+			continue
+		}
+		for _, input := range reHiddenInputTag.FindAllString(form, -1) {
+			attrs := parseHTMLAttributes(input)
+			if !strings.EqualFold(strings.TrimSpace(attrs["type"]), "hidden") {
+				continue
+			}
+			name := strings.TrimSpace(attrs["name"])
+			if name == "" {
+				continue
+			}
+			result[name] = strings.TrimSpace(attrs["value"])
+		}
+	}
+	return result
+}
+
+// parseHTMLAttributes 解析单个 HTML 标签上的属性键值。
+func parseHTMLAttributes(tag string) map[string]string {
+	result := map[string]string{}
+	for _, match := range reHTMLAttr.FindAllStringSubmatch(tag, -1) {
+		if len(match) < 5 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(match[1]))
+		value := firstNonEmptyUploadAttr(match[2], match[3], match[4])
+		if key != "" {
+			result[key] = html.UnescapeString(value)
+		}
+	}
+	return result
+}
+
+func firstNonEmptyUploadAttr(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func looksLikeExistingTorrent(text string) bool {
