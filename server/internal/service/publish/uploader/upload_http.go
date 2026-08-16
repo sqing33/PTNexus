@@ -13,6 +13,7 @@ import (
 	"net/http"
 	neturl "net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,7 +30,15 @@ const (
 var reHTMLTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 var reUploadFormTag = regexp.MustCompile(`(?is)<form\b[^>]*>.*?</form>`)
 var reHiddenInputTag = regexp.MustCompile(`(?is)<input\b[^>]*>`)
+var reSelectTag = regexp.MustCompile(`(?is)<select\b[^>]*>.*?</select>`)
+var reOptionTag = regexp.MustCompile(`(?is)<option\b[^>]*>.*?</option>`)
+var reStripHTMLTags = regexp.MustCompile(`(?is)<[^>]+>`)
 var reHTMLAttr = regexp.MustCompile(`(?is)\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>` + "`" + `]+))`)
+
+type uploadFormFields struct {
+	Hidden  map[string]string
+	Selects map[string][]string
+}
 
 // TryUploadTorrent 执行单次上传尝试，支持重定向 Location 与响应正文解析详情页链接。
 // 参数/返回：uploadURL/baseURL/cookie/fileField 为站点上传所需信息；torrentFile 为种子字节；formFields 为表单字段；
@@ -219,55 +228,59 @@ func mergeUploadFormHiddenFields(client *http.Client, baseURL string, cookie str
 		merged[trimmedKey] = strings.TrimSpace(value)
 	}
 
-	hidden, err := fetchUploadFormHiddenFields(client, baseURL, cookie)
+	formMeta, err := fetchUploadFormFields(client, baseURL, cookie)
 	if err != nil {
 		if detailLines != nil {
 			*detailLines = append(*detailLines, fmt.Sprintf("读取上传页隐藏字段失败，继续直接提交: %v", err))
 		}
-	} else if len(hidden) > 0 {
-		for key, value := range hidden {
+	} else if len(formMeta.Hidden) > 0 {
+		for key, value := range formMeta.Hidden {
 			appendField(key, value)
 		}
 		if detailLines != nil {
-			*detailLines = append(*detailLines, fmt.Sprintf("已合并上传页隐藏字段: %d 个", len(hidden)))
+			*detailLines = append(*detailLines, fmt.Sprintf("已合并上传页隐藏字段: %d 个", len(formMeta.Hidden)))
 		}
 	}
 
 	for key, value := range formFields {
 		appendField(key, value)
 	}
+	resolveUploadSelectIndexMarkers(merged, formMeta.Selects, detailLines)
 	return merged
 }
 
-func fetchUploadFormHiddenFields(client *http.Client, baseURL string, cookie string) (map[string]string, error) {
+func fetchUploadFormFields(client *http.Client, baseURL string, cookie string) (uploadFormFields, error) {
 	if client == nil {
 		client = newUploadHTTPClient()
 	}
 	uploadPageURL := strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/upload.php"
 	req, err := http.NewRequest(http.MethodGet, uploadPageURL, nil)
 	if err != nil {
-		return nil, err
+		return uploadFormFields{}, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("Cookie", cookie)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return uploadFormFields{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("上传页响应状态异常: %d", resp.StatusCode)
+		return uploadFormFields{}, fmt.Errorf("上传页响应状态异常: %d", resp.StatusCode)
 	}
 	content, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 	if err != nil {
-		return nil, err
+		return uploadFormFields{}, err
 	}
-	return extractUploadFormHiddenFields(string(content)), nil
+	return extractUploadFormFields(string(content)), nil
 }
 
-// extractUploadFormHiddenFields 从上传页 HTML 中提取 takeupload 表单的隐藏字段。
-func extractUploadFormHiddenFields(pageHTML string) map[string]string {
-	result := map[string]string{}
+// extractUploadFormFields 从上传页 HTML 中提取 takeupload 表单隐藏字段与下拉选项。
+func extractUploadFormFields(pageHTML string) uploadFormFields {
+	result := uploadFormFields{
+		Hidden:  map[string]string{},
+		Selects: map[string][]string{},
+	}
 	for _, form := range reUploadFormTag.FindAllString(pageHTML, -1) {
 		formLower := strings.ToLower(form)
 		if !strings.Contains(formLower, "takeupload.php") {
@@ -282,10 +295,70 @@ func extractUploadFormHiddenFields(pageHTML string) map[string]string {
 			if name == "" {
 				continue
 			}
-			result[name] = strings.TrimSpace(attrs["value"])
+			result.Hidden[name] = strings.TrimSpace(attrs["value"])
+		}
+		for _, selectTag := range reSelectTag.FindAllString(form, -1) {
+			attrs := parseHTMLAttributes(selectTag)
+			name := strings.TrimSpace(attrs["name"])
+			if name == "" {
+				continue
+			}
+			values := make([]string, 0, 16)
+			for _, optionTag := range reOptionTag.FindAllString(selectTag, -1) {
+				optionAttrs := parseHTMLAttributes(optionTag)
+				value, exists := optionAttrs["value"]
+				if !exists {
+					value = optionLabelText(optionTag)
+				}
+				values = append(values, strings.TrimSpace(value))
+			}
+			if len(values) > 0 {
+				result.Selects[name] = values
+			}
 		}
 	}
 	return result
+}
+
+func resolveUploadSelectIndexMarkers(formFields map[string]string, selects map[string][]string, detailLines *[]string) {
+	for key, value := range formFields {
+		idx, ok := parseUploadIndexMarker(value)
+		if !ok {
+			continue
+		}
+		options := selects[strings.TrimSpace(key)]
+		if idx < 0 || idx >= len(options) {
+			formFields[key] = fmt.Sprintf("%d", idx)
+			continue
+		}
+		resolved := strings.TrimSpace(options[idx])
+		if resolved == "" {
+			formFields[key] = fmt.Sprintf("%d", idx)
+			continue
+		}
+		formFields[key] = resolved
+		if detailLines != nil {
+			*detailLines = append(*detailLines, fmt.Sprintf("已按上传页选项索引解析字段: %s index=%d", key, idx))
+		}
+	}
+}
+
+func parseUploadIndexMarker(value string) (int, bool) {
+	trimmed := strings.TrimSpace(value)
+	if !strings.HasPrefix(trimmed, "@index:") {
+		return 0, false
+	}
+	idxText := strings.TrimSpace(strings.TrimPrefix(trimmed, "@index:"))
+	idx, err := strconv.Atoi(idxText)
+	if err != nil {
+		return 0, false
+	}
+	return idx, true
+}
+
+func optionLabelText(optionTag string) string {
+	text := reStripHTMLTags.ReplaceAllString(optionTag, "")
+	return html.UnescapeString(strings.Join(strings.Fields(strings.TrimSpace(text)), " "))
 }
 
 // parseHTMLAttributes 解析单个 HTML 标签上的属性键值。

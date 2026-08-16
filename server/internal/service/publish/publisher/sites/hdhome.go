@@ -32,6 +32,10 @@ func (hdhomePublisher) AttemptPrefix(input publisher.PublishInput) string {
 	return "检测到家园站点：启用细分类与来源/处理字段映射"
 }
 
+func (hdhomePublisher) BuildDescription(input publisher.PublishInput) string {
+	return buildHDHomeDescription(input)
+}
+
 func (hdhomePublisher) BuildExtraFormFields(input publisher.PublishInput) (map[string]string, error) {
 	return buildHDHomeExtraFields(input), nil
 }
@@ -62,7 +66,7 @@ func buildHDHomeExtraFields(input publisher.PublishInput) map[string]string {
 		result[processingField] = value
 	}
 	teamField := firstNonEmpty(siteCfg.FormFields["team"], "team_sel")
-	result[teamField] = "11"
+	result[teamField] = "@index:11"
 	return result
 }
 
@@ -126,7 +130,7 @@ func adjustHDHomeCodec(input publisher.PublishInput, formFields map[string]strin
 	if !strings.Contains(strings.ToLower(input.Title), "hevc") {
 		return
 	}
-	formFields["codec_sel"] = "6"
+	formFields["codec_sel"] = "@index:6"
 }
 
 func adjustHDHomeAudio(input publisher.PublishInput, formFields map[string]string) {
@@ -140,35 +144,61 @@ func adjustHDHomeAudio(input publisher.PublishInput, formFields map[string]strin
 	}
 	title := strings.ToLower(input.Title)
 	if strings.Contains(title, "x 7.1") || strings.Contains(title, "x7.1") || strings.Contains(title, "ma 7.1") || strings.Contains(title, "ma.7.1") {
-		formFields["audiocodec_sel"] = "12"
+		formFields["audiocodec_sel"] = "@index:12"
 	}
+}
+
+// buildHDHomeDescription 按家园要求把 MediaInfo 放在截图与简介详情中间。
+func buildHDHomeDescription(input publisher.PublishInput) string {
+	statement := resolveUploadSection(input.UploadData, "statement")
+	poster := resolveUploadSection(input.UploadData, "poster")
+	screenshots := resolveUploadSection(input.UploadData, "screenshots")
+	mediainfo := firstNonEmpty(input.MediaInfo, toStringAny(input.UploadData["mediainfo"], ""))
+	body := resolveUploadSection(input.UploadData, "body")
+
+	parts := make([]string, 0, 5)
+	for _, section := range []string{statement, poster, screenshots} {
+		if strings.TrimSpace(section) != "" {
+			parts = append(parts, strings.TrimSpace(section))
+		}
+	}
+	if strings.TrimSpace(mediainfo) != "" {
+		parts = append(parts, "[quote]"+strings.TrimSpace(mediainfo)+"[/quote]")
+	}
+	if strings.TrimSpace(body) != "" {
+		parts = append(parts, strings.TrimSpace(body))
+	}
+	if len(parts) == 0 {
+		return strings.TrimSpace(firstNonEmpty(input.Description, input.Subtitle))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func resolveHDHomeSourceValue(medium string) string {
 	switch strings.TrimSpace(medium) {
 	case "medium.uhd_bluray", "medium.uhd_diy":
-		return "1"
+		return "@index:1"
 	case "medium.bluray", "medium.bluray_diy", "medium.remux", "medium.encode", "medium.encode_2160p", "medium.encode_1080p", "medium.encode_720p":
-		return "2"
+		return "@index:2"
 	case "medium.hdtv":
-		return "3"
+		return "@index:3"
 	case "medium.dvd":
-		return "4"
+		return "@index:4"
 	case "medium.webdl":
-		return "5"
+		return "@index:5"
 	default:
-		return "6"
+		return "@index:6"
 	}
 }
 
 func resolveHDHomeProcessingValue(medium string) string {
 	switch strings.TrimSpace(medium) {
 	case "medium.uhd_bluray", "medium.uhd_diy", "medium.bluray", "medium.bluray_diy":
-		return "1"
+		return "@index:1"
 	case "medium.encode", "medium.encode_2160p", "medium.encode_1080p", "medium.encode_720p":
-		return "2"
+		return "@index:2"
 	default:
-		return "0"
+		return "@index:0"
 	}
 }
 

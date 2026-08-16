@@ -45,6 +45,8 @@ func Publish(input publisher.PublishInput) (publisher.PublishResult, error) {
 		return publishsites.PublishHDVideo(input)
 	case "hdhome":
 		return publishsites.PublishHDHome(input)
+	case "ourbits":
+		return publishsites.PublishOurBits(input)
 	case "crabpt":
 		return publishsites.PublishCrabPT(input)
 	case "ttg":
