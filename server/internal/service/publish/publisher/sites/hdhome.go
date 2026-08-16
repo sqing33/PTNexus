@@ -138,8 +138,56 @@ func buildHDHomeExtraFields(input publisher.PublishInput) map[string]string {
 		result[processingField] = value
 	}
 	teamField := firstNonEmpty(siteCfg.FormFields["team"], "team_sel")
-	result[teamField] = "@index:11"
+	if value := resolveHDHomeTeamValue(input, standardized, siteCfg); value != "" && teamField != "" {
+		result[teamField] = value
+	}
 	return result
+}
+
+// resolveHDHomeTeamValue 解析家园制作组字段，仅在能映射到站点可提交值时返回。
+func resolveHDHomeTeamValue(input publisher.PublishInput, standardized map[string]any, siteCfg *publishmapping.SitePublishConfig) string {
+	if siteCfg == nil {
+		return ""
+	}
+
+	rawTeam := extractHDHomeTeamRaw(input.UploadData, standardized)
+	if rawTeam == "" {
+		return ""
+	}
+
+	if mapped := strings.TrimSpace(publishmapping.PickMappedValue(siteCfg.Mappings["team"], rawTeam)); mapped != "" {
+		return mapped
+	}
+
+	if strings.HasPrefix(strings.ToLower(rawTeam), "team.") {
+		for _, mapped := range siteCfg.Mappings["team"] {
+			if strings.EqualFold(strings.TrimSpace(mapped), rawTeam) {
+				return strings.TrimSpace(mapped)
+			}
+		}
+	}
+
+	return ""
+}
+
+// extractHDHomeTeamRaw 优先从标题组件和来源参数中取制作组，最后再看标准化结果。
+func extractHDHomeTeamRaw(uploadData map[string]any, standardized map[string]any) string {
+	if uploadData != nil {
+		if titleComponents := parseTitleComponentsLocal(uploadData["title_components"]); len(titleComponents) > 0 {
+			if raw := strings.TrimSpace(findTitleComponentValue(titleComponents, "制作组")); raw != "" {
+				return raw
+			}
+		}
+		if sourceParams, ok := uploadData["source_params"].(map[string]any); ok && sourceParams != nil {
+			if raw := strings.TrimSpace(toStringAny(sourceParams["制作组"], "")); raw != "" {
+				return raw
+			}
+		}
+	}
+	if standardized == nil {
+		return ""
+	}
+	return strings.TrimSpace(toStringAny(standardized["team"], ""))
 }
 
 // adjustHDHomeCategory 按家园分类树把标准类型细分为原盘、Remux、4K、Pad 等具体分区。
