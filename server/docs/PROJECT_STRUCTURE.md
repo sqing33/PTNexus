@@ -403,6 +403,7 @@
 | `internal/service/publish/publisher/sites/ptlgs.go` | PTLGS 字段分离发布器（封面/截图独立字段） |
 | `internal/service/publish/publisher/sites/hdfans.go` | HDFans 标签/媒介覆盖发布器 |
 | `internal/service/publish/publisher/sites/hdvideo.go` | HDvideo 豆瓣字段、地区、风格与 MediaInfo code 包裹发布器 |
+| `internal/service/publish/publisher/sites/hdhome.go` | 家园细分类与来源/处理字段映射发布器 |
 | `internal/service/publish/publisher/sites/haidan.go` | 海胆特殊发布器（截图独立字段） |
 | `internal/service/publish/publisher/sites/zhuque.go` | 朱雀（TNode/API）特殊发布器 |
 | `internal/service/publish/publisher/sites/rousi.go` | 肉丝（API v1）特殊发布器 |
