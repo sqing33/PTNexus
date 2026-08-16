@@ -18,6 +18,7 @@ type PublishFromPayloadDeps struct {
 	ResolveTorrentPath      func(ctx Context) string
 	AddToDownloader         func(payload map[string]any) (map[string]any, int)
 	FindSiteNicknameByGroup func(releaseGroup string) (string, error)
+	UpdateTorrentDetails    func(input PublishTorrentDetailsUpdateInput) (int64, error)
 }
 
 // ExecutePublishFromPayload 按前端 payload 执行单站点发布（自动读取 task_id 对应上下文）。
@@ -55,6 +56,7 @@ func ExecutePublishFromPayload(input PublishFromPayloadInput, deps PublishFromPa
 			ResolveTorrentPath:      deps.ResolveTorrentPath,
 			AddToDownloader:         deps.AddToDownloader,
 			FindSiteNicknameByGroup: deps.FindSiteNicknameByGroup,
+			UpdateTorrentDetails:    deps.UpdateTorrentDetails,
 		},
 	)
 }

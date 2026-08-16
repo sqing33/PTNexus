@@ -446,6 +446,76 @@ func (r *MigrateRepository) UpdateSeedParameterLastPublishAtByHash(hash string, 
 	return r.UpdateSeedParameterLastPublishAt("", hash, "", "", publishAt)
 }
 
+// UpdateTorrentDetailsAfterPublish 将目标站发布成功返回的详情页地址回写到 torrents.details。
+// 参数/返回：hashes/name 用于定位种子，downloaderID 与 siteNickname 用于缩小命中范围；返回实际更新行数。
+// 失败场景：仓储未初始化或数据库更新失败时返回错误；必要定位信息为空时返回 0。
+// 副作用：写入 torrents.details，不修改下载器或其他业务表。
+func (r *MigrateRepository) UpdateTorrentDetailsAfterPublish(hashes []string, name string, downloaderID string, siteNickname string, detailsURL string) (int64, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return 0, errors.New("migrate repo is nil")
+	}
+	cleanedHashes := compactPublishDetailHashes(hashes)
+	name = strings.TrimSpace(name)
+	downloaderID = strings.TrimSpace(downloaderID)
+	siteNickname = strings.TrimSpace(siteNickname)
+	detailsURL = strings.TrimSpace(detailsURL)
+	if detailsURL == "" || (len(cleanedHashes) == 0 && name == "") {
+		return 0, nil
+	}
+
+	updates := map[string]any{"details": detailsURL}
+	updateBy := func(includeSite bool, build func(db *gorm.DB) *gorm.DB) (int64, error) {
+		db := r.store.DB.Table("torrents").Where("(is_hidden = 0 OR is_hidden IS NULL)")
+		if downloaderID != "" {
+			db = db.Where("downloader_id = ?", downloaderID)
+		}
+		if includeSite && siteNickname != "" {
+			db = db.Where("(sites = ? OR LOWER(TRIM(sites)) = LOWER(TRIM(?)))", siteNickname, siteNickname)
+		}
+		result := build(db).Updates(updates)
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		return result.RowsAffected, nil
+	}
+
+	if len(cleanedHashes) > 0 {
+		if affected, err := updateBy(true, func(db *gorm.DB) *gorm.DB {
+			return db.Where("LOWER(TRIM(hash)) IN ?", cleanedHashes)
+		}); err != nil || affected > 0 {
+			return affected, err
+		}
+		if affected, err := updateBy(false, func(db *gorm.DB) *gorm.DB {
+			return db.Where("LOWER(TRIM(hash)) IN ?", cleanedHashes)
+		}); err != nil || affected > 0 {
+			return affected, err
+		}
+	}
+	if name == "" || siteNickname == "" {
+		return 0, nil
+	}
+	return updateBy(true, func(db *gorm.DB) *gorm.DB {
+		return db.Where("name = ?", name)
+	})
+}
+
+func compactPublishDetailHashes(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.ToLower(strings.TrimSpace(value))
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
 // FindSeedParameterNameByTorrentID 按 torrent_id 查找唯一的 seed_parameters.name，用于发种日志缺少 name 时兜底关联。
 // 参数/返回：torrentID 为源种子 ID；仅当同一 torrent_id 对应唯一非空 name 时返回该名称与 true。
 // 失败场景：仓储未初始化或数据库查询失败时返回 error。

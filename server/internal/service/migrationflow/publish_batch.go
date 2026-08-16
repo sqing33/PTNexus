@@ -43,6 +43,18 @@ func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
 				})
 			},
 			AddToDownloader: s.AddToDownloader,
+			UpdateTorrentDetails: func(input publishworkflow.PublishTorrentDetailsUpdateInput) (int64, error) {
+				if s == nil || s.repo == nil {
+					return 0, nil
+				}
+				return s.repo.UpdateTorrentDetailsAfterPublish(
+					input.Hashes,
+					input.Name,
+					input.DownloaderID,
+					input.SiteNickname,
+					input.DetailsURL,
+				)
+			},
 		},
 	)
 

@@ -20,6 +20,7 @@ type PublishWithContextDeps struct {
 	ResolveTorrentPath      func(ctx Context) string
 	AddToDownloader         func(payload map[string]any) (map[string]any, int)
 	FindSiteNicknameByGroup func(releaseGroup string) (string, error)
+	UpdateTorrentDetails    func(input PublishTorrentDetailsUpdateInput) (int64, error)
 }
 
 // ExecutePublishWithContext 按上下文执行单站点发布（含目标站校验与种子路径回退）。
@@ -66,6 +67,8 @@ func ExecutePublishWithContext(input PublishWithContextInput, deps PublishWithCo
 			TargetInfo:           targetInfo,
 			UploadData:           uploadData,
 			SourceSiteNickname:   input.Context.SourceNickname,
+			SourceTorrentHash:    input.Context.Hash,
+			SourceTorrentName:    input.Context.Name,
 			TorrentPath:          torrentPath,
 			Payload:              input.Payload,
 			FallbackSavePath:     input.Context.SavePath,
@@ -76,6 +79,7 @@ func ExecutePublishWithContext(input PublishWithContextInput, deps PublishWithCo
 		PublishExecutionDeps{
 			AddToDownloader:         deps.AddToDownloader,
 			FindSiteNicknameByGroup: deps.FindSiteNicknameByGroup,
+			UpdateTorrentDetails:    deps.UpdateTorrentDetails,
 		},
 	)
 }

@@ -109,22 +109,30 @@ func (r *TorrentDataRepository) SyncDownloaderTorrents(downloaderID string, reco
 	}
 
 	existingRows := make([]struct {
-		Hash  string `gorm:"column:hash"`
-		Name  string `gorm:"column:name"`
-		Size  int64  `gorm:"column:size"`
-		State string `gorm:"column:state"`
+		Hash    string  `gorm:"column:hash"`
+		Name    string  `gorm:"column:name"`
+		Size    int64   `gorm:"column:size"`
+		State   string  `gorm:"column:state"`
+		Details *string `gorm:"column:details"`
 	}, 0)
-	if err := r.store.DB.Table("torrents").Select("hash, name, size, state").Where("downloader_id = ?", trimmedID).Scan(&existingRows).Error; err != nil {
+	if err := r.store.DB.Table("torrents").Select("hash, name, size, state, details").Where("downloader_id = ?", trimmedID).Scan(&existingRows).Error; err != nil {
 		return stats, err
 	}
 
 	existingSet := map[string]struct{}{}
+	existingDetails := map[string]string{}
 	for _, row := range existingRows {
 		trimmed := strings.TrimSpace(row.Hash)
 		if trimmed == "" {
 			continue
 		}
 		existingSet[trimmed] = struct{}{}
+		if row.Details != nil {
+			if value := strings.TrimSpace(*row.Details); value != "" {
+				existingDetails[trimmed] = value
+				existingDetails[strings.ToLower(trimmed)] = value
+			}
+		}
 	}
 
 	recordMap := map[string]TorrentSyncRecord{}
@@ -137,6 +145,15 @@ func (r *TorrentDataRepository) SyncDownloaderTorrents(downloaderID string, reco
 		record.Hash = hash
 		record.Name = name
 		record.DownloaderID = trimmedID
+		if strings.TrimSpace(record.Details) == "" {
+			existingDetail := strings.TrimSpace(existingDetails[hash])
+			if existingDetail == "" {
+				existingDetail = strings.TrimSpace(existingDetails[strings.ToLower(hash)])
+			}
+			if existingDetail != "" {
+				record.Details = existingDetail
+			}
+		}
 		recordMap[hash] = record
 	}
 

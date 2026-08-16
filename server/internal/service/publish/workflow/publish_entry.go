@@ -5,12 +5,15 @@ import (
 	neturl "net/url"
 	"strings"
 
+	"github.com/pt-nexus/server/internal/platform/logx"
 	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 	publishchecker "github.com/pt-nexus/server/internal/service/publish/checker"
 	publishdownloader "github.com/pt-nexus/server/internal/service/publish/downloader"
 	publishguard "github.com/pt-nexus/server/internal/service/publish/guard"
 	publishuploader "github.com/pt-nexus/server/internal/service/publish/uploader"
 )
+
+const publishDetailsLogModule = "发布-详情回写"
 
 // PublishExecutionInput 定义单站发布执行输入。
 type PublishExecutionInput struct {
@@ -19,6 +22,8 @@ type PublishExecutionInput struct {
 	UploadData map[string]any
 
 	SourceSiteNickname string
+	SourceTorrentHash  string
+	SourceTorrentName  string
 
 	TorrentPath string
 	Payload     map[string]any
@@ -33,12 +38,22 @@ type PublishExecutionInput struct {
 type PublishExecutionDeps struct {
 	AddToDownloader         func(payload map[string]any) (map[string]any, int)
 	FindSiteNicknameByGroup func(releaseGroup string) (string, error)
+	UpdateTorrentDetails    func(input PublishTorrentDetailsUpdateInput) (int64, error)
+}
+
+// PublishTorrentDetailsUpdateInput 定义发种成功后回写 torrents.details 所需的最小字段。
+type PublishTorrentDetailsUpdateInput struct {
+	Hashes       []string
+	Name         string
+	DownloaderID string
+	SiteNickname string
+	DetailsURL   string
 }
 
 // ExecutePublish 执行单站发布主流程（上传、URL标准化、自动加下载器）。
 // 参数/返回：输入需包含目标站配置、发布参数和种子路径；返回与原迁移接口一致的发布结果结构。
 // 失败场景：标签限制命中、上传失败、自动加下载器参数不足时返回对应状态与提示。
-// 副作用：会向目标站点发起上传请求，并可选调用下载器添加任务。
+// 副作用：会向目标站点发起上传请求，可选调用下载器添加任务，并在发布成功后回写 torrents.details。
 func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map[string]any, int) {
 	targetSite := strings.TrimSpace(input.TargetSite)
 	targetInfo := input.TargetInfo
@@ -257,6 +272,7 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 	}
 	useDefaultDownloader := boolFromAny(payload["useDefaultDownloader"]) || boolFromAny(payload["use_default_downloader"])
 	autoAddResult := map[string]any{"success": false, "message": "未启用自动添加到下载器"}
+	publishedHashCandidates := collectPublishedTorrentHashes(input.SourceTorrentHash)
 	if autoAdd {
 		if isExistingTorrent && !autoAddExistingToDownloader {
 			autoAddResult = map[string]any{"success": false, "message": "检测到目标站点种子已存在，按设置跳过自动添加"}
@@ -285,6 +301,28 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 			}
 			addResult, _ := deps.AddToDownloader(addPayload)
 			autoAddResult = addResult
+			if hash := strings.TrimSpace(toStringAny(addResult["hash"], "")); hash != "" {
+				publishedHashCandidates = appendUniqueStrings(publishedHashCandidates, hash)
+			}
+		}
+	}
+
+	if strings.TrimSpace(publishURL) != "" && deps.UpdateTorrentDetails != nil {
+		updateInput := PublishTorrentDetailsUpdateInput{
+			Hashes:       publishedHashCandidates,
+			Name:         strings.TrimSpace(firstNonEmpty(input.SourceTorrentName, toStringAny(payload["name"], ""), toStringAny(uploadData["name"], ""))),
+			DownloaderID: resolvedDownloaderID,
+			SiteNickname: targetNickname,
+			DetailsURL:   publishURL,
+		}
+		if affected, updateErr := deps.UpdateTorrentDetails(updateInput); updateErr != nil {
+			logx.Warnf(publishDetailsLogModule, "回写种子详情地址失败 downloader_id=%s site=%s hashes=%v err=%v", resolvedDownloaderID, targetNickname, publishedHashCandidates, updateErr)
+			trimmedLogs += "\n" + fmt.Sprintf("详情地址回写失败: %v", updateErr)
+		} else if affected > 0 {
+			logx.Infof(publishDetailsLogModule, "已回写种子详情地址 downloader_id=%s site=%s affected=%d hashes=%v", resolvedDownloaderID, targetNickname, affected, publishedHashCandidates)
+			trimmedLogs += "\n" + fmt.Sprintf("已回写种子详情地址: %s", publishURL)
+		} else {
+			logx.Infof(publishDetailsLogModule, "回写种子详情地址未命中 torrents downloader_id=%s site=%s hashes=%v name=%s", resolvedDownloaderID, targetNickname, publishedHashCandidates, updateInput.Name)
 		}
 	}
 
@@ -348,6 +386,36 @@ func copyStringMap(input map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func collectPublishedTorrentHashes(values ...string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.ToLower(strings.TrimSpace(value))
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func appendUniqueStrings(values []string, candidate string) []string {
+	trimmed := strings.ToLower(strings.TrimSpace(candidate))
+	if trimmed == "" {
+		return values
+	}
+	for _, value := range values {
+		if strings.ToLower(strings.TrimSpace(value)) == trimmed {
+			return values
+		}
+	}
+	return append(values, trimmed)
 }
 
 func boolFromAny(value any) bool {

@@ -340,6 +340,12 @@ func normalizeDetailURL(details string, siteName string, siteLinkRules map[strin
 		return parsed.String()
 	}
 
+	detailHost := parseHostCandidate(parsed.String())
+	baseHost := parseHostCandidate(baseURL)
+	if detailHost != "" && baseHost != "" && detailHost != baseHost && extractCoreDomain(detailHost) != extractCoreDomain(baseHost) {
+		return ""
+	}
+
 	parsed.Scheme = "https"
 	parsed.Host = normalizedBase
 	return parsed.String()
