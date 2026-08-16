@@ -57,14 +57,14 @@
     </div>
 
     <!-- 种子表格 -->
-    <div class="seed-table-container">
+    <div class="seed-table-container" :class="{ 'seed-table-container--scroll': tableShouldScroll }">
       <el-table
         ref="tableRef"
         :data="tableData"
         v-loading="loading"
         border
         style="width: 100%"
-        height="100%"
+        :height="seedTableHeight"
         empty-text="暂无种子数据"
         class="glass-table"
         @selection-change="handleSelectionChange"
@@ -315,11 +315,13 @@ const loading = ref(false)
 const tableData = ref<SeedRow[]>([])
 const total = ref(0)
 const currentPage = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(50)
 const searchQuery = ref('')
 const selectedSeeds = ref<SelectedSeed[]>([])
 const downloaderFilter = ref('')
 const downloaderList = ref<DownloaderItem[]>([])
+const tableShouldScroll = computed(() => tableData.value.length > 20)
+const seedTableHeight = computed(() => (tableShouldScroll.value ? 'calc(85vh - 178px)' : undefined))
 
 // 筛选相关
 const filterDialogVisible = ref(false)
@@ -753,6 +755,14 @@ watch(() => props.visible, (val) => {
   flex: 1;
   overflow: hidden;
   min-height: 0;
+}
+
+.seed-table-container--scroll {
+  max-height: calc(85vh - 178px);
+}
+
+.seed-table-container--scroll :deep(.el-table__body-wrapper) {
+  overflow-y: auto;
 }
 
 .title-cell {
