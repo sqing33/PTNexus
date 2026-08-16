@@ -220,16 +220,16 @@ func adjustHDHomeAudio(input publisher.PublishInput, formFields map[string]strin
 	}
 }
 
-// buildHDHomeDescription 按家园要求把 MediaInfo 放在截图与简介详情中间。
+// buildHDHomeDescription 按家园要求把简介内容拼成“声明-海报链接-简介详情-MediaInfo-视频截图”。
 func buildHDHomeDescription(input publisher.PublishInput) string {
 	statement := resolveUploadSection(input.UploadData, "statement")
 	poster := resolveUploadSection(input.UploadData, "poster")
-	screenshots := resolveUploadSection(input.UploadData, "screenshots")
-	mediainfo := firstNonEmpty(input.MediaInfo, toStringAny(input.UploadData["mediainfo"], ""))
 	body := resolveUploadSection(input.UploadData, "body")
+	mediainfo := firstNonEmpty(input.MediaInfo, toStringAny(input.UploadData["mediainfo"], ""))
+	screenshots := resolveUploadSection(input.UploadData, "screenshots")
 
 	parts := make([]string, 0, 5)
-	for _, section := range []string{statement, poster, screenshots} {
+	for _, section := range []string{statement, poster, body} {
 		if strings.TrimSpace(section) != "" {
 			parts = append(parts, strings.TrimSpace(section))
 		}
@@ -237,8 +237,8 @@ func buildHDHomeDescription(input publisher.PublishInput) string {
 	if strings.TrimSpace(mediainfo) != "" {
 		parts = append(parts, "[quote]"+strings.TrimSpace(mediainfo)+"[/quote]")
 	}
-	if strings.TrimSpace(body) != "" {
-		parts = append(parts, strings.TrimSpace(body))
+	if strings.TrimSpace(screenshots) != "" {
+		parts = append(parts, strings.TrimSpace(screenshots))
 	}
 	if len(parts) == 0 {
 		return strings.TrimSpace(firstNonEmpty(input.Description, input.Subtitle))

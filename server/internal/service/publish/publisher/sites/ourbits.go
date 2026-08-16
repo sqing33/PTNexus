@@ -30,6 +30,10 @@ func (ourbitsPublisher) AttemptPrefix(input publisher.PublishInput) string {
 	return "检测到我堡站点：启用海报与动态分类字段映射"
 }
 
+func (ourbitsPublisher) BuildDescription(input publisher.PublishInput) string {
+	return buildOurBitsDescription(input)
+}
+
 func (ourbitsPublisher) BuildExtraFormFields(input publisher.PublishInput) (map[string]string, error) {
 	return buildOurBitsExtraFields(input), nil
 }
@@ -84,6 +88,32 @@ func adjustOurBitsCategory(input publisher.PublishInput, formFields map[string]s
 	if category := resolveOurBitsCategory(input); category != "" {
 		formFields[categoryField] = category
 	}
+}
+
+// buildOurBitsDescription 按我堡要求把简介拼成“声明-海报链接-简介详情-MediaInfo-视频截图”。
+func buildOurBitsDescription(input publisher.PublishInput) string {
+	statement := resolveUploadSection(input.UploadData, "statement")
+	poster := resolveUploadSection(input.UploadData, "poster")
+	body := resolveUploadSection(input.UploadData, "body")
+	mediainfo := firstNonEmpty(input.MediaInfo, toStringAny(input.UploadData["mediainfo"], ""))
+	screenshots := resolveUploadSection(input.UploadData, "screenshots")
+
+	parts := make([]string, 0, 5)
+	for _, section := range []string{statement, poster, body} {
+		if strings.TrimSpace(section) != "" {
+			parts = append(parts, strings.TrimSpace(section))
+		}
+	}
+	if strings.TrimSpace(mediainfo) != "" {
+		parts = append(parts, "[quote]"+strings.TrimSpace(mediainfo)+"[/quote]")
+	}
+	if strings.TrimSpace(screenshots) != "" {
+		parts = append(parts, strings.TrimSpace(screenshots))
+	}
+	if len(parts) == 0 {
+		return strings.TrimSpace(firstNonEmpty(input.Description, input.Subtitle))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func buildOurBitsDynamicFields(input publisher.PublishInput) map[string]string {
