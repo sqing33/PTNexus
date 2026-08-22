@@ -53,6 +53,8 @@ func Publish(input publisher.PublishInput) (publisher.PublishResult, error) {
 		return publishsites.PublishTTG(input)
 	case "longpt":
 		return publishsites.PublishLongPT(input)
+	case "xdypt":
+		return publishsites.PublishXDYPT(input)
 	default:
 		return publisher.PublishPublic(input)
 	}

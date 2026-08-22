@@ -1,0 +1,188 @@
+site_name: "修道院"
+
+# 修道院上传页为 NexusPHP 公共表单，细分类字段使用 [4] 下标。
+form_fields:
+  category: "type"
+  medium: "medium_sel[4]"
+  video_codec: "codec_sel[4]"
+  resolution: "standard_sel[4]"
+  team: "team_sel[4]"
+  tags[4][]: "tags[]"
+  anonymous: "uplver"
+
+source_parsers:
+  source_params:
+    type:
+      source_key: "类型"
+    medium:
+      source_key: "媒介"
+    video_codec:
+      source_key: "视频编码"
+    resolution:
+      source_key: "分辨率"
+    team:
+      source_key: "制作组"
+
+  standard_keys:
+    type:
+      "Movies": "category.movie"
+      "TV Series": "category.tv_series"
+      "TV Shows": "category.tv_shows"
+      "Documentaries": "category.documentaries"
+      "Animations": "category.animation"
+      "Anime": "category.animation"
+      "Music Videos": "category.mv"
+      "Sports": "category.sports"
+      "HQ Audio": "category.music"
+      "Misc": "category.other"
+      "Games": "category.other"
+
+    medium:
+      "Track": "medium.track"
+      "CD": "medium.cd"
+      "DVDR": "medium.dvd"
+      "DVD": "medium.dvd"
+      "HDTV": "medium.hdtv"
+      "MiniBD": "medium.minibd"
+      "Encode": "medium.encode"
+      "Remux": "medium.remux"
+      "HD DVD": "medium.hddvd"
+      "Blu-ray": "medium.bluray"
+      "WEB-DL": "medium.webdl"
+
+    video_codec:
+      "H.264": "video.h264"
+      "VC-1": "video.vc1"
+      "Xvid": "video.xvid"
+      "MPEG-2": "video.mpeg2"
+      "H.265": "video.h265"
+      "VP8/9": "video.vp9"
+      "Other": "video.other"
+
+    resolution:
+      "1080i/1080P": "resolution.r1080p"
+      "2K/1440i/1440P": "resolution.r1440p"
+      "4K/2160i/2160P": "resolution.r2160p"
+      "8K/4320i/4320P": "resolution.r4320p"
+      "720i/720P": "resolution.r720p"
+      "480i/480P": "resolution.sd"
+      "Other": "resolution.other"
+
+    team:
+      "WiKi": "team.wiki"
+      "MTeam": "team.mteam"
+      "FRDS": "team.frds"
+      "ADWeb": "team.adweb"
+      "HHWEB": "team.hhweb"
+      "ZmWeb": "team.zmweb"
+      "UBWeb": "team.ubweb"
+      "AGSVWEB": "team.agsvweb"
+      "CSWEB": "team.csweb"
+      "StarfallWeb": "team.starfallweb"
+      "Other": "team.other"
+      "TPWEB": "team.tpweb"
+      "MySiLU": "team.mysilu"
+      "U2": "team.u2"
+      "HDS": "team.hds"
+      "CHD": "team.chd"
+      "QHstudio": "team.qhstudio"
+      "AllMWeb": "team.allmweb"
+      "LUCKDIY": "team.luckdiy"
+      "LUCKWEB": "team.luckweb"
+      "LUCKMUSIC": "team.luckmusic"
+
+    tag:
+      "禁转": "tag.禁转"
+      "首发": "tag.首发"
+      "官方": "tag.官方"
+      "DIY": "tag.DIY"
+      "国语": "tag.国语"
+      "中字": "tag.中字"
+      "HDR": "tag.HDR"
+      "HDR10": "tag.HDR"
+      "HDR10+": "tag.HDR"
+      "default": null
+
+mappings:
+  type:
+    "category.movie": "401"
+    "category.tv_series": "402"
+    "category.tv_shows": "403"
+    "category.documentaries": "404"
+    "category.animation": "405"
+    "category.mv": "406"
+    "category.sports": "407"
+    "category.music": "408"
+    "category.other": "409"
+    "default": "409"
+
+  medium:
+    "medium.track": "9"
+    "medium.cd": "8"
+    "medium.dvd": "6"
+    "medium.hdtv": "5"
+    "medium.minibd": "4"
+    "medium.encode": "7"
+    "medium.remux": "3"
+    "medium.hddvd": "2"
+    "medium.bluray": "1"
+    "medium.webdl": "7"
+    "medium.other": "7"
+    "default": "7"
+
+  video_codec:
+    "video.h264": "1"
+    "video.vc1": "2"
+    "video.xvid": "3"
+    "video.mpeg2": "4"
+    "video.other": "5"
+    "video.h265": "6"
+    "video.vp9": "7"
+    "default": "5"
+
+  resolution:
+    "resolution.r1080p": "6"
+    "resolution.r1080i": "6"
+    "resolution.r1440p": "7"
+    "resolution.r2160p": "8"
+    "resolution.r4320p": "9"
+    "resolution.r720p": "11"
+    "resolution.sd": "12"
+    "resolution.other": "10"
+    "default": "10"
+
+  team:
+    "team.wiki": "16"
+    "team.mteam": "26"
+    "team.frds": "25"
+    "team.adweb": "24"
+    "team.hhweb": "23"
+    "team.zmweb": "22"
+    "team.ubweb": "21"
+    "team.agsvweb": "20"
+    "team.csweb": "19"
+    "team.starfallweb": "18"
+    "team.other": "17"
+    "team.tpweb": "6"
+    "team.mysilu": "15"
+    "team.u2": "14"
+    "team.hds": "13"
+    "team.chd": "12"
+    "team.qhstudio": "11"
+    "team.allmweb": "10"
+    "team.luckdiy": "9"
+    "team.luckweb": "8"
+    "team.luckmusic": "7"
+    "default": "17"
+
+  tag:
+    "tag.禁转": "1"
+    "tag.首发": "2"
+    "tag.官方": "3"
+    "tag.DIY": "4"
+    "tag.国语": "5"
+    "tag.中字": "6"
+    "tag.HDR": "7"
+    "tag.HDR10": "7"
+    "tag.HDR10+": "7"
+    "default": null

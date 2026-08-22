@@ -1295,5 +1295,14 @@
     "description": "DStudio",
     "migration": 1,
     "speed_limit": 10
+  },
+  {
+    "site": "xdypt",
+    "nickname": "修道院",
+    "base_url": "xdypt.vip",
+    "special_tracker_domain": null,
+    "group": null,
+    "migration": 2,
+    "speed_limit": 50
   }
 ]
