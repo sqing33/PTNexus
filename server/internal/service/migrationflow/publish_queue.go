@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -19,10 +18,8 @@ import (
 )
 
 const (
-	publishQueueLogModule        = "发布-队列"
-	queueVideoSizeThresholdBytes = int64(1024 * 1024 * 1024)
-	queueBytesPerGB              = float64(1024 * 1024 * 1024)
-	queueAutoAddNotRunJSON       = `{"success": false, "message": "未执行"}`
+	publishQueueLogModule  = "发布-队列"
+	queueAutoAddNotRunJSON = `{"success": false, "message": "未执行"}`
 )
 
 type publishQueueConfig struct {
@@ -947,22 +944,6 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 		torrentID = strings.TrimSpace(processingshared.ToString(uploadData["torrent_id"], ctx.TorrentID))
 	}
 
-	preCheckPassed, preCheckMessage := s.checkQueueVideoSizePrecondition(taskRecord, payload, ctx)
-	if !preCheckPassed {
-		preCheckResult := map[string]any{
-			"success":       false,
-			"pre_check":     true,
-			"limit_reached": true,
-			"logs":          preCheckMessage,
-			"message":       preCheckMessage,
-		}
-		encodedResult, _ := json.Marshal(preCheckResult)
-		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, preCheckMessage, strings.TrimSpace(string(encodedResult)))
-		s.appendPublishLog(payload, execTaskID, torrentID, preCheckResult, 200, 0)
-		logx.Warnf(publishQueueLogModule, "队列任务预检查失败 id=%d torrent_id=%s target_site=%s reason=%s", taskID, torrentID, targetSite, preCheckMessage)
-		return
-	}
-
 	logx.Infof(publishQueueLogModule, "开始执行队列任务 id=%d torrent_id=%s target_site=%s attempt=%d", taskID, torrentID, targetSite, taskRecord.AttemptCount)
 
 	startedAt := time.Now()
@@ -1166,50 +1147,6 @@ func (s *MigrateService) notifyQueueExistingTorrent(task repository.PublishQueue
 		strings.TrimSpace(task.TargetSite),
 	)
 	s.publishQueueExistingTorrentHook(trigger)
-}
-
-func (s *MigrateService) checkQueueVideoSizePrecondition(task repository.PublishQueueTask, payload map[string]any, ctx publishworkflow.Context) (bool, string) {
-	if s == nil || s.repo == nil {
-		return false, "发布前预检查触发限制: 队列服务未初始化"
-	}
-
-	ctxCopy := ctx
-	if strings.TrimSpace(ctxCopy.TorrentID) == "" {
-		ctxCopy.TorrentID = strings.TrimSpace(firstNonEmptyString(task.TorrentID, processingshared.ToString(payload["torrent_id"], "")))
-	}
-	if strings.TrimSpace(ctxCopy.SiteName) == "" {
-		ctxCopy.SiteName = strings.TrimSpace(firstNonEmptyString(task.SourceSite, processingshared.ToString(payload["sourceSite"], "")))
-	}
-	if strings.TrimSpace(ctxCopy.SourceNickname) == "" {
-		ctxCopy.SourceNickname = strings.TrimSpace(firstNonEmptyString(task.SourceSite, ctxCopy.SiteName))
-	}
-	if strings.TrimSpace(ctxCopy.SourceDetailURL) == "" {
-		ctxCopy.SourceDetailURL = strings.TrimSpace(ctxCopy.TorrentID)
-	}
-
-	torrentPath := acquirefetch.ResolvePublishTorrentPath(s.repo, acquirefetch.ResolvePublishTorrentPathInput{
-		OriginalTorrentPath: ctxCopy.OriginalTorrentPath,
-		TorrentDir:          ctxCopy.TorrentDir,
-		SiteName:            ctxCopy.SiteName,
-		TorrentID:           ctxCopy.TorrentID,
-		SourceNickname:      ctxCopy.SourceNickname,
-		SourceDetailURL:     ctxCopy.SourceDetailURL,
-	})
-	if strings.TrimSpace(torrentPath) == "" {
-		return false, "发布前预检查触发限制: 无法获取 torrent 文件"
-	}
-
-	videoBytes, _, err := s.ExtractVideoSizeFromTorrentFile(torrentPath)
-	if err != nil {
-		return false, "发布前预检查触发限制: 视频文件大小解析失败: " + err.Error()
-	}
-	if videoBytes < queueVideoSizeThresholdBytes {
-		videoGB := float64(videoBytes) / queueBytesPerGB
-		videoGB = math.Round(videoGB*100) / 100
-		return false, fmt.Sprintf("发布前预检查触发限制: 视频文件总大小小于 1GB（%.2fGB）", videoGB)
-	}
-
-	return true, ""
 }
 
 func (s *MigrateService) resolveQueueTaskDownloaderID(task repository.PublishQueueTask, payload map[string]any, ctx publishworkflow.Context) string {

@@ -1,30 +1,23 @@
 package service
 
 import (
-	"errors"
 	"fmt"
-	"math"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server/internal/config"
 	"github.com/pt-nexus/server/internal/platform/logx"
-	acquirefetch "github.com/pt-nexus/server/internal/service/acquire/fetch"
 	migrationflow "github.com/pt-nexus/server/internal/service/migrationflow"
 )
 
 const (
 	goProxyBatchLogModule = "Go增强-批量转种"
-	minVideoSizeBytes     = int64(1024 * 1024 * 1024) // 1GiB，强制开启，不允许关闭
-	bytesPerGB            = float64(1024 * 1024 * 1024)
 	batchAutoAddNotRun    = `{"success": false, "message": "未执行"}`
 )
 
-// BatchEnhance 执行批量转种增强（强制启用 torrent 视频体积过滤）。
+// BatchEnhance 执行批量转种增强。
 // 参数/返回：payload 需包含 target_site_name 与 seeds 数组；返回处理结果与 HTTP 状态码。
 // 失败场景：参数缺失或迁移服务不可用时返回错误响应。
-// 副作用：会从数据库读取 seed_parameters；本地缺少 torrent 文件时会触发种子下载；并执行发布，写入 publish_logs（触发为“批量转种-<批次>”）。
+// 副作用：会从数据库读取 seed_parameters；并执行发布，写入 publish_logs（触发为“批量转种-<批次>”）。
 func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, int) {
 	targetSite := strings.TrimSpace(goProxyToString(payload["target_site_name"], ""))
 	if targetSite == "" {
@@ -82,7 +75,6 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 
 	seedsSuccess := 0
 	seedsFailed := 0
-	seedsFiltered := 0
 	stopped := false
 
 	for idx, raw := range rawSeeds {
@@ -101,10 +93,6 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 		torrentID := strings.TrimSpace(goProxyToString(seed["torrent_id"], ""))
 		siteCode := strings.TrimSpace(goProxyToString(seed["site_name"], ""))
 		sourceSite := strings.TrimSpace(goProxyToString(seed["nickname"], siteCode))
-		siteLookup := sourceSite
-		if siteLookup == "" {
-			siteLookup = siteCode
-		}
 		downloaderID := strings.TrimSpace(goProxyToString(seed["downloader_id"], ""))
 		savePath := strings.TrimSpace(goProxyToString(seed["save_path"], ""))
 
@@ -189,44 +177,6 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 		}
 		uploadData["title"] = title
 
-		videoBytes, videoGB, sizeErr := s.computeSeedVideoSize(torrentID, siteCode, siteLookup)
-		if sizeErr != nil {
-			seedsFiltered++
-			logx.Warnf(goProxyBatchLogModule, "大小过滤失败 batch_id=%s index=%d/%d torrent_id=%s source_site=%s err=%v", batchID, idx+1, len(rawSeeds), torrentID, sourceSite, sizeErr)
-			insertExternalLog(migrationflow.ExternalPublishLogInput{
-				Trigger:       publishTrigger,
-				Scene:         "multi_torrent",
-				TorrentID:     torrentID,
-				SourceSite:    sourceSite,
-				TargetSite:    targetSite,
-				DownloaderID:  downloaderID,
-				Title:         title,
-				Status:        "filtered",
-				Logs:          "大小过滤失败: " + sizeErr.Error(),
-				AutoAddResult: batchAutoAddNotRun,
-				CostMS:        0,
-			})
-			continue
-		}
-		if videoBytes < minVideoSizeBytes {
-			seedsFiltered++
-			logx.Infof(goProxyBatchLogModule, "大小过滤拦截 batch_id=%s index=%d/%d torrent_id=%s source_site=%s video_size_gb=%.2f", batchID, idx+1, len(rawSeeds), torrentID, sourceSite, videoGB)
-			insertExternalLog(migrationflow.ExternalPublishLogInput{
-				Trigger:       publishTrigger,
-				Scene:         "multi_torrent",
-				TorrentID:     torrentID,
-				SourceSite:    sourceSite,
-				TargetSite:    targetSite,
-				DownloaderID:  downloaderID,
-				Title:         title,
-				Status:        "filtered",
-				Logs:          fmt.Sprintf("小于 1.0GB（%.2fGB）", videoGB),
-				AutoAddResult: batchAutoAddNotRun,
-				CostMS:        0,
-			})
-			continue
-		}
-
 		publishResult, publishStatus := s.migrate.Publish(map[string]any{
 			"task_id":                contextID,
 			"targetSite":             targetSite,
@@ -248,12 +198,11 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 
 	logx.Infof(
 		goProxyBatchLogModule,
-		"批量转种结束 batch_id=%s target_site=%s success=%d failed=%d filtered=%d stopped=%v",
+		"批量转种结束 batch_id=%s target_site=%s success=%d failed=%d stopped=%v",
 		batchID,
 		targetSite,
 		seedsSuccess,
 		seedsFailed,
-		seedsFiltered,
 		stopped,
 	)
 
@@ -269,8 +218,7 @@ func (s *GoProxyService) BatchEnhance(payload map[string]any) (map[string]any, i
 			"batch_no":        batchNo,
 			"publish_trigger": publishTrigger,
 			"seeds_processed": seedsSuccess,
-			"seeds_failed":    seedsFailed + seedsFiltered,
-			"seeds_filtered":  seedsFiltered,
+			"seeds_failed":    seedsFailed,
 			"stopped":         stopped,
 		},
 		"message": message,
@@ -314,43 +262,4 @@ func (s *GoProxyService) resolveSeedTitle(torrentID, sourceSite string) string {
 		return strings.TrimSpace(torrentID)
 	}
 	return strings.TrimSpace(title)
-}
-
-func (s *GoProxyService) computeSeedVideoSize(torrentID, siteCode, sourceSite string) (int64, float64, error) {
-	if s.migrate == nil {
-		return 0, 0, errors.New("迁移服务未初始化")
-	}
-
-	paths := config.ResolveRuntimePaths()
-	torrentDir := filepath.Join(paths.DataDir, "tmp", "torrents")
-	torrentPath := acquirefetch.FindDownloadedTorrentPath("", torrentDir, siteCode, torrentID)
-	if torrentPath == "" {
-		result, status := s.migrate.DownloadTorrentOnly(map[string]any{
-			"torrent_id": torrentID,
-			"site_name":  sourceSite,
-		})
-		if status != 200 || !toBool(result["success"], false) {
-			message := strings.TrimSpace(goProxyToString(result["message"], "下载种子失败"))
-			if message == "" {
-				message = "下载种子失败"
-			}
-			return 0, 0, fmt.Errorf("下载种子失败: %s", message)
-		}
-
-		torrentPath = strings.TrimSpace(goProxyToString(result["torrent_path"], ""))
-		if torrentPath == "" {
-			return 0, 0, errors.New("下载种子成功但未返回 torrent_path")
-		}
-	}
-
-	videoBytes, _, err := s.migrate.ExtractVideoSizeFromTorrentFile(torrentPath)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	videoGB := float64(videoBytes) / bytesPerGB
-	if videoGB > 0 {
-		videoGB = math.Round(videoGB*100) / 100
-	}
-	return videoBytes, videoGB, nil
 }

@@ -148,7 +148,7 @@
 | `internal/service/cross_seed_service.go` | Cross-seed 服务入口 |
 | `internal/service/local_query_service.go` | 本地查询服务入口 |
 | `internal/service/go_proxy_service.go` | Go 代理服务，组合 migrate |
-| `internal/service/go_proxy_batch_enhance.go` | 批量转种增强入口（强制开启视频体积过滤） |
+| `internal/service/go_proxy_batch_enhance.go` | 批量转种增强入口 |
 | `internal/service/tracker_service.go` | 下载器流量采集服务入口 |
 | `internal/service/log_export_service.go` | 日志导出服务入口 |
 | `internal/service/iyuu_task_service.go` | IYUU 批任务服务入口 |
