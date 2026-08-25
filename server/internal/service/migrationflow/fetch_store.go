@@ -28,6 +28,7 @@ func (s *MigrateService) FetchAndStore(payload map[string]any) (map[string]any, 
 	torrentName := strings.TrimSpace(processingshared.ToString(payload["torrentName"], ""))
 	savePath := strings.TrimSpace(processingshared.ToString(payload["savePath"], ""))
 	downloaderID := strings.TrimSpace(processingshared.ToString(payload["downloaderId"], ""))
+	refreshMediainfoForBatch := processingshared.ToBool(payload["refreshMediainfoForBatch"])
 	screenshotReviewMode := processingshared.NormalizeScreenshotReviewMode(
 		processingshared.ToString(payload["screenshotReviewMode"], processingshared.ToString(payload["screenshot_review_mode"], processingshared.ScreenshotReviewModeBackground)),
 	)
@@ -66,13 +67,14 @@ func (s *MigrateService) FetchAndStore(payload map[string]any) (map[string]any, 
 
 	entryResult, statusCode, isAcquireError, runErr := processingpersist.ExecuteFetchAndStoreEntry(
 		processingpersist.FetchAndStoreEntryInput{
-			SourceSite:           sourceSite,
-			SearchTerm:           searchTerm,
-			TorrentName:          torrentName,
-			SavePath:             savePath,
-			DownloaderID:         downloaderID,
-			TaskID:               taskID,
-			ScreenshotReviewMode: screenshotReviewMode,
+			SourceSite:               sourceSite,
+			SearchTerm:               searchTerm,
+			TorrentName:              torrentName,
+			SavePath:                 savePath,
+			DownloaderID:             downloaderID,
+			TaskID:                   taskID,
+			ScreenshotReviewMode:     screenshotReviewMode,
+			RefreshMediainfoForBatch: refreshMediainfoForBatch,
 		},
 		processingpersist.FetchAndStoreEntryDeps{
 			Repo:            s.repo,

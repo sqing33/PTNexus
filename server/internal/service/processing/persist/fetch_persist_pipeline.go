@@ -22,19 +22,20 @@ type FetchPersistPipelineRepo interface {
 
 // FetchPersistPipelineInput 定义抓取流水线输入。
 type FetchPersistPipelineInput struct {
-	TaskID               string
-	SourceSite           string
-	Hash                 string
-	TorrentID            string
-	SiteIdentifier       string
-	SavePath             string
-	DownloaderID         string
-	TorrentNameForPath   string
-	ScreenshotReviewMode string
-	MetaName             string
-	DetailHTML           string
-	ReviewData           parser.ReviewExtractedData
-	Draft                *SeedDraft
+	TaskID                   string
+	SourceSite               string
+	Hash                     string
+	TorrentID                string
+	SiteIdentifier           string
+	SavePath                 string
+	DownloaderID             string
+	TorrentNameForPath       string
+	ScreenshotReviewMode     string
+	RefreshMediainfoForBatch bool
+	MetaName                 string
+	DetailHTML               string
+	ReviewData               parser.ReviewExtractedData
+	Draft                    *SeedDraft
 }
 
 // FetchPersistPipelineDeps 定义抓取流水线依赖。
@@ -123,18 +124,20 @@ func RunFetchPersistPipeline(input FetchPersistPipelineInput, deps FetchPersistP
 	postPersistResult := FinalizeFetchPostPersist(
 		deps.Repo,
 		FetchPostPersistInput{
-			TaskID:             input.TaskID,
-			Hash:               input.Hash,
-			TorrentID:          input.TorrentID,
-			SiteIdentifier:     input.SiteIdentifier,
-			SavePath:           input.SavePath,
-			ContentName:        input.Draft.Title,
-			DownloaderID:       input.DownloaderID,
-			TorrentNameForPath: input.TorrentNameForPath,
-			CurrentMedia:       input.Draft.Mediainfo,
-			MediainfoValid:     finalizeResult.MediainfoValid,
-			InitialStatus:      finalizeResult.MediainfoStatus,
-			SkipAutoRefresh:    repairFinalizeResult.RestrictionPrecheck.Matched,
+			TaskID:                   input.TaskID,
+			Hash:                     input.Hash,
+			TorrentID:                input.TorrentID,
+			SiteIdentifier:           input.SiteIdentifier,
+			SavePath:                 input.SavePath,
+			ContentName:              input.Draft.Title,
+			DownloaderID:             input.DownloaderID,
+			TorrentNameForPath:       input.TorrentNameForPath,
+			CurrentMedia:             input.Draft.Mediainfo,
+			Medium:                   strings.TrimSpace(toStringAny(finalizeResult.Record["medium"], "")),
+			MediainfoValid:           finalizeResult.MediainfoValid,
+			InitialStatus:            finalizeResult.MediainfoStatus,
+			SkipAutoRefresh:          repairFinalizeResult.RestrictionPrecheck.Matched,
+			RefreshMediainfoForBatch: input.RefreshMediainfoForBatch,
 		},
 		FetchPostPersistDeps{
 			TriggerMediainfoRepair: deps.TriggerMediainfoRepair,

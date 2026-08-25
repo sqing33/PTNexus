@@ -69,12 +69,13 @@ func RunBatchFetch(torrentNames []string, sourcePriority []string, rows []map[st
 		}
 
 		fetchResult, status := deps.FetchAndStore(map[string]any{
-			"sourceSite":           sourceSite,
-			"searchTerm":           torrentID,
-			"torrentName":          name,
-			"savePath":             savePath,
-			"downloaderId":         downloaderID,
-			"screenshotReviewMode": processingshared.ScreenshotReviewModeBackground,
+			"sourceSite":               sourceSite,
+			"searchTerm":               torrentID,
+			"torrentName":              name,
+			"savePath":                 savePath,
+			"downloaderId":             downloaderID,
+			"screenshotReviewMode":     processingshared.ScreenshotReviewModeBackground,
+			"refreshMediainfoForBatch": true,
 		})
 		if status != 200 || !isSuccessResult(fetchResult) {
 			result["status"] = "failed"

@@ -14,12 +14,13 @@ const iyuuPlaceholderLogModule = "迁移-IYUU占位回写"
 
 // FetchStoreProcessInput 定义抓取保存流程中段（提取+收敛）输入。
 type FetchStoreProcessInput struct {
-	TaskID               string
-	SourceSite           string
-	SearchTerm           string
-	ScreenshotReviewMode string
-	AcquireResult        acquirefetch.FetchAcquireResult
-	ExtractorEngine      *extract.Engine
+	TaskID                   string
+	SourceSite               string
+	SearchTerm               string
+	ScreenshotReviewMode     string
+	RefreshMediainfoForBatch bool
+	AcquireResult            acquirefetch.FetchAcquireResult
+	ExtractorEngine          *extract.Engine
 }
 
 // FetchStoreProcessDeps 定义抓取保存流程中段（提取+收敛）依赖。
@@ -107,20 +108,21 @@ func RunFetchStoreProcess(input FetchStoreProcessInput, deps FetchStoreProcessDe
 
 	finalizeResult, finalizeErr := RunFetchFinalizeFlow(
 		FetchFinalizeFlowInput{
-			TaskID:               input.TaskID,
-			SourceSite:           input.SourceSite,
-			SearchTerm:           input.SearchTerm,
-			Hash:                 meta.InfoHash,
-			TorrentID:            input.SearchTerm,
-			SiteIdentifier:       siteIdentifier,
-			SavePath:             savePath,
-			DownloaderID:         downloaderID,
-			TorrentNameForPath:   torrentNameForPath,
-			ScreenshotReviewMode: input.ScreenshotReviewMode,
-			MetaName:             meta.Name,
-			DetailHTML:           html,
-			ReviewData:           reviewData,
-			Draft:                draft,
+			TaskID:                   input.TaskID,
+			SourceSite:               input.SourceSite,
+			SearchTerm:               input.SearchTerm,
+			Hash:                     meta.InfoHash,
+			TorrentID:                input.SearchTerm,
+			SiteIdentifier:           siteIdentifier,
+			SavePath:                 savePath,
+			DownloaderID:             downloaderID,
+			TorrentNameForPath:       torrentNameForPath,
+			ScreenshotReviewMode:     input.ScreenshotReviewMode,
+			RefreshMediainfoForBatch: input.RefreshMediainfoForBatch,
+			MetaName:                 meta.Name,
+			DetailHTML:               html,
+			ReviewData:               reviewData,
+			Draft:                    draft,
 		},
 		FetchFinalizeFlowDeps{
 			Repo:                       deps.Repo,
