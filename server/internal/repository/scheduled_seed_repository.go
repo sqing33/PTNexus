@@ -163,18 +163,18 @@ func (r *ScheduledSeedRepository) Update(task *ScheduledSeedTask) error {
 	if err := r.store.DB.Table("scheduled_seed_tasks").
 		Where("id = ?", task.ID).
 		Updates(map[string]any{
-			"name":              task.Name,
-			"status":            task.Status,
-			"seeds_json":        task.SeedsJSON,
-			"target_sites_json": task.TargetSitesJSON,
-			"interval_minutes":  task.IntervalMinutes,
+			"name":               task.Name,
+			"status":             task.Status,
+			"seeds_json":         task.SeedsJSON,
+			"target_sites_json":  task.TargetSitesJSON,
+			"interval_minutes":   task.IntervalMinutes,
 			"current_seed_index": task.CurrentSeedIndex,
 			"current_site_index": task.CurrentSiteIndex,
-			"total_published":   task.TotalPublished,
-			"total_skipped":     task.TotalSkipped,
-			"loop_enabled":      task.LoopEnabled,
-			"next_run_at":       task.NextRunAt,
-			"updated_at":        task.UpdatedAt,
+			"total_published":    task.TotalPublished,
+			"total_skipped":      task.TotalSkipped,
+			"loop_enabled":       task.LoopEnabled,
+			"next_run_at":        task.NextRunAt,
+			"updated_at":         task.UpdatedAt,
 		}).Error; err != nil {
 		return fmt.Errorf("更新定时发种任务失败: %w", err)
 	}
@@ -389,7 +389,7 @@ func (r *ScheduledSeedRepository) GetSeedSites(name string) ([]string, error) {
 	return sites, nil
 }
 
-// ListAvailableSeeds 查询可选种子列表（从 seed_parameters 表 JOIN torrents 表），
+// ListAvailableSeeds 查询正在做种的可选种子列表（从 seed_parameters 表 JOIN torrents 表）。
 // 返回完整字段用于表格展示，包括做种数（从 torrents 表统计，与一种多站一致）、下载器、大小、进度。
 func (r *ScheduledSeedRepository) ListAvailableSeeds(page, pageSize int, f SeedFilter) ([]map[string]any, int64, int, error) {
 	if r == nil || r.store == nil || r.store.DB == nil {
@@ -414,7 +414,8 @@ func (r *ScheduledSeedRepository) ListAvailableSeeds(page, pageSize int, f SeedF
 	}
 
 	// 构建公共 WHERE 条件（用于计数和分页查询）
-	whereConditions := ""
+	// 只保留做种站点数大于 0 的种子，确保总数统计与分页结果一致。
+	whereConditions := " AND EXISTS (SELECT 1 FROM torrents t0 WHERE t0.name = seed_parameters.name AND t0.is_hidden = 0 AND t0.sites IS NOT NULL AND t0.sites != '')"
 	whereArgs := []any{}
 	if f.Search != "" {
 		likePattern := "%" + f.Search + "%"
