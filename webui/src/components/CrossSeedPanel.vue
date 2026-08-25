@@ -735,6 +735,7 @@ const allSitesStatus = ref<SiteStatus[]>([])
 const selectedTargetSites = ref<string[]>([])
 const autoAddExistingToDownloader = ref(false)
 const autoUpdateExistingTorrent = ref(false)
+const screenshotCount = ref(3)
 const isLoading = ref(false)
 const isEnqueueing = ref(false)
 const torrentData = ref<TorrentData>(getInitialTorrentData())
@@ -839,6 +840,7 @@ const hasRestrictedAutoRepairTags = computed(() => {
 
 const buildScreenshotPayload = (type: string, extra: Record<string, unknown> = {}) => ({
   type,
+  screenshot_count: screenshotCount.value,
   content_name: torrentData.value.original_main_title,
   source_info: {
     main_title: torrentData.value.original_main_title,
@@ -1026,7 +1028,7 @@ const buildScreenshotPreviewDialogMessage = (subtitleState: ScreenshotSubtitleSt
     case 'confirmed_chinese':
       return '已定位到明确的中文字幕流，可直接挑选更合适的时间点。'
     default:
-      return '当前未检测到可用字幕流，请直接在候选列表中选择 3 张截图。'
+      return `当前未检测到可用字幕流，请直接在候选列表中选择 ${screenshotCount.value} 张截图。`
   }
 }
 
@@ -1055,7 +1057,7 @@ const setScreenshotPreviewBundle = (
   screenshotPreviewCandidates.value = candidates
   activeScreenshotPreviewId.value = candidates[0]?.id || ''
   selectedScreenshotPreviewIds.value = []
-  screenshotPreviewSelectionLimit.value = selectionLimit > 0 ? selectionLimit : 3
+  screenshotPreviewSelectionLimit.value = selectionLimit > 0 ? selectionLimit : screenshotCount.value
   screenshotPreviewSubtitleState.value = subtitleState
   screenshotPreviewSubtitleStreams.value = subtitleStreams
   currentScreenshotPreviewSubtitleSID.value = currentSubtitleSID
@@ -1083,7 +1085,9 @@ const applyScreenshotPreviewCandidates = (
 ) => {
   const candidates = normalizeScreenshotPreviewCandidates(rawCandidates)
   const selectionLimit =
-    typeof rawSelectionLimit === 'number' ? rawSelectionLimit : Number(rawSelectionLimit || 5)
+    typeof rawSelectionLimit === 'number'
+      ? rawSelectionLimit
+      : Number(rawSelectionLimit || screenshotCount.value)
   if (candidates.length === 0) {
     return false
   }
@@ -1230,7 +1234,7 @@ const resetScreenshotPreviewState = () => {
   screenshotPreviewCandidates.value = []
   activeScreenshotPreviewId.value = ''
   selectedScreenshotPreviewIds.value = []
-  screenshotPreviewSelectionLimit.value = 3
+  screenshotPreviewSelectionLimit.value = screenshotCount.value
   screenshotPreviewSubtitleState.value = 'no_usable_subtitle'
   screenshotPreviewSubtitleStreams.value = []
   currentScreenshotPreviewSubtitleSID.value = 0
@@ -2436,6 +2440,7 @@ const seedFlow = createSeedFlow({
 
   autoAddExistingToDownloader,
   autoUpdateExistingTorrent,
+  screenshotCount,
 
   activeStep,
   isLoading,
@@ -2707,6 +2712,7 @@ provide(crossSeedPanelContextKey, {
   handleImageErrorWithProxy,
   refreshScreenshots,
   isRefreshingScreenshots,
+  screenshotCount,
   confirmScreenshotReview,
   isConfirmingScreenshotReview,
   isScreenshotReviewPending,

@@ -9,6 +9,7 @@ import (
 func (s *SettingsService) GetCrossSeedSettings() map[string]any {
 	defaults := map[string]any{
 		"image_hoster":                     "pixhost",
+		"screenshot_count":                 3,
 		"pixhost_domain":                   "img2.pixhost.cc",
 		"agsv_email":                       "",
 		"agsv_password":                    "",
@@ -39,6 +40,14 @@ func (s *SettingsService) SaveCrossSeedSettings(newSettings map[string]any) erro
 	merged["publish_batch_concurrency_manual"] = manual
 	merged["auto_add_existing_to_downloader"] = toBool(merged["auto_add_existing_to_downloader"], true)
 	merged["auto_update_existing_torrent"] = toBool(merged["auto_update_existing_torrent"], false)
+	screenshotCount := toIntWithDefault(merged["screenshot_count"], 3)
+	if screenshotCount < 1 {
+		screenshotCount = 1
+	}
+	if screenshotCount > 10 {
+		screenshotCount = 10
+	}
+	merged["screenshot_count"] = screenshotCount
 	if toString(merged["image_hoster"], "") == "" {
 		merged["image_hoster"] = "pixhost"
 	}

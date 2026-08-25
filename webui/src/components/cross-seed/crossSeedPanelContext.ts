@@ -172,6 +172,7 @@ export interface CrossSeedPanelContext {
   handleImageErrorWithProxy: (url: string, type: 'poster' | 'screenshot', index: number) => void
   refreshScreenshots: () => Promise<void>
   isRefreshingScreenshots: Ref<boolean>
+  screenshotCount: Ref<number>
   confirmScreenshotReview: () => Promise<void>
   isConfirmingScreenshotReview: Ref<boolean>
   isScreenshotReviewPending: ComputedRef<boolean>

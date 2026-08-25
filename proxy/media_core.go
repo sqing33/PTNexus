@@ -798,7 +798,7 @@ func buildRandomScreenshotPointsForDuration(duration float64, count int) []float
 	return points
 }
 
-func sanitizeSelectedScreenshotTimes(values []float64, duration float64) []float64 {
+func sanitizeSelectedScreenshotTimes(values []float64, duration float64, maxCount int) []float64 {
 	clean := make([]float64, 0, len(values))
 	for _, value := range values {
 		if value <= 0 || value >= duration {
@@ -817,6 +817,9 @@ func sanitizeSelectedScreenshotTimes(values []float64, duration float64) []float
 		clean = append(clean, value)
 	}
 	sort.Float64s(clean)
+	if maxCount > 0 && len(clean) > maxCount {
+		clean = clean[:maxCount]
+	}
 	return clean
 }
 

@@ -356,6 +356,20 @@
                       >
                         重新获取
                       </el-button>
+                      <el-select
+                        v-model="screenshotCount"
+                        size="small"
+                        style="width: 110px"
+                        :disabled="isRefreshingScreenshots || isConfirmingScreenshotReview"
+                        aria-label="截图数量"
+                      >
+                        <el-option
+                          v-for="count in 10"
+                          :key="count"
+                          :label="`${count} 张`"
+                          :value="count"
+                        />
+                      </el-select>
                     </div>
                   </div>
                 </template>
@@ -575,6 +589,7 @@ const {
   handleImageErrorWithProxy,
   refreshScreenshots,
   isRefreshingScreenshots,
+  screenshotCount,
   confirmScreenshotReview,
   isConfirmingScreenshotReview,
   isScreenshotReviewPending,

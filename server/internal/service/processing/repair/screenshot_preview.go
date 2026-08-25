@@ -23,8 +23,6 @@ const (
 	screenshotPreviewDefaultCount = 6
 	// 最少候选数量
 	screenshotPreviewMinCount = 3
-	// 最终必须选择 3 张
-	screenshotPreviewSelectCount = 3
 )
 
 const screenshotPreviewLogModule = "媒体校验-截图预览"
@@ -125,6 +123,7 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 	payload := input.Payload
 	sourceInfo := input.SourceInfo
 	previewCount = normalizeScreenshotPreviewCount(previewCount)
+	screenshotCount := screenshotCountFromInput(input)
 	selectedSubtitleSID, selectedSubtitleProvided := parseSelectedSubtitleSIDAny(payload["selected_subtitle_sid"])
 
 	savePath, downloaderID, torrentName, contentName, preferExactRemotePath := parseScreenshotSourceParams(input.RootConfig, payload, sourceInfo, input.ContentName)
@@ -144,7 +143,7 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 					logx.Infof(screenshotPreviewLogModule, "盒子代理候选截图生成成功 remote_path=%s count=%d", remoteCandidate, len(previewBundle.Candidates))
 					return ScreenshotPreviewBundle{
 						Candidates:         mapProxyPreviewCandidates(previewBundle.Candidates),
-						SelectionLimit:     screenshotPreviewSelectCount,
+						SelectionLimit:     screenshotCount,
 						SubtitleState:      ScreenshotSubtitleState(previewBundle.SubtitleState),
 						SubtitleStreams:    mapProxySubtitleStreams(previewBundle.SubtitleStreams),
 						CurrentSubtitleSID: previewBundle.CurrentSubtitleSID,
@@ -261,10 +260,10 @@ func GenerateScreenshotPreviewCandidates(input ScreenshotGenerateInput, previewC
 	if len(candidates) < screenshotPreviewMinCount {
 		return ScreenshotPreviewBundle{}, fmt.Errorf("可用候选截图不足，仅生成 %d 张", len(candidates))
 	}
-	markRecommendedPreviewCandidates(candidates, screenshotPreviewSelectCount)
+	markRecommendedPreviewCandidates(candidates, screenshotCount)
 	return ScreenshotPreviewBundle{
 		Candidates:         candidates,
-		SelectionLimit:     screenshotPreviewSelectCount,
+		SelectionLimit:     screenshotCount,
 		SubtitleState:      inspection.State,
 		SubtitleStreams:    inspection.Streams,
 		CurrentSubtitleSID: currentSubtitleSID,
@@ -283,10 +282,11 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 	payload := input.Payload
 	sourceInfo := input.SourceInfo
 	selectedSubtitleSID, selectedSubtitleProvided := parseSelectedSubtitleSIDAny(payload["selected_subtitle_sid"])
+	screenshotCount := screenshotCountFromInput(input)
 
 	logx.PlainInfof("开始执行截图和上传任务 (智能 HDR/SDR + 自动中文字幕)...")
 	uploadCtx := PrepareScreenshotUploadContext(input.RootConfig)
-	logx.PlainInfof("已选择图床服务: %s, 截图数量: %d", uploadCtx.Hoster, screenshotTotalCount)
+	logx.PlainInfof("已选择图床服务: %s, 截图数量: %d", uploadCtx.Hoster, screenshotCount)
 
 	savePath, downloaderID, torrentName, contentName, preferExactRemotePath := parseScreenshotSourceParams(input.RootConfig, payload, sourceInfo, input.ContentName)
 	proxyScene := "自动截图"
@@ -314,6 +314,7 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 				bbcode, err = downloader.FetchScreenshotsByProxy(
 					remoteCandidate,
 					contentName,
+					screenshotCount,
 					buildSelectedSubtitleSIDPointer(selectedSubtitleSID, selectedSubtitleProvided),
 				)
 			}
@@ -424,7 +425,7 @@ func generateAndUploadScreenshotsWithPoints(input ScreenshotGenerateInput, selec
 		ffprobePath,
 		targetResult.TargetFile,
 		selectedTimes,
-		screenshotTotalCount,
+		screenshotCount,
 		requireSelected,
 		subtitleSID,
 		hasSelectedCandidate,
@@ -634,9 +635,6 @@ func buildScreenshotPreviewPoints(
 		return nil, fmt.Errorf("读取视频时长失败: %w", err)
 	}
 	wantSmart := previewCount
-	if wantSmart > screenshotPreviewSelectCount {
-		wantSmart = screenshotPreviewSelectCount
-	}
 	smartPoints := buildSmartPointsForSelectedSubtitle(ffprobePath, videoPath, wantSmart, currentSubtitleSID, hasSelectedCandidate, selectedCandidate)
 	fallbackPoints := buildPreviewFallbackPoints(duration, previewCount)
 	merged := mergeScreenshotPointCandidates(smartPoints, fallbackPoints, previewCount, duration)
@@ -660,21 +658,17 @@ func resolveFormalScreenshotPoints(
 	if err != nil || duration <= 0 {
 		return nil, fmt.Errorf("读取视频时长失败: %w", err)
 	}
-	cleanSelected := sanitizeSelectedScreenshotTimes(selectedPoints, duration)
-	if len(cleanSelected) > 0 {
+	cleanSelected := sanitizeSelectedScreenshotTimes(selectedPoints, duration, want)
+	if len(cleanSelected) > 0 && (!requireSelected || len(cleanSelected) == want) {
 		return cleanSelected, nil
 	}
 	if requireSelected {
-		return nil, fmt.Errorf("请选择 %d 张候选截图后再生成正式截图", screenshotPreviewSelectCount)
+		return nil, fmt.Errorf("请选择 %d 张候选截图后再生成正式截图", want)
 	}
 	points := buildSmartPointsForSelectedSubtitle(ffprobePath, targetVideoFile, want, currentSubtitleSID, hasSelectedCandidate, selectedCandidate)
 	if len(points) < want {
 		logx.PlainWarnf("警告: 智能分析失败，回退到按百分比截图。")
-		percents := []float64{0.20, 0.50, 0.80}
-		points = make([]float64, 0, len(percents))
-		for _, p := range percents {
-			points = append(points, duration*p)
-		}
+		points = buildPreviewFallbackPoints(duration, want)
 	}
 	return points, nil
 }
@@ -843,7 +837,7 @@ func detectHDRFromVideo(ffprobePath, videoPath string) bool {
 	return strings.Contains(text, "smpte2084") || strings.Contains(text, "bt2020")
 }
 
-func sanitizeSelectedScreenshotTimes(values []float64, duration float64) []float64 {
+func sanitizeSelectedScreenshotTimes(values []float64, duration float64, maxCount int) []float64 {
 	clean := make([]float64, 0, len(values))
 	for _, value := range values {
 		if value <= 0 || value >= duration {
@@ -862,8 +856,8 @@ func sanitizeSelectedScreenshotTimes(values []float64, duration float64) []float
 		clean = append(clean, value)
 	}
 	sort.Float64s(clean)
-	if len(clean) > screenshotPreviewSelectCount {
-		clean = clean[:screenshotPreviewSelectCount]
+	if maxCount > 0 && len(clean) > maxCount {
+		clean = clean[:maxCount]
 	}
 	return clean
 }
@@ -872,7 +866,7 @@ func parseFloatSliceAny(value any) []float64 {
 	result := make([]float64, 0)
 	switch typed := value.(type) {
 	case []float64:
-		return sanitizeSelectedScreenshotTimes(typed, math.MaxFloat64)
+		return sanitizeSelectedScreenshotTimes(typed, math.MaxFloat64, 0)
 	case []any:
 		for _, item := range typed {
 			if parsed, ok := parseFloatAny(item); ok {

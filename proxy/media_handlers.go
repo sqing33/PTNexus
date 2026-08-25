@@ -125,14 +125,28 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("capturing screenshots with usable subtitle stream sid=%d", subtitleSID)
 		}
 
-		screenshotPoints := make([]float64, 0, 3)
-		const numScreenshots = 3
+		numScreenshots := reqData.PreviewCount
+		if numScreenshots <= 0 {
+			numScreenshots = 3
+		}
+		if numScreenshots > 10 {
+			numScreenshots = 10
+		}
+		screenshotPoints := make([]float64, 0, numScreenshots)
 		if mode == "finalize" {
-			screenshotPoints = sanitizeSelectedScreenshotTimes(reqData.SelectedTimes, duration)
+			screenshotPoints = sanitizeSelectedScreenshotTimes(reqData.SelectedTimes, duration, numScreenshots)
 			if len(screenshotPoints) == 0 {
 				statusCode = http.StatusBadRequest
 				response = ScreenshotResponse{Success: false, Message: "selected_times must contain at least one valid timestamp"}
 				return fmt.Errorf("selected_times cannot be empty")
+			}
+			if len(screenshotPoints) != numScreenshots {
+				statusCode = http.StatusBadRequest
+				response = ScreenshotResponse{
+					Success: false,
+					Message: fmt.Sprintf("selected_times must contain exactly %d valid timestamps", numScreenshots),
+				}
+				return fmt.Errorf("selected_times count must be %d", numScreenshots)
 			}
 		} else if mode == "random_final" {
 			randomCount := reqData.PreviewCount
@@ -149,11 +163,7 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			screenshotPoints = buildSmartScreenshotPointsForPreview(videoPath, duration, numScreenshots, subtitleSID, selectedCandidate, hasSelectedCandidate)
 			if len(screenshotPoints) < numScreenshots {
 				log.Printf("smart screenshot points were insufficient; falling back to uniform percentages")
-				percentages := []float64{0.20, 0.50, 0.80}
-				screenshotPoints = make([]float64, 0, len(percentages))
-				for _, p := range percentages {
-					screenshotPoints = append(screenshotPoints, duration*p)
-				}
+				screenshotPoints = buildUniformPreviewPoints(duration, numScreenshots)
 			}
 		}
 

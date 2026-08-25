@@ -26,6 +26,7 @@ export type SeedFlowDeps = {
 
   autoAddExistingToDownloader: Ref<boolean>
   autoUpdateExistingTorrent: Ref<boolean>
+  screenshotCount: Ref<number>
 
   activeStep: Ref<number>
   isLoading: Ref<boolean>
@@ -256,6 +257,12 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
       const response = await axios.get('/api/settings/cross_seed')
       autoAddExistingToDownloader.value = !!response.data?.auto_add_existing_to_downloader
       autoUpdateExistingTorrent.value = !!response.data?.auto_update_existing_torrent
+      const configuredCount = Number(response.data?.screenshot_count)
+      if (Number.isFinite(configuredCount) && configuredCount >= 1) {
+        deps.screenshotCount.value = Math.min(Math.floor(configuredCount), 10)
+      } else {
+        deps.screenshotCount.value = 3
+      }
     } catch (error) {
       console.warn('获取发种设置失败:', error)
     }

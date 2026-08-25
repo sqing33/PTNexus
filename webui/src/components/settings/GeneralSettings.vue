@@ -379,6 +379,20 @@
               </el-select>
             </el-form-item>
 
+            <el-form-item label="获取图片数量" class="form-item">
+              <el-input-number
+                v-model="settingsForm.screenshot_count"
+                :min="1"
+                :max="10"
+                :step="1"
+                controls-position="right"
+                @change="autoSaveCrossSeedSettings"
+              />
+              <el-text type="info" size="small" style="display: block; margin-top: 8px">
+                获取种子信息或自动生成截图时使用的默认数量
+              </el-text>
+            </el-form-item>
+
             <el-form-item
               v-if="settingsForm.image_hoster === 'pixhost'"
               label="Pixhost 域名"
@@ -1006,6 +1020,7 @@ type PublishBatchConcurrencyMode = 'cpu' | 'manual' | 'all'
 
 interface CrossSeedSettings {
   image_hoster: string
+  screenshot_count?: number
   pixhost_domain?: string
   agsv_email?: string
   agsv_password?: string
@@ -1019,6 +1034,7 @@ const savingCrossSeed = ref(false)
 
 const settingsForm = reactive<CrossSeedSettings>({
   image_hoster: 'pixhost',
+  screenshot_count: 3,
   pixhost_domain: 'img2.pixhost.cc',
   agsv_email: '',
   agsv_password: '',
@@ -1262,6 +1278,7 @@ const autoSaveCrossSeedSettings = async () => {
     // 保存转种设置
     const crossSeedSettings = {
       image_hoster: settingsForm.image_hoster,
+      screenshot_count: settingsForm.screenshot_count,
       pixhost_domain: settingsForm.pixhost_domain,
       agsv_email: settingsForm.agsv_email,
       agsv_password: settingsForm.agsv_password,
@@ -1656,6 +1673,7 @@ const saveUploadSettings = async () => {
     // 需要包含完整的cross_seed配置，因为后端API要求必须有image_hoster字段
     const crossSeedSettings = {
       image_hoster: settingsForm.image_hoster,
+      screenshot_count: settingsForm.screenshot_count,
       pixhost_domain: settingsForm.pixhost_domain,
       agsv_email: settingsForm.agsv_email,
       agsv_password: settingsForm.agsv_password,

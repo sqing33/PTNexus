@@ -8,6 +8,7 @@ import (
 
 	"github.com/pt-nexus/server/internal/platform/logx"
 	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
+	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
 )
 
@@ -18,7 +19,6 @@ const (
 	fetchRepairScreenshotLogModule = "迁移-截图修复"
 	fetchRepairIntroLogModule      = "迁移-简介修复"
 
-	fetchMinValidScreenshots      = 3
 	fetchScreenshotValidateWorker = 4
 )
 
@@ -606,15 +606,31 @@ func repairScreenshotsDuringFetch(
 	validURLs := filterReachableImageURLsConcurrently(rawURLs, fetchScreenshotValidateWorker)
 	logx.Infof(fetchRepairScreenshotLogModule, "截图并发校验结束 raw_count=%d valid_count=%d elapsed_ms=%d", len(rawURLs), len(validURLs), time.Since(validateStartedAt).Milliseconds())
 
-	if len(validURLs) >= fetchMinValidScreenshots {
+	configuredScreenshotCount := ScreenshotCountFromConfig(deps.RootConfig)
+	_, isBDInfo, _ := processingmedia.ValidateMediaInfoFormat(reviewData.Mediainfo)
+	hdrInfo := processingmedia.ExtractHDRInfoFromMediaText(reviewData.Mediainfo, isBDInfo)
+	hasHDR := strings.TrimSpace(hdrInfo.StandardTag) != ""
+	if len(validURLs) >= configuredScreenshotCount && hasHDR {
 		reviewData.Screens = ToBBCodeImages(validURLs)
-		logx.Infof(fetchRepairScreenshotLogModule, "截图校验通过 valid_count=%d", len(validURLs))
+		logx.Infof(fetchRepairScreenshotLogModule, "截图校验通过 valid_count=%d required_count=%d hdr=%s", len(validURLs), configuredScreenshotCount, hdrInfo.StandardTag)
 		emitLog(deps, taskID, "修复截图", "截图校验通过", "success")
 		return reviewStatus, previewRequired
 	}
 
-	logx.Warnf(fetchRepairScreenshotLogModule, "截图不合规，开始自动重建 raw_count=%d valid_count=%d", len(rawURLs), len(validURLs))
-	emitLog(deps, taskID, "修复截图", "截图缺失或失效，正在自动重建...", "processing")
+	rebuildReason := "截图缺失或失效"
+	if !hasHDR {
+		rebuildReason = "种子不是 HDR"
+	}
+	logx.Warnf(
+		fetchRepairScreenshotLogModule,
+		"开始自动重建截图 raw_count=%d valid_count=%d required_count=%d hdr=%s reason=%s",
+		len(rawURLs),
+		len(validURLs),
+		configuredScreenshotCount,
+		hdrInfo.StandardTag,
+		rebuildReason,
+	)
+	emitLog(deps, taskID, "修复截图", rebuildReason+"，正在自动重建...", "processing")
 
 	payload := map[string]any{
 		"save_path":      strings.TrimSpace(savePath),

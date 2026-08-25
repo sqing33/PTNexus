@@ -82,8 +82,11 @@ type ProxyScreenshotPreviewResult struct {
 // 参数/返回：remotePath 为盒子上的实际路径（通常是下载器返回的 save_path 或其子目录）；contentName 用于多文件时辅助选取目标视频；返回截图 BBCode。
 // 失败场景：代理不可达、HTTP 返回异常、代理返回 success=false、响应解析失败、BBCode 为空。
 // 副作用：会向盒子代理服务发起 HTTP 请求。
-func (d Downloader) FetchScreenshotsByProxy(remotePath, contentName string, selectedSubtitleSID *int) (string, error) {
-	resp, err := d.requestProxyScreenshots(remotePath, contentName, "", 0, nil, selectedSubtitleSID)
+func (d Downloader) FetchScreenshotsByProxy(remotePath, contentName string, screenshotCount int, selectedSubtitleSID *int) (string, error) {
+	if screenshotCount <= 0 {
+		screenshotCount = 3
+	}
+	resp, err := d.requestProxyScreenshots(remotePath, contentName, "", screenshotCount, nil, selectedSubtitleSID)
 	if err != nil {
 		return "", err
 	}
@@ -109,7 +112,7 @@ func (d Downloader) FetchSelectedScreenshotsByProxy(
 	selectedTimes []float64,
 	selectedSubtitleSID *int,
 ) (string, error) {
-	resp, err := d.requestProxyScreenshots(remotePath, contentName, "finalize", 0, selectedTimes, selectedSubtitleSID)
+	resp, err := d.requestProxyScreenshots(remotePath, contentName, "finalize", len(selectedTimes), selectedTimes, selectedSubtitleSID)
 	if err != nil {
 		return "", err
 	}

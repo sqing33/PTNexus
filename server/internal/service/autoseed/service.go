@@ -459,7 +459,7 @@ func (s *Service) refreshAutoSeedScreenshots(item repository.AutoSeedItem, siteN
 		ContentName: contentName,
 		RootConfig:  s.rootConfig(),
 	}
-	urls, err := processingrepair.GenerateAndUploadRandomScreenshots(input, 3)
+	urls, err := processingrepair.GenerateAndUploadRandomScreenshots(input, processingrepair.ScreenshotCountFromConfig(input.RootConfig))
 	if err != nil {
 		return err
 	}

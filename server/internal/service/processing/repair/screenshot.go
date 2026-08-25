@@ -19,7 +19,42 @@ import (
 	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
-const screenshotTotalCount = 3
+const (
+	defaultScreenshotCount = 3
+	maxScreenshotCount     = 10
+)
+
+// ScreenshotCountFromConfig 读取截图默认数量配置，并将结果限制在允许范围内。
+// 参数/返回：rootConfig 为应用根配置；返回 1-10 之间的截图数量，配置缺失时返回 3。
+// 失败场景：配置结构或数值无法解析时回退默认值。
+// 副作用：仅读取内存中的配置，不会写入配置或执行外部请求。
+func ScreenshotCountFromConfig(rootConfig map[string]any) int {
+	if rootConfig != nil {
+		if crossSeed, ok := rootConfig["cross_seed"].(map[string]any); ok {
+			if value, ok := parseIntAny(crossSeed["screenshot_count"]); ok {
+				return normalizeScreenshotCount(value)
+			}
+		}
+	}
+	return defaultScreenshotCount
+}
+
+func screenshotCountFromInput(input ScreenshotGenerateInput) int {
+	if value, ok := parseIntAny(input.Payload["screenshot_count"]); ok {
+		return normalizeScreenshotCount(value)
+	}
+	return ScreenshotCountFromConfig(input.RootConfig)
+}
+
+func normalizeScreenshotCount(value int) int {
+	if value < 1 {
+		return defaultScreenshotCount
+	}
+	if value > maxScreenshotCount {
+		return maxScreenshotCount
+	}
+	return value
+}
 
 // GenerateAndUploadScreenshots 从目标媒体自动截帧并上传到 Pixhost，返回可用图片链接列表。
 // 参数/返回：输入包含 payload/source_info/content_name/config，返回去重后的截图 URL。
@@ -29,10 +64,11 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 	payload := input.Payload
 	sourceInfo := input.SourceInfo
 	selectedSubtitleSID, selectedSubtitleProvided := parseSelectedSubtitleSIDAny(payload["selected_subtitle_sid"])
+	screenshotCount := screenshotCountFromInput(input)
 
 	logx.PlainInfof("开始执行截图和上传任务 (智能 HDR/SDR + 自动中文字幕)...")
 	uploadCtx := PrepareScreenshotUploadContext(input.RootConfig)
-	logx.PlainInfof("已选择图床服务: %s, 截图数量: %d", uploadCtx.Hoster, screenshotTotalCount)
+	logx.PlainInfof("已选择图床服务: %s, 截图数量: %d", uploadCtx.Hoster, screenshotCount)
 
 	savePath := strings.TrimSpace(toStringAny(payload["savePath"], toStringAny(payload["save_path"], "")))
 	if savePath == "" {
@@ -61,6 +97,7 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 			bbcode, err := downloader.FetchScreenshotsByProxy(
 				remoteCandidate,
 				contentName,
+				screenshotCount,
 				buildSelectedSubtitleSIDPointer(selectedSubtitleSID, selectedSubtitleProvided),
 			)
 			if err == nil && strings.TrimSpace(bbcode) != "" {
@@ -139,19 +176,15 @@ func GenerateAndUploadScreenshots(input ScreenshotGenerateInput) ([]string, erro
 	}
 
 	// 获取截图时间点：先智能分析，失败则回退百分比。
-	points := getSmartScreenshotPoints(ffprobePath, targetVideoFile, screenshotTotalCount)
-	if len(points) < screenshotTotalCount {
+	points := getSmartScreenshotPoints(ffprobePath, targetVideoFile, screenshotCount)
+	if len(points) < screenshotCount {
 		logx.PlainWarnf("警告: 智能分析失败，回退到按百分比截图。")
 		duration, err := probeDurationSeconds(targetVideoFile)
 		if err != nil || duration <= 0 {
 			logx.PlainWarnf("错误: 获取视频时长失败: %v", err)
 			return nil, fmt.Errorf("读取视频时长失败: %w", err)
 		}
-		percents := []float64{0.20, 0.50, 0.80}
-		points = make([]float64, 0, len(percents))
-		for _, p := range percents {
-			points = append(points, duration*p)
-		}
+		points = buildPreviewFallbackPoints(duration, screenshotCount)
 	}
 	sort.Float64s(points)
 
