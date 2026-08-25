@@ -19,9 +19,12 @@ import (
 )
 
 const (
-	screenshotPreviewDefaultCount = 12
-	screenshotPreviewMinCount     = 5
-	screenshotPreviewSelectCount  = 5
+	// 候选截图数量
+	screenshotPreviewDefaultCount = 6
+	// 最少候选数量
+	screenshotPreviewMinCount = 3
+	// 最终必须选择 3 张
+	screenshotPreviewSelectCount = 3
 )
 
 const screenshotPreviewLogModule = "媒体校验-截图预览"
@@ -667,7 +670,7 @@ func resolveFormalScreenshotPoints(
 	points := buildSmartPointsForSelectedSubtitle(ffprobePath, targetVideoFile, want, currentSubtitleSID, hasSelectedCandidate, selectedCandidate)
 	if len(points) < want {
 		logx.PlainWarnf("警告: 智能分析失败，回退到按百分比截图。")
-		percents := []float64{0.15, 0.30, 0.50, 0.70, 0.85}
+		percents := []float64{0.20, 0.50, 0.80}
 		points = make([]float64, 0, len(percents))
 		for _, p := range percents {
 			points = append(points, duration*p)

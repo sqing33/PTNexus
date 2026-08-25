@@ -125,8 +125,8 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("capturing screenshots with usable subtitle stream sid=%d", subtitleSID)
 		}
 
-		screenshotPoints := make([]float64, 0, 5)
-		const numScreenshots = 5
+		screenshotPoints := make([]float64, 0, 3)
+		const numScreenshots = 3
 		if mode == "finalize" {
 			screenshotPoints = sanitizeSelectedScreenshotTimes(reqData.SelectedTimes, duration)
 			if len(screenshotPoints) == 0 {
@@ -149,7 +149,7 @@ func screenshotHandler(w http.ResponseWriter, r *http.Request) {
 			screenshotPoints = buildSmartScreenshotPointsForPreview(videoPath, duration, numScreenshots, subtitleSID, selectedCandidate, hasSelectedCandidate)
 			if len(screenshotPoints) < numScreenshots {
 				log.Printf("smart screenshot points were insufficient; falling back to uniform percentages")
-				percentages := []float64{0.15, 0.30, 0.50, 0.70, 0.85}
+				percentages := []float64{0.20, 0.50, 0.80}
 				screenshotPoints = make([]float64, 0, len(percentages))
 				for _, p := range percentages {
 					screenshotPoints = append(screenshotPoints, duration*p)
