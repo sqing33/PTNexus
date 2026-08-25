@@ -132,17 +132,12 @@ func ValidateMediaPayload(payload map[string]any, rootConfig map[string]any, csp
 		// 从新获取的简介文本中提取“类别/评分”字段对应的标准化标签，仅随响应返回，不落库。
 		categoryTags := processingtagging.ExtractTagsFromDescriptionCategory(result.Intro)
 		categoryTags = append(categoryTags, processingtagging.ExtractTagsFromDescriptionScore(result.Intro)...)
-		typeOverride := ""
-		if processingtagging.CheckAnimationTypeFromDescription(result.Intro) {
-			typeOverride = "category.animation"
-		}
 		// 从新获取的简介文本提取产地，用于前端同步修正标准化产地键（不落库）。
 		sourceOverride := strings.TrimSpace(parser.InferSourceFromDescription(result.Intro))
 		return map[string]any{
 			"success":               true,
 			"intro":                 result.Intro,
 			"category_tags":         categoryTags,
-			"type_override":         typeOverride,
 			"source_override":       sourceOverride,
 			"source_links":          BuildSourceLinks(result.IMDb, result.Douban, result.TMDb),
 			"extracted_imdb_link":   result.IMDb,

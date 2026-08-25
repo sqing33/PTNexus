@@ -241,24 +241,6 @@ func extractTagsFromDescriptionScore(description string) []string {
 	return []string{}
 }
 
-// checkAnimationTypeFromDescription 判断简介类别字段是否包含 “动画/Animation”，用于修正类型为动漫。
-// 参数/返回：description 为声明与正文拼接文本；命中动画类别返回 true。
-// 失败场景：类别行缺失或为空时返回 false。
-// 副作用：命中动画判定时记录信息日志，便于追踪类型修正来源。
-func checkAnimationTypeFromDescription(description string) bool {
-	categoryText, ok := extractDescriptionCategoryText(description)
-	if !ok {
-		return false
-	}
-
-	lower := strings.ToLower(categoryText)
-	isAnimation := strings.Contains(lower, "动画") || strings.Contains(lower, "animation")
-	if isAnimation {
-		logx.Infof(tagDescriptionLogModule, "简介类别命中动画判定 category=%s", categoryText)
-	}
-	return isAnimation
-}
-
 // extractDescriptionCategoryText 从简介文本中提取“类别”字段原文。
 // 参数/返回：description 为声明与正文拼接文本；返回类别文本与是否命中。
 // 失败场景：简介为空、类别行不存在或类别值为空时返回 false。
@@ -584,11 +566,6 @@ func ExtractTagsFromDescriptionCategory(description string) []string {
 // ExtractTagsFromDescriptionScore 从简介豆瓣评分提取标准 tag.* 标签。
 func ExtractTagsFromDescriptionScore(description string) []string {
 	return extractTagsFromDescriptionScore(description)
-}
-
-// CheckAnimationTypeFromDescription 判断简介是否命中动画类型。
-func CheckAnimationTypeFromDescription(description string) bool {
-	return checkAnimationTypeFromDescription(description)
 }
 
 // ExtractRawTagsFromMediaText 从媒体文本提取原始标签。

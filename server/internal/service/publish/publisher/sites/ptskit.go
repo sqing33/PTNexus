@@ -51,21 +51,23 @@ func applyPTSKitTags(uploadData map[string]any, formFields map[string]string) {
 	if reprintID := strings.TrimSpace(siteCfg.Mappings["tag"]["tag.转载"]); reprintID != "" {
 		tagIDs = append(tagIDs, reprintID)
 	}
-	switch typeKey {
-	case "category.movie":
-		tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.电影"]))
-	case "category.tv_series":
-		tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.电视剧"]))
-	case "category.tv_shows":
-		tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.综艺"]))
-	case "category.game":
-		tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.游戏"]))
-	case "category.music":
-		tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.音乐"]))
-	case "category.animation":
+	if hasAnimationTag(uploadData) {
 		tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.动漫"]))
-	default:
-		tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.其他"]))
+	} else {
+		switch typeKey {
+		case "category.movie":
+			tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.电影"]))
+		case "category.tv_series":
+			tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.电视剧"]))
+		case "category.tv_shows":
+			tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.综艺"]))
+		case "category.game":
+			tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.游戏"]))
+		case "category.music":
+			tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.音乐"]))
+		default:
+			tagIDs = append(tagIDs, strings.TrimSpace(siteCfg.Mappings["tag"]["tag.其他"]))
+		}
 	}
 
 	rebuildIndexedFormFields(formFields, "tags[4]", sortedUniqueStrings(tagIDs))

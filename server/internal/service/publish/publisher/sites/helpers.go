@@ -207,6 +207,20 @@ func resolveSiteCombinedTags(uploadData map[string]any) map[string]struct{} {
 	return result
 }
 
+// hasAnimationTag 判断发布数据是否包含动漫标签，动漫属性由标签表达而不是类型字段表达。
+// 参数/返回：uploadData 为标准化发布数据；返回是否命中动漫/动画标签。
+// 失败场景：发布数据为空或标签格式无法解析时返回 false。
+// 副作用：无。
+func hasAnimationTag(uploadData map[string]any) bool {
+	for tag := range resolveSiteCombinedTags(uploadData) {
+		switch strings.ToLower(strings.TrimSpace(tag)) {
+		case "tag.动漫", "tag.动画", "动漫", "动画", "anime", "animation":
+			return true
+		}
+	}
+	return false
+}
+
 func parseFlexibleStringArray(value any) []string {
 	switch typed := value.(type) {
 	case nil:

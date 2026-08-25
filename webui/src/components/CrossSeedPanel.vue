@@ -1343,24 +1343,23 @@ const filteredDeclarationsList = computed(() => {
 })
 const filteredDeclarationsCount = computed(() => filteredDeclarationsList.value.length)
 
-const isAnimationRelatedType = (typeValue: string | undefined | null) => {
-  const text = (typeValue || '').trim().toLowerCase()
-  if (!text) return false
-
-  if (text === 'category.animation') {
-    return true
-  }
-
-  return (
-    text.includes('animation') ||
-    text.includes('anime') ||
-    text.includes('动漫') ||
-    text.includes('动画')
-  )
+const isAnimationRelatedTags = (tags: unknown) => {
+  const values = Array.isArray(tags) ? tags : typeof tags === 'string' ? [tags] : []
+  return values.some((tag) => {
+    const text = String(tag || '').trim().toLowerCase()
+    return (
+      text === 'tag.动漫' ||
+      text === 'tag.动画' ||
+      text === '动漫' ||
+      text === '动画' ||
+      text === 'anime' ||
+      text === 'animation'
+    )
+  })
 }
 
 const isCurrentSeedAnimationRelated = computed(() =>
-  isAnimationRelatedType(torrentData.value.standardized_params.type),
+  isAnimationRelatedTags(torrentData.value.standardized_params.tags),
 )
 
 const isIloliconSite = (siteStatus: SiteStatus | undefined) => {
@@ -1568,14 +1567,6 @@ const refreshIntro = async () => {
         torrentData.value.standardized_params.tags = merged
       }
 
-      // 若后端返回 type_override，则按返回值覆盖当前类型（用于动画类别联动）。
-      if (response.data.type_override && typeof response.data.type_override === 'string') {
-        const override = response.data.type_override.trim()
-        if (override) {
-          torrentData.value.standardized_params.type = override
-        }
-      }
-
       // 若后端从简介中提取到产地，则同步修正 standardized_params.source（不落库，随“下一步”统一提交）。
       if (response.data.source_override && typeof response.data.source_override === 'string') {
         const sourceOverride = response.data.source_override.trim()
@@ -1694,8 +1685,12 @@ const applySeedUpdates = (seedUpdates: unknown): Array<keyof InferredStandardize
       torrentData.value.standardized_params.tags = merged
     }
 
-    // type 默认不主动覆盖（除非当前为空），避免打断用户已选择的类型
-    if (typeof standardized.type === 'string' && standardized.type.trim() !== '') {
+    // 动漫不再作为类型选项，避免旧的 category.animation 值重新写回界面。
+    if (
+      typeof standardized.type === 'string' &&
+      standardized.type.trim() !== '' &&
+      standardized.type.trim() !== 'category.animation'
+    ) {
       const currentType = torrentData.value.standardized_params.type.trim()
       if (!currentType) {
         torrentData.value.standardized_params.type = standardized.type.trim()

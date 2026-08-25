@@ -330,6 +330,9 @@ func resolveHDHomeCategory(input publisher.PublishInput) string {
 	title := strings.ToLower(strings.TrimSpace(input.Title))
 	description := strings.ToLower(firstNonEmpty(input.Description, input.MediaInfo))
 	isPad := strings.Contains(title, "ipad") || strings.HasSuffix(title, "pad")
+	if hasAnimationTag(input.UploadData) {
+		return hdhomeCategoryByProfile(medium, resolution, isPad, "454", "501", "448", "445", "446", "447", "449", "444", "447")
+	}
 
 	switch category {
 	case "category.movie":
@@ -353,8 +356,6 @@ func resolveHDHomeCategory(input publisher.PublishInput) string {
 		return hdhomeCategoryByProfile(medium, resolution, isPad, "452", "", "430", "426", "427", "429", "431", "425", "429")
 	case "category.documentaries":
 		return hdhomeCategoryByProfile(medium, resolution, isPad, "451", "500", "421", "418", "419", "420", "422", "417", "420")
-	case "category.animation":
-		return hdhomeCategoryByProfile(medium, resolution, isPad, "454", "501", "448", "445", "446", "447", "449", "444", "447")
 	case "category.study":
 		return "409"
 	case "category.sports":

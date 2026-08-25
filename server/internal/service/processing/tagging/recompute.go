@@ -6,7 +6,7 @@ import (
 	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 )
 
-// RecomputeStandardTags 根据当前种子文本信息重新计算标准化 tags，并给出可选的类型修正（仅动画判定）。
+// RecomputeStandardTags 根据当前种子文本信息重新计算标准化 tags。
 // 参数/返回：siteCode 用于读取站点 tag 映射；title/subtitle/statement/body/mediainfo/titleComponents 为种子信息；savePath/torrentNameForPath/downloaderID/rootConfig 用于完结检测；
 // existingTags 会被当作候选来源之一（避免丢失已存在的有效标准标签）。
 // 失败场景：映射配置缺失或媒体文本为空时，会输出更少的标签，但不会返回错误。
@@ -36,11 +36,6 @@ func RecomputeStandardTags(
 	_, isBDInfo, _ := processingmedia.ValidateMediaInfoFormat(strings.TrimSpace(mediainfo))
 	rawTagCandidates = append(rawTagCandidates, ExtractRawTagsFromMediaText(mediainfo, isBDInfo)...)
 
-	typeOverride := ""
-	if CheckAnimationTypeFromDescription(description) {
-		typeOverride = "category.animation"
-	}
-
 	contentName := strings.TrimSpace(title)
 	if contentName == "" {
 		contentName = strings.TrimSpace(torrentNameForPath)
@@ -62,7 +57,7 @@ func RecomputeStandardTags(
 	}
 
 	mappedTags, unmappedTags := MapTagsToStandard(rawTagCandidates, siteCode)
-	return mappedTags, typeOverride, unmappedTags
+	return mappedTags, "", unmappedTags
 }
 
 // AnyTitleComponentsToMaps 将任意数组过滤为有效 title_components 结构切片。

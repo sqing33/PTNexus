@@ -344,9 +344,9 @@ func resolveHaidanSeasonEpisode(uploadData map[string]any, standardized map[stri
 		}
 	}
 
-	// 如果是动漫或电视剧类型，默认设置季集为0
+	// 如果是动漫标签或电视剧类型，默认设置季集为0
 	contentType := strings.TrimSpace(toStringAny(standardized["type"], ""))
-	if contentType == "category.animation" || contentType == "category.tv_series" {
+	if hasAnimationTag(uploadData) || contentType == "category.tv_series" {
 		return "0", "0"
 	}
 

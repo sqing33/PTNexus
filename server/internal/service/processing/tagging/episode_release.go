@@ -106,12 +106,25 @@ func looksLikeEpisodeContent(input EpisodeTagInput) bool {
 	if collectEpisodeFileStats(input.TorrentFileNames).UniqueEpisodes > 0 {
 		return true
 	}
+	if hasAnimationTag(input.ExistingTags) {
+		return input.Completion.TotalEpisodes != nil || input.Completion.LocalEpisodes != nil
+	}
 	switch strings.TrimSpace(input.Type) {
-	case "category.tv_series", "category.animation", "category.tv_shows":
+	case "category.tv_series", "category.tv_shows":
 		return input.Completion.TotalEpisodes != nil || input.Completion.LocalEpisodes != nil
 	default:
 		return false
 	}
+}
+
+func hasAnimationTag(tags []string) bool {
+	for _, tag := range tags {
+		switch strings.ToLower(strings.TrimSpace(tag)) {
+		case "tag.动漫", "tag.动画", "动漫", "动画", "anime", "animation":
+			return true
+		}
+	}
+	return false
 }
 
 func hasEpisodeToken(text string) bool {

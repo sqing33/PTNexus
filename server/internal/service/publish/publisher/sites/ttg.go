@@ -36,7 +36,7 @@ func (ttgPublisher) AdjustFormFields(input publisher.PublishInput, formFields ma
 	medium := strings.TrimSpace(toStringAny(standardized["medium"], ""))
 	resolution := strings.TrimSpace(toStringAny(standardized["resolution"], ""))
 
-	if ttgType := resolveTTGType(category, medium, resolution); ttgType != "" {
+	if ttgType := resolveTTGType(category, medium, resolution, hasAnimationTag(input.UploadData)); ttgType != "" {
 		formFields["type"] = ttgType
 	}
 
@@ -73,11 +73,17 @@ func (ttgPublisher) AdjustFormFields(input publisher.PublishInput, formFields ma
 }
 
 // resolveTTGType 根据分类、媒介和分辨率的组合，返回 TTG 的 type 值。
-func resolveTTGType(category, medium, resolution string) string {
+func resolveTTGType(category, medium, resolution string, isAnimation bool) string {
 	isBluRay := medium == "medium.bluray" || medium == "medium.uhd_bluray" ||
 		medium == "medium.bluray_diy" || medium == "medium.uhd_diy"
 	isUHD := medium == "medium.uhd_bluray" || medium == "medium.uhd_diy" ||
 		resolution == "resolution.r2160p"
+	if isAnimation {
+		if isBluRay {
+			return "111" // 动漫原盘
+		}
+		return "58" // 高清动漫
+	}
 
 	switch category {
 	case "category.movie":
@@ -119,12 +125,6 @@ func resolveTTGType(category, medium, resolution string) string {
 
 	case "category.tv_shows":
 		return "90" // 华语剧包(全集)
-
-	case "category.animation":
-		if isBluRay {
-			return "111" // 动漫原盘
-		}
-		return "58" // 高清动漫
 
 	case "category.mv":
 		return "59" // MV&演唱会

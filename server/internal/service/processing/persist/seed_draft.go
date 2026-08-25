@@ -188,10 +188,6 @@ func (d *SeedDraft) CompleteAndMapTags(siteIdentifier string, formatIsBDInfo boo
 	rawTagCandidates = append(rawTagCandidates, processingtagging.ExtractTagsFromDescriptionScore(descriptionForTags)...)
 	rawTagCandidates = append(rawTagCandidates, processingtagging.ExtractRawTagsFromMediaText(d.Mediainfo, formatIsBDInfo)...)
 
-	if processingtagging.CheckAnimationTypeFromDescription(descriptionForTags) {
-		d.Type = "category.animation"
-	}
-
 	completion := processingtagging.CheckCompletionStatusWithDownloaderContext(
 		d.Title,
 		d.Subtitle,

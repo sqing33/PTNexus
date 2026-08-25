@@ -200,6 +200,9 @@ func resolveOurBitsCategory(input publisher.PublishInput) string {
 	standardized := ourbitsStandardized(input.UploadData)
 	category := strings.TrimSpace(toStringAny(standardized["type"], ""))
 	title := strings.TrimSpace(input.Title + " " + input.Subtitle)
+	if hasAnimationTag(input.UploadData) {
+		return "411"
+	}
 	switch category {
 	case "category.movie":
 		if regexp.MustCompile(`(?i)\b3D\b`).MatchString(title) {
@@ -222,8 +225,6 @@ func resolveOurBitsCategory(input publisher.PublishInput) string {
 		return "413"
 	case "category.documentaries":
 		return "410"
-	case "category.animation":
-		return "411"
 	case "category.sports":
 		return "415"
 	default:

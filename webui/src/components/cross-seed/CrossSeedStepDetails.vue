@@ -94,7 +94,7 @@
                         data-tag-style
                       >
                         <el-option
-                          v-for="(label, value) in reverseMappings.type"
+                          v-for="(label, value) in filteredTypeMappings"
                           :key="value"
                           :label="label"
                           :value="value"
@@ -547,6 +547,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Close, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useCrossSeedPanelContext } from './crossSeedPanelContext'
 import MediaInfoSummaryCard from './MediaInfoSummaryCard.vue'
@@ -590,4 +591,10 @@ const {
   filteredDeclarationsCount,
   filteredDeclarationsList,
 } = useCrossSeedPanelContext()
+
+const filteredTypeMappings = computed(() =>
+  Object.fromEntries(
+    Object.entries(reverseMappings.value.type).filter(([value]) => value !== 'category.animation'),
+  ),
+)
 </script>

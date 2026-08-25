@@ -628,20 +628,19 @@ interface SeedParameter {
   last_publish_at?: string | null
 }
 
-const isAnimationRelatedType = (typeValue: string | undefined | null) => {
-  const text = (typeValue || '').trim().toLowerCase()
-  if (!text) return false
-
-  if (text === 'category.animation') {
-    return true
-  }
-
-  return (
-    text.includes('animation') ||
-    text.includes('anime') ||
-    text.includes('动漫') ||
-    text.includes('动画')
-  )
+const isAnimationRelatedTags = (tags: string[] | string | undefined | null) => {
+  const values = Array.isArray(tags) ? tags : typeof tags === 'string' ? [tags] : []
+  return values.some((tag) => {
+    const text = String(tag || '').trim().toLowerCase()
+    return (
+      text === 'tag.动漫' ||
+      text === 'tag.动画' ||
+      text === '动漫' ||
+      text === '动画' ||
+      text === 'anime' ||
+      text === 'animation'
+    )
+  })
 }
 
 interface PathNode {
@@ -1268,7 +1267,7 @@ const fetchData = async () => {
             return true
           }
 
-          return result.data.some((row: SeedParameter) => isAnimationRelatedType(row.type))
+          return result.data.some((row: SeedParameter) => isAnimationRelatedTags(row.tags))
         })
 
         targetSitesList.value = filteredTargetSites

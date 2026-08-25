@@ -46,8 +46,7 @@ func applyCBGAnimationCategoryOverride(input publisher.PublishInput, formFields 
 	if formFields == nil {
 		return
 	}
-	standardized, _ := input.UploadData["standardized_params"].(map[string]any)
-	if strings.TrimSpace(toStringAny(standardized["type"], "")) != "category.animation" {
+	if !hasAnimationTag(input.UploadData) {
 		return
 	}
 
