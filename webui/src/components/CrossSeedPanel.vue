@@ -680,8 +680,8 @@ const rebindDetailsTabsDrag = debounce(() => {
 
 // 在组件挂载时添加监听器
 onMounted(() => {
-  void fetchCrossSeedSettings()
   void (async () => {
+    await fetchCrossSeedSettings()
     // 先获取站点状态，避免 fetchTorrentInfo 内部再次触发 /api/sites/status
     await fetchSitesStatus()
     await fetchTorrentInfo(props.prefetchedDbSeedInfo || undefined)
