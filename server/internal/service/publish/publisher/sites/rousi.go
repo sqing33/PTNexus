@@ -36,6 +36,7 @@ var (
 	reRousiOnlyImageURLLine = regexp.MustCompile(`(?i)^https?://\S+\.(?:png|jpe?g|gif|webp)\S*$`)
 	reRousiBBCodeQuote      = regexp.MustCompile(`(?is)\[quote\](.*?)\[/quote\]`)
 	reRousiBBCodeCode       = regexp.MustCompile(`(?is)\[code\](.*?)\[/code\]`)
+	reRousiMalformedURL     = regexp.MustCompile(`(?is)\[url=\[\s*https?://[^\]\s]+\\?\]`)
 	reRousiBBCodeURLWithArg = regexp.MustCompile(`(?is)\[url=(.*?)\](.*?)\[/url\]`)
 	reRousiBBCodeURL        = regexp.MustCompile(`(?is)\[url\](.*?)\[/url\]`)
 	reRousiBBCodeColor      = regexp.MustCompile(`(?is)\[color=[^\]]+\](.*?)\[/color\]`)
@@ -1188,6 +1189,9 @@ func bbcodeToMarkdown(text string) string {
 
 	convertInline := func(s string) string {
 		out := s
+
+		// 兼容源站声明中被重复包裹的损坏 URL 标签，保留其内部 Markdown 链接文本。
+		out = reRousiMalformedURL.ReplaceAllString(out, "[")
 
 		out = reRousiBBCodeCode.ReplaceAllStringFunc(out, func(match string) string {
 			sub := reRousiBBCodeCode.FindStringSubmatch(match)

@@ -35,11 +35,6 @@
         BDInfo记录
       </el-button>
 
-      <!-- 批量获取数据按钮 -->
-      <el-button type="warning" @click="openBatchFetchDialog" plain style="margin-right: 15px">
-        获取数据
-      </el-button>
-
       <!-- 批量删除模式切换按钮 -->
       <el-button
         type="danger"
@@ -493,24 +488,6 @@
     <!-- 处理记录查看弹窗 -->
     <BDInfoRecordsDialog v-model="recordDialogVisible" @closed="fetchData" />
 
-    <!-- 批量获取数据弹窗 -->
-    <div v-if="batchFetchDialogVisible" class="modal-overlay">
-      <el-card class="batch-fetch-main-card" shadow="always">
-        <template #header>
-          <div class="modal-header">
-            <span>批量获取种子数据</span>
-            <el-button type="danger" circle @click="closeBatchFetchDialog" plain>X</el-button>
-          </div>
-        </template>
-        <div class="batch-fetch-main-content">
-          <BatchFetchPanel
-            @cancel="closeBatchFetchDialog"
-            @fetch-completed="handleFetchCompleted"
-          />
-        </div>
-      </el-card>
-    </div>
-
     <!-- 做种站点弹窗 -->
     <div v-if="seedSitesDialogVisible" class="modal-overlay" @click.self="closeSeedSitesDialog">
       <el-card class="seed-sites-card" shadow="always">
@@ -547,7 +524,6 @@ import { ElMessageBox } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
 import CrossSeedPanel from '../components/CrossSeedPanel.vue'
-import BatchFetchPanel from '../components/BatchFetchPanel.vue'
 import ColumnToggle from '../components/ColumnToggle.vue'
 import type { ColumnDef } from '../components/ColumnToggle.vue'
 import BDInfoRecordsDialog from '../components/cross-seed-data/BDInfoRecordsDialog.vue'
@@ -680,9 +656,6 @@ const error = ref<string | null>(null)
 
 // 批量转种相关
 const selectedRows = ref<SeedParameter[]>([])
-
-// 批量获取数据相关
-const batchFetchDialogVisible = ref<boolean>(false)
 
 // 删除模式相关
 const isDeleteMode = ref<boolean>(false)
@@ -1935,23 +1908,6 @@ const executeBatchDelete = async () => {
         : '网络错误'
     ElMessage.error(message)
   }
-}
-
-// 打开批量获取数据对话框
-const openBatchFetchDialog = () => {
-  batchFetchDialogVisible.value = true
-}
-
-// 关闭批量获取数据对话框
-const closeBatchFetchDialog = () => {
-  batchFetchDialogVisible.value = false
-}
-
-// 处理批量获取完成事件
-const handleFetchCompleted = () => {
-  ElMessage.success('批量获取种子数据已完成，正在刷新列表...')
-  // 刷新种子列表
-  fetchData()
 }
 
 // 打开记录查看对话框

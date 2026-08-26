@@ -10,6 +10,15 @@
       style="margin-bottom: 15px"
     ></el-alert>
 
+    <div class="page-actions">
+      <el-button type="warning" @click="openBatchFetchDialog" plain>
+        <el-icon style="margin-right: 5px">
+          <Download />
+        </el-icon>
+        获取数据
+      </el-button>
+    </div>
+
     <!-- [修改] 使用 v-if 确保在加载设置后再渲染表格 -->
     <el-table
       v-if="settingsLoaded"
@@ -801,6 +810,24 @@
     <!-- 站点数据查看器 -->
     <SiteDataViewer @refresh="handleTorrentRefresh" />
 
+    <!-- 批量获取数据弹窗 -->
+    <div v-if="batchFetchDialogVisible" class="modal-overlay">
+      <el-card class="batch-fetch-main-card" shadow="always">
+        <template #header>
+          <div class="modal-header">
+            <span>批量获取种子数据</span>
+            <el-button type="danger" circle @click="closeBatchFetchDialog" plain>X</el-button>
+          </div>
+        </template>
+        <div class="batch-fetch-main-content">
+          <BatchFetchPanel
+            @cancel="closeBatchFetchDialog"
+            @fetch-completed="handleBatchFetchCompleted"
+          />
+        </div>
+      </el-card>
+    </div>
+
     <!-- IYUU 批量查询进度弹窗（筛选结果） -->
     <div v-if="iyuuBatchDialogVisible" class="filter-overlay" @click.self="closeIyuuBatchDialog">
       <el-card class="filter-card" style="max-width: 720px">
@@ -925,11 +952,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, reactive, watch, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { Download } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import type { TableInstance, Sort } from 'element-plus'
 import type { ElTree } from 'element-plus'
 import axios from 'axios'
 import CrossSeedPanel from '../components/CrossSeedPanel.vue'
+import BatchFetchPanel from '../components/BatchFetchPanel.vue'
 import SiteDataViewer from '../components/SiteDataViewer.vue'
 import ColumnToggle from '../components/ColumnToggle.vue'
 import type { ColumnDef } from '../components/ColumnToggle.vue'
@@ -987,6 +1016,9 @@ const batchPublishDialogVisible = ref(false)
 const batchPublishTargetSite = ref('')
 const batchPublishLoading = ref(false)
 
+// 批量获取数据相关
+const batchFetchDialogVisible = ref(false)
+
 const emitGlobalRefreshLoading = (refreshing: boolean) => {
   window.dispatchEvent(
     new CustomEvent('app-global-refresh-loading', {
@@ -1023,6 +1055,20 @@ const syncDownloadersAndReload = async () => {
 
 const fetchDataWithSpinner = async () => {
   loading.value = true
+  await fetchData()
+}
+
+const openBatchFetchDialog = () => {
+  batchFetchDialogVisible.value = true
+}
+
+const closeBatchFetchDialog = () => {
+  batchFetchDialogVisible.value = false
+}
+
+const handleBatchFetchCompleted = async () => {
+  ElMessage.success('批量获取种子数据已完成，正在刷新列表...')
+  batchFetchDialogVisible.value = false
   await fetchData()
 }
 
@@ -2779,6 +2825,14 @@ watch(visibleColumns, () => {
   overflow-x: auto;
 }
 
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
 :deep(.expanded-row > td) {
   background-color: #ecf5ff !important;
 }
@@ -3025,6 +3079,30 @@ watch(visibleColumns, () => {
   justify-content: center;
   align-items: center;
   z-index: 2000;
+}
+
+.batch-fetch-main-card {
+  width: 95vw;
+  max-width: 1400px;
+  height: 85vh;
+  max-height: 900px;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.batch-fetch-main-card .el-card__body) {
+  padding: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.batch-fetch-main-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .cross-seed-card {
