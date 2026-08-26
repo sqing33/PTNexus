@@ -117,6 +117,9 @@ func isWebDLOrEncodeMedium(medium string) bool {
 	if normalized == "medium.webdl" || normalized == "webdl" || normalized == "web-dl" {
 		return true
 	}
+	if normalized == "remux" || normalized == "remmux" || strings.Contains(normalized, "remux") || strings.Contains(normalized, "remmux") {
+		return true
+	}
 	return normalized == "encode" ||
 		strings.HasPrefix(normalized, "encode_") ||
 		strings.HasPrefix(normalized, "medium.encode") ||
