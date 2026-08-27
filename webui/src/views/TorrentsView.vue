@@ -17,6 +17,41 @@
         </el-icon>
         获取数据
       </el-button>
+
+      <div class="name-header-container">
+        <div class="name-header-title">种子</div>
+        <el-input
+          v-model="nameSearch"
+          placeholder="搜索名称..."
+          clearable
+          class="search-input"
+          @click.stop
+        />
+        <span class="name-header-actions" @click.stop>
+              <div
+                v-if="hasActiveFilters"
+                class="current-filters"
+                style="display: flex; align-items: center"
+              >
+                <el-tag type="info" size="default" effect="plain">{{ currentFilterText }}</el-tag>
+                <el-button
+                  type="danger"
+                  link
+                  style="padding: 0; margin-left: 8px"
+                  @click="clearAllFilters"
+                >清除</el-button
+                >
+              </div>
+              <ColumnToggle
+                v-model="visibleColumns"
+                :columns="torrentsColumns"
+                :defaults="defaultTorrentsVisibleColumns"
+              />
+              <el-button type="primary" @click="openFilterDialog" plain class="filter-trigger">
+                筛选
+              </el-button>
+            </span>
+      </div>
     </div>
 
     <!-- [修改] 使用 v-if 确保在加载设置后再渲染表格 -->
@@ -113,42 +148,9 @@
 
       <el-table-column
         prop="name" min-width="450" sortable="custom">
-        <template #header>
-          <div class="name-header-container">
-            <div class="name-header-title">种子</div>
-            <el-input
-              v-model="nameSearch"
-              placeholder="搜索名称..."
-              clearable
-              class="search-input"
-              @click.stop
-            />
-            <span class="name-header-actions" @click.stop>
-              <div
-                v-if="hasActiveFilters"
-                class="current-filters"
-                style="display: flex; align-items: center"
-              >
-                <el-tag type="info" size="default" effect="plain">{{ currentFilterText }}</el-tag>
-                <el-button
-                  type="danger"
-                  link
-                  style="padding: 0; margin-left: 8px"
-                  @click="clearAllFilters"
-                  >清除</el-button
-                >
-              </div>
-              <ColumnToggle
-                v-model="visibleColumns"
-                :columns="torrentsColumns"
-                :defaults="defaultTorrentsVisibleColumns"
-              />
-              <el-button type="primary" @click="openFilterDialog" plain class="filter-trigger">
-                筛选
-              </el-button>
-            </span>
-          </div>
-        </template>
+<!--        <template #header>-->
+<!--          -->
+<!--        </template>-->
         <template #default="scope">
           <span class="torrent-name-cell" :class="getSourceDataStatusClass(scope.row)">
             {{ scope.row.name }}
@@ -722,12 +724,8 @@
         <div class="source-site-selection-body">
           <p class="source-site-tip">
             <el-tag type="success" size="large" style="margin-right: 5px">可获取数据</el-tag>
-            <el-tag type="primary" size="large" style="margin-right: 5px"
-              >点击尝试使用iyuu获取链接</el-tag
-            >
-            <el-tag type="error" size="large" style="margin-right: 5px; opacity: 0.5"
-              >缺少配置参数</el-tag
-            >
+            <el-tag type="primary" size="large" style="margin-right: 5px">点击尝试使用iyuu获取链接</el-tag>
+            <el-tag type="error" size="large" style="margin-right: 5px; opacity: 0.5">缺少配置参数</el-tag>
           </p>
 
           <!-- 已缓存站点区域 -->
