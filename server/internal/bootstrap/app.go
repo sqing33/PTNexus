@@ -257,6 +257,7 @@ func registerRoutes(
 	api := engine.Group("/api")
 	{
 		api.GET("/resource_info", resourceInfoHandler.List)
+		api.PUT("/resource_info/:id", resourceInfoHandler.Update)
 		api.GET("/sites_list", sitesHandler.SitesList)
 		api.GET("/sites", sitesHandler.Sites)
 		api.POST("/sites/update", sitesHandler.UpdateSite)

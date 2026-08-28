@@ -157,7 +157,7 @@ func ApplyResourceInfoToDraft(draft *SeedDraft, info *repository.ResourceInfo) {
 // SaveResourceInfoFromDraft 在资源信息库未命中时，把当前草稿解析出的资源信息入库以便后续复用。
 // 参数/返回：store 为资源信息仓储；draft 为种子草稿；三个 ID 均为空时不入库。
 // 失败场景：入库失败仅记录日志，不中断抓取主流程。
-// 副作用：可能向 resource_info 表插入新记录或补齐已有记录的空字段。
+// 副作用：仅当资源不存在时向 resource_info 表插入新记录；已存在则不写入（已存在则不修改）。
 func SaveResourceInfoFromDraft(store ResourceInfoStore, draft *SeedDraft) {
 	if store == nil || draft == nil {
 		return
@@ -191,7 +191,7 @@ func SaveResourceInfoFromDraft(store ResourceInfoStore, draft *SeedDraft) {
 // SaveResourceInfoFromRow 在资源信息库未命中时，把 get_db_seed_info 归一化数据中的资源信息入库以便后续复用。
 // 参数/返回：store 为资源信息仓储；normalized 为归一化种子数据；三个 ID 均为空时不入库。
 // 失败场景：入库失败仅记录日志，不影响预览响应。
-// 副作用：可能向 resource_info 表插入新记录或补齐已有记录的空字段。
+// 副作用：仅当资源不存在时向 resource_info 表插入新记录；已存在则不写入（已存在则不修改）。
 func SaveResourceInfoFromRow(store ResourceInfoStore, normalized map[string]any) {
 	if store == nil || normalized == nil {
 		return

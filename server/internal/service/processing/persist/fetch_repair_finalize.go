@@ -5,8 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pt-nexus/server/internal/platform/logx"
-	"github.com/pt-nexus/server/internal/repository"
 	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 	processingrepair "github.com/pt-nexus/server/internal/service/processing/repair"
 )
@@ -110,23 +108,11 @@ func RunFetchRepairAndFinalize(input FetchRepairFinalizeInput, deps FetchRepairF
 	}
 
 	// 资源信息库匹配：先完成数据获取（含 PTGen 补全的豆瓣/IMDb/TMDb ID），再按
-	// 豆瓣ID > IMDbID > TMDbID 优先级查库；命中则把海报、简介（正文）与视频截图替换为
-	// 库内数据，未命中则把本次抓取到的资源信息（含截图）入库以便后续复用。
+	// 豆瓣ID > IMDbID > TMDbID 优先级查库；命中则直接复用库内数据（海报/简介/截图等），
+	// 仅读取、不回写，绝不修改库内已存在的记录；未命中才把本次抓取到的资源信息（含截图）入库。
 	if deps.ResourceStore != nil {
 		if matchedResource := FindResourceInfoForDraft(deps.ResourceStore, input.Draft); matchedResource != nil {
 			ApplyResourceInfoToDraft(input.Draft, matchedResource)
-			// 命中资源信息库但库内截图缺失时，用本次抓取到的截图回补该记录的空缺字段，
-			// 避免同一资源每次都重复生成截图而不入库。
-			if strings.TrimSpace(matchedResource.Screenshots) == "" && strings.TrimSpace(input.Draft.Screenshots) != "" {
-				if err := deps.ResourceStore.UpsertResourceInfo(&repository.ResourceInfo{
-					DoubanID:    matchedResource.DoubanID,
-					ImdbID:      matchedResource.ImdbID,
-					TmdbID:      matchedResource.TmdbID,
-					Screenshots: strings.TrimSpace(input.Draft.Screenshots),
-				}); err != nil {
-					logx.Warnf(resourceInfoLogModule, "回补资源信息截图失败 err=%v", err)
-				}
-			}
 		} else {
 			SaveResourceInfoFromDraft(deps.ResourceStore, input.Draft)
 		}

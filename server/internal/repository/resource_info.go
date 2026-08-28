@@ -75,9 +75,10 @@ func (r *MigrateRepository) FindResourceInfoByTmdbID(tmdbID string) (*ResourceIn
 }
 
 // UpsertResourceInfo 按“任一 ID 命中即视为同一资源”的策略写入资源信息。
-// 参数/返回：info 为待写入资源；已存在时补齐空字段（补字段更新），不存在时插入新记录。
+// 参数/返回：info 为待写入资源；仅当库中不存在时才插入新记录；
+// 若资源已存在则**直接复用库内数据、不回写、不更新任何字段**（已存在则不修改）。
 // 失败场景：仓储未初始化、查询失败或写入失败时返回错误。
-// 副作用：写入 resource_info 表（INSERT 或 UPDATE）。
+// 副作用：仅当资源不存在时写入 resource_info 表（INSERT），存在时不产生任何写操作。
 func (r *MigrateRepository) UpsertResourceInfo(info *ResourceInfo) error {
 	if r == nil || r.store == nil || r.store.DB == nil {
 		return errors.New("migrate repo is nil")
@@ -127,28 +128,37 @@ func (r *MigrateRepository) UpsertResourceInfo(info *ResourceInfo) error {
 		return r.store.DB.Create(info).Error
 	}
 
-	merged := false
-	fill := func(dst *string, src string) {
-		src = strings.TrimSpace(src)
-		if strings.TrimSpace(*dst) == "" && src != "" {
-			*dst = src
-			merged = true
-		}
+	// 资源已存在：直接复用库内数据，不回写、不更新任何字段、也不把本次抓取信息合并回库内记录。
+	// 仅在真正不存在时才插入新记录，从而保证“已存在则不修改”。
+	return nil
+}
+
+// UpdateResourceInfo 按主键 ID 更新资源信息的可编辑字段（标题/年份/国家/三个 ID/海报/简介/截图），
+// 并更新 updated_at。用于前端“修改资源信息”功能。
+// 参数/返回：info 为含 ID 与待更新字段的资源；ID 无效或仓储未初始化时返回错误。
+// 失败场景：数据库写入失败时返回错误。
+// 副作用：写入 resource_info 表（UPDATE）。
+func (r *MigrateRepository) UpdateResourceInfo(info *ResourceInfo) error {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return errors.New("migrate repo is nil")
 	}
-	fill(&existing.Title, info.Title)
-	fill(&existing.Year, info.Year)
-	fill(&existing.Country, info.Country)
-	fill(&existing.DoubanID, info.DoubanID)
-	fill(&existing.ImdbID, info.ImdbID)
-	fill(&existing.TmdbID, info.TmdbID)
-	fill(&existing.PosterURL, info.PosterURL)
-	fill(&existing.Summary, info.Summary)
-	fill(&existing.Screenshots, info.Screenshots)
-	if !merged {
-		return nil
+	if info == nil || info.ID <= 0 {
+		return errors.New("资源 ID 无效")
 	}
-	existing.UpdatedAt = now
-	return r.store.DB.Save(existing).Error
+	now := time.Now().Format("2006-01-02 15:04:05")
+	updates := map[string]any{
+		"title":       strings.TrimSpace(info.Title),
+		"year":        strings.TrimSpace(info.Year),
+		"country":     strings.TrimSpace(info.Country),
+		"douban_id":   strings.TrimSpace(info.DoubanID),
+		"imdb_id":     strings.TrimSpace(info.ImdbID),
+		"tmdb_id":     strings.TrimSpace(info.TmdbID),
+		"poster_url":  normalizePosterURL(info.PosterURL),
+		"summary":     strings.TrimSpace(info.Summary),
+		"screenshots": strings.TrimSpace(info.Screenshots),
+		"updated_at":  now,
+	}
+	return r.store.DB.Table("resource_info").Where("id = ?", info.ID).Updates(updates).Error
 }
 
 // ListResourceInfos 分页查询资源信息列表，支持按标题/ID/国家模糊搜索。

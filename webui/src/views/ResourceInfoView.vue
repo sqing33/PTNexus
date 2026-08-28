@@ -93,9 +93,10 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link :icon="View" @click="openDetail(row)">查看</el-button>
+            <el-button type="primary" link :icon="Edit" @click="openEdit(row)">编辑</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -116,13 +117,14 @@
     <el-dialog
       v-model="detailVisible"
       title="资源信息详情"
-      width="720px"
+      width="900px"
       append-to-body
       class="resource-detail-dialog"
     >
       <div v-if="selectedItem" class="detail-body">
         <div class="detail-toolbar">
           <el-button type="primary" size="small" :icon="CopyDocument" @click="copyAll(selectedItem)">复制全部</el-button>
+          <el-button size="small" :icon="Edit" @click="openEdit(selectedItem)">编辑</el-button>
         </div>
         <div class="detail-poster">
           <el-image
@@ -208,6 +210,48 @@
         </div>
       </div>
     </el-dialog>
+
+    <el-dialog
+      v-model="editVisible"
+      title="编辑资源信息"
+      width="640px"
+      append-to-body
+      class="resource-edit-dialog"
+    >
+      <el-form :model="editForm" label-width="88px">
+        <el-form-item label="标题">
+          <el-input v-model="editForm.title" placeholder="标题" />
+        </el-form-item>
+        <el-form-item label="年份">
+          <el-input v-model="editForm.year" placeholder="年份" />
+        </el-form-item>
+        <el-form-item label="国家">
+          <el-input v-model="editForm.country" placeholder="国家" />
+        </el-form-item>
+        <el-form-item label="豆瓣ID">
+          <el-input v-model="editForm.douban_id" placeholder="豆瓣ID" />
+        </el-form-item>
+        <el-form-item label="IMDbID">
+          <el-input v-model="editForm.imdb_id" placeholder="IMDbID" />
+        </el-form-item>
+        <el-form-item label="TMDbID">
+          <el-input v-model="editForm.tmdb_id" placeholder="TMDbID" />
+        </el-form-item>
+        <el-form-item label="海报地址">
+          <el-input v-model="editForm.poster_url" type="textarea" :rows="2" placeholder="海报地址，支持 [img]url[/img]" />
+        </el-form-item>
+        <el-form-item label="简介">
+          <el-input v-model="editForm.summary" type="textarea" :rows="4" placeholder="简介" />
+        </el-form-item>
+        <el-form-item label="视频截图">
+          <el-input v-model="editForm.screenshots" type="textarea" :rows="4" placeholder="[img]url1[/img][img]url2[/img]" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -215,7 +259,7 @@
 import { onMounted, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, View, Link } from '@element-plus/icons-vue'
+import { CopyDocument, View, Link, Edit } from '@element-plus/icons-vue'
 
 interface ResourceInfoItem {
   id: number
@@ -241,6 +285,21 @@ const loading = ref(false)
 
 const detailVisible = ref(false)
 const selectedItem = ref<ResourceInfoItem | null>(null)
+
+const editVisible = ref(false)
+const editSaving = ref(false)
+const editForm = ref({
+  id: 0,
+  title: '',
+  year: '',
+  country: '',
+  douban_id: '',
+  imdb_id: '',
+  tmdb_id: '',
+  poster_url: '',
+  summary: '',
+  screenshots: '',
+})
 
 async function copyText(text: string, label: string) {
   if (!text) {
@@ -269,6 +328,57 @@ async function copyText(text: string, label: string) {
 function openDetail(row: ResourceInfoItem) {
   selectedItem.value = row
   detailVisible.value = true
+}
+
+function openEdit(row: ResourceInfoItem) {
+  detailVisible.value = false
+  editForm.value = {
+    id: row.id,
+    title: row.title || '',
+    year: row.year || '',
+    country: row.country || '',
+    douban_id: row.douban_id || '',
+    imdb_id: row.imdb_id || '',
+    tmdb_id: row.tmdb_id || '',
+    poster_url: row.poster_url || '',
+    summary: row.summary || '',
+    screenshots: row.screenshots || '',
+  }
+  editVisible.value = true
+}
+
+async function saveEdit() {
+  if (editForm.value.id <= 0) {
+    ElMessage.error('资源 ID 无效')
+    return
+  }
+  editSaving.value = true
+  try {
+    const payload = {
+      title: editForm.value.title,
+      year: editForm.value.year,
+      country: editForm.value.country,
+      douban_id: editForm.value.douban_id,
+      imdb_id: editForm.value.imdb_id,
+      tmdb_id: editForm.value.tmdb_id,
+      poster_url: editForm.value.poster_url,
+      summary: editForm.value.summary,
+      screenshots: editForm.value.screenshots,
+    }
+    const response = await axios.put(`/api/resource_info/${editForm.value.id}`, payload)
+    if (response.data && response.data.success) {
+      ElMessage.success('保存成功')
+      editVisible.value = false
+      fetchList()
+    } else {
+      ElMessage.error('保存失败: ' + (response.data?.error || '未知错误'))
+    }
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? error.message : String(error)
+    ElMessage.error('保存失败: ' + message)
+  } finally {
+    editSaving.value = false
+  }
 }
 
 function copyAll(item: ResourceInfoItem) {
@@ -369,6 +479,39 @@ onMounted(fetchList)
   gap: 15px;
   height: 100%;
   overflow: auto;
+}
+
+/* 详情弹框：限制最大高度，让内容区可滚动，避免占满屏幕且无法滚动；
+   同时限制最大宽度，避免小屏下溢出。 */
+.resource-detail-dialog {
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 92vw;
+}
+
+.resource-detail-dialog :deep(.el-dialog__header) {
+  flex-shrink: 0;
+}
+
+.resource-detail-dialog :deep(.el-dialog__body) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 12px;
+}
+
+.resource-edit-dialog {
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 92vw;
+}
+
+.resource-edit-dialog :deep(.el-dialog__body) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .search-and-controls {
