@@ -117,7 +117,7 @@
     <el-dialog
       v-model="detailVisible"
       title="资源信息详情"
-      width="900px"
+      width="85%"
       append-to-body
       class="resource-detail-dialog"
     >
@@ -482,8 +482,10 @@ onMounted(fetchList)
 }
 
 /* 详情弹框：限制最大高度，让内容区可滚动，避免占满屏幕且无法滚动；
-   同时限制最大宽度，避免小屏下溢出。 */
+   同时把 Element Plus 默认的上边距从 15vh 收到 5vh，否则 15vh+90vh 会超出视口、
+   弹框被顶出屏幕且内部无法滚动。max-width 避免小屏下溢出。 */
 .resource-detail-dialog {
+  --el-dialog-margin-top: 5vh;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -502,10 +504,15 @@ onMounted(fetchList)
 }
 
 .resource-edit-dialog {
+  --el-dialog-margin-top: 5vh;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
   max-width: 92vw;
+}
+
+.resource-edit-dialog :deep(.el-dialog__header) {
+  flex-shrink: 0;
 }
 
 .resource-edit-dialog :deep(.el-dialog__body) {
