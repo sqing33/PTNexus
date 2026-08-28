@@ -65,6 +65,11 @@
             <span :class="{ 'empty-text': !row.updated_at }">{{ row.updated_at || 'N/A' }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="80" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link @click="openDetail(row)">查看</el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <div class="pagination-container">
@@ -79,6 +84,118 @@
         />
       </div>
     </div>
+
+    <el-dialog v-model="detailVisible" title="资源信息详情" width="620px" destroy-on-close>
+      <div v-if="detailRow" class="detail-body">
+        <div class="detail-top">
+          <el-image
+            v-if="detailRow.poster_url"
+            :src="detailRow.poster_url"
+            :preview-src-list="[detailRow.poster_url]"
+            preview-teleported
+            fit="cover"
+            class="detail-poster"
+          />
+          <div v-else class="detail-poster detail-poster-empty">无海报</div>
+          <div class="detail-main-fields">
+            <div class="detail-field">
+              <span class="detail-label">标题</span>
+              <span class="detail-value detail-title">{{ detailRow.title || 'N/A' }}</span>
+              <el-button
+                class="copy-btn"
+                type="primary"
+                link
+                :icon="CopyDocument"
+                @click="copyField('标题', detailRow.title)"
+              />
+            </div>
+            <div class="detail-field-row">
+              <div class="detail-field">
+                <span class="detail-label">年份</span>
+                <span class="detail-value">{{ detailRow.year || 'N/A' }}</span>
+                <el-button
+                  class="copy-btn"
+                  type="primary"
+                  link
+                  :icon="CopyDocument"
+                  @click="copyField('年份', detailRow.year)"
+                />
+              </div>
+              <div class="detail-field">
+                <span class="detail-label">国家</span>
+                <span class="detail-value">{{ detailRow.country || 'N/A' }}</span>
+                <el-button
+                  class="copy-btn"
+                  type="primary"
+                  link
+                  :icon="CopyDocument"
+                  @click="copyField('国家', detailRow.country)"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-field">
+          <span class="detail-label">豆瓣ID</span>
+          <span class="detail-value">{{ detailRow.douban_id || 'N/A' }}</span>
+          <el-button
+            class="copy-btn"
+            type="primary"
+            link
+            :icon="CopyDocument"
+            @click="copyField('豆瓣ID', detailRow.douban_id)"
+          />
+        </div>
+        <div class="detail-field">
+          <span class="detail-label">IMDbID</span>
+          <span class="detail-value">{{ detailRow.imdb_id || 'N/A' }}</span>
+          <el-button
+            class="copy-btn"
+            type="primary"
+            link
+            :icon="CopyDocument"
+            @click="copyField('IMDbID', detailRow.imdb_id)"
+          />
+        </div>
+        <div class="detail-field">
+          <span class="detail-label">TMDbID</span>
+          <span class="detail-value">{{ detailRow.tmdb_id || 'N/A' }}</span>
+          <el-button
+            class="copy-btn"
+            type="primary"
+            link
+            :icon="CopyDocument"
+            @click="copyField('TMDbID', detailRow.tmdb_id)"
+          />
+        </div>
+        <div class="detail-field detail-field-summary">
+          <span class="detail-label">简介</span>
+          <span class="detail-value detail-summary">{{ detailRow.summary || 'N/A' }}</span>
+          <el-button
+            class="copy-btn"
+            type="primary"
+            link
+            :icon="CopyDocument"
+            @click="copyField('简介', detailRow.summary)"
+          />
+        </div>
+        <div class="detail-field">
+          <span class="detail-label">更新时间</span>
+          <span class="detail-value">{{ detailRow.updated_at || 'N/A' }}</span>
+          <el-button
+            class="copy-btn"
+            type="primary"
+            link
+            :icon="CopyDocument"
+            @click="copyField('更新时间', detailRow.updated_at)"
+          />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="detailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -86,6 +203,7 @@
 import { onMounted, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { CopyDocument } from '@element-plus/icons-vue'
 
 interface ResourceInfoItem {
   id: number

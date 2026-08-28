@@ -10,17 +10,17 @@ import (
 // 用于按 豆瓣ID / IMDbID / TMDbID 复用标题、年份、国家、海报与简介，
 // 避免同一资源重复走源站抓取与修复流程。
 type ResourceInfo struct {
-	ID        int64  `gorm:"column:id;primaryKey;autoIncrement"`
-	Title     string `gorm:"column:title"`
-	Year      string `gorm:"column:year"`
-	Country   string `gorm:"column:country"`
-	DoubanID  string `gorm:"column:douban_id"`
-	ImdbID    string `gorm:"column:imdb_id"`
-	TmdbID    string `gorm:"column:tmdb_id"`
-	PosterURL string `gorm:"column:poster_url"`
-	Summary   string `gorm:"column:summary"`
-	CreatedAt string `gorm:"column:created_at"`
-	UpdatedAt string `gorm:"column:updated_at"`
+	ID        int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Title     string `gorm:"column:title" json:"title"`
+	Year      string `gorm:"column:year" json:"year"`
+	Country   string `gorm:"column:country" json:"country"`
+	DoubanID  string `gorm:"column:douban_id" json:"douban_id"`
+	ImdbID    string `gorm:"column:imdb_id" json:"imdb_id"`
+	TmdbID    string `gorm:"column:tmdb_id" json:"tmdb_id"`
+	PosterURL string `gorm:"column:poster_url" json:"poster_url"`
+	Summary   string `gorm:"column:summary" json:"summary"`
+	CreatedAt string `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt string `gorm:"column:updated_at" json:"updated_at"`
 }
 
 // TableName 指定 ResourceInfo 对应的数据表名。
