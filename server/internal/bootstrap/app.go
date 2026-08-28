@@ -111,6 +111,7 @@ func NewApp() (*App, error) {
 	autoSeedService.SetFetchSeedFn(migrateService.FetchAndStore)
 	autoSeedService.Start()
 	autoSeedHandler := handler.NewAutoSeedHandler(autoSeedService)
+	resourceInfoHandler := handler.NewResourceInfoHandler(migrateRepo)
 
 	settingsService.SetIYUUTrigger(func() map[string]any {
 		settings := cfgManager.Get()
@@ -216,6 +217,7 @@ func NewApp() (*App, error) {
 		logsHandler,
 		scheduledSeedHandler,
 		autoSeedHandler,
+		resourceInfoHandler,
 	)
 
 	return &App{Engine: engine, trackerWorker: trackerService}, nil
@@ -239,6 +241,7 @@ func registerRoutes(
 	logsHandler *handler.LogsHandler,
 	scheduledSeedHandler *handler.ScheduledSeedHandler,
 	autoSeedHandler *handler.AutoSeedHandler,
+	resourceInfoHandler *handler.ResourceInfoHandler,
 ) {
 	engine.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "服务正常", "service": "pt-nexus-go"})
@@ -253,6 +256,7 @@ func registerRoutes(
 
 	api := engine.Group("/api")
 	{
+		api.GET("/resource_info", resourceInfoHandler.List)
 		api.GET("/sites_list", sitesHandler.SitesList)
 		api.GET("/sites", sitesHandler.Sites)
 		api.POST("/sites/update", sitesHandler.UpdateSite)

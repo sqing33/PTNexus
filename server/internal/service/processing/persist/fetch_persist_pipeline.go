@@ -19,6 +19,7 @@ type FetchPersistPipelineRepo interface {
 	UpsertSeedParameter(record map[string]any) error
 	ListSitesGroupAndDescription() ([]map[string]any, error)
 	FindOfficialSiteByGroup(releaseGroup string) (string, error)
+	ResourceInfoStore
 }
 
 // FetchPersistPipelineInput 定义抓取流水线输入。
@@ -89,6 +90,7 @@ func RunFetchPersistPipeline(input FetchPersistPipelineInput, deps FetchPersistP
 			FetchRepairDeps:            deps.FetchRepairDeps,
 			Now:                        deps.Now,
 			BuildSimpleTitleComponents: deps.BuildSimpleTitleComponents,
+			ResourceStore:              resourceInfoStoreFromRepo(deps.Repo),
 		},
 	)
 	if finalizeErr != nil {

@@ -408,7 +408,20 @@ func (m *SchemaManager) createTableSQLs() []string {
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL
 			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
-			`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
+			`CREATE TABLE IF NOT EXISTS resource_info (
+				id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+				title TEXT,
+				year VARCHAR(16),
+				country VARCHAR(255),
+				douban_id VARCHAR(64),
+				imdb_id VARCHAR(64),
+				tmdb_id VARCHAR(64),
+				poster_url LONGTEXT,
+				summary LONGTEXT,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL
+			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
+		`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
 				id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
 				name VARCHAR(128) NOT NULL,
 				status VARCHAR(16) NOT NULL DEFAULT 'active',
@@ -592,7 +605,20 @@ func (m *SchemaManager) createTableSQLs() []string {
 				created_at TIMESTAMP NOT NULL,
 				updated_at TIMESTAMP NOT NULL
 			)`,
-			`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
+			`CREATE TABLE IF NOT EXISTS resource_info (
+				id BIGSERIAL PRIMARY KEY,
+				title TEXT,
+				year VARCHAR(16),
+				country VARCHAR(255),
+				douban_id VARCHAR(64),
+				imdb_id VARCHAR(64),
+				tmdb_id VARCHAR(64),
+				poster_url TEXT,
+				summary TEXT,
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL
+			)`,
+		`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
 				id BIGSERIAL PRIMARY KEY,
 				name VARCHAR(128) NOT NULL,
 				status VARCHAR(16) NOT NULL DEFAULT 'active',
@@ -776,7 +802,20 @@ func (m *SchemaManager) createTableSQLs() []string {
 				created_at TEXT NOT NULL,
 				updated_at TEXT NOT NULL
 			)`,
-			`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
+			`CREATE TABLE IF NOT EXISTS resource_info (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				title TEXT,
+				year TEXT,
+				country TEXT,
+				douban_id TEXT,
+				imdb_id TEXT,
+				tmdb_id TEXT,
+				poster_url TEXT,
+				summary TEXT,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+		`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				name TEXT NOT NULL,
 				status TEXT NOT NULL DEFAULT 'active',
@@ -982,6 +1021,18 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 		},
+		"resource_info": {
+			{name: "title", definition: map[string]string{"sqlite": "TEXT", "mysql": "TEXT", "postgresql": "TEXT"}},
+			{name: "year", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(16)", "postgresql": "VARCHAR(16)"}},
+			{name: "country", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"}},
+			{name: "douban_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "imdb_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "tmdb_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
+			{name: "poster_url", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "summary", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
+		},
 		"publish_logs": {
 			{name: "publish_trigger", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "VARCHAR(32) NOT NULL", "postgresql": "VARCHAR(32) NOT NULL"}},
 			{name: "scene", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(32)", "postgresql": "VARCHAR(32)"}},
@@ -1031,6 +1082,11 @@ func (m *SchemaManager) indexSpecs() []schemaIndexSpec {
 		{table: "auto_seed_items", name: "idx_auto_seed_items_status", columns: []string{"status"}},
 		{table: "auto_seed_items", name: "idx_auto_seed_items_downloader", columns: []string{"downloader_id"}},
 		{table: "auto_seed_items", name: "idx_auto_seed_items_torrent_id", columns: []string{"torrent_id"}},
+
+		{table: "resource_info", name: "idx_resource_info_douban_id", columns: []string{"douban_id"}},
+		{table: "resource_info", name: "idx_resource_info_imdb_id", columns: []string{"imdb_id"}},
+		{table: "resource_info", name: "idx_resource_info_tmdb_id", columns: []string{"tmdb_id"}},
+		{table: "resource_info", name: "idx_resource_info_updated_at", columns: []string{"updated_at"}},
 	}
 }
 

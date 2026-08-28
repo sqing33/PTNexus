@@ -52,6 +52,11 @@ func QueryAndNormalizeSeed(repo SeedQueryRepo, torrentID, siteName string) (map[
 	normalized["final_publish_parameters"] = BuildFinalPublishParameters(normalized)
 	normalized["complete_publish_params"] = BuildCompletePublishParams(normalized)
 	normalized["raw_params_for_preview"] = BuildRawPreviewParams(normalized)
+
+	// 附加资源信息库命中结果，供发布参数预览页展示（豆瓣 > IMDb > TMDb 优先级）。
+	if resourceStore, ok := repo.(ResourceInfoStore); ok {
+		AttachResourceInfoToRow(resourceStore, normalized)
+	}
 	return normalized, seedID, nil
 }
 

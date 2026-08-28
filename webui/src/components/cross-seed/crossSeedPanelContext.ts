@@ -64,6 +64,16 @@ export interface TorrentData {
   raw_params_for_preview: Record<string, unknown>
   skip_restricted_check?: boolean
   official_site?: string
+  resource_info?: {
+    title: string
+    year: string
+    country: string
+    douban_id: string
+    imdb_id: string
+    tmdb_id: string
+    poster_url: string
+    summary: string
+  }
 }
 
 export interface BdinfoProgress {
