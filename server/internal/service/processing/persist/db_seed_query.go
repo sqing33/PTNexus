@@ -54,8 +54,12 @@ func QueryAndNormalizeSeed(repo SeedQueryRepo, torrentID, siteName string) (map[
 	normalized["raw_params_for_preview"] = BuildRawPreviewParams(normalized)
 
 	// 附加资源信息库命中结果，供发布参数预览页展示（豆瓣 > IMDb > TMDb 优先级）。
+	// 未命中时把当前种子解析出的资源信息入库，供后续同 ID 种子复用。
 	if resourceStore, ok := repo.(ResourceInfoStore); ok {
 		AttachResourceInfoToRow(resourceStore, normalized)
+		if _, exists := normalized["resource_info"]; !exists {
+			SaveResourceInfoFromRow(resourceStore, normalized)
+		}
 	}
 	return normalized, seedID, nil
 }

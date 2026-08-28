@@ -196,6 +196,48 @@ func SaveResourceInfoFromDraft(store ResourceInfoStore, draft *SeedDraft) {
 	logx.Infof(resourceInfoLogModule, "资源信息已入库 douban_id=%s imdb_id=%s tmdb_id=%s title=%s", doubanID, imdbID, tmdbID, info.Title)
 }
 
+// SaveResourceInfoFromRow 在资源信息库未命中时，把 get_db_seed_info 归一化数据中的资源信息入库以便后续复用。
+// 参数/返回：store 为资源信息仓储；normalized 为归一化种子数据；三个 ID 均为空时不入库。
+// 失败场景：入库失败仅记录日志，不影响预览响应。
+// 副作用：可能向 resource_info 表插入新记录或补齐已有记录的空字段。
+func SaveResourceInfoFromRow(store ResourceInfoStore, normalized map[string]any) {
+	if store == nil || normalized == nil {
+		return
+	}
+	doubanID, imdbID, tmdbID := ResourceSeedIDs(
+		toStringSimple(normalized["douban_link"]),
+		toStringSimple(normalized["imdb_link"]),
+		toStringSimple(normalized["tmdb_link"]),
+	)
+	if doubanID == "" && imdbID == "" && tmdbID == "" {
+		return
+	}
+	title := strings.TrimSpace(toStringSimple(normalized["title"]))
+	name := strings.TrimSpace(toStringSimple(normalized["name"]))
+	if title == "" {
+		title = name
+	}
+	summary := strings.TrimSpace(toStringSimple(normalized["body"]))
+	if summary == "" {
+		summary = strings.TrimSpace(toStringSimple(normalized["subtitle"]))
+	}
+	info := &repository.ResourceInfo{
+		Title:     title,
+		Year:      ExtractYearFromText(title + " " + name),
+		Country:   strings.TrimSpace(toStringSimple(normalized["source"])),
+		DoubanID:  doubanID,
+		ImdbID:    imdbID,
+		TmdbID:    tmdbID,
+		PosterURL: strings.TrimSpace(toStringSimple(normalized["poster"])),
+		Summary:   summary,
+	}
+	if err := store.UpsertResourceInfo(info); err != nil {
+		logx.Warnf(resourceInfoLogModule, "预览时保存资源信息失败 douban_id=%s imdb_id=%s tmdb_id=%s err=%v", doubanID, imdbID, tmdbID, err)
+		return
+	}
+	logx.Infof(resourceInfoLogModule, "预览时资源信息已入库 douban_id=%s imdb_id=%s tmdb_id=%s title=%s", doubanID, imdbID, tmdbID, info.Title)
+}
+
 // AttachResourceInfoToRow 按归一化种子数据中的外链 ID 匹配资源信息并附加到响应。
 // 参数/返回：store 为资源信息仓储；normalized 为 get_db_seed_info 的归一化数据；
 // 命中时写入 normalized["resource_info"]，未命中或无 ID 时不写入。
