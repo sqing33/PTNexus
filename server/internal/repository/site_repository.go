@@ -68,7 +68,7 @@ func (r *SiteRepository) ListSites(filterByTorrents string) ([]map[string]any, e
 	groupColumn := r.store.GroupColumn()
 	selectFields := fmt.Sprintf(`
 		s.id, s.nickname, s.site, s.base_url, s.special_tracker_domain, s.%s, s.speed_limit,
-		s.ratio_threshold, s.seed_speed_limit, s.can_publish, s.sort_order,
+		s.ratio_threshold, s.seed_speed_limit, s.can_publish, s.forbidden_transfer_sites, s.sort_order,
 		CASE WHEN s.cookie IS NOT NULL AND s.cookie != '' THEN 1 ELSE 0 END as has_cookie,
 		CASE WHEN s.passkey IS NOT NULL AND s.passkey != '' THEN 1 ELSE 0 END as has_passkey,
 		s.cookie, s.passkey
@@ -122,6 +122,7 @@ func (r *SiteRepository) ListSites(filterByTorrents string) ([]map[string]any, e
 	}
 	for _, s := range sites {
 		s["can_publish"] = toIntWithDefault(s["can_publish"], 1) != 0
+		s["forbidden_transfer_sites"] = siteStringListFromAny(s["forbidden_transfer_sites"])
 	}
 	return sites, nil
 }
@@ -139,6 +140,7 @@ func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
 	}
 	seedSpeedLimit := toIntWithDefault(data["seed_speed_limit"], 5)
 	canPublish := toIntWithDefault(data["can_publish"], 1)
+	forbiddenTransferSites := encodeSiteStringList(data["forbidden_transfer_sites"])
 	sortOrder := toIntWithDefault(data["sort_order"], 0)
 
 	groupColumn := r.store.GroupColumn()
@@ -155,6 +157,7 @@ func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
 			ratio_threshold = ?,
 			seed_speed_limit = ?,
 			can_publish = ?,
+			forbidden_transfer_sites = ?,
 			sort_order = ?
 		WHERE id = ?
 	`, groupColumn)
@@ -172,6 +175,7 @@ func (r *SiteRepository) UpdateSiteDetails(data map[string]any) (bool, error) {
 		ratioThreshold,
 		seedSpeedLimit,
 		canPublish,
+		forbiddenTransferSites,
 		sortOrder,
 		siteID,
 	)
@@ -214,7 +218,7 @@ func (r *SiteRepository) SitesStatus() ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := sqlDB.Query("SELECT nickname, site, cookie, passkey, migration, can_publish, sort_order FROM sites ORDER BY sort_order, nickname")
+	rows, err := sqlDB.Query("SELECT nickname, site, cookie, passkey, migration, can_publish, forbidden_transfer_sites, sort_order FROM sites ORDER BY sort_order, nickname")
 	if err != nil {
 		return nil, err
 	}
@@ -229,13 +233,14 @@ func (r *SiteRepository) SitesStatus() ([]map[string]any, error) {
 	for _, row := range raw {
 		migration := toIntWithDefault(row["migration"], 0)
 		result = append(result, map[string]any{
-			"name":        toString(row["nickname"], ""),
-			"site":        toString(row["site"], ""),
-			"has_cookie":  toString(row["cookie"], "") != "",
-			"has_passkey": toString(row["passkey"], "") != "",
-			"is_source":   migration == 1 || migration == 3,
-			"is_target":   migration == 2 || migration == 3,
-			"can_publish": toIntWithDefault(row["can_publish"], 1) != 0,
+			"name":                     toString(row["nickname"], ""),
+			"site":                     toString(row["site"], ""),
+			"has_cookie":               toString(row["cookie"], "") != "",
+			"has_passkey":              toString(row["passkey"], "") != "",
+			"is_source":                migration == 1 || migration == 3,
+			"is_target":                migration == 2 || migration == 3,
+			"can_publish":              toIntWithDefault(row["can_publish"], 1) != 0,
+			"forbidden_transfer_sites": siteStringListFromAny(row["forbidden_transfer_sites"]),
 		})
 	}
 	return result, nil

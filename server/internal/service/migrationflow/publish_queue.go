@@ -974,8 +974,9 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 					SourceDetailURL:     ctx.SourceDetailURL,
 				})
 			},
-			AddToDownloader:         s.AddToDownloader,
-			FindSiteNicknameByGroup: s.repo.FindSiteNicknameByGroup,
+			AddToDownloader:                   s.AddToDownloader,
+			FindSiteNicknameByGroup:           s.repo.FindSiteNicknameByGroup,
+			IsTransferForbiddenByOfficialSite: s.repo.IsTransferForbiddenByOfficialSite,
 		},
 	)
 	cost := time.Since(startedAt)

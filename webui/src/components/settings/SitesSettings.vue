@@ -185,6 +185,21 @@
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         />
+        <el-table-column prop="forbidden_transfer_sites" label="禁转站点" min-width="150">
+          <template #default="scope">
+            <div v-if="scope.row.forbidden_transfer_sites?.length" class="site-tag-list">
+              <el-tag
+                v-for="target in scope.row.forbidden_transfer_sites"
+                :key="target"
+                size="small"
+                type="warning"
+              >
+                {{ target }}
+              </el-tag>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column
           prop="speed_limit"
           label="限速"
@@ -345,6 +360,26 @@
           <el-input v-model="siteForm.group" placeholder="例如：PT, PTWEB"></el-input>
           <div class="form-tip">用于识别种子所属发布组，多个组用英文逗号(,)分隔。</div>
         </el-form-item>
+        <el-form-item label="禁转站点" prop="forbidden_transfer_sites">
+          <el-select
+            v-model="siteForm.forbidden_transfer_sites"
+            multiple
+            filterable
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="选择禁止转种的目标站点"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="target in transferSiteOptions"
+              :key="String(target.id ?? target.site)"
+              :label="target.nickname || target.site"
+              :value="target.nickname || target.site"
+            />
+          </el-select>
+          <div class="form-tip">种子的制作组归属本站时，将禁止转种到所选站点，可多选。</div>
+        </el-form-item>
         <el-form-item label="可发种站" prop="can_publish">
           <el-switch v-model="siteForm.can_publish" />
           <div class="form-tip">关闭后，该站点在发种选择时将置灰不可选择。</div>
@@ -450,6 +485,7 @@ type SiteConfig = {
   base_url?: string
   special_tracker_domain?: string
   group?: string
+  forbidden_transfer_sites?: string[]
   cookie?: string
   passkey?: string
   speed_limit?: number | null
@@ -494,6 +530,7 @@ type SiteForm = {
   base_url: string
   special_tracker_domain: string
   group: string
+  forbidden_transfer_sites: string[]
   cookie: string
   passkey: string
   speed_limit: number
@@ -544,6 +581,7 @@ const siteForm = ref<SiteForm>({
   base_url: '',
   special_tracker_domain: '',
   group: '',
+  forbidden_transfer_sites: [],
   cookie: '',
   passkey: '',
   speed_limit: 0, // 前端显示和输入使用 MB/s 单位
@@ -571,6 +609,12 @@ const getSiteStatus = (site: SiteConfig) => {
   if (!site?.site) return null
   return sitesStatusMap.value.get(String(site.site)) || null
 }
+
+const transferSiteOptions = computed(() =>
+  (sitesList.value || []).filter(
+    (site) => String(site.site || '') !== String(siteForm.value.site || ''),
+  ),
+)
 
 const getSiteRole = (site: SiteConfig): 'none' | 'both' | 'source' | 'target' => {
   const status = getSiteStatus(site)
@@ -706,7 +750,13 @@ const filteredSites = computed(() => {
       const nickname = (site.nickname || '').toLowerCase()
       const siteIdentifier = (site.site || '').toLowerCase()
       const group = (site.group || '').toLowerCase()
-      return nickname.includes(term) || siteIdentifier.includes(term) || group.includes(term)
+      const forbidden = (site.forbidden_transfer_sites || []).join(' ').toLowerCase()
+      return (
+        nickname.includes(term) ||
+        siteIdentifier.includes(term) ||
+        group.includes(term) ||
+        forbidden.includes(term)
+      )
     })
   }
 
@@ -911,6 +961,9 @@ const normalizeSiteForm = (site: SiteConfig): SiteForm => ({
   base_url: String(site.base_url || ''),
   special_tracker_domain: String(site.special_tracker_domain || ''),
   group: String(site.group || ''),
+  forbidden_transfer_sites: Array.isArray(site.forbidden_transfer_sites)
+    ? site.forbidden_transfer_sites.map((item) => String(item).trim()).filter(Boolean)
+    : [],
   cookie: String(site.cookie || ''),
   passkey: String(site.passkey || ''),
   speed_limit: typeof site.speed_limit === 'number' ? site.speed_limit : Number(site.speed_limit) || 0,

@@ -19,7 +19,6 @@
       </el-button>
 
       <div class="name-header-container">
-        <div class="name-header-title">种子</div>
         <el-input
           v-model="nameSearch"
           placeholder="搜索名称..."
@@ -148,9 +147,9 @@
 
       <el-table-column
         prop="name" min-width="450" sortable="custom">
-<!--        <template #header>-->
-<!--          -->
-<!--        </template>-->
+        <template #header>
+          <div class="name-header-title">种子</div>
+        </template>
         <template #default="scope">
           <span class="torrent-name-cell" :class="getSourceDataStatusClass(scope.row)">
             {{ scope.row.name }}
@@ -2756,7 +2755,6 @@ watch(visibleColumns, () => {
   align-items: center;
   justify-content: space-between;
   gap: 15px;
-  flex: 1;
   flex-wrap: nowrap;
   min-width: max-content;
 }

@@ -16,11 +16,12 @@ type PublishWithContextInput struct {
 
 // PublishWithContextDeps 定义基于迁移上下文发布所需依赖。
 type PublishWithContextDeps struct {
-	GetSiteByName           func(name string) (map[string]any, error)
-	ResolveTorrentPath      func(ctx Context) string
-	AddToDownloader         func(payload map[string]any) (map[string]any, int)
-	FindSiteNicknameByGroup func(releaseGroup string) (string, error)
-	UpdateTorrentDetails    func(input PublishTorrentDetailsUpdateInput) (int64, error)
+	GetSiteByName                     func(name string) (map[string]any, error)
+	ResolveTorrentPath                func(ctx Context) string
+	AddToDownloader                   func(payload map[string]any) (map[string]any, int)
+	FindSiteNicknameByGroup           func(releaseGroup string) (string, error)
+	IsTransferForbiddenByOfficialSite func(officialSite, targetSite string) (bool, string, error)
+	UpdateTorrentDetails              func(input PublishTorrentDetailsUpdateInput) (int64, error)
 }
 
 // ExecutePublishWithContext 按上下文执行单站点发布（含目标站校验与种子路径回退）。
@@ -77,9 +78,10 @@ func ExecutePublishWithContext(input PublishWithContextInput, deps PublishWithCo
 			RootConfig:           input.RootConfig,
 		},
 		PublishExecutionDeps{
-			AddToDownloader:         deps.AddToDownloader,
-			FindSiteNicknameByGroup: deps.FindSiteNicknameByGroup,
-			UpdateTorrentDetails:    deps.UpdateTorrentDetails,
+			AddToDownloader:                   deps.AddToDownloader,
+			FindSiteNicknameByGroup:           deps.FindSiteNicknameByGroup,
+			IsTransferForbiddenByOfficialSite: deps.IsTransferForbiddenByOfficialSite,
+			UpdateTorrentDetails:              deps.UpdateTorrentDetails,
 		},
 	)
 }

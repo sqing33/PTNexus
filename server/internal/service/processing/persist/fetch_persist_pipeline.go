@@ -18,6 +18,7 @@ type FetchPersistPipelineRepo interface {
 	FetchPostPersistRepo
 	UpsertSeedParameter(record map[string]any) error
 	ListSitesGroupAndDescription() ([]map[string]any, error)
+	FindOfficialSiteByGroup(releaseGroup string) (string, error)
 }
 
 // FetchPersistPipelineInput 定义抓取流水线输入。
@@ -167,6 +168,19 @@ func normalizeAndApplyTeamAcknowledgment(draft *SeedDraft, siteIdentifier string
 	}
 	draft.Team = teamKey
 	record["team"] = teamKey
+
+	releaseGroup := strings.TrimSpace(rawReleaseGroup)
+	if releaseGroup == "" {
+		releaseGroup = teamKey
+	}
+	officialSite, officialSiteErr := deps.Repo.FindOfficialSiteByGroup(releaseGroup)
+	if officialSiteErr != nil {
+		logx.Warnf("迁移-官种站", "解析官种站失败 torrent_id=%s team=%s err=%v", draft.TorrentID, releaseGroup, officialSiteErr)
+	} else {
+		draft.OfficialSite = strings.TrimSpace(officialSite)
+		record["official_site"] = draft.OfficialSite
+		logx.Infof("迁移-官种站", "官种站解析完成 torrent_id=%s team=%s official_site=%s", draft.TorrentID, releaseGroup, draft.OfficialSite)
+	}
 
 	rawSites, err := deps.Repo.ListSitesGroupAndDescription()
 	if err != nil {

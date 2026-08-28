@@ -186,6 +186,9 @@ func normalizeReleaseGroup(value string) string {
 	if v == "" {
 		return ""
 	}
+	if strings.HasPrefix(strings.ToLower(v), "team.") {
+		v = strings.TrimSpace(v[len("team."):])
+	}
 	if strings.Contains(v, "@") {
 		parts := strings.Split(v, "@")
 		if len(parts) >= 2 && strings.TrimSpace(parts[1]) != "" {
@@ -335,7 +338,10 @@ func (r *MigrateRepository) UpsertSeedParameter(record map[string]any) error {
 		if err := tx.Table("seed_parameters").Where("torrent_id = ? AND site_name = ?", torrentID, siteName).Delete(nil).Error; err != nil {
 			return err
 		}
-		return tx.Table("seed_parameters").Create(record).Error
+		if err := tx.Table("seed_parameters").Create(record).Error; err != nil {
+			return err
+		}
+		return updateTorrentOfficialSiteFromSeedRecord(tx, record)
 	})
 }
 
@@ -357,6 +363,9 @@ func (r *MigrateRepository) UpsertSeedParameterKeepingOnlyCurrent(record map[str
 			return err
 		}
 		if err := tx.Table("seed_parameters").Create(record).Error; err != nil {
+			return err
+		}
+		if err := updateTorrentOfficialSiteFromSeedRecord(tx, record); err != nil {
 			return err
 		}
 

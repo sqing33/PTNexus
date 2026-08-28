@@ -49,6 +49,9 @@ func NewApp() (*App, error) {
 	if err := schemaManager.SyncSitesFromJSON(paths.SitesData); err != nil {
 		logx.Warnf("启动", "同步站点配置失败 path=%s err=%v", paths.SitesData, err)
 	}
+	if err := repository.NewMigrateRepository(store).BackfillOfficialSites(); err != nil {
+		logx.Warnf("启动", "回填官种站失败 err=%v", err)
+	}
 
 	if err := cfgManager.UseStore(repository.NewAppSettingsRepository(store)); err != nil {
 		return nil, fmt.Errorf("init database settings failed: %w", err)

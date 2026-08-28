@@ -45,6 +45,7 @@ type torrentSummary struct {
 	TotalUploaded int64
 	Seeders       int64
 	DownloaderIDs []string
+	OfficialSite  string
 }
 
 type TorrentDataService struct {

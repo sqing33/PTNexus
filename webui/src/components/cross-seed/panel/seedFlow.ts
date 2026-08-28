@@ -102,6 +102,7 @@ type DbSeedRecord = {
   final_publish_parameters?: Record<string, string>
   complete_publish_params?: Record<string, unknown>
   raw_params_for_preview?: Record<string, unknown>
+  official_site?: string
 }
 
 type DbSeedInfoResponse = {
@@ -423,6 +424,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
           torrentData.value = {
             seed_id: compositeSeedId,
+            official_site: dbData.official_site || '',
             original_main_title: dbData.title || '',
             title_components: dbData.title_components || [],
             subtitle: dbData.subtitle,
@@ -449,6 +451,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
               resolution: dbData.resolution || '',
               team: dbData.team || '',
               source: dbData.source || '',
+              official_site: dbData.official_site || '',
               tags: (dbData.tags || []).sort((a: string, b: string) => {
                 const restricted = ['禁转', 'tag.禁转', '限转', 'tag.限转', '分集', 'tag.分集']
                 const isRa = restricted.includes(a)
@@ -510,6 +513,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         // 从数据库返回的数据中提取相关信息
         torrentData.value = {
           seed_id: compositeSeedId,
+          official_site: dbData.official_site || '',
           original_main_title: dbData.title || '',
           title_components: dbData.title_components || [],
           subtitle: dbData.subtitle || '',
@@ -536,6 +540,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
             resolution: dbData.resolution || '',
             team: dbData.team || '',
             source: dbData.source || '',
+            official_site: dbData.official_site || '',
             tags: (dbData.tags || []).sort((a: string, b: string) => {
               const restricted = ['禁转', 'tag.禁转', '限转', 'tag.限转', '分集', 'tag.分集']
               const isRa = restricted.includes(a)
@@ -767,6 +772,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
 
           torrentData.value = {
             seed_id: compositeSeedId,
+            official_site: dbData.official_site || '',
             original_main_title: dbData.title || '',
             title_components: dbData.title_components || [],
             subtitle: dbData.subtitle,
@@ -793,6 +799,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
               resolution: dbData.resolution || '',
               team: dbData.team || '',
               source: dbData.source || '',
+              official_site: dbData.official_site || '',
               tags: (dbData.tags || []).sort((a: string, b: string) => {
                 const restricted = ['禁转', 'tag.禁转', '限转', 'tag.限转', '分集', 'tag.分集']
                 const isRa = restricted.includes(a)
@@ -1172,6 +1179,10 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         // 更新本地数据，保留用户修改的内容
         torrentData.value = {
           ...torrentData.value,
+          official_site:
+            typeof standardized_params?.official_site === 'string'
+              ? standardized_params.official_site
+              : torrentData.value.official_site,
           ...(finalMainTitle ? { original_main_title: finalMainTitle } : {}),
           standardized_params: standardized_params || {},
           final_publish_parameters: final_publish_parameters || {},

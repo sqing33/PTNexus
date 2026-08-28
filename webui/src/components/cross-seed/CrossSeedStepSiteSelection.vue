@@ -87,6 +87,15 @@
           </el-icon>
         </el-tooltip>
         <el-tooltip
+          v-else-if="isTransferForbidden(site.name)"
+          content="该种子的官种站已禁止转种到此站点"
+          placement="top"
+        >
+          <el-icon style="margin-left: 4px; color: #f56c6c">
+            <InfoFilled />
+          </el-icon>
+        </el-tooltip>
+        <el-tooltip
           v-else-if="isIloliconSite(site) && !isCurrentSeedAnimationRelated"
           content="ilolicon 仅支持动漫/动画内容，当前种子已自动禁用"
           placement="top"
@@ -115,6 +124,7 @@ const {
   allSitesStatus,
   getButtonType,
   isTargetSiteSelectable,
+  isTransferForbidden,
   toggleSiteSelection,
   isAutoUpdateHighlightSite,
   selectedTargetSites,
@@ -122,4 +132,3 @@ const {
   isCurrentSeedAnimationRelated,
 } = useCrossSeedPanelContext()
 </script>
-

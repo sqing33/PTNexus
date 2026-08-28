@@ -31,11 +31,12 @@ export interface StandardizedParams {
   team: string
   source: string
   tags: string[]
+  official_site?: string
 }
 
 export type ScreenshotReviewStatus = 'none' | 'pending' | 'confirmed'
 
-export type StandardParamKey = Exclude<keyof StandardizedParams, 'tags'>
+export type StandardParamKey = Exclude<keyof StandardizedParams, 'tags' | 'official_site'>
 
 export interface IntroData {
   statement: string
@@ -62,6 +63,7 @@ export interface TorrentData {
   complete_publish_params: Record<string, unknown>
   raw_params_for_preview: Record<string, unknown>
   skip_restricted_check?: boolean
+  official_site?: string
 }
 
 export interface BdinfoProgress {
@@ -82,6 +84,7 @@ export interface SiteStatus {
   can_publish: boolean
   uses_public_publisher?: boolean
   uses_public_extractor?: boolean
+  forbidden_transfer_sites?: string[]
 }
 
 export type PublishDisplayStatus =
@@ -207,6 +210,7 @@ export interface CrossSeedPanelContext {
   clearAllTargetSites: () => void
   getButtonType: (site: SiteStatus) => ElButtonType
   isTargetSiteSelectable: (siteName: string) => boolean
+  isTransferForbidden: (siteName: string) => boolean
   toggleSiteSelection: (siteName: string) => void
   isAutoUpdateHighlightSite: (site: SiteStatus) => boolean
   isIloliconSite: (site: SiteStatus) => boolean

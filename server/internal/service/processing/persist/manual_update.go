@@ -112,6 +112,7 @@ func BuildManualUpdatedSeedRecord(input BuildManualUpdateInput) BuildManualUpdat
 	draft.AudioCodec = toStringAny(standardized["audio_codec"], "")
 	draft.Resolution = toStringAny(standardized["resolution"], "")
 	draft.Team = toStringAny(standardized["team"], "")
+	draft.OfficialSite = toStringAny(existing["official_site"], "")
 	draft.Source = toStringAny(standardized["source"], "")
 	draft.Tags = parseStringArray(standardized["tags"])
 	draft.Poster = toStringAny(updated["poster"], toStringAny(existing["poster"], ""))

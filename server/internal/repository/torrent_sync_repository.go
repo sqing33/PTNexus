@@ -36,6 +36,7 @@ type TorrentSyncRecord struct {
 	Sites        string
 	Details      string
 	TorrentGroup string
+	OfficialSite string
 	DownloaderID string
 	Seeders      int64
 	Uploaded     int64
@@ -59,6 +60,7 @@ type torrentUpsertRow struct {
 	Sites        string  `gorm:"column:sites"`
 	Details      string  `gorm:"column:details"`
 	TorrentGroup string  `gorm:"column:group"`
+	OfficialSite string  `gorm:"column:official_site"`
 	DownloaderID string  `gorm:"column:downloader_id"`
 	LastSeen     string  `gorm:"column:last_seen"`
 	Seeders      int64   `gorm:"column:seeders"`
@@ -235,6 +237,7 @@ func (r *TorrentDataRepository) SyncDownloaderTorrents(downloaderID string, reco
 				Sites:        strings.TrimSpace(record.Sites),
 				Details:      strings.TrimSpace(record.Details),
 				TorrentGroup: strings.TrimSpace(record.TorrentGroup),
+				OfficialSite: strings.TrimSpace(record.OfficialSite),
 				DownloaderID: trimmedID,
 				LastSeen:     lastSeen,
 				Seeders:      record.Seeders,
@@ -277,6 +280,7 @@ func (r *TorrentDataRepository) SyncDownloaderTorrents(downloaderID string, reco
 					"sites",
 					"details",
 					"group",
+					"official_site",
 					"last_seen",
 					"seeders",
 					"is_hidden",

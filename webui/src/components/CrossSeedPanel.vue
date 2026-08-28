@@ -340,6 +340,7 @@ interface SiteStatus {
   can_publish: boolean
   uses_public_publisher?: boolean
   uses_public_extractor?: boolean
+  forbidden_transfer_sites?: string[]
 }
 
 interface ScreenshotPreviewCandidateItem {
@@ -411,6 +412,7 @@ const getInitialTorrentData = (): TorrentData => ({
   imdb_link: '',
   douban_link: '',
   tmdb_link: '',
+  official_site: '',
   screenshot_review_status: 'none',
   intro: { statement: '', poster: '', body: '', screenshots: '', removed_ardtudeclarations: [] },
   mediainfo: '',
@@ -424,6 +426,7 @@ const getInitialTorrentData = (): TorrentData => ({
     team: '',
     source: '',
     tags: [] as string[],
+    official_site: '',
   },
   final_publish_parameters: {},
   complete_publish_params: {},
@@ -1403,6 +1406,10 @@ const isTargetSiteSelectable = (siteName: string): boolean => {
     return false
   }
 
+  if (isTransferForbidden(siteName)) {
+    return false
+  }
+
   // 肉丝站点不需要Cookie，其他站点需要配置Cookie
   if (siteName !== '肉丝' && !siteStatus.has_cookie) {
     return false
@@ -1465,6 +1472,34 @@ const isTargetSiteSelectable = (siteName: string): boolean => {
 
   // 如果所有检查都通过，则站点可选
   return true
+}
+
+const isTransferForbidden = (siteName: string): boolean => {
+  const officialSite = String(
+    torrentData.value.official_site ||
+      torrentData.value.standardized_params.official_site ||
+      '',
+  )
+    .trim()
+    .toLowerCase()
+  if (!officialSite) return false
+
+  const officialStatus = allSitesStatus.value.find((site) =>
+    [site.name, site.site].some(
+      (value) => String(value || '').trim().toLowerCase() === officialSite,
+    ),
+  )
+  if (!officialStatus?.forbidden_transfer_sites?.length) return false
+
+  const targetStatus = allSitesStatus.value.find((site) => site.name === siteName)
+  const targetAliases = new Set(
+    [targetStatus?.name, targetStatus?.site, siteName]
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean),
+  )
+  return officialStatus.forbidden_transfer_sites.some((value) =>
+    targetAliases.has(String(value || '').trim().toLowerCase()),
+  )
 }
 
 const isUbitsDisabled = computed(() => {
@@ -2743,6 +2778,7 @@ provide(crossSeedPanelContextKey, {
   clearAllTargetSites,
   getButtonType,
   isTargetSiteSelectable,
+  isTransferForbidden,
   toggleSiteSelection,
   isAutoUpdateHighlightSite,
   isIloliconSite,

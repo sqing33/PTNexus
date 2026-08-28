@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -98,4 +99,83 @@ func toFloat64WithDefault(value any, fallback float64) float64 {
 	default:
 		return fallback
 	}
+}
+
+func siteStringListFromAny(value any) []string {
+	result := make([]string, 0)
+	appendValue := func(item any) {
+		text := strings.TrimSpace(toString(item, ""))
+		if text != "" {
+			result = append(result, text)
+		}
+	}
+	switch typed := value.(type) {
+	case nil:
+		return []string{}
+	case []string:
+		for _, item := range typed {
+			appendValue(item)
+		}
+	case []any:
+		for _, item := range typed {
+			appendValue(item)
+		}
+	case []byte:
+		return siteStringListFromAny(string(typed))
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return []string{}
+		}
+		parsedString := []string{}
+		if strings.HasPrefix(trimmed, "[") && json.Unmarshal([]byte(trimmed), &parsedString) == nil {
+			for _, item := range parsedString {
+				appendValue(item)
+			}
+			return dedupeSiteStringList(result)
+		}
+		parsedAny := []any{}
+		if strings.HasPrefix(trimmed, "[") && json.Unmarshal([]byte(trimmed), &parsedAny) == nil {
+			for _, item := range parsedAny {
+				appendValue(item)
+			}
+			return dedupeSiteStringList(result)
+		}
+		for _, item := range strings.Split(trimmed, ",") {
+			appendValue(item)
+		}
+	default:
+		appendValue(typed)
+	}
+	return dedupeSiteStringList(result)
+}
+
+func encodeSiteStringList(value any) string {
+	items := siteStringListFromAny(value)
+	if len(items) == 0 {
+		return "[]"
+	}
+	encoded, err := json.Marshal(items)
+	if err != nil {
+		return "[]"
+	}
+	return string(encoded)
+}
+
+func dedupeSiteStringList(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
 }

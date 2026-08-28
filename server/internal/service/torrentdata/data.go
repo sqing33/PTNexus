@@ -78,8 +78,12 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 				TotalUploaded: 0,
 				Seeders:       row.Seeders,
 				DownloaderIDs: []string{},
+				OfficialSite:  strings.TrimSpace(row.OfficialSite),
 			}
 			aggregated[key] = item
+		}
+		if item.OfficialSite == "" && strings.TrimSpace(row.OfficialSite) != "" {
+			item.OfficialSite = strings.TrimSpace(row.OfficialSite)
 		}
 		if row.Hash != "" && !containsString(item.Hashes, row.Hash) {
 			item.Hashes = append(item.Hashes, row.Hash)
@@ -193,6 +197,7 @@ func (s *TorrentDataService) GetData(params TorrentsDataParams) (map[string]any,
 			"source_data_status":       sourceDataStatus,
 			"source_data_fetched":      sourceStatus.HasFetchedSourceData,
 			"source_data_reviewed":     sourceStatus.IsReviewed,
+			"official_site":            value.OfficialSite,
 		}
 		allItems = append(allItems, item)
 	}

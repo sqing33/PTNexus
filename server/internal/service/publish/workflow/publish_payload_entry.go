@@ -14,11 +14,12 @@ type PublishFromPayloadInput struct {
 type PublishFromPayloadDeps struct {
 	ContextState *ContextState
 
-	GetSiteByName           func(name string) (map[string]any, error)
-	ResolveTorrentPath      func(ctx Context) string
-	AddToDownloader         func(payload map[string]any) (map[string]any, int)
-	FindSiteNicknameByGroup func(releaseGroup string) (string, error)
-	UpdateTorrentDetails    func(input PublishTorrentDetailsUpdateInput) (int64, error)
+	GetSiteByName                     func(name string) (map[string]any, error)
+	ResolveTorrentPath                func(ctx Context) string
+	AddToDownloader                   func(payload map[string]any) (map[string]any, int)
+	FindSiteNicknameByGroup           func(releaseGroup string) (string, error)
+	IsTransferForbiddenByOfficialSite func(officialSite, targetSite string) (bool, string, error)
+	UpdateTorrentDetails              func(input PublishTorrentDetailsUpdateInput) (int64, error)
 }
 
 // ExecutePublishFromPayload 按前端 payload 执行单站点发布（自动读取 task_id 对应上下文）。
@@ -52,11 +53,12 @@ func ExecutePublishFromPayload(input PublishFromPayloadInput, deps PublishFromPa
 			RootConfig:          input.RootConfig,
 		},
 		PublishWithContextDeps{
-			GetSiteByName:           deps.GetSiteByName,
-			ResolveTorrentPath:      deps.ResolveTorrentPath,
-			AddToDownloader:         deps.AddToDownloader,
-			FindSiteNicknameByGroup: deps.FindSiteNicknameByGroup,
-			UpdateTorrentDetails:    deps.UpdateTorrentDetails,
+			GetSiteByName:                     deps.GetSiteByName,
+			ResolveTorrentPath:                deps.ResolveTorrentPath,
+			AddToDownloader:                   deps.AddToDownloader,
+			FindSiteNicknameByGroup:           deps.FindSiteNicknameByGroup,
+			IsTransferForbiddenByOfficialSite: deps.IsTransferForbiddenByOfficialSite,
+			UpdateTorrentDetails:              deps.UpdateTorrentDetails,
 		},
 	)
 }

@@ -41,6 +41,7 @@ func NormalizeSeedRow(row map[string]any) map[string]any {
 	item["screenshot_review_status"] = processingshared.NormalizeScreenshotReviewStatus(toStringWithFallback(item["screenshot_review_status"], processingshared.ScreenshotReviewStatusNone))
 	item["mediainfo"] = toStringWithFallback(item["mediainfo"], "")
 	item["team"] = parser.NormalizeTeamKey(toStringWithFallback(item["team"], ""))
+	item["official_site"] = toStringWithFallback(item["official_site"], "")
 
 	item["source_params"] = ParseStringMap(item["source_params"])
 	item["final_publish_parameters"] = ParseStringMap(item["final_publish_parameters"])

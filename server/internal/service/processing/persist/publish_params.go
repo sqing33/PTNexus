@@ -31,17 +31,18 @@ func ParseSeedID(seedID string) (string, string, string, error) {
 // BuildStandardizedParams 组装标准化参数。
 func BuildStandardizedParams(row map[string]any) map[string]any {
 	return map[string]any{
-		"type":        toStringAny(row["type"], ""),
-		"medium":      toStringAny(row["medium"], ""),
-		"video_codec": toStringAny(row["video_codec"], ""),
-		"audio_codec": toStringAny(row["audio_codec"], ""),
-		"resolution":  toStringAny(row["resolution"], ""),
-		"team":        parser.NormalizeTeamKey(toStringAny(row["team"], "")),
-		"source":      toStringAny(row["source"], ""),
-		"tags":        parseStringArray(row["tags"]),
-		"imdb_link":   toStringAny(row["imdb_link"], ""),
-		"douban_link": toStringAny(row["douban_link"], ""),
-		"tmdb_link":   toStringAny(row["tmdb_link"], ""),
+		"type":          toStringAny(row["type"], ""),
+		"medium":        toStringAny(row["medium"], ""),
+		"video_codec":   toStringAny(row["video_codec"], ""),
+		"audio_codec":   toStringAny(row["audio_codec"], ""),
+		"resolution":    toStringAny(row["resolution"], ""),
+		"team":          parser.NormalizeTeamKey(toStringAny(row["team"], "")),
+		"official_site": toStringAny(row["official_site"], ""),
+		"source":        toStringAny(row["source"], ""),
+		"tags":          parseStringArray(row["tags"]),
+		"imdb_link":     toStringAny(row["imdb_link"], ""),
+		"douban_link":   toStringAny(row["douban_link"], ""),
+		"tmdb_link":     toStringAny(row["tmdb_link"], ""),
 	}
 }
 

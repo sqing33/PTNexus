@@ -36,9 +36,10 @@ type PublishExecutionInput struct {
 
 // PublishExecutionDeps 定义单站发布执行依赖。
 type PublishExecutionDeps struct {
-	AddToDownloader         func(payload map[string]any) (map[string]any, int)
-	FindSiteNicknameByGroup func(releaseGroup string) (string, error)
-	UpdateTorrentDetails    func(input PublishTorrentDetailsUpdateInput) (int64, error)
+	AddToDownloader                   func(payload map[string]any) (map[string]any, int)
+	FindSiteNicknameByGroup           func(releaseGroup string) (string, error)
+	IsTransferForbiddenByOfficialSite func(officialSite, targetSite string) (bool, string, error)
+	UpdateTorrentDetails              func(input PublishTorrentDetailsUpdateInput) (int64, error)
 }
 
 // PublishTorrentDetailsUpdateInput 定义发种成功后回写 torrents.details 所需的最小字段。
@@ -64,6 +65,52 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 	}
 	if payload == nil {
 		payload = map[string]any{}
+	}
+
+	targetNickname := resolveTargetSiteLabel(targetInfo, targetSite)
+	officialSite := strings.TrimSpace(toStringAny(uploadData["official_site"], ""))
+	if officialSite == "" {
+		officialSite = strings.TrimSpace(toStringAny(payload["official_site"], ""))
+	}
+	if officialSite == "" {
+		if standardized, ok := uploadData["standardized_params"].(map[string]any); ok {
+			officialSite = strings.TrimSpace(toStringAny(standardized["official_site"], ""))
+		}
+	}
+	if officialSite == "" && deps.FindSiteNicknameByGroup != nil {
+		team := strings.TrimSpace(toStringAny(uploadData["team"], ""))
+		if team == "" {
+			if standardized, ok := uploadData["standardized_params"].(map[string]any); ok {
+				team = strings.TrimSpace(toStringAny(standardized["team"], ""))
+			}
+		}
+		if team != "" {
+			if resolved, resolveErr := deps.FindSiteNicknameByGroup(team); resolveErr != nil {
+				logx.Warnf("发布-禁转站点", "解析官种站失败 target=%s team=%s err=%v", targetNickname, team, resolveErr)
+			} else {
+				officialSite = strings.TrimSpace(resolved)
+			}
+		}
+	}
+	if officialSite != "" && deps.IsTransferForbiddenByOfficialSite != nil {
+		forbidden, matchedTarget, checkErr := deps.IsTransferForbiddenByOfficialSite(officialSite, targetNickname)
+		if checkErr != nil {
+			logx.Warnf("发布-禁转站点", "检查禁转站点失败 official_site=%s target=%s err=%v", officialSite, targetNickname, checkErr)
+		} else if forbidden {
+			if strings.TrimSpace(matchedTarget) == "" {
+				matchedTarget = targetNickname
+			}
+			message := fmt.Sprintf("🚫 发布前禁转站点限制: 官种站 %s 禁止转种到 %s", officialSite, matchedTarget)
+			logx.Infof("发布-禁转站点", "拦截发布 official_site=%s target=%s", officialSite, matchedTarget)
+			return map[string]any{
+				"success":       false,
+				"logs":          message,
+				"message":       message,
+				"limit_reached": true,
+				"pre_check":     true,
+				"url":           nil,
+			}, 200
+		}
 	}
 
 	// 检查前端是否已确认跳过受限标签检查
@@ -127,7 +174,6 @@ func ExecutePublish(input PublishExecutionInput, deps PublishExecutionDeps) (map
 		deps.FindSiteNicknameByGroup,
 		input.RootConfig,
 	)
-	targetNickname := resolveTargetSiteLabel(targetInfo, targetSite)
 	if publishErr != nil {
 		failureLogs := strings.TrimSpace(logs)
 		if failureLogs == "" {

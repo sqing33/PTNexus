@@ -14,6 +14,7 @@ type ManualUpdateRepo interface {
 	GetSeedParameter(torrentID, siteName string) (map[string]any, error)
 	UpsertSeedParameter(record map[string]any) error
 	ListSitesGroupAndDescription() ([]map[string]any, error)
+	FindOfficialSiteByGroup(releaseGroup string) (string, error)
 }
 
 type manualUpdateExclusiveRepo interface {
@@ -63,6 +64,12 @@ func ApplyManualUpdateFromPayload(
 	standardized := buildResult.Standardized
 	record := buildResult.Record
 
+	if officialSite, err := repo.FindOfficialSiteByGroup(toStringAny(record["team"], "")); err != nil {
+		logx.Warnf("迁移-官种站", "手工回写解析官种站失败 torrent_id=%s team=%s err=%v", torrentID, toStringAny(record["team"], ""), err)
+	} else {
+		record["official_site"] = officialSite
+		standardized["official_site"] = officialSite
+	}
 	applyManualUpdateTeamAcknowledgment(repo, record)
 	if err := upsertManualSeedParameter(repo, record); err != nil {
 		return map[string]any{"success": false, "message": "更新失败: " + err.Error()}, 500

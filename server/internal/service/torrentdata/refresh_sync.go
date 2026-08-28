@@ -31,6 +31,7 @@ type refreshGroupEntry struct {
 	original   string
 	lower      string
 	cleanLower string
+	owner      string
 }
 
 type refreshGroupMatcher struct {
@@ -287,6 +288,7 @@ func buildSyncRecords(
 			Sites:        siteName,
 			Details:      details,
 			TorrentGroup: torrentGroup,
+			OfficialSite: groupMatcher.Owner(torrentGroup),
 			DownloaderID: downloaderID,
 			Seeders:      snapshot.Seeders,
 			Uploaded:     snapshot.Uploaded,
@@ -377,10 +379,24 @@ func newRefreshGroupMatcher(rows []repository.SiteIdentity) refreshGroupMatcher 
 				original:   original,
 				lower:      lower,
 				cleanLower: cleanLower,
+				owner:      strings.TrimSpace(row.Nickname),
 			})
 		}
 	}
 	return refreshGroupMatcher{groups: entries}
+}
+
+func (m refreshGroupMatcher) Owner(group string) string {
+	normalized := strings.TrimSpace(strings.TrimLeft(strings.ToLower(group), "-"))
+	if normalized == "" {
+		return ""
+	}
+	for _, entry := range m.groups {
+		if entry.cleanLower == normalized {
+			return entry.owner
+		}
+	}
+	return ""
 }
 
 func (m refreshGroupMatcher) Match(name string, snapshotGroup string) string {

@@ -29,9 +29,10 @@ func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
 			RootConfig:          rootConfig,
 		},
 		publishworkflow.PublishFromPayloadDeps{
-			ContextState:            s.contextState,
-			GetSiteByName:           s.repo.GetSiteByName,
-			FindSiteNicknameByGroup: s.repo.FindSiteNicknameByGroup,
+			ContextState:                      s.contextState,
+			GetSiteByName:                     s.repo.GetSiteByName,
+			FindSiteNicknameByGroup:           s.repo.FindSiteNicknameByGroup,
+			IsTransferForbiddenByOfficialSite: s.repo.IsTransferForbiddenByOfficialSite,
 			ResolveTorrentPath: func(ctx publishworkflow.Context) string {
 				return acquirefetch.ResolvePublishTorrentPath(s.repo, acquirefetch.ResolvePublishTorrentPathInput{
 					OriginalTorrentPath: ctx.OriginalTorrentPath,

@@ -11,9 +11,10 @@ import (
 )
 
 type SiteConfig struct {
-	Nickname  string
-	Migration int
-	Cookie    string
+	Nickname               string
+	Migration              int
+	Cookie                 string
+	ForbiddenTransferSites string
 }
 
 type SiteLinkRuleRow struct {
@@ -35,6 +36,7 @@ type TorrentRecord struct {
 	LastSeen     string
 	IYUULast     string
 	Seeders      int64
+	OfficialSite string
 }
 
 type TorrentUploadTotal struct {
@@ -58,7 +60,7 @@ func NewTorrentDataRepository(store *Store) *TorrentDataRepository {
 
 func (r *TorrentDataRepository) ListSiteConfigs() ([]SiteConfig, error) {
 	rows := make([]SiteConfig, 0)
-	err := r.store.DB.Raw("SELECT nickname, migration, cookie FROM sites").Scan(&rows).Error
+	err := r.store.DB.Raw("SELECT nickname, migration, cookie, forbidden_transfer_sites FROM sites").Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +354,7 @@ func (r *TorrentDataRepository) UpdateIYUUCheckAndFillDetails(name string, size 
 
 func (r *TorrentDataRepository) ListTorrents(onlyCompleted bool) ([]TorrentRecord, error) {
 	groupColumn := r.store.GroupColumn()
-	query := "SELECT hash, name, save_path, size, progress, state, sites, " + groupColumn + " AS torrent_group, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders FROM torrents WHERE state != ? AND (is_hidden = 0 OR is_hidden IS NULL)"
+	query := "SELECT hash, name, save_path, size, progress, state, sites, " + groupColumn + " AS torrent_group, official_site, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders FROM torrents WHERE state != ? AND (is_hidden = 0 OR is_hidden IS NULL)"
 	args := []any{"不存在"}
 	if onlyCompleted {
 		query += " AND progress >= 100"
@@ -390,7 +392,7 @@ func (r *TorrentDataRepository) ListTorrentsByHashes(hashes []string) ([]Torrent
 		return []TorrentRecord{}, nil
 	}
 	rows := make([]TorrentRecord, 0, 1)
-	query := "SELECT hash, name, save_path, size, progress, state, sites, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders FROM torrents WHERE LOWER(TRIM(hash)) IN ? AND (is_hidden = 0 OR is_hidden IS NULL) ORDER BY last_seen DESC"
+	query := "SELECT hash, name, save_path, size, progress, state, sites, official_site, details, downloader_id AS downloader, last_seen, iyuu_last_check AS iyuu_last, seeders FROM torrents WHERE LOWER(TRIM(hash)) IN ? AND (is_hidden = 0 OR is_hidden IS NULL) ORDER BY last_seen DESC"
 	if err := r.store.DB.Raw(query, cleaned).Scan(&rows).Error; err != nil {
 		return nil, err
 	}

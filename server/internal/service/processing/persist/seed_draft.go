@@ -28,13 +28,14 @@ type SeedDraft struct {
 	DoubanLink string
 	TMDbLink   string
 
-	Type       string
-	Medium     string
-	VideoCodec string
-	AudioCodec string
-	Resolution string
-	Team       string
-	Source     string
+	Type         string
+	Medium       string
+	VideoCodec   string
+	AudioCodec   string
+	Resolution   string
+	Team         string
+	OfficialSite string
+	Source       string
 
 	Poster                 string
 	Screenshots            string
@@ -285,6 +286,7 @@ func (d *SeedDraft) ToSeedParameterRecord() map[string]any {
 		"audio_codec":               strings.TrimSpace(d.AudioCodec),
 		"resolution":                strings.TrimSpace(d.Resolution),
 		"team":                      parser.NormalizeTeamKeyForSite(d.Team, d.SiteName),
+		"official_site":             strings.TrimSpace(d.OfficialSite),
 		"source":                    strings.TrimSpace(d.Source),
 		"tags":                      string(encodedTags),
 		"poster":                    strings.TrimSpace(d.Poster),
