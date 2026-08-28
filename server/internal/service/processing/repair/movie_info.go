@@ -29,6 +29,8 @@ var (
 	reNbgPoster    = regexp.MustCompile(`(?is)<a[^>]+class=["']nbg["'][^>]*>\s*<img[^>]+src=["']([^"']+)["']`)
 	reSummarySpan  = regexp.MustCompile(`(?is)<span[^>]+property=["']v:summary["'][^>]*>(.*?)</span>`)
 	reMetaDesc     = regexp.MustCompile(`(?is)<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)["']`)
+	reOgDesc       = regexp.MustCompile(`(?is)<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["']`)
+	reJSONLDDesc   = regexp.MustCompile(`(?is)"description"\s*:\s*"(.*?)"`)
 	reBreakLineTag = regexp.MustCompile(`(?is)<br\s*/?>`)
 	reAnyHTMLTag   = regexp.MustCompile(`(?is)<[^>]+>`)
 	reMultiSpace   = regexp.MustCompile(`[ \t]+`)
@@ -159,6 +161,22 @@ func FetchMovieInfo(mediaType, contentName, subtitle string, sourceInfo map[stri
 				logFetchMovieInfoResult(mediaType, "tmdb_fallback", result, "TMDb兜底返回简介")
 				return result, ""
 			}
+		}
+	}
+
+	// 纯 IMDb 兜底：当豆瓣/PTGen/TMDb 均未命中时，直接抓取 IMDb 标题页提取海报与剧情简介。
+	// 用于种子仅有 IMDb 链接（无豆瓣/无 TMDb）且上游桥接不可达的场景。
+	if result.IMDb != "" {
+		imdbPoster, imdbIntro := fetchIMDbMedia(result.IMDb)
+		if mediaType == "poster" && strings.TrimSpace(result.Poster) == "" && imdbPoster != "" {
+			result.Poster = "[img]" + imdbPoster + "[/img]"
+			logFetchMovieInfoResult(mediaType, "imdb_page", result, "IMDb页面提取海报")
+			return result, ""
+		}
+		if mediaType == "intro" && strings.TrimSpace(result.Intro) == "" && strings.TrimSpace(imdbIntro) != "" {
+			result.Intro = BuildIntroText(contentName, subtitle, imdbIntro, BuildSourceLinks(result.IMDb, result.Douban, result.TMDb))
+			logFetchMovieInfoResult(mediaType, "imdb_page", result, "IMDb页面提取简介")
+			return result, ""
 		}
 	}
 
@@ -741,6 +759,36 @@ func fetchTMDbExternalIMDb(baseURL, mediaType, id, apiKey string) string {
 		return ""
 	}
 	return NormalizeExternalLink(strings.TrimSpace(pickFirstString(data, "imdb_id")), reIMDbLink)
+}
+
+// fetchIMDbMedia 直接抓取 IMDb 标题页，提取 og:image 海报与剧情简介，作为纯 IMDb 资源的兜底来源。
+// 参数/返回：imdbLink 为 IMDb 标题链接；命中返回海报直链与简介文本，未命中返回两个空字符串。
+// 失败场景：IMDb 不可达或页面未返回有效字段时返回空（交由上层继续报错）。
+// 副作用：会发起对 www.imdb.com 的网络请求。
+func fetchIMDbMedia(imdbLink string) (string, string) {
+	normalized := NormalizeExternalLink(imdbLink, reIMDbLink)
+	if normalized == "" {
+		return "", ""
+	}
+	html, err := FetchPageWithTimeout(normalized)
+	if err != nil || strings.TrimSpace(html) == "" {
+		logx.Warnf(movieInfoLogModule, "IMDb 标题页抓取失败 imdb=%s err=%v", CompactLogText(normalized, 120), err)
+		return "", ""
+	}
+	poster := ""
+	if m := reOgImage.FindStringSubmatch(html); len(m) >= 2 {
+		poster = strings.TrimSpace(m[1])
+	}
+	desc := ""
+	if m := reOgDesc.FindStringSubmatch(html); len(m) >= 2 {
+		desc = sanitizeHTMLText(m[1], false)
+	}
+	if desc == "" {
+		if m := reJSONLDDesc.FindStringSubmatch(html); len(m) >= 2 {
+			desc = sanitizeHTMLText(m[1], false)
+		}
+	}
+	return poster, desc
 }
 
 func extractPosterURLs(pageHTML string, baseURL string) []string {

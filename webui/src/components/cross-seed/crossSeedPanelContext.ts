@@ -73,6 +73,7 @@ export interface TorrentData {
     tmdb_id: string
     poster_url: string
     summary: string
+    screenshots: string
   }
 }
 

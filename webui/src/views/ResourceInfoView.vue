@@ -189,6 +189,23 @@
             <el-button text :icon="CopyDocument" title="复制" @click="copyText(selectedItem.updated_at, '更新时间')" />
           </div>
         </div>
+
+        <div class="detail-screenshots" v-if="screenshotUrlList(selectedItem).length > 0">
+          <div class="detail-screenshots-head">
+            <span class="detail-label">视频截图</span>
+            <el-button text :icon="CopyDocument" title="复制截图" @click="copyText(selectedItem.screenshots, '视频截图')" />
+          </div>
+          <div class="detail-screenshot-gallery">
+            <img
+              v-for="(url, index) in screenshotUrlList(selectedItem)"
+              :key="'detail-screenshot-' + index"
+              :src="cleanPoster(url)"
+              :alt="'截图 ' + (index + 1)"
+              class="detail-screenshot-img"
+              @error="handleScreenshotError($event, url)"
+            />
+          </div>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -210,6 +227,7 @@ interface ResourceInfoItem {
   tmdb_id: string
   poster_url: string
   summary: string
+  screenshots: string
   created_at: string
   updated_at: string
 }
@@ -281,6 +299,27 @@ function cleanPoster(raw: string): string {
   const m = raw.match(/\[img(?:\=[^\]]*)?\]([\s\S]*?)\[\/img\]/i)
   if (m && m[1] && m[1].trim()) return m[1].trim()
   return raw
+}
+
+// screenshotUrlList 从资源信息库中的视频截图 BBCode 文本提取图片直链列表。
+function screenshotUrlList(item: ResourceInfoItem | null): string[] {
+  if (!item || !item.screenshots) return []
+  const text = String(item.screenshots).trim()
+  if (!text) return []
+  const matches = [...text.matchAll(/\[img[^\]]*\](https?:\/\/[^\s[\]]+)\[\/img\]/gi)].map((m) => m[1])
+  return matches.length > 0 ? matches : []
+}
+
+// handleScreenshotError 截图加载失败时隐藏，避免破图占位影响阅读。
+function handleScreenshotError(event: Event, url: string) {
+  const img = event.target as HTMLImageElement | null
+  if (!img) return
+  if (img.dataset.fallback === '1') {
+    img.style.display = 'none'
+    return
+  }
+  img.dataset.fallback = '1'
+  img.src = url
 }
 
 async function fetchList() {
@@ -377,6 +416,7 @@ onMounted(fetchList)
 
 .detail-body {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   align-items: flex-start;
 }
@@ -434,6 +474,32 @@ onMounted(fetchList)
 .detail-summary {
   white-space: pre-wrap;
   line-height: 1.6;
+}
+
+.detail-screenshots {
+  flex-basis: 100%;
+  margin-top: 12px;
+}
+
+.detail-screenshots-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.detail-screenshot-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-screenshot-img {
+  width: 160px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--el-border-color-lighter);
 }
 
 .break-all {

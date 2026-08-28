@@ -148,19 +148,10 @@ func ApplyResourceInfoToDraft(draft *SeedDraft, info *repository.ResourceInfo) {
 	if summary := strings.TrimSpace(info.Summary); summary != "" {
 		draft.Body = summary
 	}
-}
-
-// ResourceInfoRepairSkips 判断命中资源信息后可跳过的修复任务（海报/简介）。
-// 参数/返回：info 为命中资源；返回是否可跳过海报修复与简介修复。
-// 失败场景：无。
-// 副作用：无。
-func ResourceInfoRepairSkips(info *repository.ResourceInfo) (bool, bool) {
-	if info == nil {
-		return false, false
+	// 命中资源信息库时，若库内已存视频截图则以库内截图替换本次抓取截图（按豆瓣>IMDb>TMDb 命中即视为同一资源）。
+	if screenshots := strings.TrimSpace(info.Screenshots); screenshots != "" {
+		draft.Screenshots = screenshots
 	}
-	skipPoster := strings.TrimSpace(info.PosterURL) != ""
-	skipIntro := strings.TrimSpace(info.Summary) != ""
-	return skipPoster, skipIntro
 }
 
 // SaveResourceInfoFromDraft 在资源信息库未命中时，把当前草稿解析出的资源信息入库以便后续复用。
@@ -180,14 +171,15 @@ func SaveResourceInfoFromDraft(store ResourceInfoStore, draft *SeedDraft) {
 		summary = strings.TrimSpace(draft.Subtitle)
 	}
 	info := &repository.ResourceInfo{
-		Title:     strings.TrimSpace(draft.Title),
-		Year:      ExtractYearFromText(draft.Title),
-		Country:   strings.TrimSpace(draft.Source),
-		DoubanID:  doubanID,
-		ImdbID:    imdbID,
-		TmdbID:    tmdbID,
-		PosterURL: strings.TrimSpace(draft.Poster),
-		Summary:   summary,
+		Title:       strings.TrimSpace(draft.Title),
+		Year:        ExtractYearFromText(draft.Title),
+		Country:     strings.TrimSpace(draft.Source),
+		DoubanID:    doubanID,
+		ImdbID:      imdbID,
+		TmdbID:      tmdbID,
+		PosterURL:   strings.TrimSpace(draft.Poster),
+		Summary:     summary,
+		Screenshots: strings.TrimSpace(draft.Screenshots),
 	}
 	if err := store.UpsertResourceInfo(info); err != nil {
 		logx.Warnf(resourceInfoLogModule, "保存资源信息失败 douban_id=%s imdb_id=%s tmdb_id=%s err=%v", doubanID, imdbID, tmdbID, err)
@@ -222,14 +214,15 @@ func SaveResourceInfoFromRow(store ResourceInfoStore, normalized map[string]any)
 		summary = strings.TrimSpace(toStringSimple(normalized["subtitle"]))
 	}
 	info := &repository.ResourceInfo{
-		Title:     title,
-		Year:      ExtractYearFromText(title + " " + name),
-		Country:   strings.TrimSpace(toStringSimple(normalized["source"])),
-		DoubanID:  doubanID,
-		ImdbID:    imdbID,
-		TmdbID:    tmdbID,
-		PosterURL: strings.TrimSpace(toStringSimple(normalized["poster"])),
-		Summary:   summary,
+		Title:       title,
+		Year:        ExtractYearFromText(title + " " + name),
+		Country:     strings.TrimSpace(toStringSimple(normalized["source"])),
+		DoubanID:    doubanID,
+		ImdbID:      imdbID,
+		TmdbID:      tmdbID,
+		PosterURL:   strings.TrimSpace(toStringSimple(normalized["poster"])),
+		Summary:     summary,
+		Screenshots: strings.TrimSpace(toStringSimple(normalized["screenshots"])),
 	}
 	if err := store.UpsertResourceInfo(info); err != nil {
 		logx.Warnf(resourceInfoLogModule, "预览时保存资源信息失败 douban_id=%s imdb_id=%s tmdb_id=%s err=%v", doubanID, imdbID, tmdbID, err)
@@ -282,13 +275,14 @@ func AttachResourceInfoToRow(store ResourceInfoStore, normalized map[string]any)
 		return
 	}
 	normalized["resource_info"] = map[string]any{
-		"title":     strings.TrimSpace(matched.Title),
-		"year":      strings.TrimSpace(matched.Year),
-		"country":   strings.TrimSpace(matched.Country),
-		"douban_id": strings.TrimSpace(matched.DoubanID),
-		"imdb_id":   strings.TrimSpace(matched.ImdbID),
-		"tmdb_id":   strings.TrimSpace(matched.TmdbID),
-		"poster_url": strings.TrimSpace(matched.PosterURL),
-		"summary":   strings.TrimSpace(matched.Summary),
+		"title":       strings.TrimSpace(matched.Title),
+		"year":        strings.TrimSpace(matched.Year),
+		"country":     strings.TrimSpace(matched.Country),
+		"douban_id":   strings.TrimSpace(matched.DoubanID),
+		"imdb_id":     strings.TrimSpace(matched.ImdbID),
+		"tmdb_id":     strings.TrimSpace(matched.TmdbID),
+		"poster_url":  strings.TrimSpace(matched.PosterURL),
+		"summary":     strings.TrimSpace(matched.Summary),
+		"screenshots": strings.TrimSpace(matched.Screenshots),
 	}
 }

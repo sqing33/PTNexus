@@ -68,6 +68,19 @@
               <span class="param-label">简介：</span>
               <span class="param-value">{{ torrentData.resource_info.summary }}</span>
             </div>
+            <div class="resource-info-line resource-info-screenshots" v-if="resourceInfoScreenshotImages.length > 0">
+              <span class="param-label">视频截图：</span>
+              <div class="resource-info-screenshot-gallery">
+                <img
+                  v-for="(url, index) in resourceInfoScreenshotImages"
+                  :key="'ri-screenshot-' + index"
+                  :src="getProxyImageUrl(url)"
+                  :alt="'截图 ' + (index + 1)"
+                  class="resource-info-screenshot-img"
+                  @error="handleImageErrorWithProxy(url, 'screenshot', index)"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -307,6 +320,7 @@
 <script setup lang="ts">
 import { useCrossSeedPanelContext } from './crossSeedPanelContext'
 import MediaInfoSummaryCard from './MediaInfoSummaryCard.vue'
+import { computed } from 'vue'
 
 const {
   torrentData,
@@ -319,6 +333,16 @@ const {
   getProxyImageUrl,
   handleImageErrorWithProxy,
 } = useCrossSeedPanelContext()
+
+// resourceInfoScreenshotImages 解析资源信息库命中的视频截图（BBCode [img]url[/img]），供预览区展示。
+const resourceInfoScreenshotImages = computed<string[]>(() => {
+  const raw = torrentData.value?.resource_info?.screenshots
+  if (!raw) return []
+  const text = String(raw).trim()
+  if (!text) return []
+  const matches = [...text.matchAll(/\[img[^\]]*\](https?:\/\/[^\s[\]]+)\[\/img\]/gi)].map((m) => m[1])
+  return matches.length > 0 ? matches : []
+})
 </script>
 
 <style scoped>
@@ -353,5 +377,23 @@ const {
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.resource-info-screenshots {
+  align-items: flex-start;
+}
+
+.resource-info-screenshot-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.resource-info-screenshot-img {
+  width: 120px;
+  height: 68px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--el-border-color-lighter);
 }
 </style>

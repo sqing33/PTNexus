@@ -416,12 +416,13 @@ func (m *SchemaManager) createTableSQLs() []string {
 				douban_id VARCHAR(64),
 				imdb_id VARCHAR(64),
 				tmdb_id VARCHAR(64),
-				poster_url LONGTEXT,
-				summary LONGTEXT,
-				created_at DATETIME NOT NULL,
-				updated_at DATETIME NOT NULL
-			) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
-		`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
+			poster_url LONGTEXT,
+			summary LONGTEXT,
+			screenshots LONGTEXT,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		) ENGINE=InnoDB ROW_FORMAT=Dynamic`,
+			`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
 				id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
 				name VARCHAR(128) NOT NULL,
 				status VARCHAR(16) NOT NULL DEFAULT 'active',
@@ -613,12 +614,13 @@ func (m *SchemaManager) createTableSQLs() []string {
 				douban_id VARCHAR(64),
 				imdb_id VARCHAR(64),
 				tmdb_id VARCHAR(64),
-				poster_url TEXT,
-				summary TEXT,
-				created_at TIMESTAMP NOT NULL,
-				updated_at TIMESTAMP NOT NULL
-			)`,
-		`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
+			poster_url TEXT,
+			summary TEXT,
+			screenshots TEXT,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		)`,
+			`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
 				id BIGSERIAL PRIMARY KEY,
 				name VARCHAR(128) NOT NULL,
 				status VARCHAR(16) NOT NULL DEFAULT 'active',
@@ -810,12 +812,13 @@ func (m *SchemaManager) createTableSQLs() []string {
 				douban_id TEXT,
 				imdb_id TEXT,
 				tmdb_id TEXT,
-				poster_url TEXT,
-				summary TEXT,
-				created_at TEXT NOT NULL,
-				updated_at TEXT NOT NULL
-			)`,
-		`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
+			poster_url TEXT,
+			summary TEXT,
+			screenshots TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+			`CREATE TABLE IF NOT EXISTS scheduled_seed_tasks (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				name TEXT NOT NULL,
 				status TEXT NOT NULL DEFAULT 'active',
@@ -1030,6 +1033,7 @@ func (m *SchemaManager) columnSpecs() map[string][]schemaColumnSpec {
 			{name: "tmdb_id", definition: map[string]string{"sqlite": "TEXT", "mysql": "VARCHAR(64)", "postgresql": "VARCHAR(64)"}},
 			{name: "poster_url", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
 			{name: "summary", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
+			{name: "screenshots", definition: map[string]string{"sqlite": "TEXT", "mysql": "LONGTEXT", "postgresql": "TEXT"}},
 			{name: "created_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 			{name: "updated_at", definition: map[string]string{"sqlite": "TEXT NOT NULL", "mysql": "DATETIME NOT NULL", "postgresql": "TIMESTAMP NOT NULL"}},
 		},

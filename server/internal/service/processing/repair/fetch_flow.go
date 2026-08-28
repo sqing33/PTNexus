@@ -55,8 +55,6 @@ type ParallelFetchRepairInput struct {
 	IMDbLink             string
 	DoubanLink           string
 	TMDbLink             string
-	SkipPosterRepair     bool
-	SkipIntroRepair      bool
 }
 
 // ParallelFetchRepairResult 表示并发修复输出。
@@ -311,17 +309,6 @@ func runPosterRepairTask(input ParallelFetchRepairInput, deps FetchRepairDeps) p
 	localDouban := strings.TrimSpace(input.DoubanLink)
 	localTMDb := strings.TrimSpace(input.TMDbLink)
 
-	if input.SkipPosterRepair {
-		logx.Infof(fetchRepairPosterLogModule, "资源信息库已命中海报，跳过海报修复 task_id=%s", input.TaskID)
-		emitLog(deps, input.TaskID, "修复海报", "资源信息库已命中海报，跳过海报修复", "info")
-		return posterRepairResult{
-			Poster:     localReview.Poster,
-			IMDbLink:   localIMDb,
-			DoubanLink: localDouban,
-			TMDbLink:   localTMDb,
-		}
-	}
-
 	repairPosterDuringFetch(input.TaskID, input.TorrentName, input.Subtitle, &localReview, &localIMDb, &localDouban, &localTMDb, deps)
 
 	return posterRepairResult{
@@ -337,17 +324,6 @@ func runIntroRepairTask(input ParallelFetchRepairInput, deps FetchRepairDeps) in
 	localIMDb := strings.TrimSpace(input.IMDbLink)
 	localDouban := strings.TrimSpace(input.DoubanLink)
 	localTMDb := strings.TrimSpace(input.TMDbLink)
-
-	if input.SkipIntroRepair {
-		logx.Infof(fetchRepairIntroLogModule, "资源信息库已命中简介，跳过简介修复 task_id=%s", input.TaskID)
-		emitLog(deps, input.TaskID, "修复简介", "资源信息库已命中简介，跳过简介修复", "info")
-		return introRepairResult{
-			Body:       localReview.Body,
-			IMDbLink:   localIMDb,
-			DoubanLink: localDouban,
-			TMDbLink:   localTMDb,
-		}
-	}
 
 	if isNovaHDSourceSite(input.SourceSite) {
 		logx.Infof(fetchRepairIntroLogModule, "NovaHD 简介沿用源站提取结果 task_id=%s title=%s body=%t", input.TaskID, input.TorrentName, strings.TrimSpace(localReview.Body) != "")

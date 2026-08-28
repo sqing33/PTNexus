@@ -11,17 +11,18 @@ import (
 // 用于按 豆瓣ID / IMDbID / TMDbID 复用标题、年份、国家、海报与简介，
 // 避免同一资源重复走源站抓取与修复流程。
 type ResourceInfo struct {
-	ID        int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	Title     string `gorm:"column:title" json:"title"`
-	Year      string `gorm:"column:year" json:"year"`
-	Country   string `gorm:"column:country" json:"country"`
-	DoubanID  string `gorm:"column:douban_id" json:"douban_id"`
-	ImdbID    string `gorm:"column:imdb_id" json:"imdb_id"`
-	TmdbID    string `gorm:"column:tmdb_id" json:"tmdb_id"`
-	PosterURL string `gorm:"column:poster_url" json:"poster_url"`
-	Summary   string `gorm:"column:summary" json:"summary"`
-	CreatedAt string `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt string `gorm:"column:updated_at" json:"updated_at"`
+	ID          int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Title       string `gorm:"column:title" json:"title"`
+	Year        string `gorm:"column:year" json:"year"`
+	Country     string `gorm:"column:country" json:"country"`
+	DoubanID    string `gorm:"column:douban_id" json:"douban_id"`
+	ImdbID      string `gorm:"column:imdb_id" json:"imdb_id"`
+	TmdbID      string `gorm:"column:tmdb_id" json:"tmdb_id"`
+	PosterURL   string `gorm:"column:poster_url" json:"poster_url"`
+	Summary     string `gorm:"column:summary" json:"summary"`
+	Screenshots string `gorm:"column:screenshots" json:"screenshots"`
+	CreatedAt   string `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt   string `gorm:"column:updated_at" json:"updated_at"`
 }
 
 // TableName 指定 ResourceInfo 对应的数据表名。
@@ -92,9 +93,10 @@ func (r *MigrateRepository) UpsertResourceInfo(info *ResourceInfo) error {
 	info.TmdbID = strings.TrimSpace(info.TmdbID)
 	info.PosterURL = normalizePosterURL(info.PosterURL)
 	info.Summary = strings.TrimSpace(info.Summary)
+	info.Screenshots = strings.TrimSpace(info.Screenshots)
 
 	type finder struct {
-		id   string
+		id     string
 		lookup func(string) (*ResourceInfo, error)
 	}
 	lookups := []finder{
@@ -141,6 +143,7 @@ func (r *MigrateRepository) UpsertResourceInfo(info *ResourceInfo) error {
 	fill(&existing.TmdbID, info.TmdbID)
 	fill(&existing.PosterURL, info.PosterURL)
 	fill(&existing.Summary, info.Summary)
+	fill(&existing.Screenshots, info.Screenshots)
 	if !merged {
 		return nil
 	}
