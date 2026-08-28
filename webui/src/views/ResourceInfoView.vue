@@ -18,14 +18,14 @@
       <el-table :data="items" v-loading="loading" style="width: 100%" size="small">
         <el-table-column label="海报" width="72">
           <template #default="{ row }">
-            <el-image
-              v-if="row.poster_url"
-              :src="row.poster_url"
-              :preview-src-list="[row.poster_url]"
-              preview-teleported
-              fit="cover"
-              class="poster-thumb"
-            />
+          <el-image
+            v-if="row.poster_url"
+            :src="cleanPoster(row.poster_url)"
+            :preview-src-list="[cleanPoster(row.poster_url)]"
+            preview-teleported
+            fit="cover"
+            class="poster-thumb"
+          />
             <span v-else class="empty-text">N/A</span>
           </template>
         </el-table-column>
@@ -116,7 +116,7 @@
     <el-dialog
       v-model="detailVisible"
       title="资源信息详情"
-      width="560px"
+      width="720px"
       append-to-body
       class="resource-detail-dialog"
     >
@@ -127,8 +127,8 @@
         <div class="detail-poster">
           <el-image
             v-if="selectedItem.poster_url"
-            :src="selectedItem.poster_url"
-            :preview-src-list="[selectedItem.poster_url]"
+            :src="cleanPoster(selectedItem.poster_url)"
+            :preview-src-list="[cleanPoster(selectedItem.poster_url)]"
             preview-teleported
             fit="cover"
             class="detail-poster-img"
@@ -263,8 +263,6 @@ function copyAll(item: ResourceInfoItem) {
     `TMDbID: ${item.tmdb_id || 'N/A'}`,
     `海报地址: ${item.poster_url || 'N/A'}`,
     `简介: ${item.summary || 'N/A'}`,
-    `创建时间: ${item.created_at || 'N/A'}`,
-    `更新时间: ${item.updated_at || 'N/A'}`,
   ]
   copyText(lines.join('\n'), '全部信息')
 }
@@ -274,7 +272,15 @@ function openPoster(url: string) {
     ElMessage.warning('海报地址为空，无法打开')
     return
   }
-  window.open(url, '_blank', 'noopener')
+  window.open(cleanPoster(url), '_blank', 'noopener')
+}
+
+// cleanPoster 将 BBCode 形式 [img]url[/img] 的海报文本剥出纯 URL，避免 <img src> 失效。
+function cleanPoster(raw: string): string {
+  if (!raw) return ''
+  const m = raw.match(/\[img(?:\=[^\]]*)?\]([\s\S]*?)\[\/img\]/i)
+  if (m && m[1] && m[1].trim()) return m[1].trim()
+  return raw
 }
 
 async function fetchList() {

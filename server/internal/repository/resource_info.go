@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -25,6 +26,28 @@ type ResourceInfo struct {
 
 // TableName 指定 ResourceInfo 对应的数据表名。
 func (ResourceInfo) TableName() string { return "resource_info" }
+
+// posterBBCodePattern 匹配 BBCode 图片标签 [img]url[/img] 或 [img=width]url[/img]。
+var posterBBCodePattern = regexp.MustCompile(`(?i)\[img(?:\=[^\]]*)?\](.*?)\[/img\]`)
+
+// normalizePosterURL 从海报文本中提取纯 URL。
+// PT 站点常把海报存成 BBCode 形式（如 [img]https://x.jpg[/img]），
+// 直接作为 <img src> 会失效；本函数剥离标签、回退为内部 URL，无法解析时返回原文本。
+// 参数/返回：raw 为原始海报文本；返回可直链使用的 URL 或空字符串。
+// 失败场景：无。
+// 副作用：无。
+func normalizePosterURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if m := posterBBCodePattern.FindStringSubmatch(raw); m != nil {
+		if inner := strings.TrimSpace(m[1]); inner != "" {
+			return inner
+		}
+	}
+	return raw
+}
 
 // FindResourceInfoByDoubanID 按豆瓣 ID 查询资源信息。
 // 参数/返回：doubanID 为豆瓣 subject 数字 ID；命中返回记录，未命中返回 nil。
@@ -67,7 +90,7 @@ func (r *MigrateRepository) UpsertResourceInfo(info *ResourceInfo) error {
 	info.DoubanID = strings.TrimSpace(info.DoubanID)
 	info.ImdbID = strings.TrimSpace(info.ImdbID)
 	info.TmdbID = strings.TrimSpace(info.TmdbID)
-	info.PosterURL = strings.TrimSpace(info.PosterURL)
+	info.PosterURL = normalizePosterURL(info.PosterURL)
 	info.Summary = strings.TrimSpace(info.Summary)
 
 	type finder struct {
@@ -159,6 +182,9 @@ func (r *MigrateRepository) ListResourceInfos(keyword string, page, pageSize int
 	if err := query.Order("updated_at DESC, id DESC").Limit(pageSize).Offset(offset).Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
+	for i := range rows {
+		rows[i].PosterURL = normalizePosterURL(rows[i].PosterURL)
+	}
 	return rows, total, nil
 }
 
@@ -177,5 +203,6 @@ func (r *MigrateRepository) findResourceInfoByColumn(column, value string) (*Res
 	if len(rows) == 0 {
 		return nil, nil
 	}
+	rows[0].PosterURL = normalizePosterURL(rows[0].PosterURL)
 	return &rows[0], nil
 }
