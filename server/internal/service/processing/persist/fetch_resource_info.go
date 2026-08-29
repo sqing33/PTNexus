@@ -15,6 +15,9 @@ var (
 	imdbIDPattern   = regexp.MustCompile(`tt\d{7,10}`)
 	tmdbIDPattern   = regexp.MustCompile(`themoviedb\.org/(?:movie|tv)/(\d+)`)
 	yearPattern     = regexp.MustCompile(`(?:19|20)\d{2}`)
+	// 从简介正文中按行提取“译名 / 产地”原始值（兼容 ◎ 标记与全角空格）。
+	translatedNamePattern   = regexp.MustCompile(`(?im)^[◎❁]?\s*译\s*名\s*[:：]?\s*(.+?)(?:\r?\n|$)`)
+	countryFromIntroPattern = regexp.MustCompile(`(?im)^[◎❁]?\s*(?:制\s*片\s*国\s*家/地\s*区|国\s*家|地\s*区|产\s*地)\s*[:：]?\s*(.+?)(?:\r?\n|$)`)
 )
 
 // resourceInfoStoreFromRepo 从流水线仓储中提取资源信息仓储能力。
@@ -86,6 +89,63 @@ func ExtractYearFromText(text string) string {
 	return ""
 }
 
+// extractIntroLineValue 从简介文本中按行提取指定标记后的取值，兼容全角空格（U+3000）。
+func extractIntroLineValue(body string, pattern *regexp.Regexp) string {
+	if body == "" {
+		return ""
+	}
+	norm := strings.ReplaceAll(body, "\u3000", " ")
+	if m := pattern.FindStringSubmatch(norm); len(m) >= 2 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+// ExtractTranslatedName 从简介文本中提取“译名”作为资源标题。
+// 参数/返回：body 为简介正文；未匹配返回空字符串。
+// 失败场景：无。
+// 副作用：无。
+func ExtractTranslatedName(body string) string {
+	return extractIntroLineValue(body, translatedNamePattern)
+}
+
+// ExtractCountryFromIntro 从简介文本中提取“产地/制片国家/地区”作为国家名（人类可读，如“日本”）。
+// 参数/返回：body 为简介正文；未匹配返回空字符串。
+// 失败场景：无。
+// 副作用：无。
+func ExtractCountryFromIntro(body string) string {
+	return extractIntroLineValue(body, countryFromIntroPattern)
+}
+
+// StandardizeSourceKeyFromCountryText 将人类可读的产地文本（如“日本”）映射为标准化 source.* 键；无法识别返回空。
+// 参数/返回：text 为产地文本；返回 source.japan 等标准化键或空字符串。
+// 失败场景：text 为空或无法识别时返回空字符串。
+// 副作用：无。
+func StandardizeSourceKeyFromCountryText(text string) string {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if t == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(t, "台湾"), strings.Contains(t, "taiwan"), strings.Contains(t, "twn"):
+		return "source.taiwan"
+	case strings.Contains(t, "香港"), strings.Contains(t, "hong kong"), strings.Contains(t, "hkg"):
+		return "source.hongkong"
+	case strings.Contains(t, "中国"), strings.Contains(t, "china"), strings.Contains(t, "chn"):
+		return "source.china"
+	case strings.Contains(t, "日本"), strings.Contains(t, "japan"), strings.Contains(t, "jpn"):
+		return "source.japan"
+	case strings.Contains(t, "韩国"), strings.Contains(t, "korea"), strings.Contains(t, "kor"):
+		return "source.korea"
+	case strings.Contains(t, "英国"), strings.Contains(t, "uk"):
+		return "source.uk"
+	case strings.Contains(t, "美国"), strings.Contains(t, "usa"), strings.Contains(t, "united states"):
+		return "source.western"
+	default:
+		return ""
+	}
+}
+
 // ResourceSeedIDs 依次从豆瓣/IMDb/TMDb 链接提取三个外部 ID。
 // 参数/返回：三个链接文本；返回对应的 doubanID/imdbID/tmdbID（可能为空）。
 // 失败场景：无。
@@ -141,7 +201,12 @@ func ApplyResourceInfoToDraft(draft *SeedDraft, info *repository.ResourceInfo) {
 		draft.Title = title
 	}
 	if country := strings.TrimSpace(info.Country); country != "" {
-		draft.Source = country
+		// 资源信息库的国家是人类可读文本（如“日本”），复用发布时需映射回标准化 source.* 键。
+		if key := StandardizeSourceKeyFromCountryText(country); key != "" {
+			draft.Source = key
+		} else {
+			draft.Source = country
+		}
 	}
 	if poster := strings.TrimSpace(info.PosterURL); poster != "" {
 		draft.Poster = poster
@@ -171,10 +236,22 @@ func SaveResourceInfoFromDraft(store ResourceInfoStore, draft *SeedDraft) {
 	if summary == "" {
 		summary = strings.TrimSpace(draft.Subtitle)
 	}
+	title := ExtractTranslatedName(summary)
+	if title == "" {
+		title = strings.TrimSpace(draft.Title)
+	}
+	country := ExtractCountryFromIntro(summary)
+	if country == "" {
+		country = strings.TrimSpace(draft.Source)
+	}
+	year := ExtractYearFromText(summary)
+	if year == "" {
+		year = ExtractYearFromText(draft.Title)
+	}
 	info := &repository.ResourceInfo{
-		Title:       strings.TrimSpace(draft.Title),
-		Year:        ExtractYearFromText(draft.Title),
-		Country:     strings.TrimSpace(draft.Source),
+		Title:       title,
+		Year:        year,
+		Country:     country,
 		DoubanID:    doubanID,
 		ImdbID:      imdbID,
 		TmdbID:      tmdbID,
@@ -214,10 +291,21 @@ func SaveResourceInfoFromRow(store ResourceInfoStore, normalized map[string]any)
 	if summary == "" {
 		summary = strings.TrimSpace(toStringSimple(normalized["subtitle"]))
 	}
+	if tn := ExtractTranslatedName(summary); tn != "" {
+		title = tn
+	}
+	country := ExtractCountryFromIntro(summary)
+	if country == "" {
+		country = strings.TrimSpace(toStringSimple(normalized["source"]))
+	}
+	year := ExtractYearFromText(summary)
+	if year == "" {
+		year = ExtractYearFromText(title + " " + name)
+	}
 	info := &repository.ResourceInfo{
 		Title:       title,
-		Year:        ExtractYearFromText(title + " " + name),
-		Country:     strings.TrimSpace(toStringSimple(normalized["source"])),
+		Year:        year,
+		Country:     country,
 		DoubanID:    doubanID,
 		ImdbID:      imdbID,
 		TmdbID:      tmdbID,
@@ -293,6 +381,7 @@ func AttachResourceInfoToRow(store ResourceInfoStore, normalized map[string]any)
 //   - 按豆瓣ID > IMDbID > TMDbID 优先级查库；
 //   - 命中则用 UpdateResourceInfo 覆写整行可编辑字段（标题/年份/国家/海报/简介/截图）；
 //   - 未命中则插入新记录。
+//
 // 参数/返回：store 为资源信息仓储；params 为前端 updated_parameters（含 title/poster/body/screenshots/douban_link 等）。
 // 失败场景：三个 ID 均为空或仓储为 nil 时静默跳过；写入失败仅记录日志。
 // 副作用：可能更新或插入 resource_info 表记录。
@@ -313,10 +402,21 @@ func SyncResourceInfoFromParams(store ResourceInfoStore, params map[string]any) 
 	if summary == "" {
 		summary = strings.TrimSpace(toStringSimple(params["statement"]))
 	}
+	if tn := ExtractTranslatedName(summary); tn != "" {
+		title = tn
+	}
+	country := ExtractCountryFromIntro(summary)
+	if country == "" {
+		country = strings.TrimSpace(toStringSimple(params["source"]))
+	}
+	year := ExtractYearFromText(summary)
+	if year == "" {
+		year = ExtractYearFromText(title)
+	}
 	info := &repository.ResourceInfo{
 		Title:       title,
-		Year:        ExtractYearFromText(title),
-		Country:     strings.TrimSpace(toStringSimple(params["source"])),
+		Year:        year,
+		Country:     country,
 		DoubanID:    doubanID,
 		ImdbID:      imdbID,
 		TmdbID:      tmdbID,
