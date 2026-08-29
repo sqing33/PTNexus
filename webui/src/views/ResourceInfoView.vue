@@ -118,7 +118,7 @@
       v-model="detailVisible"
       title="资源信息详情"
       width="85%"
-      :style="{ height: '85%' }"
+      :style="{ height: '85%', 'overflow-y': 'auto'}"
       append-to-body
       class="resource-detail-dialog"
     >
