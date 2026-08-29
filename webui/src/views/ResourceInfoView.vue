@@ -481,6 +481,28 @@ onMounted(fetchList)
   overflow: auto;
 }
 
+/* 查看详情弹框：固定高度 900px（小屏用 max-height 兜底不超视口），
+   弹框内用 flex 纵向布局，header 不收缩，超出的内容在 body 内滚动。 */
+.resource-detail-dialog {
+  height: 900px;
+  max-height: 90vh;
+  max-width: 92vw;
+  display: flex;
+  flex-direction: column;
+}
+
+.resource-detail-dialog :deep(.el-dialog__header) {
+  flex-shrink: 0;
+}
+
+.resource-detail-dialog :deep(.el-dialog__body) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-top: 12px;
+}
+
 .search-and-controls {
   padding: 15px;
   border-radius: 8px;
