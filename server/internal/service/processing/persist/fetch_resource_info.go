@@ -189,34 +189,21 @@ func FindResourceInfoForDraft(store ResourceInfoStore, draft *SeedDraft) *reposi
 	return nil
 }
 
-// ApplyResourceInfoToDraft 将命中的资源信息覆盖到草稿的发布数据中（标题/产地/海报/简介）。
+// ApplyResourceInfoToDraft 将命中的资源信息覆盖到草稿的发布数据中（仅海报/简介）。
+// 标题、国家/来源、视频截图保持本次抓取（种子）得到的值，不被库内数据覆盖。
 // 参数/返回：draft 为种子草稿；info 为命中的资源信息；字段为空时保持草稿原值。
 // 失败场景：无（入参为空时直接返回）。
-// 副作用：原地修改 draft.Title/Source/Poster/Body。
+// 副作用：原地修改 draft.Poster/Body。
 func ApplyResourceInfoToDraft(draft *SeedDraft, info *repository.ResourceInfo) {
 	if draft == nil || info == nil {
 		return
 	}
-	if title := strings.TrimSpace(info.Title); title != "" {
-		draft.Title = title
-	}
-	if country := strings.TrimSpace(info.Country); country != "" {
-		// 资源信息库的国家是人类可读文本（如“日本”），复用发布时需映射回标准化 source.* 键。
-		if key := StandardizeSourceKeyFromCountryText(country); key != "" {
-			draft.Source = key
-		} else {
-			draft.Source = country
-		}
-	}
 	if poster := strings.TrimSpace(info.PosterURL); poster != "" {
-		draft.Poster = poster
+		// 库内 PosterURL 为纯 URL，复用到种子草稿时需包裹为 BBCode [img]...[/img]（已包裹则原样）。
+		draft.Poster = repository.WrapPosterURL(poster)
 	}
 	if summary := strings.TrimSpace(info.Summary); summary != "" {
 		draft.Body = summary
-	}
-	// 命中资源信息库时，若库内已存视频截图则以库内截图替换本次抓取截图（按豆瓣>IMDb>TMDb 命中即视为同一资源）。
-	if screenshots := strings.TrimSpace(info.Screenshots); screenshots != "" {
-		draft.Screenshots = screenshots
 	}
 }
 

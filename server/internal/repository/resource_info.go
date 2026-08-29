@@ -50,6 +50,23 @@ func normalizePosterURL(raw string) string {
 	return raw
 }
 
+// WrapPosterURL 确保海报以 BBCode [img]...[/img] 形式呈现；已包裹则原样返回，空白返回空。
+// 资源信息库内 PosterURL 为纯 URL（经 normalizePosterURL 剥离标签），
+// 复用到种子草稿（BBCode 海报）时需重新包裹。
+// 参数/返回：raw 为原始海报文本；返回 [img]url[/img] 或空字符串。
+// 失败场景：无。
+// 副作用：无。
+func WrapPosterURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if posterBBCodePattern.MatchString(raw) {
+		return raw
+	}
+	return "[img]" + raw + "[/img]"
+}
+
 // FindResourceInfoByDoubanID 按豆瓣 ID 查询资源信息。
 // 参数/返回：doubanID 为豆瓣 subject 数字 ID；命中返回记录，未命中返回 nil。
 // 失败场景：仓储未初始化或数据库查询失败时返回错误。

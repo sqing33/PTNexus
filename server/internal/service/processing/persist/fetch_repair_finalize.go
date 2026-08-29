@@ -108,8 +108,9 @@ func RunFetchRepairAndFinalize(input FetchRepairFinalizeInput, deps FetchRepairF
 	}
 
 	// 资源信息库匹配：先完成数据获取（含 PTGen 补全的豆瓣/IMDb/TMDb ID），再按
-	// 豆瓣ID > IMDbID > TMDbID 优先级查库；命中则直接复用库内数据（海报/简介/截图等），
-	// 仅读取、不回写，绝不修改库内已存在的记录；未命中才把本次抓取到的资源信息（含截图）入库。
+	// 豆瓣ID > IMDbID > TMDbID 优先级查库；命中则复用库内的海报/简介覆盖草稿，
+	// 标题/国家来源/视频截图保持本次抓取（种子）的值不被覆盖；仅读取、不回写，
+	// 绝不修改库内已存在的记录；未命中才把本次抓取到的资源信息（含截图）入库。
 	if deps.ResourceStore != nil {
 		if matchedResource := FindResourceInfoForDraft(deps.ResourceStore, input.Draft); matchedResource != nil {
 			ApplyResourceInfoToDraft(input.Draft, matchedResource)
