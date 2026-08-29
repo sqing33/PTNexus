@@ -118,7 +118,7 @@
       v-model="detailVisible"
       title="资源信息详情"
       width="85%"
-      height="85%"
+      :style="{ height: '85%' }"
       append-to-body
       class="resource-detail-dialog"
     >
@@ -485,23 +485,9 @@ onMounted(fetchList)
 /* 查看详情弹框：固定高度 900px（小屏用 max-height 兜底不超视口），
    弹框内用 flex 纵向布局，header 不收缩，超出的内容在 body 内滚动。 */
 .resource-detail-dialog {
-  height: 900px;
-  max-height: 90vh;
-  max-width: 92vw;
-  display: flex;
-  flex-direction: column;
-}
-
-.resource-detail-dialog :deep(.el-dialog__header) {
-  flex-shrink: 0;
-}
-
-.resource-detail-dialog :deep(.el-dialog__body) {
-  flex: 1;
-  min-height: 0;
+  max-height: 85%; /* 用视口单位适配不同屏幕，内容少的时候自动收缩 */
   overflow-y: auto;
-  overflow-x: hidden;
-  padding-top: 12px;
+  padding-right: 10px; /* 预留滚动条空间，避免内容抖动 */
 }
 
 .search-and-controls {
