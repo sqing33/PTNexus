@@ -481,31 +481,28 @@ onMounted(fetchList)
   overflow: auto;
 }
 
-/* 详情 / 编辑弹框：强制锁定高度在视口范围内。
-   关键点：
-   - --el-dialog-margin-top 收到 4vh（默认 15vh 太大，会吃掉大量可视区）。
-   - max-height + overflow:hidden 联动：overflow:hidden 把超出部分截断，
-     再由内部 .el-dialog__body 的 overflow-y:auto 接管滚动。
-   - display:flex + flex-direction:column 让 header/body 按弹性布局分配空间。 */
+/* 详情 / 编辑弹框：锁定高度在视口范围内，内容区滚动。
+   采用 Element Plus 最稳妥的做法：弹框本身保持默认 block 布局，
+   只给 .el-dialog__body 设 max-height + overflow-y:auto，
+   header/footer 不进入滚动区，避免整框被内容顶满屏幕。
+   margin-top 收到 5vh（默认 15vh 太大），并为底部留 5vh 余量。 */
 .resource-detail-dialog,
 .resource-edit-dialog {
-  --el-dialog-margin-top: 4vh;
-  max-height: 85vh !important;
-  overflow: hidden !important;
-  display: flex !important;
-  flex-direction: column !important;
+  --el-dialog-margin-top: 5vh;
+  margin-bottom: 5vh !important;
   max-width: 92vw;
 }
 
 .resource-detail-dialog :deep(.el-dialog__header),
 .resource-edit-dialog :deep(.el-dialog__header) {
-  flex-shrink: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .resource-detail-dialog :deep(.el-dialog__body),
 .resource-edit-dialog :deep(.el-dialog__body) {
-  flex: 1;
-  min-height: 0;
+  /* 视口高度减去顶部留白(5vh)与 header 高度，给底部 5vh 余量，确保不超出屏幕 */
+  max-height: calc(90vh - 60px - 60px);
   overflow-y: auto;
   overflow-x: hidden;
   padding-top: 12px;
