@@ -13,6 +13,8 @@
         下一步：发布参数预览
       </el-button>
 
+      <el-checkbox v-model="syncResourceInfo" class="sync-resource-info-checkbox">同步资源信息</el-checkbox>
+
       <transition name="el-fade-in-linear">
         <div v-if="isNextButtonDisabled" class="validation-hint">
           <el-icon class="hint-icon">
@@ -98,6 +100,14 @@ const {
   handleScrollOrNextStep,
   handleEnqueue,
   handlePublish,
+  syncResourceInfo,
 } = useCrossSeedPanelContext()
 </script>
+
+<style scoped>
+.sync-resource-info-checkbox {
+  margin-left: 12px;
+  font-size: 13px;
+}
+</style>
 

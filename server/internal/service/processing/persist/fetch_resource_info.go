@@ -35,6 +35,7 @@ type ResourceInfoStore interface {
 	FindResourceInfoByImdbID(imdbID string) (*repository.ResourceInfo, error)
 	FindResourceInfoByTmdbID(tmdbID string) (*repository.ResourceInfo, error)
 	UpsertResourceInfo(info *repository.ResourceInfo) error
+	UpdateResourceInfo(info *repository.ResourceInfo) error
 }
 
 // ExtractDoubanID 从豆瓣链接中提取 subject 数字 ID。
@@ -285,4 +286,86 @@ func AttachResourceInfoToRow(store ResourceInfoStore, normalized map[string]any)
 		"summary":     strings.TrimSpace(matched.Summary),
 		"screenshots": strings.TrimSpace(matched.Screenshots),
 	}
+}
+
+// SyncResourceInfoFromParams 将用户在转种面板中编辑后的参数强制同步到资源信息库。
+// 与 UpsertResourceInfo（已存在则不修改）不同，本函数是用户主动触发的同步操作：
+//   - 按豆瓣ID > IMDbID > TMDbID 优先级查库；
+//   - 命中则用 UpdateResourceInfo 覆写整行可编辑字段（标题/年份/国家/海报/简介/截图）；
+//   - 未命中则插入新记录。
+// 参数/返回：store 为资源信息仓储；params 为前端 updated_parameters（含 title/poster/body/screenshots/douban_link 等）。
+// 失败场景：三个 ID 均为空或仓储为 nil 时静默跳过；写入失败仅记录日志。
+// 副作用：可能更新或插入 resource_info 表记录。
+func SyncResourceInfoFromParams(store ResourceInfoStore, params map[string]any) {
+	if store == nil || params == nil {
+		return
+	}
+	doubanLink := toStringSimple(params["douban_link"])
+	imdbLink := toStringSimple(params["imdb_link"])
+	tmdbLink := toStringSimple(params["tmdb_link"])
+	doubanID, imdbID, tmdbID := ResourceSeedIDs(doubanLink, imdbLink, tmdbLink)
+	if doubanID == "" && imdbID == "" && tmdbID == "" {
+		return
+	}
+
+	title := strings.TrimSpace(toStringSimple(params["title"]))
+	summary := strings.TrimSpace(toStringSimple(params["body"]))
+	if summary == "" {
+		summary = strings.TrimSpace(toStringSimple(params["statement"]))
+	}
+	info := &repository.ResourceInfo{
+		Title:       title,
+		Year:        ExtractYearFromText(title),
+		Country:     strings.TrimSpace(toStringSimple(params["source"])),
+		DoubanID:    doubanID,
+		ImdbID:      imdbID,
+		TmdbID:      tmdbID,
+		PosterURL:   strings.TrimSpace(toStringSimple(params["poster"])),
+		Summary:     summary,
+		Screenshots: strings.TrimSpace(toStringSimple(params["screenshots"])),
+	}
+
+	// 按优先级查找已有记录
+	matched := findResourceInfoByAnyID(store, doubanID, imdbID, tmdbID)
+	if matched != nil {
+		info.ID = matched.ID // 复用主键，走 UpdateResourceInfo 强制覆写
+		if err := store.UpdateResourceInfo(info); err != nil {
+			logx.Warnf(resourceInfoLogModule, "同步资源信息失败(更新) id=%d err=%v", matched.ID, err)
+			return
+		}
+		logx.Infof(resourceInfoLogModule, "资源信息已同步(更新) id=%d title=%s", matched.ID, info.Title)
+		return
+	}
+
+	// 未命中则插入新记录
+	if err := store.UpsertResourceInfo(info); err != nil {
+		logx.Warnf(resourceInfoLogModule, "同步资源信息失败(插入) douban_id=%s err=%v", doubanID, err)
+		return
+	}
+	logx.Infof(resourceInfoLogModule, "资源信息已同步(新建) douban_id=%s imdb_id=%s tmdb_id=%s title=%s", doubanID, imdbID, tmdbID, info.Title)
+}
+
+// findResourceInfoByAnyID 按优先级尝试三个 ID 查找资源信息记录，返回首个命中的记录。
+func findResourceInfoByAnyID(store ResourceInfoStore, doubanID, imdbID, tmdbID string) *repository.ResourceInfo {
+	lookups := []struct {
+		id     string
+		lookup func(string) (*repository.ResourceInfo, error)
+	}{
+		{doubanID, store.FindResourceInfoByDoubanID},
+		{imdbID, store.FindResourceInfoByImdbID},
+		{tmdbID, store.FindResourceInfoByTmdbID},
+	}
+	for _, item := range lookups {
+		if item.id == "" {
+			continue
+		}
+		row, err := item.lookup(item.id)
+		if err != nil {
+			continue
+		}
+		if row != nil {
+			return row
+		}
+	}
+	return nil
 }

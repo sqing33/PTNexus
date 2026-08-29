@@ -1,4 +1,4 @@
-import { computed, nextTick, type ComputedRef, type Ref } from 'vue'
+import { computed, nextTick, ref, type ComputedRef, type Ref } from 'vue'
 import axios from 'axios'
 import { ElNotification } from '@/utils/uiNotify'
 import { resolveSourceTorrentId } from '@/utils/sourceTorrentId'
@@ -72,6 +72,7 @@ export type SeedFlowApi = {
   clearAllTargetSites: () => void
   invalidStandardParams: ComputedRef<Array<StandardParamKey | 'tags'>>
   allTagOptions: ComputedRef<TagOption[]>
+  syncResourceInfo: Ref<boolean>
 }
 
 type DbSeedRecord = {
@@ -143,6 +144,9 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     screenshotValid,
     screenshotImages,
   } = deps
+
+  // 同步资源信息复选框状态（默认勾选）
+  const syncResourceInfo = ref(true)
 
   const normalizeScreenshotReviewStatus = (value: unknown): ScreenshotReviewStatus => {
     if (typeof value !== 'string') return 'none'
@@ -1148,6 +1152,7 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
         torrent_id: torrentId,
         site_name: siteName,
         updated_parameters: updatedParameters,
+        sync_resource_info: syncResourceInfo.value,
       })
 
       console.log('已调用更新接口，is_reviewed 将被设置为 true')
@@ -1331,5 +1336,6 @@ export function createSeedFlow(deps: SeedFlowDeps): SeedFlowApi {
     clearAllTargetSites,
     invalidStandardParams,
     allTagOptions,
+    syncResourceInfo,
   }
 }

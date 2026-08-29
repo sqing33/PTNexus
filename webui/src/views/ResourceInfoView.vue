@@ -481,44 +481,34 @@ onMounted(fetchList)
   overflow: auto;
 }
 
-/* 详情弹框：限制最大高度，让内容区可滚动，避免占满屏幕且无法滚动；
-   同时把 Element Plus 默认的上边距从 15vh 收到 5vh，否则 15vh+90vh 会超出视口、
-   弹框被顶出屏幕且内部无法滚动。max-width 避免小屏下溢出。 */
-.resource-detail-dialog {
-  --el-dialog-margin-top: 5vh;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  max-width: 92vw;
-}
-
-.resource-detail-dialog :deep(.el-dialog__header) {
-  flex-shrink: 0;
-}
-
-.resource-detail-dialog :deep(.el-dialog__body) {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-top: 12px;
-}
-
+/* 详情 / 编辑弹框：强制锁定高度在视口范围内。
+   关键点：
+   - --el-dialog-margin-top 收到 4vh（默认 15vh 太大，会吃掉大量可视区）。
+   - max-height + overflow:hidden 联动：overflow:hidden 把超出部分截断，
+     再由内部 .el-dialog__body 的 overflow-y:auto 接管滚动。
+   - display:flex + flex-direction:column 让 header/body 按弹性布局分配空间。 */
+.resource-detail-dialog,
 .resource-edit-dialog {
-  --el-dialog-margin-top: 5vh;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
+  --el-dialog-margin-top: 4vh;
+  max-height: 85vh !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
   max-width: 92vw;
 }
 
+.resource-detail-dialog :deep(.el-dialog__header),
 .resource-edit-dialog :deep(.el-dialog__header) {
   flex-shrink: 0;
 }
 
+.resource-detail-dialog :deep(.el-dialog__body),
 .resource-edit-dialog :deep(.el-dialog__body) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  padding-top: 12px;
 }
 
 .search-and-controls {

@@ -2518,6 +2518,7 @@ const {
   clearAllTargetSites,
   invalidStandardParams,
   allTagOptions,
+  syncResourceInfo,
 } = seedFlow
 
 const resolveCurrentSeedLookupIdentity = async (): Promise<{
@@ -2805,5 +2806,6 @@ provide(crossSeedPanelContextKey, {
   handleScrollOrNextStep,
   handleEnqueue,
   handlePublish,
+  syncResourceInfo,
 } satisfies CrossSeedPanelContext)
 </script>

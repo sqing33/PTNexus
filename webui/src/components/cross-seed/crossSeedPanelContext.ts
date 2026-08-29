@@ -252,6 +252,7 @@ export interface CrossSeedPanelContext {
   handleScrollOrNextStep: () => void
   handleEnqueue: () => Promise<void>
   handlePublish: () => Promise<void>
+  syncResourceInfo: Ref<boolean>
 }
 
 export const crossSeedPanelContextKey: InjectionKey<CrossSeedPanelContext> = Symbol(
