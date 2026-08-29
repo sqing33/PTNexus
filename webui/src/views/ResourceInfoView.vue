@@ -118,6 +118,7 @@
       v-model="detailVisible"
       title="资源信息详情"
       width="85%"
+      height="85%"
       append-to-body
       class="resource-detail-dialog"
     >
