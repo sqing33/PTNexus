@@ -71,7 +71,7 @@ func (ttgPublisher) AdjustFormFields(input publisher.PublishInput, formFields ma
 		formFields["hr"] = "no"
 	}
 
-	// TTG 发种标题规范：主标题中的 "." 替换为 "{@}"
+	// TTG 发种标题规范：主标题中的 "." 替换为 "{@}"，副标题以 "[]" 包裹并追加到主标题后
 	adjustTTGTitle(formFields)
 }
 
@@ -179,15 +179,37 @@ func extractTTGDoubanID(value string) string {
 }
 
 // adjustTTGTitle 按 TTG 发种标题规范调整标题字段。
-// TTG 要求主标题中不得包含 "."，需用 "{@}" 替代（如 5.1 → 5{@}1）。
-// 例：主标题 "Red Planet 2000 ... DTS-HD MA 5.1-HDS" → "Red Planet 2000 ... DTS-HD MA 5{@}1-HDS"
+// TTG 要求主标题中不得包含 "."，需用 "{@}" 替代（如 5.1 → 5{@}1）；
+// 副标题先剔除其中的 "[" / "]" 字符，再以 "[]" 包裹后以空格连接追加到主标题尾部，
+// 并清空独立副标题字段避免重复展示。
+// 例：主标题 "Red Planet 2000 ... DTS-HD MA 5.1-HDS" + 副标题 "红色星球 / ... [简繁英字幕]"
+//
+//	→ "Red Planet 2000 ... DTS-HD MA 5{@}1-HDS [红色星球 / ... 简繁英字幕]"
 func adjustTTGTitle(formFields map[string]string) {
+	// 副标题可能落在 small_descr（NexusPHP 默认）或 subtitle（TTG 配置）字段，兼容读取
+	subtitle := strings.TrimSpace(formFields["small_descr"])
+	if subtitle == "" {
+		subtitle = strings.TrimSpace(formFields["subtitle"])
+	}
+	// 剔除副标题内的 "[" / "]" 字符，避免与外层包裹的 "[]" 冲突
+	subtitle = strings.NewReplacer("[", "", "]", "").Replace(subtitle)
+
 	// NexusPHP 表单同时设置 name 与 title，统一处理
 	for _, key := range []string{"name", "title"} {
 		title := strings.TrimSpace(formFields[key])
 		if title == "" {
 			continue
 		}
-		formFields[key] = strings.ReplaceAll(title, ".", "{@}")
+		title = strings.ReplaceAll(title, ".", "{@}")
+		if subtitle != "" {
+			title = title + " [" + subtitle + "]"
+		}
+		formFields[key] = title
+	}
+
+	// 副标题已并入主标题，清空独立副标题字段避免重复展示
+	if subtitle != "" {
+		delete(formFields, "small_descr")
+		delete(formFields, "subtitle")
 	}
 }
