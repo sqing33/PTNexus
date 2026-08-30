@@ -70,6 +70,9 @@ func (ttgPublisher) AdjustFormFields(input publisher.PublishInput, formFields ma
 	if _, exists := formFields["hr"]; !exists {
 		formFields["hr"] = "no"
 	}
+
+	// TTG 发种标题规范：主标题中的 "." 替换为 "{@}"
+	adjustTTGTitle(formFields)
 }
 
 // resolveTTGType 根据分类、媒介和分辨率的组合，返回 TTG 的 type 值。
@@ -173,4 +176,18 @@ func extractTTGDoubanID(value string) string {
 		return trimmed
 	}
 	return ""
+}
+
+// adjustTTGTitle 按 TTG 发种标题规范调整标题字段。
+// TTG 要求主标题中不得包含 "."，需用 "{@}" 替代（如 5.1 → 5{@}1）。
+// 例：主标题 "Red Planet 2000 ... DTS-HD MA 5.1-HDS" → "Red Planet 2000 ... DTS-HD MA 5{@}1-HDS"
+func adjustTTGTitle(formFields map[string]string) {
+	// NexusPHP 表单同时设置 name 与 title，统一处理
+	for _, key := range []string{"name", "title"} {
+		title := strings.TrimSpace(formFields[key])
+		if title == "" {
+			continue
+		}
+		formFields[key] = strings.ReplaceAll(title, ".", "{@}")
+	}
 }
