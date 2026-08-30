@@ -319,6 +319,7 @@ type SeedFilter struct {
 	NotExistSites []string // 不存在于这些站点
 	StateFilters  []string // 状态筛选
 	PathFilters   []string // 保存路径筛选
+	TagFilters    []string // 标签筛选（命中任一标签即保留）
 	SortProp      string   // 排序字段: site_count, size, progress, title
 	SortOrder     string   // ascending / descending
 }
@@ -353,6 +354,50 @@ func (r *ScheduledSeedRepository) ListAllSeedSites() ([]string, error) {
 	result := make([]string, 0, len(sitesSet))
 	for s := range sitesSet {
 		result = append(result, s)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+// ListSeedUniqueTags 返回 seed_parameters 表中出现过的所有标准标签，用于前端标签下拉筛选。
+// tags 字段以 JSON 数组字符串存储（如 ["1080p","国语"]），此处兼容旧的逗号分隔格式。
+func (r *ScheduledSeedRepository) ListSeedUniqueTags() ([]string, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return nil, errors.New("scheduled seed repo is nil")
+	}
+
+	var tagsRaw []string
+	if err := r.store.DB.Raw(
+		"SELECT DISTINCT tags FROM seed_parameters WHERE tags IS NOT NULL AND tags != ''",
+	).Pluck("tags", &tagsRaw).Error; err != nil {
+		return nil, fmt.Errorf("查询种子标签失败: %w", err)
+	}
+
+	tagSet := map[string]struct{}{}
+	for _, raw := range tagsRaw {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		var parsed []string
+		if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+			for _, t := range parsed {
+				if t = strings.TrimSpace(t); t != "" {
+					tagSet[t] = struct{}{}
+				}
+			}
+			continue
+		}
+		for _, t := range strings.Split(trimmed, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				tagSet[t] = struct{}{}
+			}
+		}
+	}
+
+	result := make([]string, 0, len(tagSet))
+	for t := range tagSet {
+		result = append(result, t)
 	}
 	sort.Strings(result)
 	return result, nil
@@ -457,6 +502,16 @@ func (r *ScheduledSeedRepository) ListAvailableSeeds(page, pageSize int, f SeedF
 		for _, s := range f.PathFilters {
 			whereArgs = append(whereArgs, s)
 		}
+	}
+	if len(f.TagFilters) > 0 {
+		// seed_parameters.tags 存储 JSON 数组字符串（如 ["1080p","国语"]），
+		// 按带引号的完整元素匹配，避免子串误命中；多选之间为 OR（命中任一标签）。
+		tagClauses := make([]string, 0, len(f.TagFilters))
+		for _, t := range f.TagFilters {
+			tagClauses = append(tagClauses, "seed_parameters.tags LIKE ?")
+			whereArgs = append(whereArgs, `%"`+t+`"%`)
+		}
+		whereConditions += " AND (" + strings.Join(tagClauses, " OR ") + ")"
 	}
 
 	// 统计 total_site_count（所有已发现站点数）

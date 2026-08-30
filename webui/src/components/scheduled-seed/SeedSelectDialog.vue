@@ -32,6 +32,25 @@
           :value="dl.id"
         />
       </el-select>
+      <el-select
+        v-model="tagFilter"
+        placeholder="按标签筛选"
+        clearable
+        multiple
+        filterable
+        collapse-tags
+        collapse-tags-tooltip
+        :max-collapse-tags="2"
+        style="width: 220px; margin-right: 12px"
+        @change="handleTagChange"
+      >
+        <el-option
+          v-for="tag in tagOptions"
+          :key="tag"
+          :label="tag"
+          :value="tag"
+        />
+      </el-select>
       <div v-if="hasActiveFilters" style="display: flex; align-items: center; margin-right: 12px">
         <el-tag type="info" size="default" effect="plain">{{ currentFilterText }}</el-tag>
         <el-button type="danger" link style="padding: 0; margin-left: 8px" @click="clearAllFilters">清除</el-button>
@@ -320,6 +339,8 @@ const searchQuery = ref('')
 const selectedSeeds = ref<SelectedSeed[]>([])
 const downloaderFilter = ref('')
 const downloaderList = ref<DownloaderItem[]>([])
+const tagFilter = ref<string[]>([])
+const tagOptions = ref<string[]>([])
 const tableShouldScroll = computed(() => tableData.value.length > 20)
 const seedTableHeight = computed(() => (tableShouldScroll.value ? 'calc(85vh - 178px)' : undefined))
 
@@ -520,6 +541,9 @@ const fetchData = async () => {
     if (activeFilters.paths.length > 0) {
       params.set('path_filters', JSON.stringify(activeFilters.paths))
     }
+    if (tagFilter.value.length > 0) {
+      params.set('tag_filters', JSON.stringify(tagFilter.value))
+    }
     if (currentSort.value.prop && currentSort.value.order) {
       params.set('sort_prop', currentSort.value.prop)
       params.set('sort_order', currentSort.value.order)
@@ -546,6 +570,9 @@ const fetchData = async () => {
         uniquePaths.value = res.data.unique_paths
         pathTreeData.value = buildPathTree(res.data.unique_paths)
       }
+      if (Array.isArray(res.data.unique_tags)) {
+        tagOptions.value = res.data.unique_tags
+      }
 
       await restoreSelection()
     }
@@ -565,6 +592,11 @@ const handleSearchInput = () => {
 }
 
 const handleDownloaderChange = () => {
+  currentPage.value = 1
+  fetchData()
+}
+
+const handleTagChange = () => {
   currentPage.value = 1
   fetchData()
 }
@@ -703,6 +735,8 @@ const handleOpen = () => {
   currentPage.value = 1
   searchQuery.value = ''
   downloaderFilter.value = ''
+  tagFilter.value = []
+  tagOptions.value = []
   currentSort.value = { prop: '', order: null }
   activeFilters.existSites = []
   activeFilters.notExistSites = []

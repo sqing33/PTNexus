@@ -288,6 +288,10 @@ func (h *ScheduledSeedHandler) ListAvailableSeeds(c *gin.Context) {
 	if v := c.Query("path_filters"); v != "" {
 		json.Unmarshal([]byte(v), &pathFilters)
 	}
+	var tagFilters []string
+	if v := c.Query("tag_filters"); v != "" {
+		json.Unmarshal([]byte(v), &tagFilters)
+	}
 
 	filter := repository.SeedFilter{
 		Search:        search,
@@ -296,6 +300,7 @@ func (h *ScheduledSeedHandler) ListAvailableSeeds(c *gin.Context) {
 		NotExistSites: notExistSites,
 		StateFilters:  stateFilters,
 		PathFilters:   pathFilters,
+		TagFilters:    tagFilters,
 		SortProp:      sortProp,
 		SortOrder:     sortOrder,
 	}
@@ -309,6 +314,7 @@ func (h *ScheduledSeedHandler) ListAvailableSeeds(c *gin.Context) {
 	// 获取站点列表和筛选项
 	allSites, _ := h.repo.ListAllSeedSites()
 	uniquePaths, uniqueStates, _ := h.repo.ListSeedUniques()
+	uniqueTags, _ := h.repo.ListSeedUniqueTags()
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":          true,
@@ -318,6 +324,7 @@ func (h *ScheduledSeedHandler) ListAvailableSeeds(c *gin.Context) {
 		"all_sites":        allSites,
 		"unique_paths":     uniquePaths,
 		"unique_states":    uniqueStates,
+		"unique_tags":      uniqueTags,
 	})
 }
 
