@@ -89,7 +89,7 @@ func NewApp() (*App, error) {
 	scheduledSeedScheduler := scheduledseed.NewScheduler(scheduledSeedRepo)
 	scheduledSeedScheduler.SetEnqueueFn(migrateService.EnqueuePublishQueueBatch)
 	scheduledSeedScheduler.SetPublishLogRepo(publishLogRepo)
-	migrateService.SetPublishQueueExistingTorrentHook(func(trigger string) {
+	migrateService.SetPublishQueueScheduledSeedContinueHook(func(trigger string) {
 		trimmed := strings.TrimSpace(trigger)
 		if !strings.HasPrefix(trimmed, "sched:") {
 			return

@@ -30,7 +30,7 @@ type MigrateService struct {
 	publishLogRepo *repository.PublishLogRepository
 	statsRepo      *repository.StatsRepository
 
-	publishQueueExistingTorrentHook func(trigger string)
+	publishQueueScheduledSeedContinueHook func(trigger string)
 
 	queueStartOnce sync.Once
 	queueStopCh    chan struct{}

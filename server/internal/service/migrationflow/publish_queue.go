@@ -52,15 +52,16 @@ func (s *MigrateService) InitPublishQueue(queueRepo *repository.PublishQueueRepo
 	s.statsRepo = statsRepo
 }
 
-// SetPublishQueueExistingTorrentHook 注入发布队列“目标站点已存在”后的外部通知回调。
-// 参数/返回：fn 接收队列任务 trigger；无返回值。
+// SetPublishQueueScheduledSeedContinueHook 注入发布队列“定时发种可继续下一种子”的外部通知回调。
+// 触发时机：定时发种队列任务确定性跳过（目标站点已存在、预检查限制等）时调用。
+// 参数/返回：fn 接收队列任务 trigger（格式 sched:<taskID>）；无返回值。
 // 失败场景：服务为空时忽略。
 // 副作用：保存回调引用，队列任务完成时可能触发定时发种调度。
-func (s *MigrateService) SetPublishQueueExistingTorrentHook(fn func(trigger string)) {
+func (s *MigrateService) SetPublishQueueScheduledSeedContinueHook(fn func(trigger string)) {
 	if s == nil {
 		return
 	}
-	s.publishQueueExistingTorrentHook = fn
+	s.publishQueueScheduledSeedContinueHook = fn
 }
 
 // StartPublishQueueWorker 启动发布队列后台监控线程（重复调用仅生效一次）。
@@ -995,27 +996,20 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 			logx.Warnf(publishQueueLogModule, "标记任务成功失败 id=%d err=%v", taskID, err)
 		}
 		if processingshared.ToBool(result["is_existing_torrent"]) {
-			s.notifyQueueExistingTorrent(taskRecord)
+			s.notifyScheduledSeedContinue(taskRecord, "目标站点已存在")
 		}
 		logx.Infof(publishQueueLogModule, "队列任务完成 id=%d success=true status=%d", taskID, status)
 		return
 	}
 
-	if isPreCheck && limitReached && strings.Contains(logText, "发布前预检查触发限制") {
+	if isPreCheck && limitReached {
 		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, logText, resultText)
 		if s.publishLogRepo != nil {
 			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "pre_check_limit", logText)
 		}
 		logx.Warnf(publishQueueLogModule, "队列任务失败（预检查限制） id=%d", taskID)
-		return
-	}
-
-	if isPreCheck && limitReached && strings.Contains(logText, "发布前标签限制") {
-		_ = s.queueRepo.UpdateTaskAfterFailure(taskID, taskRecord.AttemptCount+1, nil, logText, resultText)
-		if s.publishLogRepo != nil {
-			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "pre_check_limit", logText)
-		}
-		logx.Warnf(publishQueueLogModule, "队列任务失败（标签限制） id=%d", taskID)
+		// 定时发种场景下预检查限制为确定性失败，通知调度器立即继续处理下一个种子
+		s.notifyScheduledSeedContinue(taskRecord, "预检查限制: "+strings.TrimSpace(logText))
 		return
 	}
 
@@ -1128,8 +1122,13 @@ func (s *MigrateService) hydrateQueuePublishLogContext(taskRecord repository.Pub
 	return execTaskID
 }
 
-func (s *MigrateService) notifyQueueExistingTorrent(task repository.PublishQueueTask) {
-	if s == nil || s.publishQueueExistingTorrentHook == nil {
+// notifyScheduledSeedContinue 通知定时发种调度器当前种子无需继续等待，立即处理下一个种子。
+// 触发场景：目标站点已存在、预检查限制等确定性跳过。
+// 参数/返回：task 为刚完成的队列任务；reason 为跳过原因（用于日志）；无返回值。
+// 失败场景：未注入回调或任务非定时发种场景时直接返回。
+// 副作用：调用外部回调，可能触发定时发种调度器立即执行。
+func (s *MigrateService) notifyScheduledSeedContinue(task repository.PublishQueueTask, reason string) {
+	if s == nil || s.publishQueueScheduledSeedContinueHook == nil {
 		return
 	}
 	if strings.TrimSpace(task.Scene) != "scheduled_seeding" {
@@ -1141,13 +1140,14 @@ func (s *MigrateService) notifyQueueExistingTorrent(task repository.PublishQueue
 	}
 	logx.Infof(
 		publishQueueLogModule,
-		"定时发种队列任务提示已存在，触发继续处理下一种子 queue_task_id=%d trigger=%s torrent_id=%s target_site=%s",
+		"定时发种队列任务跳过发布(%s)，触发继续处理下一种子 queue_task_id=%d trigger=%s torrent_id=%s target_site=%s",
+		strings.TrimSpace(reason),
 		task.ID,
 		trigger,
 		strings.TrimSpace(task.TorrentID),
 		strings.TrimSpace(task.TargetSite),
 	)
-	s.publishQueueExistingTorrentHook(trigger)
+	s.publishQueueScheduledSeedContinueHook(trigger)
 }
 
 func (s *MigrateService) resolveQueueTaskDownloaderID(task repository.PublishQueueTask, payload map[string]any, ctx publishworkflow.Context) string {
