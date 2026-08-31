@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pt-nexus/server/internal/platform/logx"
 	parser "github.com/pt-nexus/server/internal/service/acquire/extract"
 	processingmedia "github.com/pt-nexus/server/internal/service/processing/media"
 	processingshared "github.com/pt-nexus/server/internal/service/processing/shared"
@@ -75,6 +76,14 @@ func FinalizeFetchedSeed(input FinalizeFetchedSeedInput) (FinalizeFetchedSeedRes
 	}
 
 	draft.BuildTitleComponents(input.BuildSimpleTitleComponents)
+
+	// 源站类型为动画时按“季集”重判类型：有季集值视为电视剧，无季集值视为电影。
+	seasonEpisode := SeasonEpisodeFromTitleComponents(draft.TitleComponents)
+	if typeBefore, typeAfter := draft.CorrectAnimationTypeBySeasonEpisode(); typeBefore != typeAfter {
+		logx.Infof("迁移-类型纠偏", "源站类型为动画，按季集重判类型 torrent_id=%s title=%q 季集=%q before=%s after=%s",
+			draft.TorrentID, draft.Title, seasonEpisode, typeBefore, typeAfter)
+	}
+
 	unmappedTags := draft.CompleteAndMapTags(
 		input.SiteIdentifier,
 		formatIsBDInfo,

@@ -174,6 +174,50 @@ func (d *SeedDraft) BuildTitleComponents(buildSimpleComponents func(title string
 	return d.TitleComponents
 }
 
+// CorrectAnimationTypeBySeasonEpisode 纠偏动画类型：源站类型为动画时，按标题组件中的“季集”重判——
+// 有季集值视为电视剧（category.tv_series），无季集值视为电影（category.movie）。
+// 参数/返回：返回纠偏前后的类型值（未命中动画类型时前后一致，不做修改）。
+// 副作用：命中动画类型时原地修改 d.Type；需在 BuildTitleComponents 之后调用。
+func (d *SeedDraft) CorrectAnimationTypeBySeasonEpisode() (string, string) {
+	if d == nil {
+		return "", ""
+	}
+	before := strings.TrimSpace(d.Type)
+	if !isAnimationTypeValue(before) {
+		return before, before
+	}
+
+	after := "category.movie"
+	if SeasonEpisodeFromTitleComponents(d.TitleComponents) != "" {
+		after = "category.tv_series"
+	}
+	if after != before {
+		d.Type = after
+	}
+	return before, d.Type
+}
+
+// isAnimationTypeValue 判断类型值是否属于动画类（标准化键或站点原始文本）。
+func isAnimationTypeValue(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "category.animation", "动画", "动漫":
+		return true
+	default:
+		return false
+	}
+}
+
+// SeasonEpisodeFromTitleComponents 从标题组件中提取“季集”值；不存在或为空时返回空字符串。
+func SeasonEpisodeFromTitleComponents(components []map[string]any) string {
+	for _, component := range components {
+		if strings.TrimSpace(toStringAny(component["key"], "")) != "季集" {
+			continue
+		}
+		return strings.TrimSpace(toStringAny(component["value"], ""))
+	}
+	return ""
+}
+
 // CompleteAndMapTags 进行标签补全与标准化映射（只保留能映射到标准 tag.* 的标签）。
 func (d *SeedDraft) CompleteAndMapTags(siteIdentifier string, formatIsBDInfo bool, savePath string, torrentNameForPath string, downloaderID string, rootConfig map[string]any) []string {
 	if d == nil {
