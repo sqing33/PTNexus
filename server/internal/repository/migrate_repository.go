@@ -455,7 +455,9 @@ func (r *MigrateRepository) UpdateSeedParameterLastPublishAtByHash(hash string, 
 	return r.UpdateSeedParameterLastPublishAt("", hash, "", "", publishAt)
 }
 
-// FindSeedPublishAtByTorrentID 查询种子的可发种时间（同 torrent_id 各记录中的最早 publish_at）。
+// FindSeedPublishAtByTorrentID 查询种子的可发种时间。
+// 先通过 torrent_id 找到种子名称(name)，再按 name 查询同名的所有记录中最早的 publish_at。
+// 这样即使可发种时间设置在同名种子的另一个源站行(torrent_id 不同)，检查也能生效。
 // 参数/返回：torrentID 为源种子 ID；返回可发种时间文本，空串表示未设置。
 // 失败场景：仓储未初始化或数据库查询失败时返回错误。
 // 副作用：仅读取 seed_parameters.publish_at，不修改数据。
@@ -472,10 +474,16 @@ func (r *MigrateRepository) FindSeedPublishAtByTorrentID(torrentID string) (stri
 	if r.store.DBType == "sqlite" {
 		nonEmpty = " AND publish_at != ''"
 	}
+
+	// 先通过 torrent_id 查到种子名称，再按名称查同名所有行的最早 publish_at。
+	// 使用子查询兼容 torrent_id 不存在的情况（返回空串，后续 parse 返回 false 放行）。
 	row := struct {
 		PublishAt *string `gorm:"column:publish_at"`
 	}{}
-	query := "SELECT MIN(publish_at) AS publish_at FROM seed_parameters WHERE torrent_id = ? AND publish_at IS NOT NULL" + nonEmpty
+	query := `SELECT MIN(publish_at) AS publish_at
+		FROM seed_parameters
+		WHERE name = (SELECT name FROM seed_parameters WHERE torrent_id = ? LIMIT 1)
+			AND publish_at IS NOT NULL` + nonEmpty
 	if err := r.store.DB.Raw(query, torrentID).Scan(&row).Error; err != nil {
 		return "", err
 	}
