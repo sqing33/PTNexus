@@ -14,6 +14,18 @@ import (
 func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
 	startedAt := time.Now()
 
+	// 可发种时间检查：未到可发种时间不能发种。
+	ctxTaskID := strings.TrimSpace(processingshared.ToString(payload["task_id"], processingshared.ToString(payload["taskId"], "")))
+	if ctxTaskID != "" && s.contextState != nil {
+		if ctx, ok := s.contextState.Get(ctxTaskID); ok {
+			if publishAt, notReached := s.resolveSeedPublishAtNotReached(ctx.TorrentID, time.Now()); notReached {
+				result := map[string]any{"success": false, "logs": "错误: " + publishAtBlockMessage(publishAt) + "。", "url": nil}
+				s.appendPublishLog(payload, ctxTaskID, strings.TrimSpace(ctx.TorrentID), result, 400, time.Since(startedAt))
+				return result, 400
+			}
+		}
+	}
+
 	normalizedPayload := s.normalizePublishPayloadWithCrossSeedDefaults(payload)
 	defaultDownloaderID := s.resolveDefaultPublishDownloaderID()
 	rootConfig := map[string]any{}
@@ -59,7 +71,7 @@ func (s *MigrateService) Publish(payload map[string]any) (map[string]any, int) {
 		},
 	)
 
-	ctxTaskID := strings.TrimSpace(processingshared.ToString(normalizedPayload["task_id"], processingshared.ToString(normalizedPayload["taskId"], "")))
+	ctxTaskID = strings.TrimSpace(processingshared.ToString(normalizedPayload["task_id"], processingshared.ToString(normalizedPayload["taskId"], "")))
 	ctxTorrentID := ""
 	if ctxTaskID != "" && s.contextState != nil {
 		if ctx, ok := s.contextState.Get(ctxTaskID); ok {

@@ -231,6 +231,11 @@ func (s *MigrateService) EnqueuePublishQueue(payload map[string]any) (map[string
 		}
 	}
 
+	// 可发种时间检查：未到可发种时间不能发种；仅当计划发布时间不早于可发种时间时允许入队等待。
+	if publishAt, notReached := s.resolveSeedPublishAtNotReached(torrentID, now); notReached && (scheduledAt == nil || scheduledAt.Before(publishAt)) {
+		return map[string]any{"success": false, "message": publishAtBlockMessage(publishAt)}, 400
+	}
+
 	queueTasks := make([]repository.PublishQueueTask, 0, len(targetSites))
 	for _, target := range targetSites {
 		targetSite := strings.TrimSpace(target)
@@ -407,6 +412,26 @@ func (s *MigrateService) EnqueuePublishQueueBatch(payload map[string]any) (map[s
 				Title:         firstNonEmptyString(strings.TrimSpace(torrentID), fmt.Sprintf("seed-%d", idx+1)),
 				Status:        "failed",
 				Logs:          "缺少 torrent_id 或 site_name",
+				AutoAddResult: queueAutoAddNotRunJSON,
+			})
+			continue
+		}
+
+		// 可发种时间检查：未到可发种时间不能发种；仅当计划发布时间不早于可发种时间时允许入队等待。
+		if publishAt, notReached := s.resolveSeedPublishAtNotReached(torrentID, now); notReached && (scheduledAt == nil || scheduledAt.Before(publishAt)) {
+			skipped++
+			logx.Infof(publishQueueLogModule, "种子未到可发种时间，跳过入队 group_id=%s torrent_id=%s publish_at=%s", groupID, torrentID, formatSeedPublishAt(publishAt))
+			s.insertBatchQueueSkipLog(ExternalPublishLogInput{
+				Trigger:       publishTrigger,
+				Scene:         scene,
+				QueueGroupID:  groupID,
+				TorrentID:     torrentID,
+				SourceSite:    sourceSite,
+				TargetSite:    targetSite,
+				DownloaderID:  downloaderID,
+				Title:         firstNonEmptyString(strings.TrimSpace(torrentID), fmt.Sprintf("seed-%d", idx+1)),
+				Status:        "failed",
+				Logs:          publishAtBlockMessage(publishAt),
 				AutoAddResult: queueAutoAddNotRunJSON,
 			})
 			continue
@@ -943,6 +968,17 @@ func (s *MigrateService) executePublishQueueTask(cfg publishQueueConfig, taskRec
 	torrentID := strings.TrimSpace(processingshared.ToString(payload["torrent_id"], taskRecord.TorrentID))
 	if torrentID == "" {
 		torrentID = strings.TrimSpace(processingshared.ToString(uploadData["torrent_id"], ctx.TorrentID))
+	}
+
+	// 可发种时间检查：未到可发种时间不能发种，任务重新排队等待到可发种时间。
+	if publishAt, notReached := s.resolveSeedPublishAtNotReached(torrentID, time.Now()); notReached {
+		reason := publishAtBlockMessage(publishAt)
+		_ = s.queueRepo.UpdateTaskAfterRequeue(taskID, publishAt, reason, "")
+		if s.publishLogRepo != nil {
+			_ = s.publishLogRepo.UpdateStatusAndLogsByQueueTaskID(taskID, "queued", reason)
+		}
+		logx.Infof(publishQueueLogModule, "队列任务等待可发种时间 id=%d torrent_id=%s publish_at=%s", taskID, torrentID, formatSeedPublishAt(publishAt))
+		return
 	}
 
 	logx.Infof(publishQueueLogModule, "开始执行队列任务 id=%d torrent_id=%s target_site=%s attempt=%d", taskID, torrentID, targetSite, taskRecord.AttemptCount)

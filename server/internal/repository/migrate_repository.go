@@ -455,6 +455,36 @@ func (r *MigrateRepository) UpdateSeedParameterLastPublishAtByHash(hash string, 
 	return r.UpdateSeedParameterLastPublishAt("", hash, "", "", publishAt)
 }
 
+// FindSeedPublishAtByTorrentID 查询种子的可发种时间（同 torrent_id 各记录中的最早 publish_at）。
+// 参数/返回：torrentID 为源种子 ID；返回可发种时间文本，空串表示未设置。
+// 失败场景：仓储未初始化或数据库查询失败时返回错误。
+// 副作用：仅读取 seed_parameters.publish_at，不修改数据。
+func (r *MigrateRepository) FindSeedPublishAtByTorrentID(torrentID string) (string, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return "", errors.New("migrate repo is nil")
+	}
+	torrentID = strings.TrimSpace(torrentID)
+	if torrentID == "" {
+		return "", nil
+	}
+	// MySQL/PostgreSQL 中 publish_at 为日期类型，与空串比较会触发 1525 错误，仅 SQLite(TEXT) 需要判空串。
+	nonEmpty := ""
+	if r.store.DBType == "sqlite" {
+		nonEmpty = " AND publish_at != ''"
+	}
+	row := struct {
+		PublishAt *string `gorm:"column:publish_at"`
+	}{}
+	query := "SELECT MIN(publish_at) AS publish_at FROM seed_parameters WHERE torrent_id = ? AND publish_at IS NOT NULL" + nonEmpty
+	if err := r.store.DB.Raw(query, torrentID).Scan(&row).Error; err != nil {
+		return "", err
+	}
+	if row.PublishAt == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*row.PublishAt), nil
+}
+
 // UpdateTorrentDetailsAfterPublish 将目标站发布成功返回的详情页地址回写到 torrents.details。
 // 参数/返回：hashes/name 用于定位种子，downloaderID 与 siteNickname 用于缩小命中范围；返回实际更新行数。
 // 失败场景：仓储未初始化或数据库更新失败时返回错误；必要定位信息为空时返回 0。
