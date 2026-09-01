@@ -129,6 +129,9 @@ func BuildManualUpdatedSeedRecord(input BuildManualUpdateInput) BuildManualUpdat
 	draft.BDInfoStartedAt = existing["bdinfo_started_at"]
 	draft.BDInfoCompletedAt = existing["bdinfo_completed_at"]
 	draft.BDInfoError = toStringAny(existing["bdinfo_error"], "")
+	// 保留原有的可发种时间和最后发种时间，手工编辑参数不应清空这两个字段。
+	draft.PublishAt = existing["publish_at"]
+	draft.LastPublishAt = existing["last_publish_at"]
 	draft.CreatedAt = NormalizeSeedParameterDateTime(existing["created_at"], now)
 	draft.UpdatedAt = now
 

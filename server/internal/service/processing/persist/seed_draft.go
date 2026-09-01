@@ -59,6 +59,9 @@ type SeedDraft struct {
 	BDInfoCompletedAt any
 	BDInfoError       string
 
+	PublishAt     any
+	LastPublishAt any
+
 	CreatedAt string
 	UpdatedAt string
 }
@@ -347,6 +350,8 @@ func (d *SeedDraft) ToSeedParameterRecord() map[string]any {
 		"bdinfo_started_at":         d.BDInfoStartedAt,
 		"bdinfo_completed_at":       d.BDInfoCompletedAt,
 		"bdinfo_error":              strings.TrimSpace(d.BDInfoError),
+		"publish_at":                d.PublishAt,
+		"last_publish_at":           d.LastPublishAt,
 		"created_at":                strings.TrimSpace(d.CreatedAt),
 		"updated_at":                strings.TrimSpace(d.UpdatedAt),
 	}
