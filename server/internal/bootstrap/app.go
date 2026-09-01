@@ -407,6 +407,10 @@ func registerRoutes(
 	{
 		scheduledSeedAPI.GET("/tasks", scheduledSeedHandler.ListTasks)
 		scheduledSeedAPI.POST("/tasks", scheduledSeedHandler.CreateTask)
+		// 批量操作路由需注册在 :id 参数路由之前，避免静态路径被参数捕获
+		scheduledSeedAPI.POST("/tasks/batch/delete", scheduledSeedHandler.BatchDelete)
+		scheduledSeedAPI.POST("/tasks/batch/status", scheduledSeedHandler.BatchSetStatus)
+		scheduledSeedAPI.POST("/tasks/batch/trigger", scheduledSeedHandler.BatchTrigger)
 		scheduledSeedAPI.GET("/tasks/:id", scheduledSeedHandler.GetTask)
 		scheduledSeedAPI.PUT("/tasks/:id", scheduledSeedHandler.UpdateTask)
 		scheduledSeedAPI.DELETE("/tasks/:id", scheduledSeedHandler.DeleteTask)

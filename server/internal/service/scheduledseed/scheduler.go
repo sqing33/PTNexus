@@ -96,16 +96,19 @@ func (s *Scheduler) run() {
 	}
 }
 
-// TriggerTask 手动触发指定任务立即执行一次。
-func (s *Scheduler) TriggerTask(taskID int64) {
+// TriggerTask 手动触发指定任务立即执行一次。返回是否成功投递到触发队列。
+// 批量触发场景下调用方可据此统计实际投递数量。
+func (s *Scheduler) TriggerTask(taskID int64) bool {
 	if s == nil {
-		return
+		return false
 	}
 	select {
 	case s.triggerCh <- taskID:
 		logx.Infof(schedulerLogModule, "任务 %d 已手动触发", taskID)
+		return true
 	default:
 		logx.Warnf(schedulerLogModule, "任务 %d 触发队列已满，丢弃", taskID)
+		return false
 	}
 }
 

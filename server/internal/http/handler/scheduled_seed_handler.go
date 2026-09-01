@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -369,4 +370,99 @@ func (h *ScheduledSeedHandler) TriggerTask(c *gin.Context) {
 
 	h.scheduler.TriggerTask(id)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "已触发发种任务"})
+}
+
+// batchIDsRequest 批量操作的通用 ID 列表请求体。
+type batchIDsRequest struct {
+	IDs []int64 `json:"ids"`
+}
+
+// batchStatusRequest 批量设置状态请求体。
+type batchStatusRequest struct {
+	IDs    []int64 `json:"ids"`
+	Status string  `json:"status"`
+}
+
+// BatchDelete 批量删除任务。
+func (h *ScheduledSeedHandler) BatchDelete(c *gin.Context) {
+	var req batchIDsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数无效: " + err.Error()})
+		return
+	}
+	if len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "未选择任何任务"})
+		return
+	}
+
+	affected, err := h.repo.BatchDelete(req.IDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("已删除 %d 个任务", affected),
+		"data":    gin.H{"affected": affected},
+	})
+}
+
+// BatchSetStatus 批量启动/暂停任务。status 取值 active / paused。
+func (h *ScheduledSeedHandler) BatchSetStatus(c *gin.Context) {
+	var req batchStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数无效: " + err.Error()})
+		return
+	}
+	if len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "未选择任何任务"})
+		return
+	}
+
+	status := strings.TrimSpace(req.Status)
+	if status != repository.ScheduledSeedStatusActive && status != repository.ScheduledSeedStatusPaused {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的目标状态"})
+		return
+	}
+
+	affected, err := h.repo.BatchSetStatus(req.IDs, status)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+
+	action := "已启动"
+	if status == repository.ScheduledSeedStatusPaused {
+		action = "已暂停"
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("%s %d 个任务", action, affected),
+		"data":    gin.H{"affected": affected, "status": status},
+	})
+}
+
+// BatchTrigger 批量触发任务立即发下一个。仅 active 任务会被调度器实际执行。
+func (h *ScheduledSeedHandler) BatchTrigger(c *gin.Context) {
+	var req batchIDsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数无效: " + err.Error()})
+		return
+	}
+	if len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "未选择任何任务"})
+		return
+	}
+
+	triggered := 0
+	for _, id := range req.IDs {
+		if h.scheduler.TriggerTask(id) {
+			triggered++
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("已触发 %d 个任务", triggered),
+		"data":    gin.H{"triggered": triggered, "total": len(req.IDs)},
+	})
 }

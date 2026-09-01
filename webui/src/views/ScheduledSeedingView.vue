@@ -25,6 +25,56 @@
         <el-option label="已完成" value="completed" />
       </el-select>
 
+      <div class="batch-actions">
+        <span class="batch-count" :class="{ 'batch-count-active': selectedRows.length > 0 }">
+          已选 {{ selectedRows.length }} 项
+        </span>
+        <el-button
+          size="small"
+          type="success"
+          :disabled="selectedRows.length === 0 || batchLoading"
+          :loading="batchLoading"
+          @click="batchSetStatus('active')"
+        >
+          批量启动
+        </el-button>
+        <el-button
+          size="small"
+          type="warning"
+          :disabled="selectedRows.length === 0 || batchLoading"
+          :loading="batchLoading"
+          @click="batchSetStatus('paused')"
+        >
+          批量暂停
+        </el-button>
+        <el-button
+          size="small"
+          type="primary"
+          :disabled="selectedRows.length === 0 || batchLoading"
+          :loading="batchLoading"
+          @click="batchTrigger"
+        >
+          批量发下一个
+        </el-button>
+        <el-popconfirm
+          title="确认删除选中的任务？此操作不可恢复"
+          confirm-button-text="删除"
+          cancel-button-text="取消"
+          @confirm="batchDelete"
+        >
+          <template #reference>
+            <el-button
+              size="small"
+              type="danger"
+              :disabled="selectedRows.length === 0 || batchLoading"
+              :loading="batchLoading"
+            >
+              批量删除
+            </el-button>
+          </template>
+        </el-popconfirm>
+      </div>
+
       <div class="toolbar-spacer" />
 
       <div class="pagination-controls" v-if="total > 0">
@@ -43,6 +93,7 @@
 
     <div class="table-container">
       <el-table
+        ref="tableRef"
         :data="tasks"
         row-key="id"
         v-loading="loading"
@@ -52,7 +103,9 @@
         empty-text="暂无定时发种任务"
         class="glass-table"
         @expand-change="handleExpandChange"
+        @selection-change="handleSelectionChange"
       >
+        <el-table-column type="selection" width="45" />
         <el-table-column type="expand" width="40">
           <template #default="{ row }">
             <div class="expand-content">
@@ -229,6 +282,11 @@ const editingTask = ref<ScheduledSeedTask | null>(null)
 
 const logsDrawerVisible = ref(false)
 const activeTriggerTag = ref('')
+
+// 批量操作相关状态
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
+const selectedRows = ref<ScheduledSeedTask[]>([])
+const batchLoading = ref(false)
 
 const POLL_INTERVAL_MS = 3000
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -434,6 +492,92 @@ const triggerTask = async (row: ScheduledSeedTask) => {
   }
 }
 
+const handleSelectionChange = (rows: ScheduledSeedTask[]) => {
+  selectedRows.value = rows
+}
+
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+}
+
+const batchSetStatus = async (status: 'active' | 'paused') => {
+  const ids = selectedRows.value.map((r) => r.id)
+  if (ids.length === 0) return
+  batchLoading.value = true
+  try {
+    const response = await axios.post('/api/scheduled-seed/tasks/batch/status', { ids, status })
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || '操作失败')
+    }
+    ElMessage.success(response.data?.message || '操作成功')
+    clearSelection()
+    await fetchTasks()
+  } catch (e: unknown) {
+    const message = axios.isAxiosError(e)
+      ? ((e.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (e.response?.data as { error?: string } | undefined)?.error ||
+        e.message)
+      : e instanceof Error
+        ? e.message
+        : '操作失败'
+    ElMessage.error(message)
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+const batchDelete = async () => {
+  const ids = selectedRows.value.map((r) => r.id)
+  if (ids.length === 0) return
+  batchLoading.value = true
+  try {
+    const response = await axios.post('/api/scheduled-seed/tasks/batch/delete', { ids })
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || '删除失败')
+    }
+    ElMessage.success(response.data?.message || '批量删除成功')
+    clearSelection()
+    await fetchTasks()
+  } catch (e: unknown) {
+    const message = axios.isAxiosError(e)
+      ? ((e.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (e.response?.data as { error?: string } | undefined)?.error ||
+        e.message)
+      : e instanceof Error
+        ? e.message
+        : '删除失败'
+    ElMessage.error(message)
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+const batchTrigger = async () => {
+  const ids = selectedRows.value.map((r) => r.id)
+  if (ids.length === 0) return
+  batchLoading.value = true
+  try {
+    const response = await axios.post('/api/scheduled-seed/tasks/batch/trigger', { ids })
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || '触发失败')
+    }
+    ElMessage.success(response.data?.message || '批量触发成功')
+    clearSelection()
+    await fetchTasks()
+  } catch (e: unknown) {
+    const message = axios.isAxiosError(e)
+      ? ((e.response?.data as { message?: string; error?: string } | undefined)?.message ||
+        (e.response?.data as { error?: string } | undefined)?.error ||
+        e.message)
+      : e instanceof Error
+        ? e.message
+        : '触发失败'
+    ElMessage.error(message)
+  } finally {
+    batchLoading.value = false
+  }
+}
+
 const openLogsDrawer = (row: ScheduledSeedTask) => {
   activeTriggerTag.value = row.trigger_tag
   logsDrawerVisible.value = true
@@ -498,6 +642,26 @@ onBeforeUnmount(() => {
 
 .toolbar-spacer {
   flex: 1;
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 15px;
+  padding-left: 15px;
+  border-left: 1px solid #ebeef5;
+}
+
+.batch-count {
+  font-size: 12px;
+  color: #909399;
+  white-space: nowrap;
+}
+
+.batch-count-active {
+  color: #409eff;
+  font-weight: 600;
 }
 
 .pagination-controls {

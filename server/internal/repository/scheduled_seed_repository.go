@@ -197,6 +197,49 @@ func (r *ScheduledSeedRepository) Delete(id int64) error {
 	return nil
 }
 
+// BatchDelete 按 ID 批量删除任务，返回实际删除行数。
+func (r *ScheduledSeedRepository) BatchDelete(ids []int64) (int64, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return 0, errors.New("scheduled seed repo is nil")
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	result := r.store.DB.Table("scheduled_seed_tasks").Where("id IN ?", ids).Delete(nil)
+	if result.Error != nil {
+		return 0, fmt.Errorf("批量删除定时发种任务失败: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
+// BatchSetStatus 批量设置任务状态（active/paused），返回实际更新行数。
+// 激活时同步将 next_run_at 重置为当前时间，使任务在下次调度周期即可执行；
+// 暂停时保留原 next_run_at，便于恢复后按原节奏继续。
+func (r *ScheduledSeedRepository) BatchSetStatus(ids []int64, status string) (int64, error) {
+	if r == nil || r.store == nil || r.store.DB == nil {
+		return 0, errors.New("scheduled seed repo is nil")
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	if status != ScheduledSeedStatusActive && status != ScheduledSeedStatusPaused {
+		return 0, fmt.Errorf("不支持的状态: %s", status)
+	}
+	now := time.Now().Format(scheduledSeedTimeLayout)
+	updates := map[string]any{
+		"status":     status,
+		"updated_at": now,
+	}
+	if status == ScheduledSeedStatusActive {
+		updates["next_run_at"] = now
+	}
+	result := r.store.DB.Table("scheduled_seed_tasks").Where("id IN ?", ids).Updates(updates)
+	if result.Error != nil {
+		return 0, fmt.Errorf("批量更新任务状态失败: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
 // ToggleStatus 在 active 和 paused 之间切换状态。
 func (r *ScheduledSeedRepository) ToggleStatus(id int64) (string, error) {
 	if r == nil || r.store == nil || r.store.DB == nil {
