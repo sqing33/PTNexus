@@ -1,0 +1,196 @@
+site_name: "alingPT"
+
+# 爱玲 (pt.aling.de) 发种映射配置
+# 抓取来源: https://pt.aling.de/upload.php (2026-09-02)
+# 表单: action=takeupload.php method=post enctype=multipart/form-data
+# 文件字段: file
+# 关键差异: select 字段名带 [4] 后缀; 分类仅 4 类; 有 tags[4][] 标签; 用 pt_gen 接收豆瓣链接
+# 匿名: NexusPHP 标准 uplver (由 anonymous.go 默认兜底, 无需配置)
+
+upload_file_field: "file"
+
+form_fields:
+  category: "type"
+  medium: "medium_sel[4]"
+  video_codec: "codec_sel[4]"
+  resolution: "standard_sel[4]"
+  source: "source_sel[4]"
+  team: "team_sel[4]"
+  name: "name"
+  small_descr: "small_descr"
+  description: "descr"
+  pt_gen: "pt_gen"
+  technical_info: "technical_info"
+  "tags[4][]": "tags[4][]"
+
+source_parsers:
+  source_params:
+    type:
+      source_key: "类型"
+    medium:
+      source_key: "媒介"
+    video_codec:
+      source_key: "编码"
+    resolution:
+      source_key: "分辨率"
+    source:
+      source_key: "地区"
+    team:
+      source_key: "制作组"
+
+  standard_keys:
+    type:
+      "Movies": "category.movie"
+      "Movies-3D": "category.movie"
+      "电影": "category.movie"
+      "TV-Episode": "category.tv_series"
+      "TV-Pack": "category.tv_series"
+      "TV-Show": "category.tv_series"
+      "电视剧": "category.tv_series"
+      "Documentary": "category.documentaries"
+      "纪录片": "category.documentaries"
+      "Animation": "category.animation"
+      "动画": "category.animation"
+      "Concert": "category.movie"
+      "Music-Video": "category.movie"
+      "Music": "category.movie"
+      "Sports": "category.movie"
+      "E-Books": "category.movie"
+      "Games": "category.movie"
+      "Others": "category.movie"
+
+    medium:
+      "UHD Blu-ray": "medium.uhd_bluray"
+      "UHD原盘": "medium.uhd_bluray"
+      "UHD DIY": "medium.uhd_diy"
+      "FHD Blu-ray": "medium.bluray"
+      "BD原盘": "medium.bluray"
+      "Blu-ray": "medium.bluray"
+      "BD DIY": "medium.bluray_diy"
+      "Blu-ray DIY": "medium.bluray_diy"
+      "Remux": "medium.remux"
+      "Encode": "medium.encode"
+      "WEB-DL": "medium.webdl"
+      "HDTV": "medium.hdtv"
+      "TV": "medium.hdtv"
+      "DVD": "medium.dvd"
+      "DVD 原盘": "medium.dvd"
+      "CD": "medium.cd"
+      "Other": "medium.other"
+
+    video_codec:
+      "H.264": "video.h264"
+      "H.265": "video.h265"
+      "HEVC": "video.h265"
+      "AV1": "video.av1"
+      "MPEG-2": "video.mpeg2"
+      "VC-1": "video.vc1"
+      "Xvid": "video.other"
+      "Other": "video.other"
+
+    resolution:
+      "8K": "resolution.r4320p"
+      "4K": "resolution.r2160p"
+      "2160p": "resolution.r2160p"
+      "1080p": "resolution.r1080p"
+      "1080i": "resolution.r1080p"
+      "720p": "resolution.r720p"
+      "SD": "resolution.sd"
+
+    source:
+      "内地": "source.china"
+      "中国大陆": "source.china"
+      "中国": "source.china"
+      "香港": "source.hongkong"
+      "台湾": "source.taiwan"
+      "日本": "source.japan"
+      "朝鲜": "source.korea"
+      "韩国": "source.korea"
+      "印度": "source.india"
+      "欧美": "source.western"
+      "欧米": "source.western"
+      "其他": "source.other"
+
+mappings:
+  # type 分类: 401=电影 402=电视剧 404=纪录片 405=动画
+  type:
+    "category.movie": "401"
+    "category.tv_series": "402"
+    "category.animation": "405"
+    "category.documentaries": "404"
+    "default": "401"
+
+  # medium_sel[4] 媒介: 1=Blu-ray 2=Blu-ray DIY 3=Remux 4=TV 5=WEB-DL 6=DVD原盘 7=Encode 8=Other
+  medium:
+    "medium.bluray": "1"
+    "medium.uhd_bluray": "1"
+    "medium.uhd_diy": "2"
+    "medium.bluray_diy": "2"
+    "medium.remux": "3"
+    "medium.hdtv": "4"
+    "medium.webdl": "5"
+    "medium.dvd": "6"
+    "medium.encode": "7"
+    "medium.cd": "8"
+    "medium.other": "8"
+    "default": "8"
+
+  # codec_sel[4] 视频编码: 1=H.264(AVC) 2=H.265(HEVC) 3=AV1 4=MPEG-2 5=VC-1 6=Other
+  video_codec:
+    "video.h264": "1"
+    "video.x264": "1"
+    "video.h265": "2"
+    "video.x265": "2"
+    "video.hevc": "2"
+    "video.av1": "3"
+    "video.mpeg2": "4"
+    "video.mpeg4": "4"
+    "video.vc1": "5"
+    "video.xvid": "6"
+    "video.other": "6"
+    "default": "6"
+
+  # standard_sel[4] 分辨率: 1=8K 2=4K 3=1080p 4=720p 5=SD
+  resolution:
+    "resolution.r4320p": "1"
+    "resolution.r2160p": "2"
+    "resolution.r1080p": "3"
+    "resolution.r1080i": "3"
+    "resolution.r720p": "4"
+    "resolution.sd": "5"
+    "resolution.other": "5"
+    "default": "5"
+
+  # source_sel[4] 地区: 1=内地 2=香港 3=台湾 4=日本 5=朝鲜 6=印度 10=欧米 11=其他
+  source:
+    "source.china": "1"
+    "source.hongkong": "2"
+    "source.taiwan": "3"
+    "source.hongkong_taiwan": "2"
+    "source.japan": "4"
+    "source.korea": "5"
+    "source.india": "6"
+    "source.western": "10"
+    "source.other": "11"
+    "default": "11"
+
+  # team_sel[4] 制作组: 1=aling 2=alingWEB 3=Other
+  team:
+    "aling": "1"
+    "alingWEB": "2"
+    "default": "3"
+
+  # tags[4][] 标签: 1=禁转 4=DIY 6=中字 7=HDR 10=其他中国方言 12=国语 13=粤语 14=Dolby Vision
+  tag:
+    "tag.国语": "12"
+    "tag.粤语": "13"
+    "tag.中字": "6"
+    "tag.禁转": "1"
+    "tag.DIY": "4"
+    "tag.杜比": "14"
+    "tag.杜比视界": "14"
+    "tag.HDR": "7"
+    "tag.HDR10": "7"
+    "tag.HDR10+": "7"
+    "tag.其他中国方言": "10"
+    "default": null

@@ -1,0 +1,194 @@
+site_name: "我的PT"
+
+# 我的PT (cc.mypt.cc) 发种映射配置
+# 抓取来源: https://cc.mypt.cc/upload.php (2026-09-03)
+# 表单: action=takeupload.php method=post enctype=multipart/form-data
+# 文件字段: file
+# 关键差异: select 字段名带 [4] 后缀(同 aling); 无 source_sel(类似 audiences); 无 audiocodec;
+#          有 url(IMDb 链接)但无 pt_gen/dburl; tags[4][] 16 项; medium 有 MiniBD/HD DVD/Track 特殊项
+# 匿名: NexusPHP 标准 uplver (由 anonymous.go 默认兜底, 无需配置)
+
+upload_file_field: "file"
+
+form_fields:
+  category: "type"
+  medium: "medium_sel[4]"
+  video_codec: "codec_sel[4]"
+  resolution: "standard_sel[4]"
+  team: "team_sel[4]"
+  name: "name"
+  small_descr: "small_descr"
+  description: "descr"
+  imdb_url: "url"               # IMDb 链接文本框(无独立 dburl/pt_gen)
+  technical_info: "technical_info"
+  "tags[4][]": "tags[4][]"
+
+source_parsers:
+  source_params:
+    type:
+      source_key: "类型"
+    medium:
+      source_key: "媒介"
+    video_codec:
+      source_key: "编码"
+    resolution:
+      source_key: "分辨率"
+    team:
+      source_key: "制作组"
+
+  standard_keys:
+    type:
+      "Movies": "category.movie"
+      "Movies-3D": "category.movie"
+      "电影": "category.movie"
+      "TV-Episode": "category.tv_series"
+      "TV-Pack": "category.tv_series"
+      "TV-Show": "category.tv_shows"
+      "电视剧": "category.tv_series"
+      "Documentary": "category.documentaries"
+      "纪录片": "category.documentaries"
+      "Animation": "category.animation"
+      "动画": "category.animation"
+      "Concert": "category.mv"
+      "Music-Video": "category.mv"
+      "Music": "category.music"
+      "Sports": "category.sports"
+      "E-Books": "category.movie"
+      "Games": "category.movie"
+      "Others": "category.movie"
+
+    medium:
+      "UHD Blu-ray": "medium.uhd_bluray"
+      "UHD原盘": "medium.uhd_bluray"
+      "UHD DIY": "medium.uhd_diy"
+      "FHD Blu-ray": "medium.bluray"
+      "BD原盘": "medium.bluray"
+      "Blu-ray": "medium.bluray"
+      "BD DIY": "medium.bluray_diy"
+      "Blu-ray DIY": "medium.bluray_diy"
+      "MiniBD": "medium.bluray_diy"
+      "Remux": "medium.remux"
+      "Encode": "medium.encode"
+      "WEB-DL": "medium.webdl"
+      "HDTV": "medium.hdtv"
+      "TV": "medium.hdtv"
+      "DVD": "medium.dvd"
+      "DVDR": "medium.dvd"
+      "CD": "medium.cd"
+      "Track": "medium.track"
+      "Other": "medium.other"
+
+    video_codec:
+      "H.264": "video.h264"
+      "H.265": "video.h265"
+      "HEVC": "video.h265"
+      "AV1": "video.av1"
+      "MPEG-2": "video.mpeg2"
+      "MPEG-4": "video.mpeg4"
+      "MP4/AVI": "video.mpeg4"
+      "VC-1": "video.vc1"
+      "Xvid": "video.xvid"
+      "Other": "video.other"
+
+    resolution:
+      "8K": "resolution.r4320p"
+      "4K": "resolution.r2160p"
+      "2160p": "resolution.r2160p"
+      "1080p": "resolution.r1080p"
+      "1080i": "resolution.r1080i"
+      "720p": "resolution.r720p"
+      "SD": "resolution.sd"
+
+    team:
+      "HDS": "team.hds"
+      "CHD": "team.chd"
+      "MySiLu": "team.mysilu"
+      "Other": "team.other"
+
+mappings:
+  # type 分类: 401=电影 402=剧集 403=节目 404=纪录片 405=动画 406=MTV/演唱会 407=体育 408=短剧 409=戏曲
+  type:
+    "category.movie": "401"
+    "category.movie_3d": "401"
+    "category.tv_series": "402"
+    "category.tv_pack": "402"
+    "category.tv_shows": "403"
+    "category.documentaries": "404"
+    "category.animation": "405"
+    "category.mv": "406"
+    "category.music": "406"
+    "category.sports": "407"
+    "category.stage": "409"
+    "category.other": "401"
+    "default": "401"
+
+  # medium_sel[4] 媒介: 1=Blu-ray 2=HD DVD 3=Remux 4=MiniBD 5=HDTV 6=DVDR 7=Encode 8=CD 9=Track 10=WEB-DL
+  medium:
+    "medium.bluray": "1"
+    "medium.uhd_bluray": "1"
+    "medium.uhd_diy": "4"
+    "medium.bluray_diy": "4"
+    "medium.remux": "3"
+    "medium.hdtv": "5"
+    "medium.dvd": "6"
+    "medium.encode": "7"
+    "medium.encode_2160p": "7"
+    "medium.encode_1080p": "7"
+    "medium.encode_720p": "7"
+    "medium.cd": "8"
+    "medium.track": "9"
+    "medium.webdl": "10"
+    "medium.other": "7"
+    "default": "7"
+
+  # codec_sel[4] 视频编码: 1=H.264 2=H.265 3=Xvid 4=MPEG-2 5=MP4/AVI 6=RM/RMVB 7=Other
+  video_codec:
+    "video.h264": "1"
+    "video.x264": "1"
+    "video.h265": "2"
+    "video.x265": "2"
+    "video.hevc": "2"
+    "video.xvid": "3"
+    "video.mpeg2": "4"
+    "video.mpeg4": "5"
+    "video.av1": "7"
+    "video.vc1": "7"
+    "video.other": "7"
+    "default": "7"
+
+  # standard_sel[4] 分辨率: 1=other 2=1080i/P 3=720p 4=2k/高清 5=4k/超清 6=8k/蓝光 7=3D/DTS 8=360p/480p
+  resolution:
+    "resolution.r4320p": "6"
+    "resolution.r2160p": "5"
+    "resolution.r1080p": "2"
+    "resolution.r1080i": "2"
+    "resolution.r720p": "3"
+    "resolution.sd": "8"
+    "resolution.other": "1"
+    "default": "1"
+
+  # team_sel[4] 制作组: 1=HDS 2=CHD 3=MySiLu 4=MY/发布者 5=Other/转载
+  team:
+    "team.hds": "1"
+    "team.chd": "2"
+    "team.mysilu": "3"
+    "team.other": "5"
+    "default": "5"
+
+  # tags[4][] 标签: 1=严禁转载 3=长期保种 4=DIY资源 5=简繁中字 6=国语 7=HDR(原盘)
+  #   8=港/奥/台 9=国产剧 10=欧美剧 11=日韩剧 12=粤语 13=已完结 14=少儿不宜 15=恐怖/暴力 16=英语
+  tag:
+    "tag.禁转": "1"
+    "tag.限转": "1"
+    "tag.DIY": "4"
+    "tag.中字": "5"
+    "tag.国语": "6"
+    "tag.粤语": "12"
+    "tag.英语": "16"
+    "tag.HDR": "7"
+    "tag.HDR10": "7"
+    "tag.HDR10+": "7"
+    "tag.杜比": null
+    "tag.杜比视界": null
+    "tag.其他中国方言": null
+    "default": null

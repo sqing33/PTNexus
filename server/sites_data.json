@@ -891,7 +891,7 @@
     "base_url": "cc.mypt.cc",
     "special_tracker_domain": null,
     "group": null,
-    "migration": 0,
+    "migration": 2,
     "speed_limit": 10
   },
   {
@@ -1071,7 +1071,7 @@
     "base_url": "pt.aling.de",
     "special_tracker_domain": null,
     "group": "-alingWEB",
-    "migration": 0,
+    "migration": 2,
     "speed_limit": 10
   },
   {
