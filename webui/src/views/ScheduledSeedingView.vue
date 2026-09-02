@@ -12,11 +12,17 @@
     <div class="toolbar glass-table">
       <el-button type="primary" @click="openCreateDialog">新建任务</el-button>
 
+      <el-tooltip content="刷新任务列表" placement="bottom">
+        <el-button :loading="loading" @click="fetchTasks()">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
+      </el-tooltip>
+
       <el-select
         v-model="statusFilter"
         placeholder="状态筛选"
         clearable
-        style="width: 140px; margin-left: 15px"
+        style="width: 140px; margin-left: 8px"
         @change="handleStatusChange"
       >
         <el-option label="全部" value="" />
@@ -236,9 +242,10 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from '@/utils/uiNotify'
+import { Refresh } from '@element-plus/icons-vue'
 import TaskFormDialog from '@/components/scheduled-seed/TaskFormDialog.vue'
 import PublishLogsDrawer from '@/components/scheduled-seed/PublishLogsDrawer.vue'
 
@@ -288,9 +295,6 @@ const tableRef = ref<{ clearSelection: () => void } | null>(null)
 const selectedRows = ref<ScheduledSeedTask[]>([])
 const batchLoading = ref(false)
 
-const POLL_INTERVAL_MS = 3000
-let pollTimer: ReturnType<typeof setInterval> | null = null
-let pollRefreshing = false
 let fetchSeq = 0
 
 const parseSeeds = (seedsJson: string): SeedItem[] => {
@@ -587,39 +591,9 @@ const handleExpandChange = () => {
   // No-op, handled by el-table internally
 }
 
-const runPollRefresh = async () => {
-  if (pollRefreshing || loading.value) return
-  pollRefreshing = true
-  try {
-    await fetchTasks({ silent: true })
-  } finally {
-    pollRefreshing = false
-  }
-}
-
-const startPolling = () => {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-  }
-  pollTimer = setInterval(() => {
-    void runPollRefresh()
-  }, POLL_INTERVAL_MS)
-}
-
-const stopPolling = () => {
-  if (!pollTimer) return
-  clearInterval(pollTimer)
-  pollTimer = null
-}
-
 onMounted(async () => {
   await fetchTasks()
   emits('ready', fetchTasks)
-  startPolling()
-})
-
-onBeforeUnmount(() => {
-  stopPolling()
 })
 </script>
 
